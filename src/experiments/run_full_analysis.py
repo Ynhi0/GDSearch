@@ -13,9 +13,9 @@ import pandas as pd
 import numpy as np
 from typing import List, Dict
 
-from run_multi_seed import run_multi_seed_experiment, aggregate_results, save_aggregated_results
-from statistical_analysis import compare_optimizers_ttest, print_ttest_results, plot_comparison_with_errorbars
-from plot_results import plot_multiseed_comparison, plot_final_metric_comparison
+from src.experiments.run_multi_seed import run_multi_seed_experiment, aggregate_results, save_aggregated_results
+from src.analysis.statistical_analysis import compare_optimizers_ttest, print_ttest_results, plot_comparison_with_errorbars
+from src.visualization.plot_results import plot_multiseed_comparison, plot_final_metric_comparison
 
 
 def load_multiseed_results(pattern: str, results_dir: str = 'results') -> List[pd.DataFrame]:

@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 import pytest
-from test_functions import Rosenbrock, IllConditionedQuadratic, SaddlePoint
+from src.core.test_functions import Rosenbrock, IllConditionedQuadratic, SaddlePoint
 
 
 def numerical_gradient(func, x, y, eps=1e-7):

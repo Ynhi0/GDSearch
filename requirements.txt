@@ -6,3 +6,5 @@ tqdm
 torch
 torchvision
 pytest
+optuna
+datasets

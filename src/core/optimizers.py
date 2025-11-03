@@ -50,13 +50,16 @@ class SGD(Optimizer):
     
     def step(self, params, gradients):
         """Thực hiện một bước SGD."""
-        x, y = params
-        grad_x, grad_y = gradients
-        
-        new_x = x - self.lr * grad_x
-        new_y = y - self.lr * grad_y
-        
-        return new_x, new_y
+        # Hỗ trợ cả tuple (x,y) và numpy array
+        if isinstance(params, tuple):
+            x, y = params
+            grad_x, grad_y = gradients
+            new_x = x - self.lr * grad_x
+            new_y = y - self.lr * grad_y
+            return new_x, new_y
+        else:
+            # Xử lý array (cho neural networks)
+            return params - self.lr * gradients
     
     def reset(self):
         """SGD không có trạng thái nội bộ."""
@@ -88,26 +91,40 @@ class SGDMomentum(Optimizer):
         # Khởi tạo velocity
         self.v_x = 0.0
         self.v_y = 0.0
+        self.v = None  # Cho neural networks
     
     def step(self, params, gradients):
         """Thực hiện một bước SGD với Momentum."""
-        x, y = params
-        grad_x, grad_y = gradients
-        
-        # Cập nhật velocity
-        self.v_x = self.beta * self.v_x + grad_x
-        self.v_y = self.beta * self.v_y + grad_y
-        
-        # Cập nhật tham số
-        new_x = x - self.lr * self.v_x
-        new_y = y - self.lr * self.v_y
-        
-        return new_x, new_y
+        # Hỗ trợ cả tuple (x,y) và numpy array
+        if isinstance(params, tuple):
+            x, y = params
+            grad_x, grad_y = gradients
+            
+            # Cập nhật velocity
+            self.v_x = self.beta * self.v_x + grad_x
+            self.v_y = self.beta * self.v_y + grad_y
+            
+            # Cập nhật tham số
+            new_x = x - self.lr * self.v_x
+            new_y = y - self.lr * self.v_y
+            
+            return new_x, new_y
+        else:
+            # Xử lý array (cho neural networks)
+            if self.v is None:
+                self.v = np.zeros_like(params)
+            
+            # Cập nhật velocity
+            self.v = self.beta * self.v + gradients
+            
+            # Cập nhật tham số
+            return params - self.lr * self.v
     
     def reset(self):
         """Reset velocity về 0."""
         self.v_x = 0.0
         self.v_y = 0.0
+        self.v = None
 
 
 class RMSProp(Optimizer):
@@ -137,26 +154,40 @@ class RMSProp(Optimizer):
         # Khởi tạo squared gradient accumulator
         self.s_x = 0.0
         self.s_y = 0.0
+        self.s = None  # Cho neural networks
     
     def step(self, params, gradients):
         """Thực hiện một bước RMSProp."""
-        x, y = params
-        grad_x, grad_y = gradients
-        
-        # Cập nhật squared gradient accumulator
-        self.s_x = self.decay_rate * self.s_x + (1 - self.decay_rate) * grad_x**2
-        self.s_y = self.decay_rate * self.s_y + (1 - self.decay_rate) * grad_y**2
-        
-        # Cập nhật tham số với adaptive learning rate
-        new_x = x - self.lr * grad_x / (np.sqrt(self.s_x) + self.epsilon)
-        new_y = y - self.lr * grad_y / (np.sqrt(self.s_y) + self.epsilon)
-        
-        return new_x, new_y
+        # Hỗ trợ cả tuple (x,y) và numpy array
+        if isinstance(params, tuple):
+            x, y = params
+            grad_x, grad_y = gradients
+            
+            # Cập nhật squared gradient accumulator
+            self.s_x = self.decay_rate * self.s_x + (1 - self.decay_rate) * grad_x**2
+            self.s_y = self.decay_rate * self.s_y + (1 - self.decay_rate) * grad_y**2
+            
+            # Cập nhật tham số với adaptive learning rate
+            new_x = x - self.lr * grad_x / (np.sqrt(self.s_x) + self.epsilon)
+            new_y = y - self.lr * grad_y / (np.sqrt(self.s_y) + self.epsilon)
+            
+            return new_x, new_y
+        else:
+            # Xử lý array (cho neural networks)
+            if self.s is None:
+                self.s = np.zeros_like(params)
+            
+            # Cập nhật squared gradient accumulator
+            self.s = self.decay_rate * self.s + (1 - self.decay_rate) * gradients**2
+            
+            # Cập nhật tham số với adaptive learning rate
+            return params - self.lr * gradients / (np.sqrt(self.s) + self.epsilon)
     
     def reset(self):
         """Reset squared gradient accumulator về 0."""
         self.s_x = 0.0
         self.s_y = 0.0
+        self.s = None
 
 
 class Adam(Optimizer):
@@ -193,37 +224,59 @@ class Adam(Optimizer):
         self.m_y = 0.0
         self.v_x = 0.0
         self.v_y = 0.0
+        self.m = None  # Cho neural networks
+        self.v = None  # Cho neural networks
         
         # Bộ đếm timestep
         self.t = 0
     
     def step(self, params, gradients):
         """Thực hiện một bước Adam."""
-        x, y = params
-        grad_x, grad_y = gradients
-        
         # Tăng timestep
         self.t += 1
         
-        # Cập nhật biased first moment estimate
-        self.m_x = self.beta1 * self.m_x + (1 - self.beta1) * grad_x
-        self.m_y = self.beta1 * self.m_y + (1 - self.beta1) * grad_y
-        
-        # Cập nhật biased second moment estimate
-        self.v_x = self.beta2 * self.v_x + (1 - self.beta2) * grad_x**2
-        self.v_y = self.beta2 * self.v_y + (1 - self.beta2) * grad_y**2
-        
-        # Tính bias-corrected moment estimates
-        m_x_hat = self.m_x / (1 - self.beta1**self.t)
-        m_y_hat = self.m_y / (1 - self.beta1**self.t)
-        v_x_hat = self.v_x / (1 - self.beta2**self.t)
-        v_y_hat = self.v_y / (1 - self.beta2**self.t)
-        
-        # Cập nhật tham số
-        new_x = x - self.lr * m_x_hat / (np.sqrt(v_x_hat) + self.epsilon)
-        new_y = y - self.lr * m_y_hat / (np.sqrt(v_y_hat) + self.epsilon)
-        
-        return new_x, new_y
+        # Hỗ trợ cả tuple (x,y) và numpy array
+        if isinstance(params, tuple):
+            x, y = params
+            grad_x, grad_y = gradients
+            
+            # Cập nhật biased first moment estimate
+            self.m_x = self.beta1 * self.m_x + (1 - self.beta1) * grad_x
+            self.m_y = self.beta1 * self.m_y + (1 - self.beta1) * grad_y
+            
+            # Cập nhật biased second moment estimate
+            self.v_x = self.beta2 * self.v_x + (1 - self.beta2) * grad_x**2
+            self.v_y = self.beta2 * self.v_y + (1 - self.beta2) * grad_y**2
+            
+            # Tính bias-corrected moment estimates
+            m_x_hat = self.m_x / (1 - self.beta1**self.t)
+            m_y_hat = self.m_y / (1 - self.beta1**self.t)
+            v_x_hat = self.v_x / (1 - self.beta2**self.t)
+            v_y_hat = self.v_y / (1 - self.beta2**self.t)
+            
+            # Cập nhật tham số
+            new_x = x - self.lr * m_x_hat / (np.sqrt(v_x_hat) + self.epsilon)
+            new_y = y - self.lr * m_y_hat / (np.sqrt(v_y_hat) + self.epsilon)
+            
+            return new_x, new_y
+        else:
+            # Xử lý array (cho neural networks)
+            if self.m is None:
+                self.m = np.zeros_like(params)
+                self.v = np.zeros_like(params)
+            
+            # Cập nhật biased first moment estimate
+            self.m = self.beta1 * self.m + (1 - self.beta1) * gradients
+            
+            # Cập nhật biased second moment estimate
+            self.v = self.beta2 * self.v + (1 - self.beta2) * gradients**2
+            
+            # Tính bias-corrected moment estimates
+            m_hat = self.m / (1 - self.beta1**self.t)
+            v_hat = self.v / (1 - self.beta2**self.t)
+            
+            # Cập nhật tham số
+            return params - self.lr * m_hat / (np.sqrt(v_hat) + self.epsilon)
     
     def reset(self):
         """Reset moment estimates và timestep về 0."""
@@ -231,4 +284,6 @@ class Adam(Optimizer):
         self.m_y = 0.0
         self.v_x = 0.0
         self.v_y = 0.0
+        self.m = None
+        self.v = None
         self.t = 0

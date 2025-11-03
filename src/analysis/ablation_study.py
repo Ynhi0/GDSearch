@@ -12,8 +12,8 @@ import pandas as pd
 from typing import Dict, List
 import matplotlib.pyplot as plt
 
-from run_nn_experiment import run_nn_experiment
-from statistical_analysis import compare_optimizers_ttest, print_ttest_results
+from src.experiments.run_nn_experiment import run_nn_experiment
+from src.analysis.statistical_analysis import compare_optimizers_ttest, print_ttest_results
 
 
 def create_ablation_configs(base_config: Dict) -> Dict[str, Dict]:

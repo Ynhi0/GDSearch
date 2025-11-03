@@ -7,7 +7,7 @@ from typing import List, Dict, Any
 import numpy as np
 import pandas as pd
 
-from plot_results import plot_generalization_gap, plot_layer_grad_norms
+from src.visualization.plot_results import plot_generalization_gap, plot_layer_grad_norms
 
 
 RESULTS_DIR = 'results'

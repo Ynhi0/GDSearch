@@ -15,9 +15,9 @@ import torch.nn as nn
 from typing import Dict, List
 import matplotlib.pyplot as plt
 
-from run_nn_experiment import run_nn_experiment, build_model_and_data
-from statistical_analysis import compare_optimizers_ttest, print_ttest_results
-from data_utils import get_mnist_loaders, get_cifar10_loaders
+from src.experiments.run_nn_experiment import run_nn_experiment, build_model_and_data
+from src.analysis.statistical_analysis import compare_optimizers_ttest, print_ttest_results
+from src.core.data_utils import get_mnist_loaders, get_cifar10_loaders
 
 
 def run_pytorch_baseline(config: Dict) -> pd.DataFrame:

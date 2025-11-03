@@ -13,9 +13,9 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from models import SimpleMLP, SimpleCNN, ConvNet
-from data_utils import get_mnist_loaders, get_cifar10_loaders
-from optimizer_wrappers import DelayedOptimizer
+from src.core.models import SimpleMLP, SimpleCNN, ConvNet
+from src.core.data_utils import get_mnist_loaders, get_cifar10_loaders
+from src.core.optimizer_wrappers import DelayedOptimizer
 
 
 def set_seed(seed: int):

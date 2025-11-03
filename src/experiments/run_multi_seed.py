@@ -10,7 +10,7 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 
-from run_nn_experiment import train_and_evaluate, result_filename
+from src.experiments.run_nn_experiment import train_and_evaluate, result_filename
 
 
 def run_multi_seed_experiment(base_config: Dict[str, Any], seeds: List[int], results_dir: str = 'results') -> List[str]:

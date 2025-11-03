@@ -1,32 +1,57 @@
-# IDE and Editor
-.qodo
-.vscode/
-.idea/
-
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-*.egg-info/
-dist/
-build/
-
-# Virtual Environment
-.venv/
+env/
 venv/
 ENV/
+.venv
 
 # Jupyter
-.ipynb_checkpoints/
-*.ipynb
+.ipynb_checkpoints
+*.ipynb_checkpoints
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Data files (datasets download automatically)
+data/
+!data/generate_data.py
+*.tar.gz
+*.zip
+*.h5
+*.pkl
+*.pickle
+
+# Model checkpoints
+*.pt
+*.pth
+*.ckpt
+checkpoints/
+
+# Results and outputs
+results/*.csv
+plots/*.png
+!plots/lr_schedulers*.png
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Temporary files
-*.tmp
+# Logs
+*.log
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Other
+.env
 *.bak
-*~

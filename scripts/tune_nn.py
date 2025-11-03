@@ -4,8 +4,8 @@ from typing import Dict, Any, Tuple, List
 
 import pandas as pd
 
-from run_nn_experiment import train_and_evaluate, result_filename
-from plot_results import plot_generalization_gap, plot_layer_grad_norms
+from src.experiments.run_nn_experiment import train_and_evaluate, result_filename
+from src.visualization.plot_results import plot_generalization_gap, plot_layer_grad_norms
 
 RESULTS_DIR = 'results'
 PLOTS_DIR = 'plots'

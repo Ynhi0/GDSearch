@@ -10,8 +10,8 @@ import matplotlib.pyplot as plt
 from matplotlib import cm
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 
-from test_functions import Rosenbrock, IllConditionedQuadratic, SaddlePoint
-from run_experiment import run_single_experiment
+from src.core.test_functions import Rosenbrock, IllConditionedQuadratic, SaddlePoint
+from src.experiments.run_experiment import run_single_experiment
 
 
 def plot_generalization_curves(df, title, save_path=None):

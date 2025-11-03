@@ -1,14 +1,16 @@
 # GDSearch - Optimizer Dynamics Research Platform
 
-A comprehensive Python framework for comparing gradient descent algorithms on 2D test functions and neural networks (MNIST/CIFAR-10). Features systematic hyperparameter tuning, convergence analysis, curvature tracking, loss landscape visualization, **multi-seed experiments**, and **statistical analysis**.
+A comprehensive Python framework for comparing gradient descent algorithms on 2D test functions and neural networks (MNIST/CIFAR-10/IMDB). Features systematic hyperparameter tuning, convergence analysis, curvature tracking, loss landscape visualization, **multi-seed experiments**, **statistical analysis**, and **NLP support**.
 
 ## 🎯 Features
 
 ### Core Capabilities
 - ✅ **4 Optimization Algorithms:** SGD, SGD+Momentum, RMSProp, Adam/AdamW
 - ✅ **3 2D Test Functions:** Rosenbrock, Ill-Conditioned Quadratic, Saddle Point
-- ✅ **Neural Networks:** SimpleMLP (MNIST), SimpleCNN/ConvNet (CIFAR-10) with PyTorch
-- ✅ **Systematic Hyperparameter Tuning:** Two-stage pipeline (LR sweep → parameter sweep)
+- ✅ **Neural Networks:** SimpleMLP (MNIST), SimpleCNN/ConvNet (CIFAR-10), NLP models (IMDB)
+- ✅ **NLP Models (NEW!)**: SimpleRNN, SimpleLSTM, BiLSTM, TextCNN (Kim 2014)
+- ✅ **Systematic Hyperparameter Tuning:** Two-stage pipeline (LR sweep → parameter sweep) + Optuna integration
+- ✅ **Learning Rate Schedulers:** Step, Cosine, Exponential, Warmup, OneCycle, and more
 - ✅ **Convergence Detection:** Dual conditions (grad norm threshold OR loss delta)
 - ✅ **Advanced Analysis:**
   - Hessian eigenvalue tracking (λ_min, λ_max, condition number)
@@ -17,11 +19,11 @@ A comprehensive Python framework for comparing gradient descent algorithms on 2D
   - Curvature analysis (trajectory turning angles)
   - Generalization gap monitoring
 
-### 🆕 Scientific Rigor (NEW!)
+### 🆕 Scientific Rigor
 - ✅ **Multi-Seed Experiments:** Run experiments with multiple random seeds for statistical reliability
 - ✅ **Statistical Analysis:** T-tests, effect sizes (Cohen's d), 95% confidence intervals
 - ✅ **Error Bar Visualization:** Plots with mean ± std bands
-- ✅ **Unit Tests:** 35 tests verifying gradients and optimizer correctness (pytest)
+- ✅ **Unit Tests:** 79 tests verifying gradients, optimizers, schedulers, and NLP (pytest)
 - ✅ **Input Validation:** Comprehensive error checking and input sanitization
 - ✅ **Ablation Studies:** Component-wise isolation to quantify contributions
 - ✅ **Baseline Comparisons:** Compare custom implementations with PyTorch built-ins
@@ -30,59 +32,76 @@ A comprehensive Python framework for comparing gradient descent algorithms on 2D
 
 ```
 GDSearch/
-├── configs/
+├── src/                        # 🆕 All source code (organized!)
+│   ├── core/                   # Core implementations
+│   │   ├── optimizers.py           # SGD, Adam, RMSProp implementations (2D + ND)
+│   │   ├── test_functions.py       # 2D test functions with analytic derivatives
+│   │   ├── models.py               # PyTorch NN models (MLP, CNN, ConvNet)
+│   │   ├── nlp_models.py           # 🆕 NLP models (RNN, LSTM, BiLSTM, TextCNN)
+│   │   ├── nlp_data_utils.py       # 🆕 IMDB dataset loading & vocabulary
+│   │   ├── pytorch_optimizers.py   # 🆕 PyTorch wrappers for custom optimizers
+│   │   ├── data_utils.py           # MNIST/CIFAR-10 loaders
+│   │   ├── lr_schedulers.py        # 🆕 Learning rate scheduling (9 schedulers)
+│   │   ├── optuna_tuner.py         # 🆕 Optuna hyperparameter optimization
+│   │   └── validation.py           # Input validation & error handling
+│   │
+│   ├── experiments/            # Experiment runners
+│   │   ├── run_experiment.py       # 2D experiments with Hessian tracking
+│   │   ├── run_nn_experiment.py    # NN training with convergence detection
+│   │   ├── run_multi_seed.py       # Multi-seed experiment framework
+│   │   └── run_full_analysis.py    # Complete pipeline: experiments → stats → plots
+│   │
+│   ├── analysis/               # Statistical analysis
+│   │   ├── statistical_analysis.py # T-tests, effect sizes, confidence intervals
+│   │   ├── sensitivity_analysis.py # Hyperparameter sensitivity
+│   │   ├── ablation_study.py       # Component-wise ablation
+│   │   └── baseline_comparison.py  # Compare with PyTorch optimizers
+│   │
+│   └── visualization/          # Plotting utilities
+│       ├── plot_results.py         # Comprehensive plotting (with error bars!)
+│       ├── plot_eigenvalues.py     # Hessian eigenvalue visualization
+│       └── loss_landscape.py       # Loss surface probing
+│
+├── tests/                      # Unit tests (79 tests, 100% passing)
+│   ├── test_gradients.py       # Numerical gradient verification
+│   ├── test_optimizers.py      # Optimizer correctness tests
+│   ├── test_lr_schedulers.py   # 🆕 LR scheduler tests
+│   ├── test_optuna_tuner.py    # 🆕 Optuna integration tests
+│   └── test_nlp.py             # 🆕 NLP models & data tests
+│
+├── configs/                    # Experiment configurations
 │   ├── nn_tuning.json          # MNIST hyperparameter sweeps
 │   └── cifar10_tuning.json     # CIFAR-10 configurations
+│
+├── scripts/                    # Utility scripts
+│   ├── run_all.py              # Complete reproducibility pipeline
+│   ├── tune_nn.py              # Two-stage hyperparameter tuning
+│   ├── demo_imdb_training.py   # 🆕 IMDB sentiment analysis demo
+│   └── generate_summaries.py   # Quantitative & qualitative tables
+│
+├── docs/                       # 🆕 All documentation (consolidated!)
+│   ├── INDEX.md                # Documentation navigation hub
+│   ├── LIMITATIONS.md          # Known limitations & assumptions
+│   ├── MULTISEED_GUIDE.md      # Guide for multi-seed experiments
+│   ├── IMPROVEMENT_PROGRESS.md # Progress tracking
+│   ├── CRITICAL_VALIDATION_REPORT.md  # Scientific validation
+│   ├── REPORT.md               # Synthesis report with ablation study
+│   ├── PHASE11_NLP_SUMMARY.md  # NLP implementation summary
+│   └── hypothesis_matrix.md    # Theory ⇄ Experiment mapping
+│
+├── kaggle/                     # 🆕 Kaggle GPU experiments
+│   ├── QUICKSTART.md           # How to run experiments on Kaggle
+│   ├── INSTRUCTIONS.md         # Detailed step-by-step guide
+│   ├── resnet18_cifar10.py     # ResNet-18 training script
+│   └── verify_local.py         # Local verification script
+│
 ├── results/                    # CSV outputs (experiments, summaries)
 ├── plots/                      # All visualizations (PNG)
 ├── data/                       # Dataset utilities
 │
-├── Core Modules:
-│   ├── test_functions.py       # 2D test functions with analytic derivatives
-│   ├── optimizers.py           # Optimizer implementations
-│   ├── models.py               # PyTorch NN models (MLP, CNN, ConvNet)
-│   ├── data_utils.py           # MNIST/CIFAR-10 loaders
-│   ├── validation.py           # Input validation & error handling
-│
-├── Experiment Runners:
-│   ├── run_experiment.py       # 2D experiments with Hessian tracking
-│   ├── run_nn_experiment.py    # NN training with convergence detection
-│   ├── tune_nn.py              # Two-stage hyperparameter tuning
-│   ├── run_loss_landscape.py   # Loss landscape visualization
-│   ├── run_multi_seed.py       # Multi-seed experiment framework 🆕
-│   ├── run_full_analysis.py    # Complete pipeline: experiments → stats → plots 🆕
-│   ├── run_ablation_study.py   # Component-wise ablation 🆕
-│   ├── run_baseline_comparison.py  # Compare with PyTorch optimizers 🆕
-│
-├── Analysis & Visualization:
-│   ├── plot_results.py         # Comprehensive plotting (now with error bars!)
-│   ├── plot_eigenvalues.py     # Hessian eigenvalue visualization
-│   ├── loss_landscape.py       # Loss surface probing
-│   ├── generate_summaries.py   # Quantitative & qualitative tables
-│   ├── statistical_analysis.py # T-tests, effect sizes, confidence intervals 🆕
-│
-├── Testing & Validation:
-│   ├── tests/
-│   │   ├── test_gradients.py   # Numerical gradient verification 🆕
-│   │   └── test_optimizers.py  # Optimizer correctness tests 🆕
-│
-├── Documentation:
-│   ├── README.md               # This file
-│   ├── MULTISEED_GUIDE.md      # Guide for multi-seed experiments 🆕
-│   ├── LIMITATIONS.md          # Known limitations & assumptions 🆕
-│   ├── IMPROVEMENT_PROGRESS.md # Progress tracking 🆕
-│   └── CRITICAL_VALIDATION_REPORT.md  # Scientific validation report
-│
-├── Automation:
-│   └── run_all.py              # Complete reproducibility pipeline
-│   └── nn_workflow.py          # Quick demo workflow
-│
-├── Documentation:
-│   ├── REPORT.md               # Synthesis report with ablation study
-│   ├── hypothesis_matrix.md    # Theory ⇄ Experiment mapping
-│   └── README_PROJECT.md       # Detailed technical documentation
-│
-└── requirements.txt            # Dependencies
+├── pyproject.toml              # 🆕 Modern Python project configuration
+├── requirements.txt            # Dependencies
+└── README.md                   # This file
 ```
 
 ## 🚀 Quick Start
@@ -113,13 +132,13 @@ pytest tests/ -v
 #### Option 1: Multi-Seed Statistical Analysis (Recommended) 🆕
 ```bash
 # Full pipeline: experiments → aggregation → stats → plots
-python run_full_analysis.py \
+python src/experiments/run_full_analysis.py \
     --config configs/nn_tuning.json \
     --seeds 1,2,3,4,5 \
     --compare AdamW-SGDMomentum,Adam-RMSProp
 
 # Quick test with 3 seeds
-python run_full_analysis.py --seeds 1,2,3
+python src/experiments/run_full_analysis.py --seeds 1,2,3
 ```
 
 **Output:**
@@ -131,7 +150,7 @@ python run_full_analysis.py --seeds 1,2,3
 #### Option 2: Ablation Study (Component Analysis) 🆕
 ```bash
 # Test each optimizer component in isolation
-python run_ablation_study.py
+python src/analysis/ablation_study.py
 
 # Components tested:
 #   1. SGD baseline (no momentum, no adaptive LR)
@@ -145,7 +164,7 @@ python run_ablation_study.py
 #### Option 3: Baseline Comparison 🆕
 ```bash
 # Compare custom implementations with PyTorch built-ins
-python run_baseline_comparison.py
+python src/analysis/baseline_comparison.py
 
 # Compares:
 #   - Custom Adam vs torch.optim.Adam
@@ -157,41 +176,72 @@ python run_baseline_comparison.py
 #### Option 4: Traditional Single-Seed Pipeline
 ```bash
 # Run everything: 2D + NN tuning + summaries + plots
-python run_all.py
+python scripts/run_all.py
 
 # Skip specific phases
-python run_all.py --skip-2d              # Skip 2D experiments
-python run_all.py --skip-tuning          # Skip NN hyperparameter tuning
-python run_all.py --summaries-only       # Only regenerate summaries
+python scripts/run_all.py --skip-2d              # Skip 2D experiments
+python scripts/run_all.py --skip-tuning          # Skip NN hyperparameter tuning
+python scripts/run_all.py --summaries-only       # Only regenerate summaries
 
 # Quick mode (reduced iterations)
-python run_all.py --quick
+python scripts/run_all.py --quick
 ```
 
 #### Option 5: Step-by-Step (Learning Mode)
 
 ```bash
 # 1. Run 2D test function experiments (with Hessian eigenvalue tracking)
-python run_experiment.py
+python src/experiments/run_experiment.py
 
 # 2. Run neural network hyperparameter tuning
-python tune_nn.py
+python scripts/tune_nn.py
 
 # 3. Generate loss landscape visualizations
-python run_loss_landscape.py
+python src/visualization/loss_landscape.py
 
 # 4. Create summary tables and plots
-python generate_summaries.py
+python scripts/generate_summaries.py
 
 # 5. Visualize Hessian eigenvalues (optional)
-python plot_eigenvalues.py
+python src/visualization/plot_eigenvalues.py
 ```
 
 #### Option 6: Quick Demo
 ```bash
 # Run short MNIST demo (2 epochs)
-python nn_workflow.py
+python scripts/nn_workflow.py
 ```
+
+#### Option 7: NLP Experiments (NEW! 🆕)
+```bash
+# Train sentiment classifier on IMDB dataset
+python scripts/demo_imdb_training.py \
+    --model lstm \
+    --optimizer adam \
+    --epochs 5 \
+    --train-size 5000 \
+    --test-size 1000
+
+# Available models: rnn, lstm, bilstm, textcnn
+# Available optimizers: sgd, sgd_momentum, adam, rmsprop
+
+# Quick test with small dataset
+python scripts/demo_imdb_training.py \
+    --epochs 2 \
+    --train-size 1000 \
+    --test-size 200
+```
+
+**NLP Models:**
+- **SimpleRNN**: Vanilla recurrent network for baseline
+- **SimpleLSTM**: Long Short-Term Memory with forget gates
+- **BiLSTM**: Bidirectional LSTM for context from both directions
+- **TextCNN**: Kim 2014 architecture with multiple filter sizes
+
+**Custom Optimizer Integration:**
+- All custom optimizers now support arbitrary-dimensional parameters
+- Backward compatible with 2D test functions
+- PyTorch-compatible wrappers for seamless neural network training
 
 ## 📊 Key Outputs
 
@@ -276,7 +326,7 @@ Then run: `python tune_nn.py`
 ### Adding Custom Test Functions
 
 ```python
-# In test_functions.py
+# In src/core/test_functions.py
 class MyFunction(TestFunction):
     def compute(self, x, y):
         return x**2 + y**2  # Your function here
@@ -291,7 +341,7 @@ class MyFunction(TestFunction):
 ### Adding Custom Optimizers
 
 ```python
-# In optimizers.py
+# In src/core/optimizers.py
 class MyOptimizer(Optimizer):
     def __init__(self, lr=0.01, beta=0.9):
         super().__init__()
@@ -350,9 +400,9 @@ If you use this codebase in your research, please cite:
 ```
 @software{gdsearch2025,
   title={GDSearch: Optimizer Dynamics Research Platform},
-  author={Le Tran Minh Phuc},
+  author={Your Name},
   year={2025},
-  url={[https://github.com/Ynhi0/GDSearch]}
+  url={https://github.com/yourusername/GDSearch}
 }
 ```
 
@@ -370,7 +420,7 @@ Contributions welcome! Areas for improvement:
 
 ## 📞 Contact
 
-For questions or issues, please open a GitHub issue or contact mphuc666@gmail.com
+For questions or issues, please open a GitHub issue or contact [your-email@example.com]
 
 ---
 

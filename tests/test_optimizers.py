@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 import pytest
-from optimizers import SGD, SGDMomentum, RMSProp, Adam
+from src.core.optimizers import SGD, SGDMomentum, RMSProp, Adam
 
 
 class TestSGD:

@@ -7,8 +7,8 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from test_functions import Rosenbrock, IllConditionedQuadratic, SaddlePoint
-from optimizers import SGD, SGDMomentum, RMSProp, Adam
+from src.core.test_functions import Rosenbrock, IllConditionedQuadratic, SaddlePoint
+from src.core.optimizers import SGD, SGDMomentum, RMSProp, Adam
 
 
 def run_single_experiment(optimizer_config, function_config, initial_point, num_iterations, seed):
