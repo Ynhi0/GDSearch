@@ -48,9 +48,9 @@ This document outlines known limitations, assumptions, and areas for future impr
 - 16 comprehensive unit tests (100% passing)
 - GPU validation on Kaggle (Tesla T4)
 
-**Performance Results** (5 epochs on CIFAR-10):
-- Test Accuracy: **75.35%**
-- Training Time: 6.94 minutes (GPU)
+**Performance Results** (10 epochs on CIFAR-10):
+- Test Accuracy: **85.51%**
+- Training Time: 14.00 minutes (GPU)
 - Stable convergence: no gradient issues
 - All custom optimizers compatible with 11M parameters
 

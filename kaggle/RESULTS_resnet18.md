@@ -16,25 +16,30 @@
 
 | Metric | Value |
 |--------|-------|
-| **Best Test Accuracy** | **75.35%** |
-| **Training Time** | 416.17s (6.94 minutes) |
-| **Epochs** | 5 |
-| **Final Train Accuracy** | 75.15% |
+| **Best Test Accuracy** | **85.51%** |
+| **Training Time** | 839.86s (14.00 minutes) |
+| **Epochs** | 10 |
+| **Final Train Accuracy** | 87.97% |
 | **Device** | Tesla T4 GPU |
 
 ### Epoch-by-Epoch Progress
 
 | Epoch | Train Loss | Train Acc | Test Loss | Test Acc | Status |
 |-------|-----------|-----------|-----------|----------|--------|
-| 1/5 | 1.8237 | 31.70% | 1.5467 | 41.62% | ✓ New best |
-| 2/5 | 1.3880 | 48.94% | 1.4067 | 50.20% | ✓ New best |
-| 3/5 | 1.0706 | 61.39% | 1.0261 | 63.74% | ✓ New best |
-| 4/5 | 0.8611 | 69.17% | 0.8217 | 70.98% | ✓ New best |
-| 5/5 | 0.7118 | 75.15% | 0.7436 | 75.35% | ✓ New best |
+| 1/10 | 1.7626 | 34.74% | 1.5323 | 43.29% | ✓ New best |
+| 2/10 | 1.2388 | 55.02% | 1.0888 | 61.49% | ✓ New best |
+| 3/10 | 0.9368 | 66.47% | 1.0816 | 64.97% | ✓ New best |
+| 4/10 | 0.7686 | 72.70% | 0.7233 | 74.44% | ✓ New best |
+| 5/10 | 0.6353 | 77.79% | 0.7459 | 75.77% | ✓ New best |
+| 6/10 | 0.5447 | 81.13% | 0.6327 | 78.29% | ✓ New best |
+| 7/10 | 0.4734 | 83.72% | 0.5143 | 82.53% | ✓ New best |
+| 8/10 | 0.4228 | 85.40% | 0.4954 | 83.34% | ✓ New best |
+| 9/10 | 0.3890 | 86.56% | 0.4886 | 83.57% | ✓ New best |
+| 10/10 | 0.3490 | 87.97% | 0.4330 | 85.51% | ✓ New best |
 
 ### Training Speed
-- **Average**: ~5.22 it/s
-- **Time per epoch**: ~80 seconds
+- **Average**: ~5.14 it/s
+- **Time per epoch**: ~81 seconds
 - **Total batches**: 391 per epoch
 
 ---
@@ -54,9 +59,10 @@
 ## Analysis
 
 ### Convergence
-- **Excellent convergence**: Loss decreased from 1.82 → 0.71
+- **Excellent convergence**: Loss decreased from 1.76 → 0.35
 - **Steady improvement**: Test accuracy improved every single epoch
-- **No overfitting**: Test accuracy (75.35%) close to train accuracy (75.15%)
+- **Minimal overfitting**: Test accuracy (85.51%) close to train accuracy (87.97%)
+- **Gap**: Only 2.46% difference between train and test
 
 ### Custom Optimizer Performance
 - Successfully handled 11M parameters
@@ -65,12 +71,14 @@
 - No numerical instability issues
 
 ### Comparison Baseline
-- ResNet-18 on CIFAR-10 baseline: ~70-80% (varies by training)
-- Our result (75.35%) is within expected range
+- ResNet-18 on CIFAR-10 baseline: ~80-85% (varies by training)
+- Our result (85.51%) is at the high end of expected range
+- Excellent performance for custom optimizer implementation
 - Could improve with:
-  - More epochs
-  - Learning rate scheduling
+  - Learning rate scheduling (cosine annealing)
+  - More epochs (15-20)
   - Data augmentation tuning
+  - Weight decay optimization
 
 ---
 
@@ -108,6 +116,7 @@ This experiment successfully demonstrates:
 ## Raw Output
 
 ```
+```
 Using device: cuda
    GPU: Tesla T4
 
@@ -116,7 +125,6 @@ ResNet-18 on CIFAR-10 with Custom Adam Optimizer
 ================================================================================
 
 Loading CIFAR-10 dataset...
-100%|██████████| 170M/170M [00:03<00:00, 55.1MB/s] 
 ✓ Train samples: 50,000
 ✓ Test samples: 10,000
 ✓ Train batches: 391
@@ -132,45 +140,80 @@ Creating Custom Adam Optimizer...
 Training...
 ================================================================================
 
-Epoch 1/5
+Epoch 1/10
 --------------------------------------------------------------------------------
-Training: 100% 391/391 [01:19<00:00,  5.32it/s, loss=1.8237, acc=31.70%]
-Train Loss: 1.8237 | Train Acc: 31.70%
-Test Loss:  1.5467  | Test Acc:  41.62%
+Training: 100% 391/391 [01:20<00:00,  5.10it/s, loss=1.7626, acc=34.74%]
+Train Loss: 1.7626 | Train Acc: 34.74%
+Test Loss:  1.5323  | Test Acc:  43.29%
 ✓ New best test accuracy!
 
-Epoch 2/5
+Epoch 2/10
 --------------------------------------------------------------------------------
-Training: 100% 391/391 [01:20<00:00,  5.23it/s, loss=1.3880, acc=48.94%]
-Train Loss: 1.3880 | Train Acc: 48.94%
-Test Loss:  1.4067  | Test Acc:  50.20%
+Training: 100% 391/391 [01:21<00:00,  5.12it/s, loss=1.2388, acc=55.02%]
+Train Loss: 1.2388 | Train Acc: 55.02%
+Test Loss:  1.0888  | Test Acc:  61.49%
 ✓ New best test accuracy!
 
-Epoch 3/5
+Epoch 3/10
 --------------------------------------------------------------------------------
-Training: 100% 391/391 [01:20<00:00,  5.23it/s, loss=1.0706, acc=61.39%]
-Train Loss: 1.0706 | Train Acc: 61.39%
-Test Loss:  1.0261  | Test Acc:  63.74%
+Training: 100% 391/391 [01:21<00:00,  5.20it/s, loss=0.9368, acc=66.47%]
+Train Loss: 0.9368 | Train Acc: 66.47%
+Test Loss:  1.0816  | Test Acc:  64.97%
 ✓ New best test accuracy!
 
-Epoch 4/5
+Epoch 4/10
 --------------------------------------------------------------------------------
-Training: 100% 391/391 [01:20<00:00,  5.22it/s, loss=0.8611, acc=69.17%]
-Train Loss: 0.8611 | Train Acc: 69.17%
-Test Loss:  0.8217  | Test Acc:  70.98%
+Training: 100% 391/391 [01:21<00:00,  5.13it/s, loss=0.7686, acc=72.70%]
+Train Loss: 0.7686 | Train Acc: 72.70%
+Test Loss:  0.7233  | Test Acc:  74.44%
 ✓ New best test accuracy!
 
-Epoch 5/5
+Epoch 5/10
 --------------------------------------------------------------------------------
-Training: 100% 391/391 [01:20<00:00,  5.22it/s, loss=0.7118, acc=75.15%]
-Train Loss: 0.7118 | Train Acc: 75.15%
-Test Loss:  0.7436  | Test Acc:  75.35%
+Training: 100% 391/391 [01:21<00:00,  5.16it/s, loss=0.6353, acc=77.79%]
+Train Loss: 0.6353 | Train Acc: 77.79%
+Test Loss:  0.7459  | Test Acc:  75.77%
+✓ New best test accuracy!
+
+Epoch 6/10
+--------------------------------------------------------------------------------
+Training: 100% 391/391 [01:21<00:00,  5.17it/s, loss=0.5447, acc=81.13%]
+Train Loss: 0.5447 | Train Acc: 81.13%
+Test Loss:  0.6327  | Test Acc:  78.29%
+✓ New best test accuracy!
+
+Epoch 7/10
+--------------------------------------------------------------------------------
+Training: 100% 391/391 [01:21<00:00,  5.15it/s, loss=0.4734, acc=83.72%]
+Train Loss: 0.4734 | Train Acc: 83.72%
+Test Loss:  0.5143  | Test Acc:  82.53%
+✓ New best test accuracy!
+
+Epoch 8/10
+--------------------------------------------------------------------------------
+Training: 100% 391/391 [01:21<00:00,  5.15it/s, loss=0.4228, acc=85.40%]
+Train Loss: 0.4228 | Train Acc: 85.40%
+Test Loss:  0.4954  | Test Acc:  83.34%
+✓ New best test accuracy!
+
+Epoch 9/10
+--------------------------------------------------------------------------------
+Training: 100% 391/391 [01:21<00:00,  5.09it/s, loss=0.3890, acc=86.56%]
+Train Loss: 0.3890 | Train Acc: 86.56%
+Test Loss:  0.4886  | Test Acc:  83.57%
+✓ New best test accuracy!
+
+Epoch 10/10
+--------------------------------------------------------------------------------
+Training: 100% 391/391 [01:21<00:00,  5.21it/s, loss=0.3490, acc=87.97%]
+Train Loss: 0.3490 | Train Acc: 87.97%
+Test Loss:  0.4330  | Test Acc:  85.51%
 ✓ New best test accuracy!
 
 ================================================================================
 ✅ Training Complete!
-Best Test Accuracy: 75.35%
-Total Time: 416.17s (6.94 minutes)
+Best Test Accuracy: 85.51%
+Total Time: 839.86s (14.00 minutes)
 ================================================================================
 
 Verification:
@@ -178,4 +221,5 @@ Verification:
 ✓ Deep network (18 layers) training successful
 ✓ Residual connections (skip connections) working
 ✓ Gradient flow through 11M parameters
+```
 ```

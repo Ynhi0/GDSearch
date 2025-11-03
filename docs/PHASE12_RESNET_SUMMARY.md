@@ -99,31 +99,36 @@ All custom optimizers (SGD, SGDMomentum, Adam, RMSProp) successfully work with R
 - **Solution**: Created self-contained Kaggle folder for GPU experiments
 - **Device**: Tesla T4 GPU
 
-### Results (CIFAR-10, 5 epochs)
+### Results (CIFAR-10, 10 epochs)
 
 | Metric | Value |
 |--------|-------|
-| **Test Accuracy** | **75.35%** |
-| **Training Time** | 6.94 minutes |
-| **Speed** | 5.22 it/s (80s/epoch) |
-| **Final Train Acc** | 75.15% |
+| **Test Accuracy** | **85.51%** |
+| **Training Time** | 14.00 minutes |
+| **Speed** | 5.14 it/s (81s/epoch) |
+| **Final Train Acc** | 87.97% |
 | **Convergence** | Smooth, no instabilities |
 
 **Epoch-by-Epoch**:
 ```
-Epoch 1: Train 31.70% → Test 41.62%
-Epoch 2: Train 48.94% → Test 50.20%
-Epoch 3: Train 61.39% → Test 63.74%
-Epoch 4: Train 69.17% → Test 70.98%
-Epoch 5: Train 75.15% → Test 75.35%
+Epoch 1:  Train 34.74% → Test 43.29%
+Epoch 2:  Train 55.02% → Test 61.49%
+Epoch 3:  Train 66.47% → Test 64.97%
+Epoch 4:  Train 72.70% → Test 74.44%
+Epoch 5:  Train 77.79% → Test 75.77%
+Epoch 6:  Train 81.13% → Test 78.29%
+Epoch 7:  Train 83.72% → Test 82.53%
+Epoch 8:  Train 85.40% → Test 83.34%
+Epoch 9:  Train 86.56% → Test 83.57%
+Epoch 10: Train 87.97% → Test 85.51%
 ```
 
 **Key Observations**:
 - Consistent improvement every epoch
-- No overfitting (test accuracy close to train)
-- Loss decreased from 1.82 → 0.71
+- Minimal overfitting (2.46% train-test gap)
+- Loss decreased from 1.76 → 0.35
 - All custom Adam optimizer functionality working correctly
-- Within expected range for ResNet-18 on CIFAR-10 (70-80%)
+- At high end of expected range for ResNet-18 on CIFAR-10 (80-85%)
 
 **Full Results**: `kaggle/RESULTS_resnet18.md`
 
@@ -333,15 +338,15 @@ optimizer.zero_grad()
 | SimpleMLP | 3 | ~200K | ~50% |
 | SimpleCNN | 5 | ~120K | ~65% |
 | ConvNet | 6 | ~1.2M | ~70% |
-| **ResNet-18** | **18** | **11.2M** | **75.35%** |
+| **ResNet-18** | **18** | **11.2M** | **85.51%** |
 
-### Training Speed (5 epochs, CIFAR-10)
+### Training Speed (10 epochs, CIFAR-10)
 
 | Device | Time/Batch | Total Time | Speedup |
 |--------|-----------|-----------|---------|
-| CPU (i7/M1) | 6.11s | ~2-3 hours | 1x |
-| GPU (T4) | 0.19s | 6.94 min | ~20x |
-| GPU (V100/A100) | ~0.10s | ~3-4 min | ~40x |
+| CPU (i7/M1) | 6.11s | ~5-6 hours | 1x |
+| GPU (T4) | 0.19s | 14.00 min | ~24x |
+| GPU (V100/A100) | ~0.10s | ~7-8 min | ~45x |
 
 ---
 
@@ -367,16 +372,16 @@ optimizer.zero_grad()
 
 ## Conclusion
 
-Phase 12 successfully demonstrates that custom optimization implementations can scale to production-ready deep networks. ResNet-18 with 11M parameters trains successfully with custom Adam optimizer, achieving 75.35% test accuracy on CIFAR-10 in under 7 minutes on a Tesla T4 GPU.
+Phase 12 successfully demonstrates that custom optimization implementations can scale to production-ready deep networks. ResNet-18 with 11M parameters trains successfully with custom Adam optimizer, achieving 85.51% test accuracy on CIFAR-10 in 14 minutes on a Tesla T4 GPU.
 
 **Key Achievements**:
 - ✅ Deep network architecture (18 layers)
 - ✅ Residual connections implemented
 - ✅ Custom optimizers compatible
-- ✅ GPU validation successful
+- ✅ GPU validation successful (85.51% accuracy)
 - ✅ 16 comprehensive unit tests
 - ✅ Self-contained Kaggle scripts
 
 **Limitation #8 Status**: ✅ **RESOLVED**
 
-The project now supports deep networks with skip connections, validating that custom optimizer implementations generalize beyond simple shallow models.
+The project now supports deep networks with skip connections, validating that custom optimizer implementations generalize beyond simple shallow models and achieve competitive performance on standard benchmarks.

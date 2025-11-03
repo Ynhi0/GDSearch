@@ -28,7 +28,7 @@ A comprehensive Python framework for comparing gradient descent algorithms on 2D
 - ✅ **Input Validation:** Comprehensive error checking and input sanitization
 - ✅ **Ablation Studies:** Component-wise isolation to quantify contributions
 - ✅ **Baseline Comparisons:** Compare custom implementations with PyTorch built-ins
-- ✅ **GPU Validation:** Kaggle experiments for large-scale training (ResNet-18: 75.35% on CIFAR-10)
+- ✅ **GPU Validation:** Kaggle experiments for large-scale training (ResNet-18: 85.51% on CIFAR-10)
 
 ## 📁 Project Structure
 
@@ -97,7 +97,7 @@ GDSearch/
 │   ├── QUICKSTART.md           # How to run experiments on Kaggle
 │   ├── INSTRUCTIONS.md         # Detailed step-by-step guide
 │   ├── resnet18_cifar10.py     # ResNet-18 training script
-│   ├── RESULTS_resnet18.md     # 🆕 Kaggle experiment results (75.35% accuracy)
+│   ├── RESULTS_resnet18.md     # 🆕 Kaggle experiment results (85.51% accuracy)
 │   └── verify_local.py         # Local verification script
 │
 ├── results/                    # CSV outputs (experiments, summaries)
