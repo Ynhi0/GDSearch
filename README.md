@@ -24,8 +24,10 @@ A comprehensive Python framework for comparing gradient descent algorithms on 2D
 ### 🆕 Scientific Rigor
 - ✅ **Multi-Seed Experiments:** Run experiments with multiple random seeds for statistical reliability
 - ✅ **Statistical Analysis:** T-tests, effect sizes (Cohen's d), 95% confidence intervals
+- ✅ **Power Analysis:** Statistical power calculation and sample size determination
+- ✅ **Multiple Comparison Corrections:** Bonferroni, Holm-Bonferroni, Benjamini-Hochberg (FDR)
 - ✅ **Error Bar Visualization:** Plots with mean ± std bands
-- ✅ **Unit Tests:** 123 tests verifying gradients, optimizers, schedulers, NLP, ResNet, and high-dim functions (pytest)
+- ✅ **Unit Tests:** 148 tests verifying gradients, optimizers, schedulers, NLP, ResNet, high-dim functions, and statistical analysis (pytest)
 - ✅ **Input Validation:** Comprehensive error checking and input sanitization
 - ✅ **Ablation Studies:** Component-wise isolation to quantify contributions
 - ✅ **Baseline Comparisons:** Compare custom implementations with PyTorch built-ins
