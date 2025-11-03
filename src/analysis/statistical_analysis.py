@@ -1,13 +1,22 @@
 """
 Statistical analysis tools for comparing optimizers.
+
+Includes:
+- Independent t-tests with effect sizes (Cohen's d)
+- Power analysis for sample size determination
+- Multiple comparison corrections (Bonferroni, Holm-Bonferroni, Benjamini-Hochberg)
+- Non-parametric tests (Wilcoxon, Mann-Whitney)
+- Confidence intervals
+- Publication-ready visualizations
 """
 
 import os
 import numpy as np
 import pandas as pd
 from scipy import stats
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 import matplotlib.pyplot as plt
+import warnings
 
 
 def load_multiseed_results(pattern: str, results_dir: str = 'results') -> List[pd.DataFrame]:
@@ -64,16 +73,36 @@ def compare_optimizers_ttest(
     std_B = results_B.std()
     n_B = len(results_B)
     
-    # Perform t-test
-    t_stat, p_value = stats.ttest_ind(results_A, results_B)
-    
-    # Effect size (Cohen's d)
-    pooled_std = np.sqrt(((n_A - 1) * std_A**2 + (n_B - 1) * std_B**2) / (n_A + n_B - 2))
-    cohens_d = (mean_A - mean_B) / pooled_std if pooled_std > 0 else 0.0
-    
-    # Confidence intervals (95%)
-    ci_A = stats.t.interval(0.95, n_A - 1, loc=mean_A, scale=stats.sem(results_A))
-    ci_B = stats.t.interval(0.95, n_B - 1, loc=mean_B, scale=stats.sem(results_B))
+    # Check for zero variance cases (avoid scipy warnings)
+    epsilon = 1e-10
+    if std_A < epsilon and std_B < epsilon:
+        # Both groups have essentially zero variance
+        if abs(mean_A - mean_B) < epsilon:
+            # Identical groups
+            t_stat = 0.0
+            p_value = 1.0
+            cohens_d = 0.0
+        else:
+            # Different means with zero variance - very strong effect
+            # Use Welch's t-test approximation for zero variance case
+            t_stat = np.inf if mean_A > mean_B else -np.inf
+            p_value = 0.0
+            cohens_d = np.inf if mean_A > mean_B else -np.inf
+        
+        # For zero variance, confidence intervals collapse to the mean
+        ci_A = (mean_A, mean_A)
+        ci_B = (mean_B, mean_B)
+    else:
+        # Normal case: perform standard t-test
+        t_stat, p_value = stats.ttest_ind(results_A, results_B)
+        
+        # Effect size (Cohen's d)
+        pooled_std = np.sqrt(((n_A - 1) * std_A**2 + (n_B - 1) * std_B**2) / (n_A + n_B - 2))
+        cohens_d = (mean_A - mean_B) / pooled_std if pooled_std > 0 else 0.0
+        
+        # Confidence intervals (95%)
+        ci_A = stats.t.interval(0.95, n_A - 1, loc=mean_A, scale=stats.sem(results_A))
+        ci_B = stats.t.interval(0.95, n_B - 1, loc=mean_B, scale=stats.sem(results_B))
     
     result = {
         'name_A': name_A,
@@ -227,15 +256,374 @@ def wilcoxon_signed_rank_test(results_A: np.ndarray, results_B: np.ndarray) -> D
     }
 
 
+# ============================================================================
+# Power Analysis
+# ============================================================================
+
+
+def compute_power_analysis(
+    effect_size: float,
+    n_samples: int,
+    alpha: float = 0.05,
+    alternative: str = 'two-sided'
+) -> float:
+    """
+    Compute statistical power for a t-test.
+    
+    Power = probability of correctly rejecting null hypothesis when alternative is true.
+    
+    Args:
+        effect_size: Cohen's d (standardized effect size)
+        n_samples: Sample size per group
+        alpha: Significance level (default: 0.05)
+        alternative: 'two-sided', 'greater', or 'less'
+        
+    Returns:
+        Statistical power (0 to 1)
+    """
+    # Degrees of freedom
+    df = 2 * n_samples - 2
+    
+    # Non-centrality parameter
+    ncp = effect_size * np.sqrt(n_samples / 2)
+    
+    # Critical value
+    if alternative == 'two-sided':
+        critical_t = stats.t.ppf(1 - alpha / 2, df)
+    elif alternative == 'greater':
+        critical_t = stats.t.ppf(1 - alpha, df)
+    else:  # 'less'
+        critical_t = stats.t.ppf(alpha, df)
+    
+    # Power = P(reject H0 | H1 is true)
+    # For two-sided test: power = P(|T| > critical_t | effect_size)
+    if alternative == 'two-sided':
+        power = 1 - stats.nct.cdf(critical_t, df, ncp) + stats.nct.cdf(-critical_t, df, ncp)
+    elif alternative == 'greater':
+        power = 1 - stats.nct.cdf(critical_t, df, ncp)
+    else:  # 'less'
+        power = stats.nct.cdf(critical_t, df, -ncp)
+    
+    return power
+
+
+def compute_required_sample_size(
+    effect_size: float,
+    power: float = 0.8,
+    alpha: float = 0.05,
+    alternative: str = 'two-sided'
+) -> int:
+    """
+    Compute required sample size to achieve desired power.
+    
+    Args:
+        effect_size: Cohen's d (expected effect size)
+        power: Desired statistical power (default: 0.8 = 80%)
+        alpha: Significance level (default: 0.05)
+        alternative: 'two-sided', 'greater', or 'less'
+        
+    Returns:
+        Required sample size per group
+    """
+    # Binary search for required n
+    n_min, n_max = 2, 1000
+    
+    while n_max - n_min > 1:
+        n_mid = (n_min + n_max) // 2
+        current_power = compute_power_analysis(effect_size, n_mid, alpha, alternative)
+        
+        if current_power < power:
+            n_min = n_mid
+        else:
+            n_max = n_mid
+    
+    return n_max
+
+
+def power_analysis_report(
+    results_A: np.ndarray,
+    results_B: np.ndarray,
+    name_A: str = "Optimizer A",
+    name_B: str = "Optimizer B",
+    target_power: float = 0.8,
+    alpha: float = 0.05
+) -> Dict:
+    """
+    Generate comprehensive power analysis report.
+    
+    Args:
+        results_A, results_B: Arrays of metric values
+        name_A, name_B: Optimizer names
+        target_power: Desired power (default: 0.8)
+        alpha: Significance level (default: 0.05)
+        
+    Returns:
+        Dictionary with power analysis results
+    """
+    # Compute observed effect size
+    n_A, n_B = len(results_A), len(results_B)
+    mean_A, mean_B = results_A.mean(), results_B.mean()
+    std_A, std_B = results_A.std(), results_B.std()
+    
+    pooled_std = np.sqrt(((n_A - 1) * std_A**2 + (n_B - 1) * std_B**2) / (n_A + n_B - 2))
+    observed_effect_size = abs(mean_A - mean_B) / pooled_std if pooled_std > 0 else 0.0
+    
+    # Compute achieved power
+    n_samples = min(n_A, n_B)
+    achieved_power = compute_power_analysis(observed_effect_size, n_samples, alpha)
+    
+    # Compute required sample size for target power
+    if observed_effect_size > 0:
+        required_n = compute_required_sample_size(observed_effect_size, target_power, alpha)
+    else:
+        required_n = float('inf')
+    
+    # Power for different effect sizes (small, medium, large)
+    power_small = compute_power_analysis(0.2, n_samples, alpha)
+    power_medium = compute_power_analysis(0.5, n_samples, alpha)
+    power_large = compute_power_analysis(0.8, n_samples, alpha)
+    
+    return {
+        'name_A': name_A,
+        'name_B': name_B,
+        'n_samples': n_samples,
+        'observed_effect_size': observed_effect_size,
+        'achieved_power': achieved_power,
+        'target_power': target_power,
+        'required_n': required_n,
+        'alpha': alpha,
+        'power_vs_effect_size': {
+            'small (0.2)': power_small,
+            'medium (0.5)': power_medium,
+            'large (0.8)': power_large
+        }
+    }
+
+
+def print_power_analysis(report: Dict):
+    """Print power analysis report."""
+    print(f"\n{'='*70}")
+    print(f"Power Analysis: {report['name_A']} vs {report['name_B']}")
+    print(f"{'='*70}")
+    
+    print(f"\nCurrent Study:")
+    print(f"  Sample size per group: {report['n_samples']}")
+    print(f"  Observed effect size (Cohen's d): {report['observed_effect_size']:.4f}")
+    print(f"  Achieved power: {report['achieved_power']:.4f} ({report['achieved_power']*100:.1f}%)")
+    
+    print(f"\nRecommendations:")
+    if report['achieved_power'] >= report['target_power']:
+        print(f"  ✅ Study is adequately powered (power ≥ {report['target_power']})")
+    else:
+        print(f"  ⚠️  Study is underpowered (power < {report['target_power']})")
+        if report['required_n'] != float('inf'):
+            print(f"  Required sample size for {report['target_power']*100:.0f}% power: {report['required_n']} per group")
+            additional_needed = report['required_n'] - report['n_samples']
+            if additional_needed > 0:
+                print(f"  Need {additional_needed} more samples per group")
+    
+    print(f"\nPower to Detect Different Effect Sizes:")
+    print(f"  (with n={report['n_samples']}, α={report['alpha']})")
+    for effect_name, power_value in report['power_vs_effect_size'].items():
+        status = "✅" if power_value >= 0.8 else "⚠️ "
+        print(f"  {status} {effect_name}: {power_value:.4f} ({power_value*100:.1f}%)")
+    
+    print(f"\n{'─'*70}")
+    print(f"Interpretation:")
+    print(f"  - Power = probability of detecting true effect")
+    print(f"  - Conventionally, power ≥ 0.80 (80%) is desired")
+    print(f"  - Small effect (d=0.2): Subtle differences")
+    print(f"  - Medium effect (d=0.5): Moderate differences")
+    print(f"  - Large effect (d=0.8): Substantial differences")
+    print(f"{'='*70}\n")
+
+
+# ============================================================================
+# Multiple Comparison Corrections
+# ============================================================================
+
+
+def bonferroni_correction(p_values: List[float], alpha: float = 0.05) -> Tuple[List[bool], float]:
+    """
+    Apply Bonferroni correction for multiple comparisons.
+    
+    Most conservative method: α_adjusted = α / n_comparisons
+    
+    Args:
+        p_values: List of p-values
+        alpha: Family-wise error rate (default: 0.05)
+        
+    Returns:
+        Tuple of (significant_tests, adjusted_alpha)
+    """
+    n_comparisons = len(p_values)
+    adjusted_alpha = alpha / n_comparisons
+    significant = [p < adjusted_alpha for p in p_values]
+    
+    return significant, adjusted_alpha
+
+
+def holm_bonferroni_correction(p_values: List[float], alpha: float = 0.05) -> List[bool]:
+    """
+    Apply Holm-Bonferroni correction (less conservative than Bonferroni).
+    
+    Step-down procedure that adjusts alpha based on rank.
+    
+    Args:
+        p_values: List of p-values
+        alpha: Family-wise error rate (default: 0.05)
+        
+    Returns:
+        List of booleans indicating significance
+    """
+    n = len(p_values)
+    
+    # Sort p-values and keep track of original indices
+    sorted_indices = np.argsort(p_values)
+    sorted_p_values = np.array(p_values)[sorted_indices]
+    
+    # Test each p-value
+    significant = np.zeros(n, dtype=bool)
+    for i, p in enumerate(sorted_p_values):
+        adjusted_alpha = alpha / (n - i)
+        if p < adjusted_alpha:
+            significant[sorted_indices[i]] = True
+        else:
+            # Once we fail to reject, stop (step-down)
+            break
+    
+    return significant.tolist()
+
+
+def benjamini_hochberg_correction(p_values: List[float], alpha: float = 0.05) -> List[bool]:
+    """
+    Apply Benjamini-Hochberg correction (controls False Discovery Rate).
+    
+    Less conservative than Bonferroni/Holm, good for exploratory analysis.
+    
+    Args:
+        p_values: List of p-values
+        alpha: False discovery rate (default: 0.05)
+        
+    Returns:
+        List of booleans indicating significance
+    """
+    n = len(p_values)
+    
+    # Sort p-values and keep track of original indices
+    sorted_indices = np.argsort(p_values)
+    sorted_p_values = np.array(p_values)[sorted_indices]
+    
+    # Find largest i where p(i) <= (i/n) * alpha
+    significant = np.zeros(n, dtype=bool)
+    for i in range(n - 1, -1, -1):
+        adjusted_alpha = ((i + 1) / n) * alpha
+        if sorted_p_values[i] <= adjusted_alpha:
+            # All tests up to and including i are significant
+            for j in range(i + 1):
+                significant[sorted_indices[j]] = True
+            break
+    
+    return significant.tolist()
+
+
+def compare_multiple_optimizers(
+    results_dict: Dict[str, np.ndarray],
+    correction_method: str = 'holm',
+    alpha: float = 0.05,
+    metric: str = 'test_accuracy'
+) -> pd.DataFrame:
+    """
+    Perform pairwise comparisons with multiple testing correction.
+    
+    Args:
+        results_dict: Dictionary mapping optimizer names to result arrays
+        correction_method: 'bonferroni', 'holm', 'bh' (Benjamini-Hochberg), or 'none'
+        alpha: Significance level
+        metric: Metric name
+        
+    Returns:
+        DataFrame with comparison results
+    """
+    optimizer_names = list(results_dict.keys())
+    n_optimizers = len(optimizer_names)
+    
+    # Perform all pairwise comparisons
+    comparisons = []
+    p_values = []
+    
+    for i in range(n_optimizers):
+        for j in range(i + 1, n_optimizers):
+            name_A = optimizer_names[i]
+            name_B = optimizer_names[j]
+            results_A = results_dict[name_A]
+            results_B = results_dict[name_B]
+            
+            # T-test
+            result = compare_optimizers_ttest(results_A, results_B, name_A, name_B, metric)
+            
+            comparisons.append({
+                'Optimizer A': name_A,
+                'Optimizer B': name_B,
+                'Mean A': result['mean_A'],
+                'Mean B': result['mean_B'],
+                'Difference': result['mean_A'] - result['mean_B'],
+                'p-value': result['p_value'],
+                't-statistic': result['t_statistic'],
+                'Cohen\'s d': result['cohens_d']
+            })
+            p_values.append(result['p_value'])
+    
+    # Apply correction
+    if correction_method == 'bonferroni':
+        significant, adj_alpha = bonferroni_correction(p_values, alpha)
+        correction_name = f"Bonferroni (α_adj = {adj_alpha:.4f})"
+    elif correction_method == 'holm':
+        significant = holm_bonferroni_correction(p_values, alpha)
+        correction_name = "Holm-Bonferroni"
+    elif correction_method == 'bh':
+        significant = benjamini_hochberg_correction(p_values, alpha)
+        correction_name = "Benjamini-Hochberg (FDR)"
+    else:  # 'none'
+        significant = [p < alpha for p in p_values]
+        correction_name = "None (uncorrected)"
+    
+    # Add significance flags
+    for i, comp in enumerate(comparisons):
+        comp['Significant (raw)'] = comp['p-value'] < alpha
+        comp['Significant (corrected)'] = significant[i]
+    
+    df = pd.DataFrame(comparisons)
+    
+    print(f"\n{'='*80}")
+    print(f"Multiple Comparison Analysis ({len(optimizer_names)} optimizers, {len(comparisons)} comparisons)")
+    print(f"Correction method: {correction_name}")
+    print(f"{'='*80}\n")
+    print(df.to_string(index=False))
+    print(f"\n{'─'*80}")
+    print(f"Summary:")
+    print(f"  Significant (raw, α={alpha}): {sum(df['Significant (raw)'])}/{len(comparisons)}")
+    print(f"  Significant (corrected): {sum(df['Significant (corrected)'])}/{len(comparisons)}")
+    print(f"{'='*80}\n")
+    
+    return df
+
+
 def main():
-    """Example usage."""
-    # Generate example data
-    print("Example: Comparing AdamW vs SGD+Momentum on MNIST")
+    """Example usage with all features."""
+    print("="*80)
+    print("Statistical Analysis Module - Complete Demo")
+    print("="*80)
+    
+    # ========================================================================
+    # Example 1: Basic T-Test
+    # ========================================================================
+    print("\n### EXAMPLE 1: Basic T-Test ###\n")
     
     # Simulate results (replace with actual data loading)
     np.random.seed(42)
-    adamw_results = np.random.normal(0.975, 0.005, size=5)  # Mean 97.5%, std 0.5%
-    sgdm_results = np.random.normal(0.976, 0.003, size=5)   # Mean 97.6%, std 0.3%
+    adamw_results = np.random.normal(0.975, 0.005, size=10)  # Mean 97.5%, std 0.5%
+    sgdm_results = np.random.normal(0.976, 0.003, size=10)   # Mean 97.6%, std 0.3%
     
     # Perform t-test
     result = compare_optimizers_ttest(
@@ -248,15 +636,78 @@ def main():
     
     print_ttest_results(result)
     
-    # Plot comparison
-    plot_comparison_with_errorbars(
+    # ========================================================================
+    # Example 2: Power Analysis
+    # ========================================================================
+    print("\n### EXAMPLE 2: Power Analysis ###\n")
+    
+    power_report = power_analysis_report(
         adamw_results,
         sgdm_results,
         name_A="AdamW",
         name_B="SGD+Momentum",
-        metric="Test Accuracy (%)",
-        save_path="plots/statistical_comparison_example.png"
+        target_power=0.8
     )
+    
+    print_power_analysis(power_report)
+    
+    # ========================================================================
+    # Example 3: Multiple Comparisons
+    # ========================================================================
+    print("\n### EXAMPLE 3: Multiple Comparisons ###\n")
+    
+    # Simulate results for 4 optimizers
+    np.random.seed(42)
+    results_dict = {
+        'SGD': np.random.normal(0.950, 0.008, size=10),
+        'SGD+Momentum': np.random.normal(0.976, 0.003, size=10),
+        'RMSProp': np.random.normal(0.970, 0.005, size=10),
+        'Adam': np.random.normal(0.975, 0.005, size=10)
+    }
+    
+    print("\n--- Holm-Bonferroni Correction (Recommended) ---")
+    df_holm = compare_multiple_optimizers(
+        results_dict,
+        correction_method='holm',
+        alpha=0.05,
+        metric='test_accuracy'
+    )
+    
+    print("\n--- Bonferroni Correction (Most Conservative) ---")
+    df_bonf = compare_multiple_optimizers(
+        results_dict,
+        correction_method='bonferroni',
+        alpha=0.05,
+        metric='test_accuracy'
+    )
+    
+    print("\n--- Benjamini-Hochberg Correction (Less Conservative) ---")
+    df_bh = compare_multiple_optimizers(
+        results_dict,
+        correction_method='bh',
+        alpha=0.05,
+        metric='test_accuracy'
+    )
+    
+    # ========================================================================
+    # Example 4: Sample Size Recommendations
+    # ========================================================================
+    print("\n### EXAMPLE 4: Sample Size Recommendations ###\n")
+    
+    effect_sizes = [0.2, 0.5, 0.8]
+    effect_names = ['Small', 'Medium', 'Large']
+    
+    print("Required sample sizes for 80% power (α=0.05, two-sided):")
+    print(f"{'Effect Size':<15} {'Cohen\'s d':<12} {'Required n':<12}")
+    print("-" * 40)
+    
+    for name, d in zip(effect_names, effect_sizes):
+        required_n = compute_required_sample_size(d, power=0.8, alpha=0.05)
+        print(f"{name:<15} {d:<12.1f} {required_n:<12d}")
+    
+    print("\n" + "="*80)
+    print("Demo complete!")
+    print("="*80)
 
 
 if __name__ == "__main__":
