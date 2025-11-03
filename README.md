@@ -414,9 +414,9 @@ If you use this codebase in your research, please cite:
 ```
 @software{gdsearch2025,
   title={GDSearch: Optimizer Dynamics Research Platform},
-  author={Your Name},
+  author={Le Tran Minh Phuc},
   year={2025},
-  url={https://github.com/yourusername/GDSearch}
+  url={https://github.com/Ynhi0/GDSearch}
 }
 ```
 
@@ -434,7 +434,7 @@ Contributions welcome! Areas for improvement:
 
 ##  Contact
 
-For questions or issues, please open a GitHub issue or contact [your-email@example.com]
+For questions or issues, please open a GitHub issue or contact mphuc666@gmail.com
 
 ---
 
