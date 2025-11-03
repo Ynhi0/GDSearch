@@ -352,7 +352,7 @@ If you use this codebase in your research, please cite:
   title={GDSearch: Optimizer Dynamics Research Platform},
   author={Le Tran Minh Phuc},
   year={2025},
-  url={https://github.com/yourusername/GDSearch}
+  url={[https://github.com/Ynhi0/GDSearch]}
 }
 ```
 
