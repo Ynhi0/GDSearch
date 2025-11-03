@@ -7,8 +7,9 @@ A comprehensive Python framework for comparing gradient descent algorithms on 2D
 ### Core Capabilities
 - ✅ **4 Optimization Algorithms:** SGD, SGD+Momentum, RMSProp, Adam/AdamW
 - ✅ **3 2D Test Functions:** Rosenbrock, Ill-Conditioned Quadratic, Saddle Point
-- ✅ **Neural Networks:** SimpleMLP (MNIST), SimpleCNN/ConvNet (CIFAR-10), NLP models (IMDB)
-- ✅ **NLP Models (NEW!)**: SimpleRNN, SimpleLSTM, BiLSTM, TextCNN (Kim 2014)
+- ✅ **Neural Networks:** SimpleMLP (MNIST), SimpleCNN/ConvNet (CIFAR-10), **ResNet-18** (CIFAR-10), NLP models (IMDB)
+- ✅ **Deep Architectures:** ResNet-18 (18 layers, 11M parameters, residual connections)
+- ✅ **NLP Models:** SimpleRNN, SimpleLSTM, BiLSTM, TextCNN (Kim 2014)
 - ✅ **Systematic Hyperparameter Tuning:** Two-stage pipeline (LR sweep → parameter sweep) + Optuna integration
 - ✅ **Learning Rate Schedulers:** Step, Cosine, Exponential, Warmup, OneCycle, and more
 - ✅ **Convergence Detection:** Dual conditions (grad norm threshold OR loss delta)
@@ -23,10 +24,11 @@ A comprehensive Python framework for comparing gradient descent algorithms on 2D
 - ✅ **Multi-Seed Experiments:** Run experiments with multiple random seeds for statistical reliability
 - ✅ **Statistical Analysis:** T-tests, effect sizes (Cohen's d), 95% confidence intervals
 - ✅ **Error Bar Visualization:** Plots with mean ± std bands
-- ✅ **Unit Tests:** 79 tests verifying gradients, optimizers, schedulers, and NLP (pytest)
+- ✅ **Unit Tests:** 96 tests verifying gradients, optimizers, schedulers, NLP, and ResNet (pytest)
 - ✅ **Input Validation:** Comprehensive error checking and input sanitization
 - ✅ **Ablation Studies:** Component-wise isolation to quantify contributions
 - ✅ **Baseline Comparisons:** Compare custom implementations with PyTorch built-ins
+- ✅ **GPU Validation:** Kaggle experiments for large-scale training (ResNet-18: 75.35% on CIFAR-10)
 
 ## 📁 Project Structure
 
@@ -36,7 +38,7 @@ GDSearch/
 │   ├── core/                   # Core implementations
 │   │   ├── optimizers.py           # SGD, Adam, RMSProp implementations (2D + ND)
 │   │   ├── test_functions.py       # 2D test functions with analytic derivatives
-│   │   ├── models.py               # PyTorch NN models (MLP, CNN, ConvNet)
+│   │   ├── models.py               # PyTorch NN models (MLP, CNN, ConvNet, ResNet-18)
 │   │   ├── nlp_models.py           # 🆕 NLP models (RNN, LSTM, BiLSTM, TextCNN)
 │   │   ├── nlp_data_utils.py       # 🆕 IMDB dataset loading & vocabulary
 │   │   ├── pytorch_optimizers.py   # 🆕 PyTorch wrappers for custom optimizers
@@ -62,12 +64,13 @@ GDSearch/
 │       ├── plot_eigenvalues.py     # Hessian eigenvalue visualization
 │       └── loss_landscape.py       # Loss surface probing
 │
-├── tests/                      # Unit tests (79 tests, 100% passing)
+├── tests/                      # Unit tests (96 tests, 100% passing)
 │   ├── test_gradients.py       # Numerical gradient verification
 │   ├── test_optimizers.py      # Optimizer correctness tests
 │   ├── test_lr_schedulers.py   # 🆕 LR scheduler tests
 │   ├── test_optuna_tuner.py    # 🆕 Optuna integration tests
-│   └── test_nlp.py             # 🆕 NLP models & data tests
+│   ├── test_nlp.py             # 🆕 NLP models & data tests
+│   └── test_resnet.py          # 🆕 ResNet-18 architecture tests
 │
 ├── configs/                    # Experiment configurations
 │   ├── nn_tuning.json          # MNIST hyperparameter sweeps
@@ -87,12 +90,14 @@ GDSearch/
 │   ├── CRITICAL_VALIDATION_REPORT.md  # Scientific validation
 │   ├── REPORT.md               # Synthesis report with ablation study
 │   ├── PHASE11_NLP_SUMMARY.md  # NLP implementation summary
+│   ├── PHASE12_RESNET_SUMMARY.md  # 🆕 ResNet-18 deep network summary
 │   └── hypothesis_matrix.md    # Theory ⇄ Experiment mapping
 │
 ├── kaggle/                     # 🆕 Kaggle GPU experiments
 │   ├── QUICKSTART.md           # How to run experiments on Kaggle
 │   ├── INSTRUCTIONS.md         # Detailed step-by-step guide
 │   ├── resnet18_cifar10.py     # ResNet-18 training script
+│   ├── RESULTS_resnet18.md     # 🆕 Kaggle experiment results (75.35% accuracy)
 │   └── verify_local.py         # Local verification script
 │
 ├── results/                    # CSV outputs (experiments, summaries)
