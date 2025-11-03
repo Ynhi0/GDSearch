@@ -5,10 +5,10 @@ This document explains how to use the new multi-seed experiment framework and st
 ## Overview
 
 The framework now supports:
-- ✅ **Multi-seed experiments** for statistical reliability
-- ✅ **Automated statistical tests** (t-tests, effect sizes, confidence intervals)
-- ✅ **Error bar visualization** (mean ± std bands)
-- ✅ **Comprehensive unit tests** (gradients and optimizers)
+-  **Multi-seed experiments** for statistical reliability
+-  **Automated statistical tests** (t-tests, effect sizes, confidence intervals)
+-  **Error bar visualization** (mean ± std bands)
+-  **Comprehensive unit tests** (gradients and optimizers)
 
 ## Quick Start
 
@@ -85,16 +85,16 @@ SGD+Momentum:
   N:    5
   95% CI: [0.9688, 0.9724]
 
-──────────────────────────────────────────────────────────────────────
+
 Test Statistics:
   t-statistic: 4.8137
   p-value:     0.0008
-  Significant: ✅ YES (α=0.05)
+  Significant:  YES (α=0.05)
   Effect size (Cohen's d): 3.4052
   Effect size interpretation: large
 
-──────────────────────────────────────────────────────────────────────
-✅ CONCLUSION: AdamW is statistically significantly better
+
+ CONCLUSION: AdamW is statistically significantly better
    (p=0.0008 < 0.05, effect size=large)
 ======================================================================
 ```
@@ -160,34 +160,34 @@ pytest tests/test_optimizers.py -v
 
 ```
 GDSearch/
-├── run_multi_seed.py           # Multi-seed experiment framework
-├── run_full_analysis.py        # Full pipeline (experiments + stats + plots)
-├── statistical_analysis.py     # T-tests, effect sizes, CI computation
-├── plot_results.py             # Plotting (now with error bars!)
-│
-├── tests/
-│   ├── test_gradients.py       # Numerical gradient verification
-│   └── test_optimizers.py      # Optimizer correctness tests
-│
-├── configs/
-│   ├── mnist_tuning.json       # MNIST experiments
-│   └── rosenbrock_tuning.json  # Test function experiments
-│
-└── results/                    # Multi-seed results stored here
-    ├── AdamW_seed1.csv
-    ├── AdamW_seed2.csv
-    └── ...
+ run_multi_seed.py           # Multi-seed experiment framework
+ run_full_analysis.py        # Full pipeline (experiments + stats + plots)
+ statistical_analysis.py     # T-tests, effect sizes, CI computation
+ plot_results.py             # Plotting (now with error bars!)
+
+ tests/
+    test_gradients.py       # Numerical gradient verification
+    test_optimizers.py      # Optimizer correctness tests
+
+ configs/
+    mnist_tuning.json       # MNIST experiments
+    rosenbrock_tuning.json  # Test function experiments
+
+ results/                    # Multi-seed results stored here
+     AdamW_seed1.csv
+     AdamW_seed2.csv
+     ...
 ```
 
 ## Statistical Validity Checklist
 
-✅ **Multi-seed experiments**: Always use ≥5 seeds  
-✅ **Report statistics**: Always report "mean ± std (n=X)"  
-✅ **Statistical tests**: Use t-tests to compare optimizers  
-✅ **Effect sizes**: Report Cohen's d for practical significance  
-✅ **Confidence intervals**: Show 95% CI for all means  
-✅ **Error bars**: All plots must show ±1 std bands  
-✅ **Unit tests**: All gradients and optimizers verified numerically  
+ **Multi-seed experiments**: Always use ≥5 seeds  
+ **Report statistics**: Always report "mean ± std (n=X)"  
+ **Statistical tests**: Use t-tests to compare optimizers  
+ **Effect sizes**: Report Cohen's d for practical significance  
+ **Confidence intervals**: Show 95% CI for all means  
+ **Error bars**: All plots must show ±1 std bands  
+ **Unit tests**: All gradients and optimizers verified numerically  
 
 ## Example Workflows
 
@@ -275,11 +275,11 @@ pytest tests/test_gradients.py::TestRosenbrockGradients -v
 
 After running multi-seed experiments:
 
-1. ✅ **Verify statistical significance** with t-tests
-2. ✅ **Check effect sizes** (practical significance)
-3. ✅ **Visualize with error bars** (confidence bands)
-4. ✅ **Document limitations** (sample size, assumptions)
-5. ✅ **Compare to baselines** (PyTorch defaults, published papers)
+1.  **Verify statistical significance** with t-tests
+2.  **Check effect sizes** (practical significance)
+3.  **Visualize with error bars** (confidence bands)
+4.  **Document limitations** (sample size, assumptions)
+5.  **Compare to baselines** (PyTorch defaults, published papers)
 
 ## References
 

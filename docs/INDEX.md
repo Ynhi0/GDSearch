@@ -4,7 +4,7 @@ Welcome to GDSearch documentation! This guide helps you navigate all available d
 
 ---
 
-## 📚 Essential Reading (Start Here)
+##  Essential Reading (Start Here)
 
 ### For New Users:
 1. **[README.md](../README.md)** - Project overview, installation, quick start
@@ -23,9 +23,9 @@ Welcome to GDSearch documentation! This guide helps you navigate all available d
 
 ---
 
-## 📖 Documentation by Category
+##  Documentation by Category
 
-### 🎯 Getting Started
+###  Getting Started
 | Document | Purpose | Audience |
 |----------|---------|----------|
 | [README.md](../README.md) | Project overview | Everyone |
@@ -33,7 +33,7 @@ Welcome to GDSearch documentation! This guide helps you navigate all available d
 | [requirements.txt](../requirements.txt) | Dependencies | Setup |
 | [pyproject.toml](../pyproject.toml) | Project config | Developers |
 
-### 🔬 Scientific Documentation
+###  Scientific Documentation
 | Document | Purpose | Audience |
 |----------|---------|----------|
 | [CRITICAL_VALIDATION_REPORT.md](CRITICAL_VALIDATION_REPORT.md) | Validation & assessment | Researchers |
@@ -41,7 +41,7 @@ Welcome to GDSearch documentation! This guide helps you navigate all available d
 | [RESEARCH_JOURNAL.md](RESEARCH_JOURNAL.md) | Experimental insights | Researchers |
 | [MULTISEED_GUIDE.md](MULTISEED_GUIDE.md) | Statistical methodology | Researchers |
 
-### 💻 Developer Documentation
+###  Developer Documentation
 | Document | Purpose | Audience |
 |----------|---------|----------|
 | [IMPROVEMENT_PROGRESS.md](IMPROVEMENT_PROGRESS.md) | Development history | Developers |
@@ -51,63 +51,63 @@ Welcome to GDSearch documentation! This guide helps you navigate all available d
 
 ---
 
-## 🗂️ Project Structure
+##  Project Structure
 
 ```
 /workspaces/GDSearch/
-├── src/                          # Source code (organized by purpose)
-│   ├── core/                     # Core implementations
-│   │   ├── optimizers.py        # SGD, Adam, RMSProp, AdamW
-│   │   ├── test_functions.py    # Rosenbrock, etc.
-│   │   ├── models.py            # Neural network models
-│   │   ├── data_utils.py        # MNIST/CIFAR-10 loaders
-│   │   └── validation.py        # Input validation
-│   ├── experiments/              # Experiment runners
-│   │   ├── run_experiment.py    # Single experiment
-│   │   ├── run_nn_experiment.py # Neural network exp
-│   │   ├── run_multi_seed.py    # Multi-seed framework
-│   │   └── run_full_analysis.py # Full pipeline
-│   ├── analysis/                 # Analysis tools
-│   │   ├── statistical_analysis.py  # T-tests, CI
-│   │   ├── ablation_study.py        # Component analysis
-│   │   ├── baseline_comparison.py   # PyTorch comparison
-│   │   └── sensitivity_analysis.py  # Sensitivity study
-│   └── visualization/            # Plotting
-│       ├── plot_results.py      # Result plots
-│       ├── plot_eigenvalues.py  # Eigenvalue plots
-│       └── loss_landscape.py    # Loss surface viz
-├── tests/                        # Unit tests
-│   ├── test_gradients.py        # Gradient verification
-│   ├── test_optimizers.py       # Optimizer correctness
-│   └── test_validation.py       # Validation tests
-├── configs/                      # Experiment configs
-│   ├── mnist_tuning.json
-│   └── cifar10_tuning.json
-├── scripts/                      # Utility scripts
-│   ├── run_all.py               # Run full pipeline
-│   ├── tune_nn.py               # Hyperparameter tuning
-│   └── generate_summaries.py    # Result summaries
-├── docs/                         # Documentation (you are here!)
-│   ├── INDEX.md                 # This file
-│   ├── README.md                # Symlink to main README
-│   ├── QUICK_START.md
-│   ├── MULTISEED_GUIDE.md
-│   ├── LIMITATIONS.md
-│   ├── CRITICAL_VALIDATION_REPORT.md
-│   ├── RESEARCH_JOURNAL.md
-│   └── IMPROVEMENT_PROGRESS.md
-├── data/                         # Datasets (auto-downloaded)
-├── results/                      # Experiment results (gitignored)
-├── plots/                        # Generated plots (gitignored)
-├── README.md                     # Main readme
-├── requirements.txt              # Python dependencies
-├── pyproject.toml                # Modern Python config
-└── .gitignore                    # Git ignore rules
+ src/                          # Source code (organized by purpose)
+    core/                     # Core implementations
+       optimizers.py        # SGD, Adam, RMSProp, AdamW
+       test_functions.py    # Rosenbrock, etc.
+       models.py            # Neural network models
+       data_utils.py        # MNIST/CIFAR-10 loaders
+       validation.py        # Input validation
+    experiments/              # Experiment runners
+       run_experiment.py    # Single experiment
+       run_nn_experiment.py # Neural network exp
+       run_multi_seed.py    # Multi-seed framework
+       run_full_analysis.py # Full pipeline
+    analysis/                 # Analysis tools
+       statistical_analysis.py  # T-tests, CI
+       ablation_study.py        # Component analysis
+       baseline_comparison.py   # PyTorch comparison
+       sensitivity_analysis.py  # Sensitivity study
+    visualization/            # Plotting
+        plot_results.py      # Result plots
+        plot_eigenvalues.py  # Eigenvalue plots
+        loss_landscape.py    # Loss surface viz
+ tests/                        # Unit tests
+    test_gradients.py        # Gradient verification
+    test_optimizers.py       # Optimizer correctness
+    test_validation.py       # Validation tests
+ configs/                      # Experiment configs
+    mnist_tuning.json
+    cifar10_tuning.json
+ scripts/                      # Utility scripts
+    run_all.py               # Run full pipeline
+    tune_nn.py               # Hyperparameter tuning
+    generate_summaries.py    # Result summaries
+ docs/                         # Documentation (you are here!)
+    INDEX.md                 # This file
+    README.md                # Symlink to main README
+    QUICK_START.md
+    MULTISEED_GUIDE.md
+    LIMITATIONS.md
+    CRITICAL_VALIDATION_REPORT.md
+    RESEARCH_JOURNAL.md
+    IMPROVEMENT_PROGRESS.md
+ data/                         # Datasets (auto-downloaded)
+ results/                      # Experiment results (gitignored)
+ plots/                        # Generated plots (gitignored)
+ README.md                     # Main readme
+ requirements.txt              # Python dependencies
+ pyproject.toml                # Modern Python config
+ .gitignore                    # Git ignore rules
 ```
 
 ---
 
-## 🎓 Learning Path
+##  Learning Path
 
 ### Path 1: Quick User (30 minutes)
 1. Read [README.md](../README.md) overview
@@ -131,7 +131,7 @@ Welcome to GDSearch documentation! This guide helps you navigate all available d
 
 ---
 
-## 📊 Key Features Documentation
+##  Key Features Documentation
 
 ### Multi-Seed Experiments
 - **Guide**: [MULTISEED_GUIDE.md](MULTISEED_GUIDE.md)
@@ -160,7 +160,7 @@ Welcome to GDSearch documentation! This guide helps you navigate all available d
 
 ---
 
-## 🔍 Finding Information
+##  Finding Information
 
 ### Want to...
 | Goal | Document | Location |
@@ -186,7 +186,7 @@ Welcome to GDSearch documentation! This guide helps you navigate all available d
 
 ---
 
-## 📞 Getting Help
+##  Getting Help
 
 1. **Check this INDEX** - Find the right document
 2. **Read QUICK_START.md** - Step-by-step tutorial
@@ -196,22 +196,22 @@ Welcome to GDSearch documentation! This guide helps you navigate all available d
 
 ---
 
-## 🔄 Document Status
+##  Document Status
 
 | Document | Status | Last Updated |
 |----------|--------|--------------|
-| README.md | ✅ Current | Session 2.0 |
-| QUICK_START.md | ✅ Current | Session 2.0 |
-| MULTISEED_GUIDE.md | ✅ Current | Session 2.0 |
-| CRITICAL_VALIDATION_REPORT.md | ✅ Current | Session 2.0 |
-| LIMITATIONS.md | ✅ Current | Session 2.0 |
-| RESEARCH_JOURNAL.md | ✅ Current | Session 2.0 |
-| IMPROVEMENT_PROGRESS.md | ✅ Current | Session 2.0 |
-| pyproject.toml | ✅ Current | Session 2.0 |
+| README.md |  Current | Session 2.0 |
+| QUICK_START.md |  Current | Session 2.0 |
+| MULTISEED_GUIDE.md |  Current | Session 2.0 |
+| CRITICAL_VALIDATION_REPORT.md |  Current | Session 2.0 |
+| LIMITATIONS.md |  Current | Session 2.0 |
+| RESEARCH_JOURNAL.md |  Current | Session 2.0 |
+| IMPROVEMENT_PROGRESS.md |  Current | Session 2.0 |
+| pyproject.toml |  Current | Session 2.0 |
 
 ---
 
-## 📝 Contributing to Documentation
+##  Contributing to Documentation
 
 When adding new documentation:
 1. Place file in appropriate location (`docs/` for user docs)

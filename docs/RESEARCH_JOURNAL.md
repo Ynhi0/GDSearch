@@ -6,9 +6,9 @@
 
 ---
 
-## 📅 Entry 1: November 3, 2025 - Initial Observations
+##  Entry 1: November 3, 2025 - Initial Observations
 
-### 🔍 Detective Question: Why does Adam "shoot" in early iterations?
+###  Detective Question: Why does Adam "shoot" in early iterations?
 
 **Observation:**
 - Adam trajectories show rapid initial progress on Rosenbrock function
@@ -28,9 +28,9 @@ Relates to adaptive moment estimation - Adam's second moment (v) tracks gradient
 
 ---
 
-## 📅 Entry 2: Generalization Gap Anomaly
+##  Entry 2: Generalization Gap Anomaly
 
-### 🔍 Detective Question: Why does SGD+Momentum generalize better despite slower convergence?
+###  Detective Question: Why does SGD+Momentum generalize better despite slower convergence?
 
 **Observation:**
 - AdamW: Fast convergence, gen-gap ~0.15
@@ -41,8 +41,8 @@ Relates to adaptive moment estimation - Adam's second moment (v) tracks gradient
 Adam's adaptive steps allow it to settle into sharper minima (faster convergence). SGD+Momentum's momentum carries it past sharp minima, preferring flatter basins.
 
 **Evidence collected:**
-- ✅ Loss landscape plots show flatter neighborhoods for SGD+Momentum
-- ✅ See: `plots/loss_landscape_*.png`
+-  Loss landscape plots show flatter neighborhoods for SGD+Momentum
+-  See: `plots/loss_landscape_*.png`
 
 **Hypothesis 2 (Implicit Regularization):**
 Momentum acts as implicit regularization by averaging gradients over time, preventing overfitting to batch-specific noise.
@@ -59,9 +59,9 @@ This hybrid approach combines speed and generalization quality.
 
 ---
 
-## 📅 Entry 3: Saddle Point Escape Behavior
+##  Entry 3: Saddle Point Escape Behavior
 
-### 🔍 Detective Question: How do optimizers escape saddle points?
+###  Detective Question: How do optimizers escape saddle points?
 
 **Observation:**
 - On SaddlePoint test function, optimizers show different escape patterns
@@ -81,9 +81,9 @@ Run controlled noise experiment: inject Gaussian noise with different σ values,
 
 ---
 
-## 📅 Entry 4: Anomaly - Seed 42 Divergence on Rosenbrock
+##  Entry 4: Anomaly - Seed 42 Divergence on Rosenbrock
 
-### 🚨 ANOMALY ALERT
+###  ANOMALY ALERT
 
 **Observation:**
 During initial testing, SGD+Momentum with β=0.99, lr=0.01 diverged (OverflowError) on Rosenbrock function.
@@ -112,9 +112,9 @@ Rule of thumb: If β > 0.9, use lr < 0.001 * (1-β) as starting point.
 
 ---
 
-## 📅 Entry 5: Per-Layer Gradient Distribution
+##  Entry 5: Per-Layer Gradient Distribution
 
-### 🔍 Detective Question: Why do gradient norms differ across layers?
+###  Detective Question: Why do gradient norms differ across layers?
 
 **Observation:**
 - AdamW shows more uniform gradient distribution across layers
@@ -125,7 +125,7 @@ Rule of thumb: If β > 0.9, use lr < 0.001 * (1-β) as starting point.
 Later layers (closer to loss) receive stronger error signals initially. AdamW's per-parameter adaptation normalizes this imbalance. SGD+Momentum propagates raw gradients, maintaining the natural imbalance.
 
 **Evidence collected:**
-- ✅ Bar charts at epochs [1, 10, 20]
+-  Bar charts at epochs [1, 10, 20]
 - Pattern: AdamW stays uniform, SGD+Momentum balances over time
 
 **Connection to practice:**
@@ -140,7 +140,7 @@ This explains why AdamW works well out-of-the-box, while SGD+Momentum may need:
 
 ---
 
-## 🔬 Methodology Notes
+##  Methodology Notes
 
 ### When to Add Journal Entries
 
@@ -161,7 +161,7 @@ Use these to guide your detective work:
 
 ---
 
-## 🎯 Active Investigations
+##  Active Investigations
 
 ### Priority 1: High Impact
 - [ ] Sensitivity analysis around best hyperparameters (lr±10%)
@@ -180,7 +180,7 @@ Use these to guide your detective work:
 
 ---
 
-## 📚 Connections to Literature
+##  Connections to Literature
 
 ### Papers to reference:
 1. **Sharp minima and generalization:**
@@ -197,7 +197,7 @@ Use these to guide your detective work:
 
 ---
 
-## 💡 Eureka Moments
+##  Eureka Moments
 
 > "The anomaly where SGD+Momentum diverged wasn't a failure - it was a window into understanding the interaction between momentum, learning rate, and local curvature. This single 'failed' experiment taught us more than 10 successful ones."
 
@@ -205,7 +205,7 @@ Use these to guide your detective work:
 
 ---
 
-## 🔄 Iteration Log
+##  Iteration Log
 
 ### v1.0 → v2.0
 - Added Hessian eigenvalue tracking (enables saddle analysis)

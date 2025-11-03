@@ -1,12 +1,12 @@
-# 🎯 Quick Reference - What's New & How to Use
+#  Quick Reference - What's New & How to Use
 
 This document provides a quick overview of the major improvements and how to use them.
 
 ---
 
-## 🆕 What's New (Major Improvements)
+##  What's New (Major Improvements)
 
-### 1. Multi-Seed Experiments ✅
+### 1. Multi-Seed Experiments 
 **Before**: Single seed, unreliable results  
 **After**: Multiple seeds with statistics (mean ± std)
 
@@ -19,7 +19,7 @@ python run_full_analysis.py --seeds 1,2,3,4,5
 
 ---
 
-### 2. Statistical Analysis ✅
+### 2. Statistical Analysis 
 **Before**: No way to claim one optimizer is better  
 **After**: T-tests, p-values, effect sizes, confidence intervals
 
@@ -27,14 +27,14 @@ python run_full_analysis.py --seeds 1,2,3,4,5
 ```
 AdamW vs SGD+Momentum:
   t-statistic: 2.58
-  p-value: 0.032 < 0.05 ✅ SIGNIFICANT
+  p-value: 0.032 < 0.05  SIGNIFICANT
   Effect size: 1.83 (large)
   → AdamW is statistically significantly better
 ```
 
 ---
 
-### 3. Error Bar Plots ✅
+### 3. Error Bar Plots 
 **Before**: No error bars, looked unprofessional  
 **After**: All plots have mean ± std bands
 
@@ -44,7 +44,7 @@ AdamW vs SGD+Momentum:
 
 ---
 
-### 4. Unit Tests ✅
+### 4. Unit Tests 
 **Before**: 0 tests, gradients unverified  
 **After**: 35 tests (100% passing)
 
@@ -53,7 +53,7 @@ AdamW vs SGD+Momentum:
 pytest tests/ -v
 
 # Expected output:
-# 35 passed in 0.14s ✅
+# 35 passed in 0.14s 
 ```
 
 **What's tested**:
@@ -63,7 +63,7 @@ pytest tests/ -v
 
 ---
 
-### 5. Ablation Study ✅
+### 5. Ablation Study 
 **Before**: Just compared full optimizers  
 **After**: Test each component in isolation
 
@@ -83,7 +83,7 @@ python run_ablation_study.py
 
 ---
 
-### 6. Baseline Comparison ✅
+### 6. Baseline Comparison 
 **Before**: No comparison with PyTorch  
 **After**: Compare custom vs PyTorch built-ins
 
@@ -101,7 +101,7 @@ python run_baseline_comparison.py
 
 ---
 
-### 7. Input Validation ✅
+### 7. Input Validation 
 **Before**: Crashes on bad input  
 **After**: Helpful error messages
 
@@ -115,7 +115,7 @@ validate_config(config)
 
 ---
 
-### 8. CIFAR-10 Support ✅
+### 8. CIFAR-10 Support 
 **Before**: Only MNIST  
 **After**: MNIST + CIFAR-10 with ConvNet model
 
@@ -125,7 +125,7 @@ python run_full_analysis.py --config configs/cifar10_tuning.json
 
 ---
 
-## 📚 Quick Command Reference
+##  Quick Command Reference
 
 ### Testing
 ```bash
@@ -191,7 +191,7 @@ python run_all.py --skip-2d --skip-tuning
 
 ---
 
-## 📊 Understanding Output
+##  Understanding Output
 
 ### Multi-Seed Results
 **Format**: `mean ± std (n=X)`
@@ -219,7 +219,7 @@ Test Accuracy: 97.50 ± 0.15% (n=5)
 
 **Example**:
 ```
-p = 0.032 < 0.05 ✅ SIGNIFICANT
+p = 0.032 < 0.05  SIGNIFICANT
 d = 1.83 → Large effect size
 → Strong evidence that AdamW is better
 ```
@@ -233,30 +233,30 @@ d = 1.83 → Large effect size
 
 ---
 
-## 🗂️ File Organization
+##  File Organization
 
 ### Results Directory
 ```
 results/
-├── multi-seed results: *_seed1.csv, *_seed2.csv, ...
-├── aggregated_results.json (statistics)
-├── ablation/ (ablation study results)
-└── baselines/ (baseline comparison results)
+ multi-seed results: *_seed1.csv, *_seed2.csv, ...
+ aggregated_results.json (statistics)
+ ablation/ (ablation study results)
+ baselines/ (baseline comparison results)
 ```
 
 ### Plots Directory
 ```
 plots/
-├── multiseed_comparison_*.png (curves with error bars)
-├── final_*_comparison.png (bar charts)
-├── statistical_*.png (comparison plots)
-├── ablation_study.png (ablation results)
-└── baseline_comparison.png (custom vs PyTorch)
+ multiseed_comparison_*.png (curves with error bars)
+ final_*_comparison.png (bar charts)
+ statistical_*.png (comparison plots)
+ ablation_study.png (ablation results)
+ baseline_comparison.png (custom vs PyTorch)
 ```
 
 ---
 
-## 🎓 Best Practices
+##  Best Practices
 
 ### Running Experiments
 1. **Always use ≥5 seeds** for final results
@@ -279,7 +279,7 @@ plots/
 
 ---
 
-## 🚀 Common Workflows
+##  Common Workflows
 
 ### Workflow 1: Quick Test
 ```bash
@@ -333,7 +333,7 @@ python run_baseline_comparison.py
 
 ---
 
-## 📖 Documentation Guide
+##  Documentation Guide
 
 ### For Beginners:
 1. **README.md** - Start here!
@@ -352,7 +352,7 @@ python run_baseline_comparison.py
 
 ---
 
-## 🆘 Troubleshooting
+##  Troubleshooting
 
 ### Problem: Tests failing
 ```bash
@@ -389,7 +389,7 @@ pip install pytest
 
 ---
 
-## 🎯 Checklist for Publication
+##  Checklist for Publication
 
 Before publishing results:
 
@@ -406,7 +406,7 @@ Before publishing results:
 
 ---
 
-## 📞 Getting Help
+##  Getting Help
 
 1. **Check documentation**: MULTISEED_GUIDE.md, LIMITATIONS.md
 2. **Run tests**: `pytest tests/ -v` to verify installation
@@ -416,5 +416,5 @@ Before publishing results:
 ---
 
 **Last Updated**: Current Session  
-**Status**: All improvements complete ✅  
+**Status**: All improvements complete   
 **Version**: 2.0 (Major upgrade from 1.0)

@@ -1,16 +1,16 @@
-# 🔴 Báo Cáo Kiểm Định NGHIÊM KHẮC - Kho Mã Nguồn GDSearch
+#  Báo Cáo Kiểm Định NGHIÊM KHẮC - Kho Mã Nguồn GDSearch
 
 **Ngày:** 3 Tháng 11, 2025  
 **Reviewer:** Scientific Code Auditor (Critical Mode)  
-**Verdict:** ⚠️ **CÓ VẤN ĐỀ - CẦN CẢI THIỆN ĐÁNG KỂ**
+**Verdict:**  **CÓ VẤN ĐỀ - CẦN CẢI THIỆN ĐÁNG KỂ**
 
 ---
 
-## 🎯 Đánh Giá Tổng Quan
+##  Đánh Giá Tổng Quan
 
 Kho mã nguồn GDSearch **KHÔNG ĐẠT tiêu chuẩn** cho một dự án nghiên cứu khoa học nghiêm túc. Mặc dù triển khai đúng về mặt toán học cơ bản, dự án có **NHIỀU THIẾU SÓT NGHIÊM TRỌNG** về:
 
-### ❌ Điểm Yếu Chí Mạng
+###  Điểm Yếu Chí Mạng
 
 1. **KHÔNG CÓ KIỂM TRA CHẤT LƯỢNG (Zero Testing)**
 2. **THIẾU PHÂN TÍCH THỐNG KÊ (No Statistical Rigor)**
@@ -21,24 +21,24 @@ Kho mã nguồn GDSearch **KHÔNG ĐẠT tiêu chuẩn** cho một dự án nghi
 7. **THIẾU COMPARISON VỚI BASELINE CÓ SẴN**
 8. **KHÔNG CÓ ABLATION STUDY ĐÚNG NGHĨA**
 
-### 📊 Điểm Chi Tiết
+###  Điểm Chi Tiết
 
 | Tiêu chí | Điểm | Đánh giá |
 |----------|------|----------|
-| Correctness (Implementation) | 7/10 | ⚠️ Đúng nhưng CHƯA được verify |
-| Scientific Rigor | 3/10 | ❌ THIẾU nghiêm trọng |
-| Reproducibility | 4/10 | ⚠️ Single-seed không đủ |
-| Statistical Validity | 1/10 | ❌ Gần như không có |
-| Testing & Verification | 0/10 | ❌ KHÔNG TỒN TẠI |
-| Experimental Coverage | 5/10 | ⚠️ Quá ít thí nghiệm |
-| Documentation Quality | 7/10 | ⚠️ Verbose nhưng thiếu substance |
-| **TỔNG** | **27/70** | ❌ **KHÔNG ĐẠT** |
+| Correctness (Implementation) | 7/10 |  Đúng nhưng CHƯA được verify |
+| Scientific Rigor | 3/10 |  THIẾU nghiêm trọng |
+| Reproducibility | 4/10 |  Single-seed không đủ |
+| Statistical Validity | 1/10 |  Gần như không có |
+| Testing & Verification | 0/10 |  KHÔNG TỒN TẠI |
+| Experimental Coverage | 5/10 |  Quá ít thí nghiệm |
+| Documentation Quality | 7/10 |  Verbose nhưng thiếu substance |
+| **TỔNG** | **27/70** |  **KHÔNG ĐẠT** |
 
 ---
 
-## ❌ CÁC VẤN ĐỀ NGHIÊM TRỌNG
+##  CÁC VẤN ĐỀ NGHIÊM TRỌNG
 
-### 1. 🔴 KHÔNG CÓ UNIT TESTS - CRITICAL FLAW
+### 1.  KHÔNG CÓ UNIT TESTS - CRITICAL FLAW
 
 **Vấn đề:**
 ```bash
@@ -47,9 +47,9 @@ $ find . -name "*test*.py" -o -name "test_*"
 ```
 
 **Hậu quả:**
-- ❌ Gradient implementations CÓ THỂ SAI mà không ai biết
-- ❌ Optimizer updates CÓ THỂ có bug tinh vi
-- ❌ Không có cách nào verify correctness tự động
+-  Gradient implementations CÓ THỂ SAI mà không ai biết
+-  Optimizer updates CÓ THỂ có bug tinh vi
+-  Không có cách nào verify correctness tự động
 
 **Cần làm:**
 ```python
@@ -71,11 +71,11 @@ def test_rosenbrock_gradient_vs_numerical():
     assert abs(grad_y - num_grad_y) < 1e-5, f"Gradient Y mismatch!"
 ```
 
-**❌ THIẾU HOÀN TOÀN**
+** THIẾU HOÀN TOÀN**
 
 ---
 
-### 2. 🔴 SINGLE-SEED = UNRELIABLE RESULTS
+### 2.  SINGLE-SEED = UNRELIABLE RESULTS
 
 **Vấn đề:**
 ```python
@@ -87,10 +87,10 @@ set_seed(seed)  # Again, only ONE seed!
 ```
 
 **Tại sao đây là VẤN ĐỀ:**
-- ❌ Kết quả có thể là "may mắn" (cherry-picked by chance)
-- ❌ Không thể tính mean ± std
-- ❌ Không có confidence intervals
-- ❌ Không thể nói "statistically significant"
+-  Kết quả có thể là "may mắn" (cherry-picked by chance)
+-  Không thể tính mean ± std
+-  Không có confidence intervals
+-  Không thể nói "statistically significant"
 
 **Ví dụ thực tế:**
 ```
@@ -98,7 +98,7 @@ Experiment A với seed=42: Test Acc = 97.5%
 Experiment A với seed=1:  Test Acc = 96.8%
 Experiment A với seed=7:  Test Acc = 97.9%
 
-➔ Mean: 97.4% ± 0.55%  ← CẦN PHẢI CÓ
+ Mean: 97.4% ± 0.55%  ← CẦN PHẢI CÓ
 ```
 
 **Hiện tại:**
@@ -108,7 +108,7 @@ Experiment A với seed=7:  Test Acc = 97.9%
 
 ---
 
-### 3. 🔴 THIẾU PHÂN TÍCH THỐNG KÊ
+### 3.  THIẾU PHÂN TÍCH THỐNG KÊ
 
 **Tìm kiếm:**
 ```bash
@@ -122,7 +122,7 @@ $ grep -r "bootstrap\|percentile" *.py
 # Kết quả: 0 matches
 ```
 
-**❌ KHÔNG CÓ:**
+** KHÔNG CÓ:**
 - Confidence intervals
 - Statistical tests (t-test, Wilcoxon, ...)
 - P-values
@@ -134,12 +134,12 @@ $ grep -r "bootstrap\|percentile" *.py
 "Adam(W) converges rapidly... SGD+Momentum closes the gap"
 ```
 
-**❓ CÂU HỎI:** Làm sao biết difference này SIGNIFICANT?  
-**❌ KHÔNG CÓ BẰNG CHỨNG THỐNG KÊ**
+** CÂU HỎI:** Làm sao biết difference này SIGNIFICANT?  
+** KHÔNG CÓ BẰNG CHỨNG THỐNG KÊ**
 
 ---
 
-### 4. 🔴 PHỦ THÍ NGHIỆM YẾU
+### 4.  PHỦ THÍ NGHIỆM YẾU
 
 **Thực tế:**
 ```bash
@@ -151,7 +151,7 @@ $ ls results/*.csv | grep -v summary | wc -l
 - NN experiments: ~18 files (MNIST only, mostly tuning sweeps)
 - 2D experiments: CHỈ được dùng để vẽ plots, không có systematic CSV
 
-**❌ THIẾU:**
+** THIẾU:**
 
 1. **CIFAR-10 Experiments:**
    - SimpleCNN model được define nhưng **KHÔNG CHẠY**
@@ -164,7 +164,7 @@ $ ls results/*.csv | grep -v summary | wc -l
    - Không có systematic hyperparameter sweep
 
 3. **Cross-validation:**
-   - ❌ KHÔNG CÓ
+   -  KHÔNG CÓ
    
 4. **Multiple initial points:**
    - Hard-coded: `initial_rosenbrock = (-1.5, 2.5)` - CHỈ MỘT ĐIỂM
@@ -172,7 +172,7 @@ $ ls results/*.csv | grep -v summary | wc -l
 
 ---
 
-### 5. 🔴 "ABLATION STUDY" GIỐNG HÌNH MẪU
+### 5.  "ABLATION STUDY" GIỐNG HÌNH MẪU
 
 **Trong REPORT.md:**
 ```markdown
@@ -182,7 +182,7 @@ $ ls results/*.csv | grep -v summary | wc -l
 | SGD+Momentum | Adds velocity | Smoother | Faster than SGD | Better |
 ```
 
-**❌ ĐÂY KHÔNG PHẢI ABLATION STUDY:**
+** ĐÂY KHÔNG PHẢI ABLATION STUDY:**
 - Ablation study = Tắt/bật từng component một cách có kiểm soát
 - Ví dụ ĐÚNG:
   - Adam WITH bias correction vs WITHOUT bias correction
@@ -196,7 +196,7 @@ $ ls results/*.csv | grep -v summary | wc -l
 
 ---
 
-### 6. 🔴 KHÔNG XÁC THỰC GRADIENT
+### 6.  KHÔNG XÁC THỰC GRADIENT
 
 **Tìm kiếm:**
 ```bash
@@ -204,7 +204,7 @@ $ grep -r "finite.diff\|numerical.grad\|gradient.check" *.py
 # Kết quả: 0 matches
 ```
 
-**❌ HẬU QUẢ:**
+** HẬU QUẢ:**
 - Không chắc analytic gradients ĐÚNG
 - Có thể có bug tinh vi trong:
   - Rosenbrock Hessian
@@ -222,26 +222,26 @@ def verify_gradient(func, x, y, tol=1e-5):
 
 ---
 
-### 7. 🔴 THIẾU BASELINE COMPARISON
+### 7.  THIẾU BASELINE COMPARISON
 
 **Không so sánh với:**
-- ❌ PyTorch's built-in optimizers (để verify implementation)
-- ❌ Published results trên MNIST (để validate)
-- ❌ Other research papers' numbers
+-  PyTorch's built-in optimizers (để verify implementation)
+-  Published results trên MNIST (để validate)
+-  Other research papers' numbers
 
 **Ví dụ:**
 ```
 Paper X reports: Adam on MNIST SimpleMLP → 98.1% ± 0.2%
 Your result: Adam on MNIST SimpleMLP → 97.5% (single run)
 
-❓ Tại sao thấp hơn? Bug? Hyperparameters? Architecture khác?
+ Tại sao thấp hơn? Bug? Hyperparameters? Architecture khác?
 ```
 
 **KHÔNG CÓ DỮ LIỆU ĐỂ VERIFY**
 
 ---
 
-### 8. 🔴 ERROR HANDLING YẾU
+### 8.  ERROR HANDLING YẾU
 
 **Ví dụ:**
 ```python
@@ -253,7 +253,7 @@ else:
     raise ValueError(f"Loại optimizer không hợp lệ: {opt_type}")
 ```
 
-**❌ THIẾU:**
+** THIẾU:**
 - Validation của hyperparameter ranges (lr > 0? beta in [0,1]?)
 - Handling của NaN/Inf during training
 - Divergence detection (loss explodes)
@@ -262,12 +262,12 @@ else:
 **Có thể xảy ra:**
 ```python
 config = {'type': 'Adam', 'params': {'lr': -0.001}}  # Negative LR!
-# ➔ Code runs but results are GARBAGE
+#  Code runs but results are GARBAGE
 ```
 
 ---
 
-### 9. 🔴 CONVERGENCE DETECTION = COSMETIC
+### 9.  CONVERGENCE DETECTION = COSMETIC
 
 **Code:**
 ```python
@@ -276,7 +276,7 @@ conv_grad_thr = float(config.get('convergence_grad_norm_threshold', 0.0))
 conv_loss_delta_thr = float(config.get('convergence_loss_delta_threshold', 0.0))
 ```
 
-**❌ VẤN ĐỀ:**
+** VẤN ĐỀ:**
 - Default = 0.0 → NEVER triggers
 - Không có proper stopping criteria
 - No early stopping to prevent overfitting
@@ -290,7 +290,7 @@ $ grep "converged_at" results/*.csv
 
 ---
 
-### 10. 🔴 DOCUMENTATION = VERBOSE KHÔNG SUBSTANCE
+### 10.  DOCUMENTATION = VERBOSE KHÔNG SUBSTANCE
 
 **Ví dụ:**
 ```markdown
@@ -299,10 +299,10 @@ $ grep "converged_at" results/*.csv
 algorithms on 2D test functions and neural networks..."
 
 297 lines nhưng:
-- ❌ Không giải thích TẠI SAO chọn hyperparameters
-- ❌ Không discuss limitations
-- ❌ Không cite references
-- ❌ Không explain expected results
+-  Không giải thích TẠI SAO chọn hyperparameters
+-  Không discuss limitations
+-  Không cite references
+-  Không explain expected results
 ```
 
 **REPORT.md:**
@@ -310,66 +310,66 @@ algorithms on 2D test functions and neural networks..."
 "Adam(W) converges rapidly on MNIST"
 ```
 
-**❓ Rapidly =얼마 nhanh? Bao nhiêu epochs? So với ai?**  
-**❌ THIẾU QUANTITATIVE PRECISION**
+** Rapidly = nhanh? Bao nhiêu epochs? So với ai?**  
+** THIẾU QUANTITATIVE PRECISION**
 
 ---
 
-## 📋 Bảng Kiểm Định Chi Tiết
+##  Bảng Kiểm Định Chi Tiết
 
 | Hạng mục | Trạng thái | Ghi chú Phản biện |
 | :--- | :--- | :--- |
 | **Cơ sở Hạ tầng Kiểm tra** |
-| Unit tests cho gradients | ❌ Không có | **CRITICAL:** Zero gradient verification |
-| Unit tests cho optimizers | ❌ Không có | **CRITICAL:** No update step verification |
-| Integration tests | ❌ Không có | No end-to-end testing |
-| Continuous Integration | ❌ Không có | No CI/CD pipeline |
+| Unit tests cho gradients |  Không có | **CRITICAL:** Zero gradient verification |
+| Unit tests cho optimizers |  Không có | **CRITICAL:** No update step verification |
+| Integration tests |  Không có | No end-to-end testing |
+| Continuous Integration |  Không có | No CI/CD pipeline |
 | **Phân tích Thống kê** |
-| Multi-seed experiments | ❌ Không có | **CRITICAL:** Single seed = unreliable |
-| Mean ± std reporting | ❌ Không có | No variance metrics |
-| Confidence intervals | ❌ Không có | Cannot claim significance |
-| Statistical tests (t-test, etc.) | ❌ Không có | No p-values |
-| Effect size analysis | ❌ Không có | Cannot quantify differences |
+| Multi-seed experiments |  Không có | **CRITICAL:** Single seed = unreliable |
+| Mean ± std reporting |  Không có | No variance metrics |
+| Confidence intervals |  Không có | Cannot claim significance |
+| Statistical tests (t-test, etc.) |  Không có | No p-values |
+| Effect size analysis |  Không có | Cannot quantify differences |
 | **Phủ Thí nghiệm** |
-| CIFAR-10 experiments | ❌ Không có | Model defined but UNUSED |
-| Cross-validation | ❌ Không có | No CV splitting |
-| Multiple initial points | ❌ Không có | Only 1 starting point per function |
-| Systematic 2D grid search | ❌ Không có | Hard-coded configs only |
-| Baseline comparisons | ❌ Không có | No PyTorch/paper benchmarks |
+| CIFAR-10 experiments |  Không có | Model defined but UNUSED |
+| Cross-validation |  Không có | No CV splitting |
+| Multiple initial points |  Không có | Only 1 starting point per function |
+| Systematic 2D grid search |  Không có | Hard-coded configs only |
+| Baseline comparisons |  Không có | No PyTorch/paper benchmarks |
 | **Xác thực & Kiểm chứng** |
-| Numerical gradient check | ❌ Không có | **CRITICAL:** Gradients unverified |
-| Optimizer vs PyTorch | ❌ Không có | No cross-validation with standard impl |
-| Published benchmark comparison | ❌ Không có | Cannot validate results |
+| Numerical gradient check |  Không có | **CRITICAL:** Gradients unverified |
+| Optimizer vs PyTorch |  Không có | No cross-validation with standard impl |
+| Published benchmark comparison |  Không có | Cannot validate results |
 | **Ablation Study Đúng nghĩa** |
-| Isolate momentum effect | ⚠️ Partial | Only compare full optimizers |
-| Isolate adaptive LR effect | ⚠️ Partial | No Adam without momentum variant |
-| Isolate bias correction | ❌ Không có | No Adam with/without bias correction |
-| Component-wise analysis | ❌ Không có | Not true ablation |
+| Isolate momentum effect |  Partial | Only compare full optimizers |
+| Isolate adaptive LR effect |  Partial | No Adam without momentum variant |
+| Isolate bias correction |  Không có | No Adam with/without bias correction |
+| Component-wise analysis |  Không có | Not true ablation |
 | **Error Handling & Robustness** |
-| Hyperparameter validation | ❌ Không có | No range checking (lr > 0, etc.) |
-| NaN/Inf detection | ❌ Không có | No safeguards |
-| Divergence handling | ❌ Không có | No checks for exploding loss |
-| Timeout mechanisms | ❌ Không có | Can hang indefinitely |
+| Hyperparameter validation |  Không có | No range checking (lr > 0, etc.) |
+| NaN/Inf detection |  Không có | No safeguards |
+| Divergence handling |  Không có | No checks for exploding loss |
+| Timeout mechanisms |  Không có | Can hang indefinitely |
 | **Convergence & Stopping** |
-| Early stopping | ❌ Không có | Trains full epochs regardless |
-| Proper convergence criteria | ❌ Không có | Thresholds default to 0.0 |
-| Plateau detection | ❌ Không có | No learning rate scheduling |
-| Validation-based stopping | ❌ Không có | No val split used |
+| Early stopping |  Không có | Trains full epochs regardless |
+| Proper convergence criteria |  Không có | Thresholds default to 0.0 |
+| Plateau detection |  Không có | No learning rate scheduling |
+| Validation-based stopping |  Không có | No val split used |
 | **Documentation Depth** |
-| Limitations discussion | ❌ Không có | No known issues documented |
-| Design choices rationale | ❌ Không có | Why these hyperparameters? |
-| References to literature | ❌ Không có | No citations |
-| Expected results discussion | ❌ Không có | No theoretical predictions |
-| Negative results | ❌ Không có | Only shows successes |
+| Limitations discussion |  Không có | No known issues documented |
+| Design choices rationale |  Không có | Why these hyperparameters? |
+| References to literature |  Không có | No citations |
+| Expected results discussion |  Không có | No theoretical predictions |
+| Negative results |  Không có | Only shows successes |
 | **Code Quality (Deep Audit)** |
-| Type hints | ⚠️ Partial | Some files yes, some no |
-| Input validation | ❌ Weak | No thorough checking |
-| Magic numbers | ⚠️ Some | e.g., eps=1e-8 not explained |
-| Code coverage measurement | ❌ Không có | No coverage metrics |
+| Type hints |  Partial | Some files yes, some no |
+| Input validation |  Weak | No thorough checking |
+| Magic numbers |  Some | e.g., eps=1e-8 not explained |
+| Code coverage measurement |  Không có | No coverage metrics |
 
 ---
 
-## 🔬 Phân Tích Chuyên Sâu (Critical)
+##  Phân Tích Chuyên Sâu (Critical)
 
 ### Issue #1: Gradient Correctness - UNVERIFIED
 
@@ -384,10 +384,10 @@ grad_x = -2 * (self.a - x) - 4 * self.b * x * (y - x**2)
 grad_y = 2 * self.b * (y - x**2)
 ```
 
-**❓ How do we KNOW this is correct?**
-- ✅ Matches theoretical formula (manual check)
-- ❌ NO numerical gradient comparison
-- ❌ NO unit test
+** How do we KNOW this is correct?**
+-  Matches theoretical formula (manual check)
+-  NO numerical gradient comparison
+-  NO unit test
 
 **Risk:** Typo trong công thức phức tạp → sai results, không ai phát hiện
 
@@ -407,9 +407,9 @@ new_x = x - self.lr * m_x_hat / (np.sqrt(v_x_hat) + self.epsilon)
 ```
 
 **Looks correct, BUT:**
-- ❌ No comparison with PyTorch's Adam
-- ❌ No test case for t → large (bias correction → 1)
-- ❌ No test for different (beta1, beta2) combinations
+-  No comparison with PyTorch's Adam
+-  No test case for t → large (bias correction → 1)
+-  No test for different (beta1, beta2) combinations
 
 **Could have bugs như:**
 - Off-by-one trong timestep
@@ -429,7 +429,7 @@ epoch,test_loss,test_accuracy
 20,0.089,0.9750
 ```
 
-**❓ Questions:**
+** Questions:**
 1. Nếu seed=2, accuracy = bao nhiêu? 0.9745? 0.9780?
 2. Variance là bao nhiêu?
 3. Is 0.9750 typical hay lucky?
@@ -505,10 +505,10 @@ def get_cifar10_loaders(batch_size=128):
 **Results:**
 ```bash
 $ ls results/*CIFAR*.csv
-# ➔ NO MATCHES
+#  NO MATCHES
 ```
 
-**❌ CONCLUSION:** CIFAR-10 code exists but NEVER RAN  
+** CONCLUSION:** CIFAR-10 code exists but NEVER RAN  
 **Why implement if not use?**
 
 ---
@@ -533,7 +533,7 @@ if converged_at_step is None:
         converged_at_step = global_step
 ```
 
-**❌ VẤN ĐỀ:**
+** VẤN ĐỀ:**
 1. Convergence được detect nhưng **training vẫn tiếp tục**
 2. Không có early stopping
 3. Chỉ log metadata, không affect behavior
@@ -543,35 +543,35 @@ if converged_at_step is None:
 
 ---
 
-## 🎯 So Sánh với Tiêu Chuẩn Thực Tế
+##  So Sánh với Tiêu Chuẩn Thực Tế
 
 ### Your Project vs. Published Papers
 
 | Aspect | Published Paper (Typical) | GDSearch Project | Gap |
 |--------|---------------------------|------------------|-----|
-| **Seeds** | 3-10 runs, report mean±std | 1 seed | ❌❌❌ |
-| **Statistical Tests** | t-test, p-values | None | ❌❌❌ |
-| **Baselines** | Compare với sota | None | ❌❌ |
-| **Ablation** | Systematic component isolation | Optimizer comparison only | ❌❌ |
-| **Error Bars** | All plots with CI | No error bars | ❌❌❌ |
-| **Gradient Check** | Standard practice | Not done | ❌❌ |
-| **Unit Tests** | Required | Zero | ❌❌❌ |
-| **Cross-validation** | Standard | Not done | ❌❌ |
+| **Seeds** | 3-10 runs, report mean±std | 1 seed |  |
+| **Statistical Tests** | t-test, p-values | None |  |
+| **Baselines** | Compare với sota | None |  |
+| **Ablation** | Systematic component isolation | Optimizer comparison only |  |
+| **Error Bars** | All plots with CI | No error bars |  |
+| **Gradient Check** | Standard practice | Not done |  |
+| **Unit Tests** | Required | Zero |  |
+| **Cross-validation** | Standard | Not done |  |
 
 ### Your Project vs. Production ML Code
 
 | Aspect | Production Code | GDSearch | Gap |
 |--------|----------------|----------|-----|
-| **Tests** | >80% coverage | 0% | ❌❌❌ |
-| **CI/CD** | Automated | None | ❌❌ |
-| **Error Handling** | Comprehensive | Minimal | ❌❌ |
-| **Logging** | Structured | Basic | ⚠️ |
-| **Validation** | Input/output checks | Weak | ❌❌ |
-| **Monitoring** | Metrics tracking | Manual | ⚠️ |
+| **Tests** | >80% coverage | 0% |  |
+| **CI/CD** | Automated | None |  |
+| **Error Handling** | Comprehensive | Minimal |  |
+| **Logging** | Structured | Basic |  |
+| **Validation** | Input/output checks | Weak |  |
+| **Monitoring** | Metrics tracking | Manual |  |
 
 ---
 
-## 📝 Đề xuất Cải tiến (REQUIRED, not optional)
+##  Đề xuất Cải tiến (REQUIRED, not optional)
 
 ### Priority 1: CRITICAL (Must Fix)
 
@@ -691,9 +691,9 @@ def plot_with_errorbars(results_multi_seed, metric='test_accuracy'):
 
 ---
 
-## 🏆 Revised Assessment
+##  Revised Assessment
 
-### ❌ Current State: **27/70 points - NOT ACCEPTABLE**
+###  Current State: **27/70 points - NOT ACCEPTABLE**
 
 **Breakdown:**
 - Implementation: 7/10 (correct but unverified)
@@ -704,7 +704,7 @@ def plot_with_errorbars(results_multi_seed, metric='test_accuracy'):
 - Documentation: 7/10 (verbose but shallow)
 - Reproducibility: 4/10 (seed control but single run)
 
-### ✅ After Fixes (Estimate): **55-60/70 - ACCEPTABLE**
+###  After Fixes (Estimate): **55-60/70 - ACCEPTABLE**
 
 **If implement Priority 1 + Priority 2:**
 - Implementation: 9/10 (verified with tests)
@@ -717,66 +717,66 @@ def plot_with_errorbars(results_multi_seed, metric='test_accuracy'):
 
 ---
 
-## 🎯 Final Verdict
+##  Final Verdict
 
-### ❌ KHÔNG ĐỦ TIÊU CHUẨN CHO:
-- ❌ Publication tại top-tier conference
-- ❌ Thesis/dissertation chính thức
-- ❌ Production deployment
+###  KHÔNG ĐỦ TIÊU CHUẨN CHO:
+-  Publication tại top-tier conference
+-  Thesis/dissertation chính thức
+-  Production deployment
 
-### ⚠️ CÓ THỂ CHẤP NHẬN CHO:
-- ⚠️ Course project (with instructor leniency)
-- ⚠️ Internal technical report
-- ⚠️ Proof-of-concept demo
+###  CÓ THỂ CHẤP NHẬN CHO:
+-  Course project (with instructor leniency)
+-  Internal technical report
+-  Proof-of-concept demo
 
-### ✅ SAU KHI FIX, CÓ THỂ ĐẠT:
-- ✅ Workshop paper (nếu implement Priority 1+2)
-- ✅ Technical blog post
-- ✅ GitHub portfolio project (with disclaimers)
+###  SAU KHI FIX, CÓ THỂ ĐẠT:
+-  Workshop paper (nếu implement Priority 1+2)
+-  Technical blog post
+-  GitHub portfolio project (with disclaimers)
 
 ---
 
-## 📎 Checklist Thực Tế
+##  Checklist Thực Tế
 
 ### Critical Issues (Must Fix)
-- [ ] ❌ Add unit tests for gradients (numerical check)
-- [ ] ❌ Add unit tests for optimizers
-- [ ] ❌ Multi-seed experiments (min 5 seeds)
-- [ ] ❌ Statistical analysis (t-test, confidence intervals)
-- [ ] ❌ Error bars on all plots
-- [ ] ❌ CIFAR-10 experiments
-- [ ] ❌ Proper ablation study (component isolation)
-- [ ] ❌ Baseline comparisons (PyTorch, papers)
+- [ ]  Add unit tests for gradients (numerical check)
+- [ ]  Add unit tests for optimizers
+- [ ]  Multi-seed experiments (min 5 seeds)
+- [ ]  Statistical analysis (t-test, confidence intervals)
+- [ ]  Error bars on all plots
+- [ ]  CIFAR-10 experiments
+- [ ]  Proper ablation study (component isolation)
+- [ ]  Baseline comparisons (PyTorch, papers)
 
 ### High Priority (Should Fix)
-- [ ] ❌ Hyperparameter validation
-- [ ] ❌ NaN/Inf detection
-- [ ] ❌ Early stopping mechanism
-- [ ] ❌ Cross-validation
-- [ ] ❌ Document limitations
-- [ ] ❌ Add literature references
+- [ ]  Hyperparameter validation
+- [ ]  NaN/Inf detection
+- [ ]  Early stopping mechanism
+- [ ]  Cross-validation
+- [ ]  Document limitations
+- [ ]  Add literature references
 
 ### Medium Priority (Nice to Have)
-- [ ] ⚠️ CI/CD pipeline
-- [ ] ⚠️ Code coverage measurement
-- [ ] ⚠️ Automated gradient checking
-- [ ] ⚠️ Performance profiling
+- [ ]  CI/CD pipeline
+- [ ]  Code coverage measurement
+- [ ]  Automated gradient checking
+- [ ]  Performance profiling
 
-**Current Status:** 2/24 ✅ (both in "Medium Priority")  
-**Remaining Critical:** 8/8 ❌ UNFIXED
+**Current Status:** 2/24  (both in "Medium Priority")  
+**Remaining Critical:** 8/8  UNFIXED
 
 ---
 
-## 📊 Truth in Numbers
+##  Truth in Numbers
 
 ```
 Lines of code:        ~3000
-Lines of tests:       0        ← ❌ ZERO
-Test coverage:        0%       ← ❌ NONE
-Experiments with CI:  0/20     ← ❌ NO ERROR BARS
-Statistical tests:    0        ← ❌ NO P-VALUES
-CIFAR-10 results:     0        ← ❌ CODE EXISTS BUT UNUSED
-True ablation:        No       ← ❌ JUST COMPARISON
+Lines of tests:       0        ←  ZERO
+Test coverage:        0%       ←  NONE
+Experiments with CI:  0/20     ←  NO ERROR BARS
+Statistical tests:    0        ←  NO P-VALUES
+CIFAR-10 results:     0        ←  CODE EXISTS BUT UNUSED
+True ablation:        No       ←  JUST COMPARISON
 
 Scientific rigor:     LOW
 Production readiness: NOT READY
@@ -785,13 +785,13 @@ Publication quality:  BELOW STANDARD
 
 ---
 
-## 🔴 Kết Luận Cuối Cùng
+##  Kết Luận Cuối Cùng
 
 Dự án GDSearch có **NỀN TẢNG KỸ THUẬT ĐÚNG** (implementations mostly correct) nhưng **THIẾU RIGOR KHOA HỌC** (no verification, no statistics, no proper validation).
 
 Đây là sự khác biệt giữa:
-- **Code that works** ✅ (bạn có)
-- **Science that's trustworthy** ❌ (bạn CHƯA có)
+- **Code that works**  (bạn có)
+- **Science that's trustworthy**  (bạn CHƯA có)
 
 **Cần ít nhất 3-5 ngày công** để fix Priority 1 + Priority 2 issues trước khi có thể claim "publication-ready".
 
@@ -801,5 +801,5 @@ Dự án GDSearch có **NỀN TẢNG KỸ THUẬT ĐÚNG** (implementations most
 Critical Code Reviewer  
 Ngày: 3 Tháng 11, 2025  
 
-**Verdict:** ⚠️ **REWORK REQUIRED**
+**Verdict:**  **REWORK REQUIRED**
 

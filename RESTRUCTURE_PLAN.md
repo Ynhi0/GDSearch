@@ -3,64 +3,64 @@
 ## Current Structure (Messy)
 ```
 /workspaces/GDSearch/
-├── 15+ .md files (scattered documentation)
-├── 20+ .py files (mixed purpose)
-├── configs/, data/, plots/, results/, tests/
-└── PDF file (thesis registration)
+ 15+ .md files (scattered documentation)
+ 20+ .py files (mixed purpose)
+ configs/, data/, plots/, results/, tests/
+ PDF file (thesis registration)
 ```
 
 ## Target Structure (Clean)
 ```
 /workspaces/GDSearch/
-├── src/
-│   ├── core/              # Core implementations
-│   │   ├── __init__.py
-│   │   ├── optimizers.py
-│   │   ├── test_functions.py
-│   │   ├── models.py
-│   │   └── data_utils.py
-│   ├── experiments/       # Experiment runners
-│   │   ├── __init__.py
-│   │   ├── run_experiment.py
-│   │   ├── run_nn_experiment.py
-│   │   ├── run_multi_seed.py
-│   │   └── run_full_analysis.py
-│   ├── analysis/          # Analysis tools
-│   │   ├── __init__.py
-│   │   ├── statistical_analysis.py
-│   │   ├── sensitivity_analysis.py
-│   │   └── ablation_study.py
-│   └── visualization/     # Plotting
-│       ├── __init__.py
-│       ├── plot_results.py
-│       ├── plot_eigenvalues.py
-│       └── loss_landscape.py
-├── tests/
-│   ├── __init__.py
-│   ├── test_gradients.py
-│   ├── test_optimizers.py
-│   └── test_validation.py
-├── configs/
-│   ├── mnist_tuning.json
-│   ├── cifar10_tuning.json
-│   └── test_functions.json
-├── scripts/               # Utility scripts
-│   ├── run_all.py
-│   ├── tune_nn.py
-│   └── generate_summaries.py
-├── docs/                  # Documentation
-│   ├── README.md -> ../README.md
-│   ├── LIMITATIONS.md
-│   ├── MULTISEED_GUIDE.md
-│   ├── QUICK_START.md
-│   └── CRITICAL_VALIDATION_REPORT.md
-├── data/                  # Datasets (gitignored)
-├── results/               # Experiment results (gitignored)
-├── plots/                 # Generated plots (gitignored)
-├── README.md              # Main readme
-├── requirements.txt
-├── .gitignore
-└── pyproject.toml         # Modern Python project config
+ src/
+    core/              # Core implementations
+       __init__.py
+       optimizers.py
+       test_functions.py
+       models.py
+       data_utils.py
+    experiments/       # Experiment runners
+       __init__.py
+       run_experiment.py
+       run_nn_experiment.py
+       run_multi_seed.py
+       run_full_analysis.py
+    analysis/          # Analysis tools
+       __init__.py
+       statistical_analysis.py
+       sensitivity_analysis.py
+       ablation_study.py
+    visualization/     # Plotting
+        __init__.py
+        plot_results.py
+        plot_eigenvalues.py
+        loss_landscape.py
+ tests/
+    __init__.py
+    test_gradients.py
+    test_optimizers.py
+    test_validation.py
+ configs/
+    mnist_tuning.json
+    cifar10_tuning.json
+    test_functions.json
+ scripts/               # Utility scripts
+    run_all.py
+    tune_nn.py
+    generate_summaries.py
+ docs/                  # Documentation
+    README.md -> ../README.md
+    LIMITATIONS.md
+    MULTISEED_GUIDE.md
+    QUICK_START.md
+    CRITICAL_VALIDATION_REPORT.md
+ data/                  # Datasets (gitignored)
+ results/               # Experiment results (gitignored)
+ plots/                 # Generated plots (gitignored)
+ README.md              # Main readme
+ requirements.txt
+ .gitignore
+ pyproject.toml         # Modern Python project config
 ```
 
 ## Migration Steps
@@ -125,7 +125,7 @@
 
 ## Breaking Changes
 
-⚠️ All imports will change:
+ All imports will change:
 ```python
 # Before
 from optimizers import SGD
@@ -141,7 +141,7 @@ from src.core.optimizers import SGD
 pytest tests/ -v
 
 # 2. Verify imports
-python -c "from src.core import optimizers; print('✅')"
+python -c "from src.core import optimizers; print('')"
 
 # 3. Run quick experiment
 python scripts/run_all.py --quick

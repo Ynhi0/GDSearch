@@ -2,18 +2,18 @@
 
 This folder contains ready-to-run code for Kaggle notebooks with GPU acceleration.
 
-## 📁 Structure
+##  Structure
 
 ```
 kaggle/
-├── README.md                    # This file
-├── resnet18_cifar10.py          # ResNet-18 training script
-├── requirements_kaggle.txt      # Kaggle-specific dependencies
-└── notebooks/                   # Jupyter notebooks for Kaggle
-    └── resnet18_demo.ipynb      # Ready-to-upload notebook
+ README.md                    # This file
+ resnet18_cifar10.py          # ResNet-18 training script
+ requirements_kaggle.txt      # Kaggle-specific dependencies
+ notebooks/                   # Jupyter notebooks for Kaggle
+     resnet18_demo.ipynb      # Ready-to-upload notebook
 ```
 
-## 🚀 How to Use
+##  How to Use
 
 ### Option 1: Upload Python Script
 1. Go to https://www.kaggle.com/code
@@ -30,14 +30,14 @@ kaggle/
 4. Enable GPU: Settings → Accelerator → GPU T4 x2
 5. Run All
 
-## ⚙️ Settings
+##  Settings
 
 **Recommended Kaggle Settings:**
 - **Accelerator**: GPU T4 x2 (or P100)
 - **Internet**: On (for downloading CIFAR-10)
 - **Environment**: Latest (Python 3.10+, PyTorch 2.0+)
 
-## 📊 What to Report Back
+##  What to Report Back
 
 After running on Kaggle, please share:
 
@@ -55,7 +55,7 @@ After running on Kaggle, please share:
    - Training progress
    - Final results
 
-## 🎯 Current Experiments
+##  Current Experiments
 
 ### 1. ResNet-18 on CIFAR-10 (Phase 12)
 **Purpose**: Verify custom optimizers work with deep networks (skip connections)
@@ -67,13 +67,13 @@ After running on Kaggle, please share:
 **Expected Runtime**: ~5-10 minutes (5 epochs on GPU)
 
 **What we're testing**:
-- ✅ Custom Adam works with 11M parameter model
-- ✅ Gradient flow through residual connections
-- ✅ Deep network (18 layers) compatibility
+-  Custom Adam works with 11M parameter model
+-  Gradient flow through residual connections
+-  Deep network (18 layers) compatibility
 
 ---
 
-## 📝 Notes
+##  Notes
 
 - All code is self-contained (no external imports needed)
 - CIFAR-10 dataset downloads automatically

@@ -2,123 +2,123 @@
 
 A comprehensive Python framework for comparing gradient descent algorithms on 2D test functions and neural networks (MNIST/CIFAR-10/IMDB). Features systematic hyperparameter tuning, convergence analysis, curvature tracking, loss landscape visualization, **multi-seed experiments**, **statistical analysis**, and **NLP support**.
 
-## 🎯 Features
+##  Features
 
 ### Core Capabilities
-- ✅ **4 Optimization Algorithms:** SGD, SGD+Momentum, RMSProp, Adam/AdamW
-- ✅ **7 Test Functions:** Rosenbrock, Ill-Conditioned Quadratic, Saddle Point, Rastrigin, Ackley, Sphere, Schwefel
-- ✅ **High-Dimensional Benchmarks:** Rastrigin, Ackley, Sphere, Schwefel (N-dimensional, tested up to 100D)
-- ✅ **Neural Networks:** SimpleMLP (MNIST), SimpleCNN/ConvNet (CIFAR-10), **ResNet-18** (CIFAR-10), NLP models (IMDB)
-- ✅ **Deep Architectures:** ResNet-18 (18 layers, 11M parameters, residual connections)
-- ✅ **NLP Models:** SimpleRNN, SimpleLSTM, BiLSTM, TextCNN (Kim 2014)
-- ✅ **Systematic Hyperparameter Tuning:** Two-stage pipeline (LR sweep → parameter sweep) + Optuna integration
-- ✅ **Learning Rate Schedulers:** Step, Cosine, Exponential, Warmup, OneCycle, and more
-- ✅ **Convergence Detection:** Dual conditions (grad norm threshold OR loss delta)
-- ✅ **Advanced Analysis:**
+-  **4 Optimization Algorithms:** SGD, SGD+Momentum, RMSProp, Adam/AdamW
+-  **7 Test Functions:** Rosenbrock, Ill-Conditioned Quadratic, Saddle Point, Rastrigin, Ackley, Sphere, Schwefel
+-  **High-Dimensional Benchmarks:** Rastrigin, Ackley, Sphere, Schwefel (N-dimensional, tested up to 100D)
+-  **Neural Networks:** SimpleMLP (MNIST), SimpleCNN/ConvNet (CIFAR-10), **ResNet-18** (CIFAR-10), NLP models (IMDB)
+-  **Deep Architectures:** ResNet-18 (18 layers, 11M parameters, residual connections)
+-  **NLP Models:** SimpleRNN, SimpleLSTM, BiLSTM, TextCNN (Kim 2014)
+-  **Systematic Hyperparameter Tuning:** Two-stage pipeline (LR sweep → parameter sweep) + Optuna integration
+-  **Learning Rate Schedulers:** Step, Cosine, Exponential, Warmup, OneCycle, and more
+-  **Convergence Detection:** Dual conditions (grad norm threshold OR loss delta)
+-  **Advanced Analysis:**
   - Hessian eigenvalue tracking (λ_min, λ_max, condition number)
   - Loss landscape 1D/2D visualization
   - Per-layer gradient norms
   - Curvature analysis (trajectory turning angles)
   - Generalization gap monitoring
 
-### 🆕 Scientific Rigor
-- ✅ **Multi-Seed Experiments:** Run experiments with multiple random seeds for statistical reliability
-- ✅ **Statistical Analysis:** T-tests, effect sizes (Cohen's d), 95% confidence intervals
-- ✅ **Power Analysis:** Statistical power calculation and sample size determination
-- ✅ **Multiple Comparison Corrections:** Bonferroni, Holm-Bonferroni, Benjamini-Hochberg (FDR)
-- ✅ **Normality Testing:** Shapiro-Wilk, Anderson-Darling, Kolmogorov-Smirnov
-- ✅ **Non-parametric Tests:** Mann-Whitney U, Wilcoxon signed-rank (for non-normal data)
-- ✅ **Auto-Test Selection:** Automatically choose appropriate test based on normality
-- ✅ **Interactive Visualizations:** Plotly-based 2D/3D plots, animations, loss landscapes
-- ✅ **Error Bar Visualization:** Plots with mean ± std bands
-- ✅ **Unit Tests:** 177 tests verifying gradients, optimizers, schedulers, NLP, ResNet, high-dim functions, statistics, and visualizations (pytest)
-- ✅ **Input Validation:** Comprehensive error checking and input sanitization
-- ✅ **Ablation Studies:** Component-wise isolation to quantify contributions
-- ✅ **Baseline Comparisons:** Compare custom implementations with PyTorch built-ins
-- ✅ **GPU Validation:** Kaggle experiments for large-scale training (ResNet-18: 85.51% on CIFAR-10)
+###  Scientific Rigor
+-  **Multi-Seed Experiments:** Run experiments with multiple random seeds for statistical reliability
+-  **Statistical Analysis:** T-tests, effect sizes (Cohen's d), 95% confidence intervals
+-  **Power Analysis:** Statistical power calculation and sample size determination
+-  **Multiple Comparison Corrections:** Bonferroni, Holm-Bonferroni, Benjamini-Hochberg (FDR)
+-  **Normality Testing:** Shapiro-Wilk, Anderson-Darling, Kolmogorov-Smirnov
+-  **Non-parametric Tests:** Mann-Whitney U, Wilcoxon signed-rank (for non-normal data)
+-  **Auto-Test Selection:** Automatically choose appropriate test based on normality
+-  **Interactive Visualizations:** Plotly-based 2D/3D plots, animations, loss landscapes
+-  **Error Bar Visualization:** Plots with mean ± std bands
+-  **Unit Tests:** 177 tests verifying gradients, optimizers, schedulers, NLP, ResNet, high-dim functions, statistics, and visualizations (pytest)
+-  **Input Validation:** Comprehensive error checking and input sanitization
+-  **Ablation Studies:** Component-wise isolation to quantify contributions
+-  **Baseline Comparisons:** Compare custom implementations with PyTorch built-ins
+-  **GPU Validation:** Kaggle experiments for large-scale training (ResNet-18: 85.51% on CIFAR-10)
 
-## 📁 Project Structure
+##  Project Structure
 
 ```
 GDSearch/
-├── src/                        # 🆕 All source code (organized!)
-│   ├── core/                   # Core implementations
-│   │   ├── optimizers.py           # SGD, Adam, RMSProp implementations (2D + ND)
-│   │   ├── test_functions.py       # 2D test functions with analytic derivatives
-│   │   ├── models.py               # PyTorch NN models (MLP, CNN, ConvNet, ResNet-18)
-│   │   ├── nlp_models.py           # 🆕 NLP models (RNN, LSTM, BiLSTM, TextCNN)
-│   │   ├── nlp_data_utils.py       # 🆕 IMDB dataset loading & vocabulary
-│   │   ├── pytorch_optimizers.py   # 🆕 PyTorch wrappers for custom optimizers
-│   │   ├── data_utils.py           # MNIST/CIFAR-10 loaders
-│   │   ├── lr_schedulers.py        # 🆕 Learning rate scheduling (9 schedulers)
-│   │   ├── optuna_tuner.py         # 🆕 Optuna hyperparameter optimization
-│   │   └── validation.py           # Input validation & error handling
-│   │
-│   ├── experiments/            # Experiment runners
-│   │   ├── run_experiment.py       # 2D experiments with Hessian tracking
-│   │   ├── run_nn_experiment.py    # NN training with convergence detection
-│   │   ├── run_multi_seed.py       # Multi-seed experiment framework
-│   │   └── run_full_analysis.py    # Complete pipeline: experiments → stats → plots
-│   │
-│   ├── analysis/               # Statistical analysis
-│   │   ├── statistical_analysis.py # T-tests, effect sizes, confidence intervals
-│   │   ├── sensitivity_analysis.py # Hyperparameter sensitivity
-│   │   ├── ablation_study.py       # Component-wise ablation
-│   │   └── baseline_comparison.py  # Compare with PyTorch optimizers
-│   │
-│   └── visualization/          # Plotting utilities
-│       ├── plot_results.py         # Comprehensive plotting (with error bars!)
-│       ├── plot_eigenvalues.py     # Hessian eigenvalue visualization
-│       └── loss_landscape.py       # Loss surface probing
-│
-├── tests/                      # Unit tests (123 tests, 100% passing)
-│   ├── test_gradients.py       # Numerical gradient verification
-│   ├── test_optimizers.py      # Optimizer correctness tests
-│   ├── test_lr_schedulers.py   # 🆕 LR scheduler tests
-│   ├── test_optuna_tuner.py    # 🆕 Optuna integration tests
-│   ├── test_nlp.py             # 🆕 NLP models & data tests
-│   ├── test_resnet.py          # 🆕 ResNet-18 architecture tests
-│   └── test_highdim_functions.py  # 🆕 High-dimensional function tests
-│
-├── configs/                    # Experiment configurations
-│   ├── nn_tuning.json          # MNIST hyperparameter sweeps
-│   └── cifar10_tuning.json     # CIFAR-10 configurations
-│
-├── scripts/                    # Utility scripts
-│   ├── run_all.py              # Complete reproducibility pipeline
-│   ├── tune_nn.py              # Two-stage hyperparameter tuning
-│   ├── demo_imdb_training.py   # 🆕 IMDB sentiment analysis demo
-│   ├── demo_highdim_optimization.py  # 🆕 High-dimensional function optimization
-│   └── generate_summaries.py   # Quantitative & qualitative tables
-│
-├── docs/                       # 🆕 All documentation (consolidated!)
-│   ├── INDEX.md                # Documentation navigation hub
-│   ├── LIMITATIONS.md          # Known limitations & assumptions
-│   ├── MULTISEED_GUIDE.md      # Guide for multi-seed experiments
-│   ├── IMPROVEMENT_PROGRESS.md # Progress tracking
-│   ├── CRITICAL_VALIDATION_REPORT.md  # Scientific validation
-│   ├── REPORT.md               # Synthesis report with ablation study
-│   ├── PHASE11_NLP_SUMMARY.md  # NLP implementation summary
-│   ├── PHASE12_RESNET_SUMMARY.md  # 🆕 ResNet-18 deep network summary
-│   └── hypothesis_matrix.md    # Theory ⇄ Experiment mapping
-│
-├── kaggle/                     # 🆕 Kaggle GPU experiments
-│   ├── QUICKSTART.md           # How to run experiments on Kaggle
-│   ├── INSTRUCTIONS.md         # Detailed step-by-step guide
-│   ├── resnet18_cifar10.py     # ResNet-18 training script
-│   ├── RESULTS_resnet18.md     # 🆕 Kaggle experiment results (85.51% accuracy)
-│   └── verify_local.py         # Local verification script
-│
-├── results/                    # CSV outputs (experiments, summaries)
-├── plots/                      # All visualizations (PNG)
-├── data/                       # Dataset utilities
-│
-├── pyproject.toml              # 🆕 Modern Python project configuration
-├── requirements.txt            # Dependencies
-└── README.md                   # This file
+ src/                        #  All source code (organized!)
+    core/                   # Core implementations
+       optimizers.py           # SGD, Adam, RMSProp implementations (2D + ND)
+       test_functions.py       # 2D test functions with analytic derivatives
+       models.py               # PyTorch NN models (MLP, CNN, ConvNet, ResNet-18)
+       nlp_models.py           #  NLP models (RNN, LSTM, BiLSTM, TextCNN)
+       nlp_data_utils.py       #  IMDB dataset loading & vocabulary
+       pytorch_optimizers.py   #  PyTorch wrappers for custom optimizers
+       data_utils.py           # MNIST/CIFAR-10 loaders
+       lr_schedulers.py        #  Learning rate scheduling (9 schedulers)
+       optuna_tuner.py         #  Optuna hyperparameter optimization
+       validation.py           # Input validation & error handling
+   
+    experiments/            # Experiment runners
+       run_experiment.py       # 2D experiments with Hessian tracking
+       run_nn_experiment.py    # NN training with convergence detection
+       run_multi_seed.py       # Multi-seed experiment framework
+       run_full_analysis.py    # Complete pipeline: experiments → stats → plots
+   
+    analysis/               # Statistical analysis
+       statistical_analysis.py # T-tests, effect sizes, confidence intervals
+       sensitivity_analysis.py # Hyperparameter sensitivity
+       ablation_study.py       # Component-wise ablation
+       baseline_comparison.py  # Compare with PyTorch optimizers
+   
+    visualization/          # Plotting utilities
+        plot_results.py         # Comprehensive plotting (with error bars!)
+        plot_eigenvalues.py     # Hessian eigenvalue visualization
+        loss_landscape.py       # Loss surface probing
+
+ tests/                      # Unit tests (123 tests, 100% passing)
+    test_gradients.py       # Numerical gradient verification
+    test_optimizers.py      # Optimizer correctness tests
+    test_lr_schedulers.py   #  LR scheduler tests
+    test_optuna_tuner.py    #  Optuna integration tests
+    test_nlp.py             #  NLP models & data tests
+    test_resnet.py          #  ResNet-18 architecture tests
+    test_highdim_functions.py  #  High-dimensional function tests
+
+ configs/                    # Experiment configurations
+    nn_tuning.json          # MNIST hyperparameter sweeps
+    cifar10_tuning.json     # CIFAR-10 configurations
+
+ scripts/                    # Utility scripts
+    run_all.py              # Complete reproducibility pipeline
+    tune_nn.py              # Two-stage hyperparameter tuning
+    demo_imdb_training.py   #  IMDB sentiment analysis demo
+    demo_highdim_optimization.py  #  High-dimensional function optimization
+    generate_summaries.py   # Quantitative & qualitative tables
+
+ docs/                       #  All documentation (consolidated!)
+    INDEX.md                # Documentation navigation hub
+    LIMITATIONS.md          # Known limitations & assumptions
+    MULTISEED_GUIDE.md      # Guide for multi-seed experiments
+    IMPROVEMENT_PROGRESS.md # Progress tracking
+    CRITICAL_VALIDATION_REPORT.md  # Scientific validation
+    REPORT.md               # Synthesis report with ablation study
+    PHASE11_NLP_SUMMARY.md  # NLP implementation summary
+    PHASE12_RESNET_SUMMARY.md  #  ResNet-18 deep network summary
+    hypothesis_matrix.md    # Theory ⇄ Experiment mapping
+
+ kaggle/                     #  Kaggle GPU experiments
+    QUICKSTART.md           # How to run experiments on Kaggle
+    INSTRUCTIONS.md         # Detailed step-by-step guide
+    resnet18_cifar10.py     # ResNet-18 training script
+    RESULTS_resnet18.md     #  Kaggle experiment results (85.51% accuracy)
+    verify_local.py         # Local verification script
+
+ results/                    # CSV outputs (experiments, summaries)
+ plots/                      # All visualizations (PNG)
+ data/                       # Dataset utilities
+
+ pyproject.toml              #  Modern Python project configuration
+ requirements.txt            # Dependencies
+ README.md                   # This file
 ```
 
-## 🚀 Quick Start
+##  Quick Start
 
 ### Installation
 
@@ -138,12 +138,12 @@ pip install -r requirements.txt
 # Run all tests (gradients + optimizers)
 pytest tests/ -v
 
-# Expected: 35 tests passed ✅
+# Expected: 35 tests passed 
 ```
 
 ### Running Experiments
 
-#### Option 1: Multi-Seed Statistical Analysis (Recommended) 🆕
+#### Option 1: Multi-Seed Statistical Analysis (Recommended) 
 ```bash
 # Full pipeline: experiments → aggregation → stats → plots
 python src/experiments/run_full_analysis.py \
@@ -161,7 +161,7 @@ python src/experiments/run_full_analysis.py --seeds 1,2,3
 - Plots with error bars
 - Aggregated JSON summary
 
-#### Option 2: Ablation Study (Component Analysis) 🆕
+#### Option 2: Ablation Study (Component Analysis) 
 ```bash
 # Test each optimizer component in isolation
 python src/analysis/ablation_study.py
@@ -175,7 +175,7 @@ python src/analysis/ablation_study.py
 #   6. AdamW (decoupled weight decay)
 ```
 
-#### Option 3: Baseline Comparison 🆕
+#### Option 3: Baseline Comparison 
 ```bash
 # Compare custom implementations with PyTorch built-ins
 python src/analysis/baseline_comparison.py
@@ -226,7 +226,7 @@ python src/visualization/plot_eigenvalues.py
 python scripts/nn_workflow.py
 ```
 
-#### Option 7: NLP Experiments (NEW! 🆕)
+#### Option 7: NLP Experiments (NEW! )
 ```bash
 # Train sentiment classifier on IMDB dataset
 python scripts/demo_imdb_training.py \
@@ -257,7 +257,7 @@ python scripts/demo_imdb_training.py \
 - Backward compatible with 2D test functions
 - PyTorch-compatible wrappers for seamless neural network training
 
-## 📊 Key Outputs
+##  Key Outputs
 
 ### Results Directory (`results/`)
 - **Experiment CSVs:** `NN_<model>_<dataset>_<optimizer>_lr<lr>_seed<seed>[_tag].csv`
@@ -283,7 +283,7 @@ python scripts/demo_imdb_training.py \
 - `loss_landscape_2d_surface.png`: 2D loss surface around trained weights
 - `loss_landscape_2d_contour.png`: Contour map of loss landscape
 
-## 📖 Understanding the Outputs
+##  Understanding the Outputs
 
 ### Convergence Detection
 The system automatically detects convergence using dual conditions:
@@ -306,7 +306,7 @@ Smaller gap indicates better generalization. Our findings:
 - **AdamW:** Fast convergence but larger gen-gap (~0.15)
 - **SGD+Momentum:** Slower start but smaller gen-gap (~0.08), better generalization
 
-## 🔬 Advanced Usage
+##  Advanced Usage
 
 ### Custom Hyperparameter Tuning
 
@@ -372,7 +372,7 @@ class MyOptimizer(Optimizer):
         self.state = {}
 ```
 
-## 📈 Results & Insights
+##  Results & Insights
 
 ### Ablation Study: Optimizer Comparison
 
@@ -396,7 +396,7 @@ See `hypothesis_matrix.md` for complete mapping:
 | Sharp vs flat minima | Loss landscape around trained weights | `loss_landscape_*.png` |
 | Layer-wise scaling | Per-layer gradient norms | `*_layer_grads.png` |
 
-## 🛠️ Troubleshooting
+##  Troubleshooting
 
 **Issue:** Overflow error on Rosenbrock with high momentum
 - **Solution:** Reduce learning rate (try 0.001 instead of 0.01)
@@ -407,7 +407,7 @@ See `hypothesis_matrix.md` for complete mapping:
 **Issue:** Missing eigenvalue columns in old CSV files
 - **Solution:** Re-run `python run_experiment.py` to regenerate with new format
 
-## 📚 Citation
+##  Citation
 
 If you use this codebase in your research, please cite:
 
@@ -420,11 +420,11 @@ If you use this codebase in your research, please cite:
 }
 ```
 
-## 📄 License
+##  License
 
 MIT License - see LICENSE file for details.
 
-## 🤝 Contributing
+##  Contributing
 
 Contributions welcome! Areas for improvement:
 - Basin-of-attraction maps
@@ -432,7 +432,7 @@ Contributions welcome! Areas for improvement:
 - Additional test functions (Beale, Himmelblau, etc.)
 - More NN architectures (ResNet, Transformer)
 
-## 📞 Contact
+##  Contact
 
 For questions or issues, please open a GitHub issue or contact [your-email@example.com]
 

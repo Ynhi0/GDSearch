@@ -417,7 +417,8 @@ class TestNormalityTests:
         
         data = np.array([1.0, 2.0])
         
-        result = test_normality(data, method='shapiro')
+        with pytest.warns(UserWarning, match="Sample size too small for normality testing"):
+            result = test_normality(data, method='shapiro')
         
         assert 'warning' in result
         assert result['normal'] is None
