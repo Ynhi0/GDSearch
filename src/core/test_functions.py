@@ -202,3 +202,269 @@ class SaddlePoint(TestFunction):
     def get_bounds(self):
         """Trả về giới hạn vẽ đồ thị cho hàm Saddle Point."""
         return (-2, 2), (-2, 2)
+
+
+# ============================================================================
+# High-Dimensional Test Functions (N-dimensional)
+# ============================================================================
+
+
+class HighDimensionalFunction:
+    """Base class for high-dimensional test functions."""
+    
+    def __init__(self, dim=10):
+        """
+        Initialize high-dimensional function.
+        
+        Args:
+            dim: Number of dimensions (default: 10)
+        """
+        self.dim = dim
+        self.name = f"{self.__class__.__name__}(dim={dim})"
+    
+    def compute(self, x):
+        """
+        Compute function value at point x.
+        
+        Args:
+            x: numpy array of shape (dim,)
+            
+        Returns:
+            Function value at x
+        """
+        raise NotImplementedError
+    
+    def gradient(self, x):
+        """
+        Compute gradient at point x.
+        
+        Args:
+            x: numpy array of shape (dim,)
+            
+        Returns:
+            Gradient array of shape (dim,)
+        """
+        raise NotImplementedError
+    
+    def get_bounds(self):
+        """
+        Return search bounds.
+        
+        Returns:
+            Tuple (lower_bound, upper_bound) for each dimension
+        """
+        raise NotImplementedError
+    
+    def get_optimum(self):
+        """
+        Return known global optimum.
+        
+        Returns:
+            Tuple (x_opt, f_opt) - optimal point and value
+        """
+        raise NotImplementedError
+
+
+class Rastrigin(HighDimensionalFunction):
+    """
+    Rastrigin function: f(x) = A*n + sum(x_i^2 - A*cos(2*pi*x_i))
+    
+    Highly multimodal function with many local minima.
+    Global minimum at x = [0, 0, ..., 0] with f(x) = 0.
+    """
+    
+    def __init__(self, dim=10, A=10):
+        """
+        Initialize Rastrigin function.
+        
+        Args:
+            dim: Number of dimensions (default: 10)
+            A: Amplitude parameter (default: 10)
+        """
+        super().__init__(dim)
+        self.A = A
+        self.name = f"Rastrigin(dim={dim}, A={A})"
+    
+    def compute(self, x):
+        """Compute Rastrigin function value."""
+        x = np.asarray(x)
+        return self.A * self.dim + np.sum(x**2 - self.A * np.cos(2 * np.pi * x))
+    
+    def gradient(self, x):
+        """
+        Compute gradient of Rastrigin function.
+        
+        df/dx_i = 2*x_i + 2*pi*A*sin(2*pi*x_i)
+        """
+        x = np.asarray(x)
+        return 2 * x + 2 * np.pi * self.A * np.sin(2 * np.pi * x)
+    
+    def get_bounds(self):
+        """Return search bounds for Rastrigin function."""
+        return (-5.12, 5.12)
+    
+    def get_optimum(self):
+        """Return known global optimum."""
+        return np.zeros(self.dim), 0.0
+
+
+class Ackley(HighDimensionalFunction):
+    """
+    Ackley function: f(x) = -a*exp(-b*sqrt(sum(x_i^2)/n)) - exp(sum(cos(c*x_i))/n) + a + e
+    
+    Characterized by nearly flat outer region and large hole at center.
+    Global minimum at x = [0, 0, ..., 0] with f(x) = 0.
+    """
+    
+    def __init__(self, dim=10, a=20, b=0.2, c=2*np.pi):
+        """
+        Initialize Ackley function.
+        
+        Args:
+            dim: Number of dimensions (default: 10)
+            a: Amplitude parameter (default: 20)
+            b: Width parameter (default: 0.2)
+            c: Frequency parameter (default: 2*pi)
+        """
+        super().__init__(dim)
+        self.a = a
+        self.b = b
+        self.c = c
+        self.name = f"Ackley(dim={dim})"
+    
+    def compute(self, x):
+        """Compute Ackley function value."""
+        x = np.asarray(x)
+        n = len(x)
+        sum_sq = np.sum(x**2)
+        sum_cos = np.sum(np.cos(self.c * x))
+        
+        term1 = -self.a * np.exp(-self.b * np.sqrt(sum_sq / n))
+        term2 = -np.exp(sum_cos / n)
+        return term1 + term2 + self.a + np.e
+    
+    def gradient(self, x):
+        """
+        Compute gradient of Ackley function.
+        
+        df/dx_i = (a*b / (n*sqrt(sum(x_j^2)/n))) * x_i * exp(-b*sqrt(sum(x_j^2)/n))
+                  + (c / n) * sin(c*x_i) * exp(sum(cos(c*x_j))/n)
+        """
+        x = np.asarray(x)
+        n = len(x)
+        sum_sq = np.sum(x**2)
+        sum_cos = np.sum(np.cos(self.c * x))
+        
+        sqrt_term = np.sqrt(sum_sq / n)
+        
+        # Term 1 derivative
+        if sqrt_term > 1e-10:
+            grad1 = (self.a * self.b / (n * sqrt_term)) * x * np.exp(-self.b * sqrt_term)
+        else:
+            grad1 = np.zeros_like(x)
+        
+        # Term 2 derivative
+        grad2 = (self.c / n) * np.sin(self.c * x) * np.exp(sum_cos / n)
+        
+        return grad1 + grad2
+    
+    def get_bounds(self):
+        """Return search bounds for Ackley function."""
+        return (-32.768, 32.768)
+    
+    def get_optimum(self):
+        """Return known global optimum."""
+        return np.zeros(self.dim), 0.0
+
+
+class Sphere(HighDimensionalFunction):
+    """
+    Sphere function: f(x) = sum(x_i^2)
+    
+    Simple convex function, easy to optimize.
+    Global minimum at x = [0, 0, ..., 0] with f(x) = 0.
+    """
+    
+    def __init__(self, dim=10):
+        """
+        Initialize Sphere function.
+        
+        Args:
+            dim: Number of dimensions (default: 10)
+        """
+        super().__init__(dim)
+        self.name = f"Sphere(dim={dim})"
+    
+    def compute(self, x):
+        """Compute Sphere function value."""
+        x = np.asarray(x)
+        return np.sum(x**2)
+    
+    def gradient(self, x):
+        """
+        Compute gradient of Sphere function.
+        
+        df/dx_i = 2*x_i
+        """
+        x = np.asarray(x)
+        return 2 * x
+    
+    def get_bounds(self):
+        """Return search bounds for Sphere function."""
+        return (-5.12, 5.12)
+    
+    def get_optimum(self):
+        """Return known global optimum."""
+        return np.zeros(self.dim), 0.0
+
+
+class Schwefel(HighDimensionalFunction):
+    """
+    Schwefel function: f(x) = 418.9829*n - sum(x_i * sin(sqrt(|x_i|)))
+    
+    Deceptive function where global minimum is far from local minima.
+    Global minimum at x = [420.9687, ..., 420.9687] with f(x) ≈ 0.
+    """
+    
+    def __init__(self, dim=10):
+        """
+        Initialize Schwefel function.
+        
+        Args:
+            dim: Number of dimensions (default: 10)
+        """
+        super().__init__(dim)
+        self.name = f"Schwefel(dim={dim})"
+    
+    def compute(self, x):
+        """Compute Schwefel function value."""
+        x = np.asarray(x)
+        return 418.9829 * self.dim - np.sum(x * np.sin(np.sqrt(np.abs(x))))
+    
+    def gradient(self, x):
+        """
+        Compute gradient of Schwefel function.
+        
+        f(x) = 418.9829*n - sum(x_i * sin(sqrt(|x_i|)))
+        df/dx_i = -sin(sqrt(|x_i|)) - x_i * cos(sqrt(|x_i|)) * sign(x_i) / (2*sqrt(|x_i|))
+        """
+        x = np.asarray(x)
+        abs_x = np.abs(x)
+        sqrt_abs_x = np.sqrt(abs_x)
+        
+        # Handle zero values
+        grad = np.zeros_like(x, dtype=float)
+        nonzero = abs_x > 1e-10
+        
+        grad[nonzero] = (-np.sin(sqrt_abs_x[nonzero]) - 
+                         x[nonzero] * np.cos(sqrt_abs_x[nonzero]) * np.sign(x[nonzero]) / (2 * sqrt_abs_x[nonzero]))
+        
+        return grad
+    
+    def get_bounds(self):
+        """Return search bounds for Schwefel function."""
+        return (-500, 500)
+    
+    def get_optimum(self):
+        """Return known global optimum."""
+        return np.full(self.dim, 420.9687), 0.0
