@@ -26,8 +26,12 @@ A comprehensive Python framework for comparing gradient descent algorithms on 2D
 - ✅ **Statistical Analysis:** T-tests, effect sizes (Cohen's d), 95% confidence intervals
 - ✅ **Power Analysis:** Statistical power calculation and sample size determination
 - ✅ **Multiple Comparison Corrections:** Bonferroni, Holm-Bonferroni, Benjamini-Hochberg (FDR)
+- ✅ **Normality Testing:** Shapiro-Wilk, Anderson-Darling, Kolmogorov-Smirnov
+- ✅ **Non-parametric Tests:** Mann-Whitney U, Wilcoxon signed-rank (for non-normal data)
+- ✅ **Auto-Test Selection:** Automatically choose appropriate test based on normality
+- ✅ **Interactive Visualizations:** Plotly-based 2D/3D plots, animations, loss landscapes
 - ✅ **Error Bar Visualization:** Plots with mean ± std bands
-- ✅ **Unit Tests:** 148 tests verifying gradients, optimizers, schedulers, NLP, ResNet, high-dim functions, and statistical analysis (pytest)
+- ✅ **Unit Tests:** 177 tests verifying gradients, optimizers, schedulers, NLP, ResNet, high-dim functions, statistics, and visualizations (pytest)
 - ✅ **Input Validation:** Comprehensive error checking and input sanitization
 - ✅ **Ablation Studies:** Component-wise isolation to quantify contributions
 - ✅ **Baseline Comparisons:** Compare custom implementations with PyTorch built-ins

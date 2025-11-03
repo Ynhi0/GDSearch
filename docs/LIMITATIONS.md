@@ -105,7 +105,7 @@ This document outlines known limitations, assumptions, and areas for future impr
 
 ## 2. Statistical Limitations
 
-**Status**: ✅ COMPLETE (Session 2.0 - Phase 14)  
+**Status**: ✅ COMPLETE (Session 2.0 - Phases 14 & 16)  
 
 ### 2.1 Power Analysis
 **Status**: ✅ COMPLETE  
@@ -141,7 +141,38 @@ This document outlines known limitations, assumptions, and areas for future impr
 **Previous Limitation**: No correction for multiple testing, inflated Type I error  
 **Now Resolved**: Three correction methods with comprehensive testing
 
-### 2.3 Edge Case Handling
+### 2.3 Normality Testing
+**Status**: ✅ COMPLETE (Phase 16)
+**Achievement**:
+- **Shapiro-Wilk Test:** Best for n < 5000, general normality assessment
+- **Anderson-Darling Test:** More sensitive to tails than Shapiro-Wilk
+- **Kolmogorov-Smirnov Test:** Good for large samples
+- Automatic test selection based on sample properties
+- `test_normality()` function with multiple methods
+
+**Impact**:
+- Verify parametric test assumptions
+- Choose appropriate statistical tests
+- Avoid invalid t-test applications
+
+**Test Coverage**: 5 tests for normality testing
+
+### 2.4 Non-parametric Tests
+**Status**: ✅ COMPLETE (Phase 16)
+**Achievement**:
+- **Mann-Whitney U Test:** For independent samples (non-normal distributions)
+- **Wilcoxon Signed-Rank Test:** For paired samples (non-normal distributions)
+- Effect size calculations (rank-biserial correlation)
+- `auto_select_test()`: Automatically choose parametric vs non-parametric
+
+**Impact**:
+- Robust analysis for non-normal data
+- No distributional assumptions required
+- Handles outliers gracefully
+
+**Test Coverage**: 5 tests for non-parametric methods
+
+### 2.5 Edge Case Handling
 **Status**: ✅ COMPLETE  
 **Achievement**:
 - Pre-check for zero-variance data (ε = 1e-10 threshold)
@@ -152,23 +183,26 @@ This document outlines known limitations, assumptions, and areas for future impr
 - Mathematically correct results for all edge cases
 
 **Impact**:
-- Zero warnings in test suite (148 tests, all passing)
+- Zero warnings in test suite (177 tests, all passing)
 - Robust to edge cases in synthetic benchmarks
 - Clear interpretation of degenerate scenarios
 
-**Test Coverage**: 25 new tests (148 total)
+**Test Coverage**: 39 total tests for statistical analysis
 - Basic t-tests (4 tests)
 - Power analysis (6 tests)
 - Multiple comparisons (8 tests)
 - Multiple optimizer comparison (3 tests)
 - Statistical properties (4 tests)
+- Normality testing (5 tests)
+- Non-parametric tests (5 tests)
+- Auto-test selection (4 tests)
 
 **Verification**:
 - All tests pass without warnings
 - Edge cases handled gracefully
 - Publication-ready statistical framework
 
-### 2.4 Independence Assumption
+### 2.6 Independence Assumption
 **Assumption**: Experiments with different seeds are independent  
 **Limitation**: May not hold if:
 - Hardware/temperature affects results
@@ -178,10 +212,10 @@ This document outlines known limitations, assumptions, and areas for future impr
 **Recommendation**: Run experiments on different machines/times to verify independence.
 
 **Remaining Future Enhancements**:
-- Non-parametric tests (Mann-Whitney U, Wilcoxon)
-- Normality testing (Shapiro-Wilk, Anderson-Darling)
 - Effect size confidence intervals via bootstrap
 - Power curve visualization
+- Bayesian alternatives (credible intervals)
+- Cross-validation for model comparison
 
 ---
 
@@ -497,7 +531,29 @@ This document outlines known limitations, assumptions, and areas for future impr
 
 **Impact**: Can now claim "statistically significant"
 
-#### 4. Error Bar Visualization
+#### 4. Interactive Visualizations
+**Status**: ✅ COMPLETE (Session 2.0 - Phase 15)  
+**Achievement**:
+- **Plotly Integration:** Interactive 2D/3D plots with zoom, pan, hover
+- **3D Loss Landscapes:** Rotate, explore loss surfaces interactively
+- **Animated Convergence:** Play/pause animations showing optimization progress
+- **Multi-Optimizer Dashboards:** Side-by-side comparison plots
+- **HTML Export:** Share interactive plots via web browser
+- **15 Comprehensive Tests:** All visualization functionality verified
+
+**Technical Details**:
+- `plot_trajectory_interactive()`: 2D trajectories with contours
+- `plot_loss_landscape_3d()`: 3D surface plots with trajectory overlay
+- `animate_convergence()`: Frame-by-frame animations with controls
+- `plot_multi_optimizer_comparison()`: 4-panel comparison dashboard
+
+**Impact**: 
+- Professional, publication-ready interactive figures
+- Easy exploration of loss landscapes
+- Engaging presentations and demonstrations
+- Web-based sharing without Python dependencies
+
+#### 5. Error Bar Visualization
 **Status**: ✅ COMPLETE  
 **Achievement**:
 - All plots support error bars
@@ -507,17 +563,19 @@ This document outlines known limitations, assumptions, and areas for future impr
 
 **Impact**: Publication-ready figures
 
-#### 5. Unit Testing
-**Status**: ✅ COMPLETE  
+#### 6. Unit Testing
+**Status**: ✅ COMPLETE (177 tests)
 **Achievement**:
-- 35 tests (100% passing)
+- 177 tests (100% passing)
 - Numerical gradient verification
 - Optimizer correctness tests
+- Statistical analysis validation
+- Interactive visualization tests
 - Full test coverage of core functionality
 
 **Impact**: Mathematical correctness proven
 
-#### 6. Input Validation
+#### 7. Input Validation
 **Status**: ✅ COMPLETE  
 **Achievement**:
 - Comprehensive validation module
@@ -527,7 +585,7 @@ This document outlines known limitations, assumptions, and areas for future impr
 
 **Impact**: Better user experience
 
-#### 7. CIFAR-10 Support
+#### 8. CIFAR-10 Support
 **Status**: ✅ COMPLETE  
 **Achievement**:
 - ConvNet model added
