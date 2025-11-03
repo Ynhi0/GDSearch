@@ -5,7 +5,8 @@ Includes:
 - Independent t-tests with effect sizes (Cohen's d)
 - Power analysis for sample size determination
 - Multiple comparison corrections (Bonferroni, Holm-Bonferroni, Benjamini-Hochberg)
-- Non-parametric tests (Wilcoxon, Mann-Whitney)
+- Normality testing (Shapiro-Wilk, Anderson-Darling, Kolmogorov-Smirnov)
+- Non-parametric tests (Mann-Whitney U, Wilcoxon signed-rank)
 - Confidence intervals
 - Publication-ready visualizations
 """
@@ -708,6 +709,302 @@ def main():
     print("\n" + "="*80)
     print("Demo complete!")
     print("="*80)
+
+
+# =============================================================================
+# Normality Testing Functions
+# =============================================================================
+
+def test_normality(
+    data: np.ndarray,
+    method: str = 'shapiro',
+    alpha: float = 0.05
+) -> Dict:
+    """
+    Test if data follows a normal distribution.
+    
+    Args:
+        data: Array of values to test
+        method: Test method ('shapiro', 'anderson', 'kstest')
+        alpha: Significance level
+        
+    Returns:
+        Dictionary with test results
+    """
+    if len(data) < 3:
+        warnings.warn("Sample size too small for normality testing (n < 3)")
+        return {
+            'method': method,
+            'statistic': np.nan,
+            'p_value': np.nan,
+            'normal': None,
+            'warning': 'Sample size too small'
+        }
+    
+    if method == 'shapiro':
+        # Shapiro-Wilk test (good for n < 5000)
+        statistic, p_value = stats.shapiro(data)
+        normal = p_value > alpha
+        interpretation = f"Data {'appears' if normal else 'does not appear'} normally distributed (W={statistic:.4f}, p={p_value:.4f})"
+        
+    elif method == 'anderson':
+        # Anderson-Darling test
+        result = stats.anderson(data, dist='norm')
+        # Get critical value for alpha
+        if alpha == 0.05:
+            crit_idx = 2  # 5% significance
+        elif alpha == 0.01:
+            crit_idx = 4  # 1% significance
+        else:
+            crit_idx = 2  # default to 5%
+        
+        statistic = result.statistic
+        critical_value = result.critical_values[crit_idx]
+        normal = statistic < critical_value
+        p_value = None  # Anderson-Darling doesn't return p-value directly
+        interpretation = f"Data {'appears' if normal else 'does not appear'} normally distributed (A²={statistic:.4f}, critical={critical_value:.4f})"
+        
+    elif method == 'kstest':
+        # Kolmogorov-Smirnov test
+        # Fit normal distribution to data
+        mu, sigma = data.mean(), data.std()
+        statistic, p_value = stats.kstest(data, 'norm', args=(mu, sigma))
+        normal = p_value > alpha
+        interpretation = f"Data {'appears' if normal else 'does not appear'} normally distributed (D={statistic:.4f}, p={p_value:.4f})"
+        
+    else:
+        raise ValueError(f"Unknown method: {method}. Use 'shapiro', 'anderson', or 'kstest'")
+    
+    return {
+        'method': method,
+        'statistic': statistic,
+        'p_value': p_value,
+        'normal': normal,
+        'alpha': alpha,
+        'interpretation': interpretation,
+        'n': len(data)
+    }
+
+
+def compare_optimizers_mann_whitney(
+    results_A: np.ndarray,
+    results_B: np.ndarray,
+    name_A: str = "Optimizer A",
+    name_B: str = "Optimizer B",
+    alternative: str = 'two-sided',
+    alpha: float = 0.05
+) -> Dict:
+    """
+    Non-parametric comparison using Mann-Whitney U test (for independent samples).
+    
+    Use when:
+    - Data is not normally distributed
+    - Sample sizes are small
+    - Outliers are present
+    
+    Args:
+        results_A: Array of metric values for optimizer A
+        results_B: Array of metric values for optimizer B
+        name_A, name_B: Names for display
+        alternative: 'two-sided', 'less', or 'greater'
+        alpha: Significance level
+        
+    Returns:
+        Dictionary with test results
+    """
+    # Compute statistics
+    median_A = np.median(results_A)
+    median_B = np.median(results_B)
+    
+    # Mann-Whitney U test
+    statistic, p_value = stats.mannwhitneyu(
+        results_A,
+        results_B,
+        alternative=alternative
+    )
+    
+    # Effect size (rank-biserial correlation)
+    # r = 1 - (2U) / (n1 * n2)
+    n_A, n_B = len(results_A), len(results_B)
+    r = 1 - (2 * statistic) / (n_A * n_B)
+    
+    significant = p_value < alpha
+    
+    return {
+        'name_A': name_A,
+        'name_B': name_B,
+        'median_A': median_A,
+        'median_B': median_B,
+        'n_A': n_A,
+        'n_B': n_B,
+        'U_statistic': statistic,
+        'p_value': p_value,
+        'effect_size_r': r,
+        'significant': significant,
+        'alpha': alpha,
+        'alternative': alternative,
+        'test': 'Mann-Whitney U'
+    }
+
+
+def compare_optimizers_wilcoxon(
+    results_A: np.ndarray,
+    results_B: np.ndarray,
+    name_A: str = "Optimizer A",
+    name_B: str = "Optimizer B",
+    alternative: str = 'two-sided',
+    alpha: float = 0.05
+) -> Dict:
+    """
+    Non-parametric comparison using Wilcoxon signed-rank test (for paired samples).
+    
+    Use when:
+    - Comparing same optimizers on different problems
+    - Data is paired/matched
+    - Distribution is not normal
+    
+    Args:
+        results_A: Array of metric values for optimizer A
+        results_B: Array of metric values for optimizer B
+        name_A, name_B: Names for display
+        alternative: 'two-sided', 'less', or 'greater'
+        alpha: Significance level
+        
+    Returns:
+        Dictionary with test results
+    """
+    if len(results_A) != len(results_B):
+        raise ValueError("Wilcoxon test requires paired samples of equal length")
+    
+    # Compute statistics
+    median_A = np.median(results_A)
+    median_B = np.median(results_B)
+    median_diff = np.median(results_A - results_B)
+    
+    # Wilcoxon signed-rank test
+    statistic, p_value = stats.wilcoxon(
+        results_A,
+        results_B,
+        alternative=alternative
+    )
+    
+    # Effect size (rank-biserial correlation for paired samples)
+    # r = Z / sqrt(n)
+    n = len(results_A)
+    z_score = stats.norm.ppf(1 - p_value / 2) if p_value < 1 else 0
+    r = z_score / np.sqrt(n)
+    
+    significant = p_value < alpha
+    
+    return {
+        'name_A': name_A,
+        'name_B': name_B,
+        'median_A': median_A,
+        'median_B': median_B,
+        'median_diff': median_diff,
+        'n': n,
+        'W_statistic': statistic,
+        'p_value': p_value,
+        'effect_size_r': r,
+        'significant': significant,
+        'alpha': alpha,
+        'alternative': alternative,
+        'test': 'Wilcoxon signed-rank'
+    }
+
+
+def auto_select_test(
+    results_A: np.ndarray,
+    results_B: np.ndarray,
+    paired: bool = False,
+    alpha: float = 0.05,
+    name_A: str = "Optimizer A",
+    name_B: str = "Optimizer B"
+) -> Dict:
+    """
+    Automatically select appropriate statistical test based on normality.
+    
+    Decision tree:
+    1. Test normality of both samples
+    2. If both normal: use t-test
+    3. If not normal:
+       - If paired: use Wilcoxon signed-rank
+       - If independent: use Mann-Whitney U
+    
+    Args:
+        results_A: Array of metric values for optimizer A
+        results_B: Array of metric values for optimizer B
+        paired: Whether samples are paired
+        alpha: Significance level
+        name_A, name_B: Names for display
+        
+    Returns:
+        Dictionary with test results and normality info
+    """
+    # Test normality
+    normality_A = test_normality(results_A, method='shapiro', alpha=alpha)
+    normality_B = test_normality(results_B, method='shapiro', alpha=alpha)
+    
+    both_normal = normality_A['normal'] and normality_B['normal']
+    
+    # Select test
+    if both_normal:
+        # Parametric test
+        test_result = compare_optimizers_ttest(
+            results_A, results_B, name_A, name_B
+        )
+        test_type = 'parametric (t-test)'
+    else:
+        # Non-parametric test
+        if paired:
+            test_result = compare_optimizers_wilcoxon(
+                results_A, results_B, name_A, name_B,
+                alternative='two-sided', alpha=alpha
+            )
+            test_type = 'non-parametric (Wilcoxon)'
+        else:
+            test_result = compare_optimizers_mann_whitney(
+                results_A, results_B, name_A, name_B,
+                alternative='two-sided', alpha=alpha
+            )
+            test_type = 'non-parametric (Mann-Whitney U)'
+    
+    # Combine results
+    result = {
+        'test_type': test_type,
+        'normality_A': normality_A,
+        'normality_B': normality_B,
+        'test_result': test_result
+    }
+    
+    return result
+
+
+def print_normality_results(normality_result: Dict) -> None:
+    """Print formatted normality test results."""
+    print(f"\nNormality Test ({normality_result['method'].capitalize()}):")
+    print(f"  Sample size: n = {normality_result['n']}")
+    print(f"  Test statistic: {normality_result['statistic']:.4f}")
+    if normality_result['p_value'] is not None:
+        print(f"  P-value: {normality_result['p_value']:.4f}")
+    print(f"  {normality_result['interpretation']}")
+
+
+def print_nonparametric_results(result: Dict) -> None:
+    """Print formatted non-parametric test results."""
+    print(f"\n{result['test']} Results:")
+    print(f"  {result['name_A']}: median = {result['median_A']:.4f}, n = {result['n_A']}")
+    print(f"  {result['name_B']}: median = {result['median_B']:.4f}, n = {result['n_B']}")
+    
+    if 'U_statistic' in result:
+        print(f"  U statistic: {result['U_statistic']:.2f}")
+    elif 'W_statistic' in result:
+        print(f"  W statistic: {result['W_statistic']:.2f}")
+        print(f"  Median difference: {result['median_diff']:.4f}")
+    
+    print(f"  P-value: {result['p_value']:.4f}")
+    print(f"  Effect size (r): {result['effect_size_r']:.4f}")
+    print(f"  Significant (α={result['alpha']}): {result['significant']}")
 
 
 if __name__ == "__main__":

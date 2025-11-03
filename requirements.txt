@@ -8,3 +8,4 @@ torchvision
 pytest
 optuna
 datasets
+plotly

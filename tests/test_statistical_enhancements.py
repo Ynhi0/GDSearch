@@ -350,3 +350,217 @@ class TestStatisticalProperties:
         # Very small sample
         power_small_n = compute_power_analysis(0.5, 2)
         assert 0 <= power_small_n <= 0.2
+
+
+class TestNormalityTests:
+    """Tests for normality testing functions."""
+    
+    def test_shapiro_wilk_normal_data(self):
+        """Test Shapiro-Wilk on normal data."""
+        from src.analysis.statistical_analysis import test_normality
+        
+        # Generate normal data
+        np.random.seed(42)
+        data = np.random.normal(0, 1, size=50)
+        
+        result = test_normality(data, method='shapiro', alpha=0.05)
+        
+        assert result['method'] == 'shapiro'
+        assert result['statistic'] > 0
+        assert result['p_value'] > 0.05  # Should not reject normality
+        assert result['normal'] == True
+    
+    def test_shapiro_wilk_non_normal_data(self):
+        """Test Shapiro-Wilk on non-normal data."""
+        from src.analysis.statistical_analysis import test_normality
+        
+        # Generate exponential data (non-normal)
+        np.random.seed(42)
+        data = np.random.exponential(1, size=100)
+        
+        result = test_normality(data, method='shapiro', alpha=0.05)
+        
+        # Should reject normality (but might not always due to randomness)
+        assert result['method'] == 'shapiro'
+        assert 'statistic' in result
+        assert 'p_value' in result
+    
+    def test_anderson_darling(self):
+        """Test Anderson-Darling test."""
+        from src.analysis.statistical_analysis import test_normality
+        
+        np.random.seed(42)
+        data = np.random.normal(0, 1, size=50)
+        
+        result = test_normality(data, method='anderson', alpha=0.05)
+        
+        assert result['method'] == 'anderson'
+        assert result['statistic'] > 0
+        assert result['normal'] in [True, False]
+    
+    def test_kstest(self):
+        """Test Kolmogorov-Smirnov test."""
+        from src.analysis.statistical_analysis import test_normality
+        
+        np.random.seed(42)
+        data = np.random.normal(0, 1, size=50)
+        
+        result = test_normality(data, method='kstest', alpha=0.05)
+        
+        assert result['method'] == 'kstest'
+        assert result['statistic'] >= 0
+        assert 0 <= result['p_value'] <= 1
+    
+    def test_small_sample_warning(self):
+        """Test warning for very small samples."""
+        from src.analysis.statistical_analysis import test_normality
+        
+        data = np.array([1.0, 2.0])
+        
+        result = test_normality(data, method='shapiro')
+        
+        assert 'warning' in result
+        assert result['normal'] is None
+
+
+class TestNonParametricTests:
+    """Tests for non-parametric statistical tests."""
+    
+    def test_mann_whitney_different_groups(self):
+        """Test Mann-Whitney U test with different groups."""
+        from src.analysis.statistical_analysis import compare_optimizers_mann_whitney
+        
+        np.random.seed(42)
+        # Two clearly different groups
+        results_A = np.random.exponential(1, size=20) + 5
+        results_B = np.random.exponential(1, size=20)
+        
+        result = compare_optimizers_mann_whitney(
+            results_A, results_B,
+            name_A="A", name_B="B",
+            alternative='two-sided'
+        )
+        
+        assert result['test'] == 'Mann-Whitney U'
+        assert result['median_A'] > result['median_B']
+        assert result['p_value'] < 0.05  # Should be significant
+        assert result['significant'] == True
+    
+    def test_mann_whitney_same_groups(self):
+        """Test Mann-Whitney U test with same groups."""
+        from src.analysis.statistical_analysis import compare_optimizers_mann_whitney
+        
+        np.random.seed(42)
+        results_A = np.random.normal(0, 1, size=20)
+        results_B = np.random.normal(0, 1, size=20)
+        
+        result = compare_optimizers_mann_whitney(results_A, results_B)
+        
+        # Should not be significant (same distribution)
+        assert result['p_value'] > 0.01
+        assert abs(result['effect_size_r']) < 0.5
+    
+    def test_wilcoxon_paired_different(self):
+        """Test Wilcoxon test with paired different samples."""
+        from src.analysis.statistical_analysis import compare_optimizers_wilcoxon
+        
+        np.random.seed(42)
+        # Before and after (paired)
+        before = np.random.normal(5, 1, size=20)
+        after = before + np.random.normal(2, 0.5, size=20)  # Improvement
+        
+        result = compare_optimizers_wilcoxon(
+            after, before,
+            name_A="After", name_B="Before",
+            alternative='greater'
+        )
+        
+        assert result['test'] == 'Wilcoxon signed-rank'
+        assert result['median_A'] > result['median_B']
+        assert result['p_value'] < 0.05
+        assert result['significant'] == True
+    
+    def test_wilcoxon_requires_equal_length(self):
+        """Test that Wilcoxon requires equal-length samples."""
+        from src.analysis.statistical_analysis import compare_optimizers_wilcoxon
+        
+        results_A = np.array([1, 2, 3])
+        results_B = np.array([1, 2, 3, 4, 5])
+        
+        with pytest.raises(ValueError):
+            compare_optimizers_wilcoxon(results_A, results_B)
+    
+    def test_mann_whitney_effect_size(self):
+        """Test Mann-Whitney effect size calculation."""
+        from src.analysis.statistical_analysis import compare_optimizers_mann_whitney
+        
+        # Perfect separation
+        results_A = np.array([1, 2, 3, 4, 5])
+        results_B = np.array([6, 7, 8, 9, 10])
+        
+        result = compare_optimizers_mann_whitney(results_A, results_B)
+        
+        # Effect size should be strong
+        assert abs(result['effect_size_r']) > 0.5
+
+
+class TestAutoSelectTest:
+    """Tests for automatic test selection."""
+    
+    def test_auto_select_normal_data(self):
+        """Test auto-selection with normal data."""
+        from src.analysis.statistical_analysis import auto_select_test
+        
+        np.random.seed(42)
+        results_A = np.random.normal(10, 1, size=50)
+        results_B = np.random.normal(10.5, 1, size=50)
+        
+        result = auto_select_test(results_A, results_B, paired=False)
+        
+        # Should select parametric test (t-test)
+        assert 'parametric' in result['test_type']
+        assert result['normality_A']['normal'] == True
+        assert result['normality_B']['normal'] == True
+    
+    def test_auto_select_non_normal_independent(self):
+        """Test auto-selection with non-normal independent data."""
+        from src.analysis.statistical_analysis import auto_select_test
+        
+        np.random.seed(42)
+        results_A = np.random.exponential(1, size=30)
+        results_B = np.random.exponential(1, size=30)
+        
+        result = auto_select_test(results_A, results_B, paired=False)
+        
+        # Should select Mann-Whitney U
+        if not result['normality_A']['normal'] or not result['normality_B']['normal']:
+            assert 'Mann-Whitney' in result['test_type']
+    
+    def test_auto_select_non_normal_paired(self):
+        """Test auto-selection with non-normal paired data."""
+        from src.analysis.statistical_analysis import auto_select_test
+        
+        np.random.seed(42)
+        results_A = np.random.exponential(1, size=30)
+        results_B = results_A * 1.2 + np.random.normal(0, 0.1, size=30)
+        
+        result = auto_select_test(results_A, results_B, paired=True)
+        
+        # Should select Wilcoxon if not normal
+        if not result['normality_A']['normal'] or not result['normality_B']['normal']:
+            assert 'Wilcoxon' in result['test_type']
+    
+    def test_auto_select_includes_normality_info(self):
+        """Test that auto-selection includes normality test info."""
+        from src.analysis.statistical_analysis import auto_select_test
+        
+        np.random.seed(42)
+        results_A = np.random.normal(10, 1, size=30)
+        results_B = np.random.normal(10, 1, size=30)
+        
+        result = auto_select_test(results_A, results_B)
+        
+        assert 'normality_A' in result
+        assert 'normality_B' in result
+        assert 'test_result' in result
+        assert 'test_type' in result
