@@ -6,7 +6,8 @@ A comprehensive Python framework for comparing gradient descent algorithms on 2D
 
 ### Core Capabilities
 - ✅ **4 Optimization Algorithms:** SGD, SGD+Momentum, RMSProp, Adam/AdamW
-- ✅ **3 2D Test Functions:** Rosenbrock, Ill-Conditioned Quadratic, Saddle Point
+- ✅ **7 Test Functions:** Rosenbrock, Ill-Conditioned Quadratic, Saddle Point, Rastrigin, Ackley, Sphere, Schwefel
+- ✅ **High-Dimensional Benchmarks:** Rastrigin, Ackley, Sphere, Schwefel (N-dimensional, tested up to 100D)
 - ✅ **Neural Networks:** SimpleMLP (MNIST), SimpleCNN/ConvNet (CIFAR-10), **ResNet-18** (CIFAR-10), NLP models (IMDB)
 - ✅ **Deep Architectures:** ResNet-18 (18 layers, 11M parameters, residual connections)
 - ✅ **NLP Models:** SimpleRNN, SimpleLSTM, BiLSTM, TextCNN (Kim 2014)
@@ -24,7 +25,7 @@ A comprehensive Python framework for comparing gradient descent algorithms on 2D
 - ✅ **Multi-Seed Experiments:** Run experiments with multiple random seeds for statistical reliability
 - ✅ **Statistical Analysis:** T-tests, effect sizes (Cohen's d), 95% confidence intervals
 - ✅ **Error Bar Visualization:** Plots with mean ± std bands
-- ✅ **Unit Tests:** 96 tests verifying gradients, optimizers, schedulers, NLP, and ResNet (pytest)
+- ✅ **Unit Tests:** 123 tests verifying gradients, optimizers, schedulers, NLP, ResNet, and high-dim functions (pytest)
 - ✅ **Input Validation:** Comprehensive error checking and input sanitization
 - ✅ **Ablation Studies:** Component-wise isolation to quantify contributions
 - ✅ **Baseline Comparisons:** Compare custom implementations with PyTorch built-ins
@@ -64,13 +65,14 @@ GDSearch/
 │       ├── plot_eigenvalues.py     # Hessian eigenvalue visualization
 │       └── loss_landscape.py       # Loss surface probing
 │
-├── tests/                      # Unit tests (96 tests, 100% passing)
+├── tests/                      # Unit tests (123 tests, 100% passing)
 │   ├── test_gradients.py       # Numerical gradient verification
 │   ├── test_optimizers.py      # Optimizer correctness tests
 │   ├── test_lr_schedulers.py   # 🆕 LR scheduler tests
 │   ├── test_optuna_tuner.py    # 🆕 Optuna integration tests
 │   ├── test_nlp.py             # 🆕 NLP models & data tests
-│   └── test_resnet.py          # 🆕 ResNet-18 architecture tests
+│   ├── test_resnet.py          # 🆕 ResNet-18 architecture tests
+│   └── test_highdim_functions.py  # 🆕 High-dimensional function tests
 │
 ├── configs/                    # Experiment configurations
 │   ├── nn_tuning.json          # MNIST hyperparameter sweeps
@@ -80,6 +82,7 @@ GDSearch/
 │   ├── run_all.py              # Complete reproducibility pipeline
 │   ├── tune_nn.py              # Two-stage hyperparameter tuning
 │   ├── demo_imdb_training.py   # 🆕 IMDB sentiment analysis demo
+│   ├── demo_highdim_optimization.py  # 🆕 High-dimensional function optimization
 │   └── generate_summaries.py   # Quantitative & qualitative tables
 │
 ├── docs/                       # 🆕 All documentation (consolidated!)
