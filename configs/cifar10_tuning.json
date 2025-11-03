@@ -1,0 +1,42 @@
+{
+  "dataset": "CIFAR10",
+  "model": "ConvNet",
+  "seed": 1,
+  "batch_size": 128,
+  "sweeps": [
+    {
+      "optimizer": "AdamW",
+      "lr_values": [1e-2, 1e-3, 5e-4, 1e-4],
+      "epochs": 5,
+      "weight_decay_values": [0.0, 1e-4, 5e-4, 1e-3]
+    },
+    {
+      "optimizer": "SGD_Momentum",
+      "lr_values": [0.1, 0.05, 0.01, 0.005],
+      "epochs": 5,
+      "momentum_values": [0.0, 0.5, 0.9, 0.95]
+    },
+    {
+      "optimizer": "Adam",
+      "lr_values": [1e-2, 1e-3, 5e-4, 1e-4],
+      "epochs": 5,
+      "beta1_values": [0.9],
+      "beta2_values": [0.999, 0.99]
+    },
+    {
+      "optimizer": "RMSProp",
+      "lr_values": [1e-2, 1e-3, 5e-4, 1e-4],
+      "epochs": 5,
+      "alpha_values": [0.99, 0.9]
+    }
+  ],
+  "final": {
+    "epochs": 50,
+    "capture_layer_grad_epochs": [1, 10, 25, 50]
+  },
+  "convergence": {
+    "grad_norm_threshold": 1e-6,
+    "loss_delta_threshold": 1e-7,
+    "loss_window": 200
+  }
+}
