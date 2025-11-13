@@ -1,0 +1,22 @@
+\begin{table}[htbp]
+\centering
+\caption{Optimizer Ablation Study on Rosenbrock Function}
+\label{tab:ablation}
+\begin{tabular}{lcccc}
+\toprule
+Optimizer & Final Loss & Min Loss & Iterations & Converged \\
+\midrule
+SGD & 9.62e-05 & 9.62e-05 & 7156 & \checkmark \\
+SGD+Momentum & DIV & --- & >10k & --- \\
+RMSProp & 2.22e-02 & 2.22e-02 & >10k & --- \\
+Adam & 2.11e-09 & 1.11e-31 & 2391 & \checkmark \\
+AdamW & 1.00e-05 & 8.67e-06 & 2762 & \checkmark \\
+AMSGrad & 1.56e+00 & 1.56e+00 & >10k & --- \\
+\bottomrule
+\end{tabular}
+\begin{tablenotes}
+\small
+\item Note: All optimizers started from $(-1.5, 2.0)$ with 10,000 maximum iterations. 
+Convergence threshold: loss $< 10^{-3}$. DIV indicates divergence.
+\end{tablenotes}
+\end{table}

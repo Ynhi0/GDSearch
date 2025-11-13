@@ -60,12 +60,12 @@ def run_2d_experiments(quick=False):
     log("PHASE 1: 2D Test Function Experiments")
     log("=" * 60)
     
-    # Check if run_experiment.py exists
-    if not Path("run_experiment.py").exists():
-        log("⚠️  run_experiment.py not found, skipping 2D experiments")
+    # Check if src/experiments/run_experiment.py exists
+    if not Path("src/experiments/run_experiment.py").exists():
+        log("⚠️  src/experiments/run_experiment.py not found, skipping 2D experiments")
         return
     
-    run_python_script("run_experiment.py", "2D baseline experiments")
+    run_python_script("src/experiments/run_experiment.py", "2D baseline experiments")
     
     # Generate advanced visualizations
     if Path("generate_advanced_plots.py").exists():
@@ -81,47 +81,76 @@ def run_nn_tuning(quick=False):
     log("=" * 60)
     
     # Check for tuning script
-    if Path("tune_nn.py").exists():
-        run_python_script("tune_nn.py", "NN hyperparameter tuning (2-stage sweeps + final runs)")
+    if Path("scripts/tune_nn.py").exists():
+        run_python_script("scripts/tune_nn.py", "NN hyperparameter tuning (2-stage sweeps + final runs)")
     else:
         log("⚠️  tune_nn.py not found, trying nn_workflow.py")
-        if Path("nn_workflow.py").exists():
-            run_python_script("nn_workflow.py", "NN workflow (demo runs)")
+        if Path("scripts/nn_workflow.py").exists():
+            run_python_script("scripts/nn_workflow.py", "NN workflow (demo runs)")
         else:
             log("⚠️  No NN training scripts found, skipping")
+
+
+def run_cifar10_experiments(quick=False):
+    """Run CIFAR-10 experiments."""
+    log("=" * 60)
+    log("PHASE 3: CIFAR-10 Experiments")
+    cmd = "python src/experiments/run_cifar10.py"
+    if quick:
+        cmd += " --quick"
+    run_python_script(cmd, "CIFAR-10 Experiments")
 
 
 def run_loss_landscape():
     """Generate loss landscape visualizations."""
     log("=" * 60)
-    log("PHASE 3: Loss Landscape Analysis")
+    log("PHASE 4: Loss Landscape Analysis")
     log("=" * 60)
     
-    if Path("run_loss_landscape.py").exists():
-        run_python_script("run_loss_landscape.py", 
-                         "Loss landscape 1D/2D visualizations", 
-                         check=False)
+    # No standalone script provided; provide guidance and skip.
+    if Path("src/visualization/loss_landscape.py").exists():
+        log("ℹ️  Loss landscape utilities available in src/visualization/loss_landscape.py (call from notebooks or custom script). Skipping.")
     else:
-        log("⚠️  run_loss_landscape.py not found, skipping")
+        log("⚠️  src/visualization/loss_landscape.py not found, skipping")
 
 
 def generate_summaries():
     """Generate quantitative and qualitative summary tables."""
     log("=" * 60)
-    log("PHASE 4: Summary Generation")
+    log("PHASE 5: Summary Generation")
     log("=" * 60)
     
-    if Path("generate_summaries.py").exists():
-        run_python_script("generate_summaries.py", 
+    if Path("scripts/generate_summaries.py").exists():
+        run_python_script("scripts/generate_summaries.py", 
                          "Quantitative & qualitative summaries + plots")
     else:
-        log("⚠️  generate_summaries.py not found, skipping")
+        log("⚠️  scripts/generate_summaries.py not found, skipping")
+
+
+def run_statistical_reports():
+    """Generate statistical reports for MNIST and CIFAR-10 if results exist."""
+    log("=" * 60)
+    log("PHASE 5.1: Statistical Reports")
+    if Path("scripts/generate_statistical_report.py").exists():
+        run_python_script("scripts/generate_statistical_report.py", "MNIST statistical report", check=False)
+    if Path("scripts/generate_cifar10_statistical_report.py").exists():
+        run_python_script("scripts/generate_cifar10_statistical_report.py", "CIFAR-10 statistical report", check=False)
+
+
+def compute_tradeoffs():
+    """Compute Accuracy vs Time/Memory trade-offs and save plots."""
+    log("=" * 60)
+    log("PHASE 5.2: Trade-off Analysis")
+    if Path("scripts/compute_tradeoffs.py").exists():
+        run_python_script("scripts/compute_tradeoffs.py", "Trade-offs (Accuracy vs Time/Memory)", check=False)
+    else:
+        log("⚠️  scripts/compute_tradeoffs.py not found, skipping")
 
 
 def list_outputs():
     """List generated outputs."""
     log("=" * 60)
-    log("PHASE 5: Output Summary")
+    log("PHASE 6: Output Summary")
     log("=" * 60)
     
     results_count = len(list(Path("results").glob("*.csv"))) if Path("results").exists() else 0
@@ -184,16 +213,24 @@ def main():
     else:
         log("⏭️  Skipping NN tuning (--skip-tuning)")
     
-    # Phase 3: Loss landscape
+    # Phase 3: CIFAR-10 experiments
+    if not args.skip_tuning:
+        run_cifar10_experiments(quick=args.quick)
+    else:
+        log("⏭️  Skipping CIFAR-10 experiments (--skip-tuning)")
+    
+    # Phase 4: Loss landscape
     if not args.skip_landscape:
         run_loss_landscape()
     else:
         log("⏭️  Skipping loss landscape (--skip-landscape)")
     
-    # Phase 4: Summaries
+    # Phase 5: Summaries and analyses
     generate_summaries()
+    run_statistical_reports()
+    compute_tradeoffs()
     
-    # Phase 5: Report outputs
+    # Phase 6: Report outputs
     list_outputs()
     
     elapsed = time.time() - start_time

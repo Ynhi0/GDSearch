@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 import pytest
-from src.core.optimizers import SGD, SGDMomentum, RMSProp, Adam
+from src.core.optimizers import SGD, SGDMomentum, SGDNesterov, RMSProp, Adam, AdamW
 
 
 class TestSGD:
@@ -129,6 +129,47 @@ class TestRMSProp:
         assert opt.s_x > opt.s_y * 10, "s_x should accumulate more from larger gradients"
 
 
+class TestSGDNesterov:
+    """Test SGD with Nesterov Accelerated Gradient."""
+
+    def test_first_step_more_than_sgd(self):
+        """First step is larger than SGD by factor (1+beta) when v=0."""
+        beta = 0.9
+        lr = 0.1
+        opt = SGDNesterov(lr=lr, beta=beta)
+        params = (1.0, 2.0)
+        gradients = (0.5, 1.0)
+
+        new_x, new_y = opt.step(params, gradients)
+
+        # d = (1+beta) * grad on first step
+        expected_x = 1.0 - lr * (1 + beta) * 0.5
+        expected_y = 2.0 - lr * (1 + beta) * 1.0
+        assert abs(new_x - expected_x) < 1e-10
+        assert abs(new_y - expected_y) < 1e-10
+
+    def test_zero_gradient(self):
+        opt = SGDNesterov(lr=0.1, beta=0.9)
+        params = (1.0, 2.0)
+        gradients = (0.0, 0.0)
+
+        new_x, new_y = opt.step(params, gradients)
+
+        assert abs(new_x - 1.0) < 1e-10
+        assert abs(new_y - 2.0) < 1e-10
+
+    def test_reset(self):
+        beta = 0.8
+        lr = 0.05
+        opt = SGDNesterov(lr=lr, beta=beta)
+        opt.step((1.0, 1.0), (1.0, 1.0))
+        opt.reset()
+        # First step after reset should again use (1+beta)*grad
+        new_x, new_y = opt.step((1.0, 1.0), (1.0, 1.0))
+        expected = 1.0 - lr * (1 + beta) * 1.0
+        assert abs(new_x - expected) < 1e-10
+
+
 class TestAdam:
     """Test Adam optimizer."""
     
@@ -198,6 +239,39 @@ class TestAdam:
         assert step2 > 0  # Should still be making progress
 
 
+class TestAdamW:
+    """Tests for AdamW optimizer (decoupled weight decay)."""
+
+    def test_zero_grad_is_pure_decay(self):
+        lr = 0.01
+        wd = 0.1
+        opt = AdamW(lr=lr, weight_decay=wd)
+        params = (1.0, -2.0)
+        gradients = (0.0, 0.0)
+
+        new_x, new_y = opt.step(params, gradients)
+
+        # With zero gradient, Adam step is zero; only decay applies: p <- p * (1 - lr*wd)
+        factor = (1 - lr * wd)
+        assert abs(new_x - (1.0 * factor)) < 1e-12
+        assert abs(new_y - (-2.0 * factor)) < 1e-12
+
+    def test_matches_adam_when_no_decay(self):
+        lr = 0.001
+        opt_adam = Adam(lr=lr)
+        opt_adamw = AdamW(lr=lr, weight_decay=0.0)
+
+        params_a = (1.0, 1.0)
+        params_w = (1.0, 1.0)
+        grads = (0.3, -0.7)
+
+        for _ in range(5):
+            params_a = opt_adam.step(params_a, grads)
+            params_w = opt_adamw.step(params_w, grads)
+
+        assert np.allclose(params_a, params_w, rtol=1e-7, atol=1e-9)
+
+
 class TestOptimizerConsistency:
     """Test consistency across optimizers."""
     
@@ -208,8 +282,10 @@ class TestOptimizerConsistency:
         optimizers = [
             SGD(lr=0.1),
             SGDMomentum(lr=0.1, beta=0.9),
+            SGDNesterov(lr=0.05, beta=0.9),
             RMSProp(lr=0.1, decay_rate=0.9),
             Adam(lr=0.1, beta1=0.9, beta2=0.999),
+            AdamW(lr=0.05, weight_decay=0.01),
         ]
         
         for opt in optimizers:

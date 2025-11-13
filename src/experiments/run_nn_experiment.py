@@ -22,6 +22,17 @@ def set_seed(seed: int):
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
+    # Enforce deterministic behavior where possible
+    try:
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+    except Exception:
+        pass
+    try:
+        torch.use_deterministic_algorithms(True)
+    except Exception:
+        # Older PyTorch may not support this; ignore
+        pass
 
 
 def count_parameters(model: torch.nn.Module) -> int:
@@ -55,15 +66,15 @@ def _update_norm(model: torch.nn.Module, before: Tuple[torch.Tensor, ...]) -> fl
         return float(np.sqrt(sq))
 
 
-def build_model_and_data(dataset: str, model_name: str, batch_size: int, device: torch.device):
+def build_model_and_data(dataset: str, model_name: str, batch_size: int, device: torch.device, seed: int):
     if dataset.upper() == 'MNIST':
-        train_loader, test_loader = get_mnist_loaders(batch_size=batch_size)
+        train_loader, test_loader = get_mnist_loaders(batch_size=batch_size, seed=seed)
         if model_name == 'SimpleMLP':
             model = SimpleMLP()
         else:
             raise ValueError(f"Unsupported model '{model_name}' for MNIST")
     elif dataset.upper() == 'CIFAR-10' or dataset.upper() == 'CIFAR10':
-        train_loader, test_loader = get_cifar10_loaders(batch_size=batch_size)
+        train_loader, test_loader = get_cifar10_loaders(batch_size=batch_size, seed=seed)
         if model_name == 'SimpleCNN':
             model = SimpleCNN()
         elif model_name == 'ConvNet':
@@ -85,6 +96,8 @@ def build_optimizer(optimizer_name: str, model: torch.nn.Module, lr: float, weig
         return optim.SGD(model.parameters(), lr=lr, momentum=momentum, weight_decay=weight_decay)
     if name == 'ADAM':
         return optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+    if name in ('AMSGRAD', 'ADAM_AMSGRAD', 'ADAM_AMS'):
+        return optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay, amsgrad=True)
     if name == 'ADAMW':
         return optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     raise ValueError(f"Unsupported optimizer '{optimizer_name}'")
@@ -117,7 +130,7 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
     Expected config keys:
       - model: 'SimpleMLP' | 'SimpleCNN'
       - dataset: 'MNIST' | 'CIFAR-10'
-      - optimizer: 'SGD' | 'SGD_Momentum' | 'Adam' | 'AdamW'
+      - optimizer: 'SGD' | 'SGD_Momentum' | 'Adam' | 'AdamW' | 'AMSGrad' (or 'Adam_AMSGrad')
       - lr: float
       - epochs: int
       - batch_size: int
@@ -138,7 +151,7 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
     batch_size = int(config.get('batch_size', 128))
     epochs = int(config.get('epochs', 5))
 
-    model, train_loader, test_loader = build_model_and_data(dataset, model_name, batch_size, device)
+    model, train_loader, test_loader = build_model_and_data(dataset, model_name, batch_size, device, seed)
     criterion = nn.CrossEntropyLoss()
     optimizer = build_optimizer(
         optimizer_name=config['optimizer'],
@@ -158,10 +171,26 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
     capture_epochs = set(config.get('capture_layer_grad_epochs', []))
     named_params = list(model.named_parameters())
     start_time = time.time()
+    # Meta row with environment info
+    try:
+        history.append({
+            'phase': 'meta_begin',
+            'seed': seed,
+            'torch_version': torch.__version__,
+            'cuda_available': torch.cuda.is_available(),
+            'device': str(device),
+            'cudnn_deterministic': getattr(torch.backends.cudnn, 'deterministic', None),
+            'cudnn_benchmark': getattr(torch.backends.cudnn, 'benchmark', None),
+            'time_sec': 0.0,
+        })
+    except Exception:
+        pass
     # Convergence settings (optional)
-    conv_grad_thr = float(config.get('convergence_grad_norm_threshold', 0.0))  # e.g., 1e-6
-    conv_loss_delta_thr = float(config.get('convergence_loss_delta_threshold', 0.0))  # e.g., 1e-7
-    conv_loss_window = int(config.get('convergence_loss_window', 0))  # e.g., 100 train steps
+    # Support both top-level keys (convergence_*), and nested config['convergence'] with keys
+    conv_section = config.get('convergence', {}) if isinstance(config.get('convergence', {}), dict) else {}
+    conv_grad_thr = float(config.get('convergence_grad_norm_threshold', conv_section.get('grad_norm_threshold', 0.0)))  # e.g., 1e-6
+    conv_loss_delta_thr = float(config.get('convergence_loss_delta_threshold', conv_section.get('loss_delta_threshold', 0.0)))  # e.g., 1e-7
+    conv_loss_window = int(config.get('convergence_loss_window', conv_section.get('loss_window', 0)))  # e.g., 100 train steps
     train_loss_window = []
     converged_at_step = None
     converged_at_time = None

@@ -1,0 +1,23 @@
+\begin{table}[htbp]
+\centering
+\caption{Initial Condition Robustness: Success Rate Across Test Functions}
+\label{tab:robustness}
+\begin{tabular}{lc}
+\toprule
+Optimizer & Rosenbrock \\
+\midrule
+AMSGrad(lr=0.01) & 0.00% \\
+Adam(lr=0.01) & 10.00% \\
+AdamW(lr=0.01, wd=0.01) & 0.00% \\
+RMSProp(lr=0.01, decay=0.9) & 0.00% \\
+SGD(lr=0.001) & 0.00% \\
+SGDMomentum(lr=0.01, beta=0.9) & 0.00% \\
+SGDNesterov(lr=0.01, beta=0.9) & 0.00% \\
+\bottomrule
+\end{tabular}
+\begin{tablenotes}
+\small
+\item Note: Success rate = proportion of 30 initial conditions that converged to 
+gradient norm $< 10^{-6}$ within 5,000 iterations.
+\end{tablenotes}
+\end{table}

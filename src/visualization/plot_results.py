@@ -406,6 +406,96 @@ def trajectory_series_momentum(betas, lr=0.01, a=1, b=100, initial=(-1.5, 2.0), 
         plt.show()
 
 
+def trajectory_series_nesterov(betas, lr=0.01, a=1, b=100, initial=(-1.5, 2.0), num_iterations=2000, seed=42, save_path=None):
+    """Generate a row of trajectory plots for SGD with Nesterov for various beta values on Rosenbrock."""
+    func = Rosenbrock(a=a, b=b)
+    ncols = len(betas)
+    fig, axes = plt.subplots(1, ncols, figsize=(5*ncols, 4))
+    if ncols == 1:
+        axes = np.array([axes])
+
+    (x_min, x_max), (y_min, y_max) = func.get_bounds()
+    x_grid = np.linspace(x_min, x_max, 200)
+    y_grid = np.linspace(y_min, y_max, 200)
+    X, Y = np.meshgrid(x_grid, y_grid)
+    Z = np.zeros_like(X)
+    for i in range(X.shape[0]):
+        for j in range(X.shape[1]):
+            Z[i, j] = func.compute(X[i, j], Y[i, j])
+
+    for c, beta in enumerate(betas):
+        ax = axes[c]
+        df = run_single_experiment(
+            optimizer_config={'type': 'SGDNesterov', 'params': {'lr': lr, 'beta': beta}},
+            function_config={'type': 'Rosenbrock', 'params': {'a': a, 'b': b}},
+            initial_point=initial,
+            num_iterations=num_iterations,
+            seed=seed
+        )
+        levels = np.logspace(np.log10(Z.min()+1e-10), np.log10(Z.max()+1), 30)
+        ax.contour(X, Y, Z, levels=levels, cmap='viridis', alpha=0.5, linewidths=0.5)
+        ax.plot(df['x'].values, df['y'].values, 'r-', linewidth=1.5)
+        ax.plot(df['x'].values[0], df['y'].values[0], 'go', ms=6)
+        ax.plot(df['x'].values[-1], df['y'].values[-1], 'r*', ms=10)
+        ax.set_xlim([x_min, x_max])
+        ax.set_ylim([y_min, y_max])
+        ax.set_title(f"β={beta}")
+        ax.grid(True, alpha=0.2)
+
+    fig.suptitle(f"SGD Nesterov Trajectories on Rosenbrock (lr={lr})", fontsize=14, fontweight='bold')
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
+
+
+def trajectory_series_adamw(weight_decays, lr=0.01, a=1, b=100, initial=(-1.5, 2.0), num_iterations=2000, seed=42, beta1=0.9, beta2=0.999, save_path=None):
+    """Generate a row of trajectory plots for AdamW across weight decay values on Rosenbrock."""
+    func = Rosenbrock(a=a, b=b)
+    ncols = len(weight_decays)
+    fig, axes = plt.subplots(1, ncols, figsize=(5*ncols, 4))
+    if ncols == 1:
+        axes = np.array([axes])
+
+    (x_min, x_max), (y_min, y_max) = func.get_bounds()
+    x_grid = np.linspace(x_min, x_max, 200)
+    y_grid = np.linspace(y_min, y_max, 200)
+    X, Y = np.meshgrid(x_grid, y_grid)
+    Z = np.zeros_like(X)
+    for i in range(X.shape[0]):
+        for j in range(X.shape[1]):
+            Z[i, j] = func.compute(X[i, j], Y[i, j])
+
+    for c, wd in enumerate(weight_decays):
+        ax = axes[c]
+        df = run_single_experiment(
+            optimizer_config={'type': 'AdamW', 'params': {'lr': lr, 'beta1': beta1, 'beta2': beta2, 'epsilon': 1e-8, 'weight_decay': wd}},
+            function_config={'type': 'Rosenbrock', 'params': {'a': a, 'b': b}},
+            initial_point=initial,
+            num_iterations=num_iterations,
+            seed=seed
+        )
+        levels = np.logspace(np.log10(Z.min()+1e-10), np.log10(Z.max()+1), 30)
+        ax.contour(X, Y, Z, levels=levels, cmap='viridis', alpha=0.5, linewidths=0.5)
+        ax.plot(df['x'].values, df['y'].values, 'r-', linewidth=1.5)
+        ax.plot(df['x'].values[0], df['y'].values[0], 'go', ms=6)
+        ax.plot(df['x'].values[-1], df['y'].values[-1], 'r*', ms=10)
+        ax.set_xlim([x_min, x_max])
+        ax.set_ylim([y_min, y_max])
+        ax.set_title(f"wd={wd}")
+        ax.grid(True, alpha=0.2)
+
+    fig.suptitle(f"AdamW Trajectories on Rosenbrock (lr={lr})", fontsize=14, fontweight='bold')
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
+
+
 def plot_metrics(df, title, save_path=None):
     """
     Vẽ các chỉ số tối ưu hóa theo thời gian.

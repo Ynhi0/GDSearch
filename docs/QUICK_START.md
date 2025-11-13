@@ -41,6 +41,20 @@ AdamW vs SGD+Momentum:
 **Files**: `plot_results.py` now has:
 - `plot_multiseed_comparison()` - curves with error bands
 - `plot_final_metric_comparison()` - bar charts with error bars
+## Publication add-ons (MNIST)
+
+- After running the Kaggle MNIST suite (see `kaggle/mnist_publication/README.md`), aggregate and plot NN ablation:
+    - Summaries: `results/nn_ablation_summary.csv`
+    - Plots: `plots/nn_ablation_accuracy.png` and `plots/nn_ablation_loss.png`
+    - Script: `scripts/run_nn_ablation.py`
+
+- Generate statistical report with normality diagnostics, paired tests and Holm–Bonferroni:
+    - CSV: `results/nn_statistical_comparisons.csv`
+    - Markdown: `results/nn_statistical_report.md`
+    - Script: `scripts/generate_statistical_report.py`
+
+## Outline mapping
+See `docs/OUTLINE_MAPPING.md` for how each outline section maps to code, data, and figures.
 
 ---
 

@@ -6,58 +6,25 @@ import numpy as np
 
 
 class TestFunction:
-    """Lớp cơ sở cho các hàm kiểm tra."""
-    
+    """Lớp cơ sở cho các hàm kiểm tra 2D."""
+
     def __init__(self):
-        """Khởi tạo hàm kiểm tra."""
         pass
-    
+
     def compute(self, x, y):
-        """
-        Tính giá trị hàm tại điểm (x, y).
-        
-        Args:
-            x: Tọa độ x
-            y: Tọa độ y
-            
-        Returns:
-            Giá trị hàm tại (x, y)
-        """
+        """Tính giá trị hàm tại điểm (x, y)."""
         raise NotImplementedError("Phương thức compute phải được triển khai trong lớp con")
-    
+
     def gradient(self, x, y):
-        """
-        Tính gradient của hàm tại điểm (x, y).
-        
-        Args:
-            x: Tọa độ x
-            y: Tọa độ y
-            
-        Returns:
-            Tuple (grad_x, grad_y) - gradient theo x và y
-        """
+        """Tính gradient của hàm tại điểm (x, y). Trả về (grad_x, grad_y)."""
         raise NotImplementedError("Phương thức gradient phải được triển khai trong lớp con")
-    
+
     def hessian(self, x, y):
-        """
-        Tính ma trận Hessian của hàm tại điểm (x, y).
-        
-        Args:
-            x: Tọa độ x
-            y: Tọa độ y
-            
-        Returns:
-            Ma trận Hessian 2x2 dạng numpy array
-        """
+        """Tính ma trận Hessian 2x2 tại điểm (x, y)."""
         raise NotImplementedError("Phương thức hessian phải được triển khai trong lớp con")
-    
+
     def get_bounds(self):
-        """
-        Trả về giới hạn vẽ đồ thị.
-        
-        Returns:
-            Tuple ((x_min, x_max), (y_min, y_max))
-        """
+        """Trả về giới hạn vẽ đồ thị dạng ((x_min, x_max), (y_min, y_max))."""
         raise NotImplementedError("Phương thức get_bounds phải được triển khai trong lớp con")
 
 
@@ -202,6 +169,70 @@ class SaddlePoint(TestFunction):
     def get_bounds(self):
         """Trả về giới hạn vẽ đồ thị cho hàm Saddle Point."""
         return (-2, 2), (-2, 2)
+
+
+class Ackley2D(TestFunction):
+    """
+    Hàm Ackley (2D):
+        f(x, y) = -a * exp(-b * sqrt(0.5 * (x^2 + y^2)))
+                  - exp(0.5 * (cos(c x) + cos(c y))) + a + e
+
+    Mặc định: a=20, b=0.2, c=2π. Cực tiểu toàn cục tại (0,0) với f=0.
+    """
+
+    def __init__(self, a=20.0, b=0.2, c=2 * np.pi):
+        super().__init__()
+        self.a = float(a)
+        self.b = float(b)
+        self.c = float(c)
+        self.name = "Ackley2D"
+
+    def compute(self, x, y):
+        x = float(x)
+        y = float(y)
+        r = np.sqrt(0.5 * (x * x + y * y))
+        term1 = -self.a * np.exp(-self.b * r)
+        term2 = -np.exp(0.5 * (np.cos(self.c * x) + np.cos(self.c * y)))
+        return term1 + term2 + self.a + np.e
+
+    def gradient(self, x, y):
+        x = float(x)
+        y = float(y)
+        r = np.sqrt(0.5 * (x * x + y * y))
+        if r == 0.0:
+            d1x = 0.0
+            d1y = 0.0
+        else:
+            common = self.a * self.b * np.exp(-self.b * r) / (2.0 * r)
+            d1x = common * x
+            d1y = common * y
+        exp2 = np.exp(0.5 * (np.cos(self.c * x) + np.cos(self.c * y)))
+        d2x = 0.5 * self.c * np.sin(self.c * x) * exp2
+        d2y = 0.5 * self.c * np.sin(self.c * y) * exp2
+        return d1x + d2x, d1y + d2y
+
+    def hessian(self, x, y):
+        # Numerical Hessian (central difference)
+        x = float(x)
+        y = float(y)
+        eps = 1e-4
+        gx, gy = self.gradient(x, y)
+        gx_xp, _ = self.gradient(x + eps, y)
+        gx_xm, _ = self.gradient(x - eps, y)
+        gx_yp, _ = self.gradient(x, y + eps)
+        gx_ym, _ = self.gradient(x, y - eps)
+        _, gy_xp = self.gradient(x + eps, y)
+        _, gy_xm = self.gradient(x - eps, y)
+        _, gy_yp = self.gradient(x, y + eps)
+        _, gy_ym = self.gradient(x, y - eps)
+        f_xx = (gx_xp - gx_xm) / (2 * eps)
+        f_xy = (gx_yp - gx_ym) / (2 * eps)
+        f_yx = (gy_xp - gy_xm) / (2 * eps)
+        f_yy = (gy_yp - gy_ym) / (2 * eps)
+        return np.array([[f_xx, 0.5 * (f_xy + f_yx)], [0.5 * (f_xy + f_yx), f_yy]], dtype=float)
+
+    def get_bounds(self):
+        return ((-5, 5), (-5, 5))
 
 
 # ============================================================================

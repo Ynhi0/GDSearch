@@ -3,12 +3,14 @@ Script chính để chạy các thí nghiệm so sánh thuật toán tối ưu h
 """
 
 import os
+import time
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+import torch
 
-from src.core.test_functions import Rosenbrock, IllConditionedQuadratic, SaddlePoint
-from src.core.optimizers import SGD, SGDMomentum, RMSProp, Adam
+from src.core.test_functions import Rosenbrock, IllConditionedQuadratic, SaddlePoint, Ackley2D
+from src.core.optimizers import SGD, SGDMomentum, SGDNesterov, RMSProp, Adam, AdamW, AMSGrad
 
 
 def run_single_experiment(optimizer_config, function_config, initial_point, num_iterations, seed):
@@ -40,6 +42,8 @@ def run_single_experiment(optimizer_config, function_config, initial_point, num_
         test_function = IllConditionedQuadratic(**func_params)
     elif func_type == 'SaddlePoint':
         test_function = SaddlePoint(**func_params)
+    elif func_type == 'Ackley':
+        test_function = Ackley2D(**func_params)
     else:
         raise ValueError(f"Loại hàm kiểm tra không hợp lệ: {func_type}")
     
@@ -51,10 +55,16 @@ def run_single_experiment(optimizer_config, function_config, initial_point, num_
         optimizer = SGD(**opt_params)
     elif opt_type == 'SGDMomentum':
         optimizer = SGDMomentum(**opt_params)
+    elif opt_type == 'SGDNesterov':
+        optimizer = SGDNesterov(**opt_params)
     elif opt_type == 'RMSProp':
         optimizer = RMSProp(**opt_params)
     elif opt_type == 'Adam':
         optimizer = Adam(**opt_params)
+    elif opt_type == 'AdamW':
+        optimizer = AdamW(**opt_params)
+    elif opt_type == 'AMSGrad':
+        optimizer = AMSGrad(**opt_params)
     else:
         raise ValueError(f"Loại optimizer không hợp lệ: {opt_type}")
     
@@ -66,7 +76,12 @@ def run_single_experiment(optimizer_config, function_config, initial_point, num_
     
     # Danh sách lưu trữ lịch sử
     history = []
-    
+
+    # Bắt đầu đo thời gian và theo dõi GPU (nếu có)
+    start_time = time.time()
+    if torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats()
+
     # Vòng lặp tối ưu hóa
     for i in range(num_iterations):
         # Tính toán giá trị hàm và gradient
@@ -109,7 +124,15 @@ def run_single_experiment(optimizer_config, function_config, initial_point, num_
     
     # Chuyển đổi lịch sử thành DataFrame
     df = pd.DataFrame(history)
-    
+
+    # Kết thúc đo thời gian và ghi lại thống kê GPU
+    elapsed_time = time.time() - start_time
+    peak_memory = torch.cuda.max_memory_allocated() / (1024 ** 2) if torch.cuda.is_available() else None
+
+    # Thêm thông tin thời gian và bộ nhớ vào DataFrame (hằng cho mọi hàng)
+    df['elapsed_time'] = elapsed_time
+    df['peak_memory_MB'] = peak_memory
+
     return df
 
 
@@ -193,6 +216,45 @@ def create_experiment_configs():
     configs.append({
         'experiment_id': 'ADAM-R-4',
         'optimizer_config': {'type': 'Adam', 'params': {'lr': 0.01, 'beta1': 0.5, 'beta2': 0.9, 'epsilon': 1e-8}},
+        'function_config': {'type': 'Rosenbrock', 'params': {'a': 1, 'b': 100}},
+        'initial_point': initial_rosenbrock,
+        'num_iterations': 10000,
+        'seed': 42
+    })
+
+    # ========== Nesterov trên Rosenbrock ==========
+    configs.append({
+        'experiment_id': 'NAG-R-1',
+        'optimizer_config': {'type': 'SGDNesterov', 'params': {'lr': 0.01, 'beta': 0.9}},
+        'function_config': {'type': 'Rosenbrock', 'params': {'a': 1, 'b': 100}},
+        'initial_point': initial_rosenbrock,
+        'num_iterations': 10000,
+        'seed': 42
+    })
+    configs.append({
+        'experiment_id': 'NAG-R-2',
+        'optimizer_config': {'type': 'SGDNesterov', 'params': {'lr': 0.01, 'beta': 0.5}},
+        'function_config': {'type': 'Rosenbrock', 'params': {'a': 1, 'b': 100}},
+        'initial_point': initial_rosenbrock,
+        'num_iterations': 10000,
+        'seed': 42
+    })
+
+    # ========== AdamW trên Rosenbrock (so sánh weight decay) ==========
+    for wd, exp_id in [(0.0, 'ADAMW-R-0'), (0.01, 'ADAMW-R-1'), (0.05, 'ADAMW-R-5')]:
+        configs.append({
+            'experiment_id': exp_id,
+            'optimizer_config': {'type': 'AdamW', 'params': {'lr': 0.01, 'beta1': 0.9, 'beta2': 0.999, 'epsilon': 1e-8, 'weight_decay': wd}},
+            'function_config': {'type': 'Rosenbrock', 'params': {'a': 1, 'b': 100}},
+            'initial_point': initial_rosenbrock,
+            'num_iterations': 10000,
+            'seed': 42
+        })
+
+    # ========== AMSGrad trên Rosenbrock ==========
+    configs.append({
+        'experiment_id': 'AMSG-R-1',
+        'optimizer_config': {'type': 'AMSGrad', 'params': {'lr': 0.01, 'beta1': 0.9, 'beta2': 0.999, 'epsilon': 1e-8}},
         'function_config': {'type': 'Rosenbrock', 'params': {'a': 1, 'b': 100}},
         'initial_point': initial_rosenbrock,
         'num_iterations': 10000,

@@ -10,15 +10,27 @@ import numpy as np
 
 # Import custom optimizers - handle path properly
 try:
-    from src.core.optimizers import SGD as CustomSGD, SGDMomentum as CustomSGDMomentum
-    from src.core.optimizers import Adam as CustomAdam, RMSProp as CustomRMSProp
+    from src.core.optimizers import (
+        SGD as CustomSGD,
+        SGDMomentum as CustomSGDMomentum,
+        SGDNesterov as CustomSGDNesterov,
+        Adam as CustomAdam,
+        AdamW as CustomAdamW,
+        RMSProp as CustomRMSProp,
+    )
 except ModuleNotFoundError:
     # If running as script, add parent to path
     import sys
     import os
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-    from src.core.optimizers import SGD as CustomSGD, SGDMomentum as CustomSGDMomentum
-    from src.core.optimizers import Adam as CustomAdam, RMSProp as CustomRMSProp
+    from src.core.optimizers import (
+        SGD as CustomSGD,
+        SGDMomentum as CustomSGDMomentum,
+        SGDNesterov as CustomSGDNesterov,
+        Adam as CustomAdam,
+        AdamW as CustomAdamW,
+        RMSProp as CustomRMSProp,
+    )
 
 
 class SGDWrapper(Optimizer):
@@ -73,9 +85,10 @@ class SGDMomentumWrapper(Optimizer):
                 
                 # Initialize optimizer for this parameter if needed
                 if id(p) not in self.custom_opts:
+                    # Map torch's momentum -> beta in custom optimizer
                     self.custom_opts[id(p)] = CustomSGDMomentum(
                         lr=group['lr'],
-                        momentum=group['momentum']
+                        beta=group['momentum']
                     )
                 
                 # Get gradient as numpy
@@ -132,6 +145,36 @@ class AdamWrapper(Optimizer):
         return loss
 
 
+class SGDNesterovWrapper(Optimizer):
+    """PyTorch wrapper for custom SGD with Nesterov (NAG)."""
+
+    def __init__(self, params, lr=0.01, momentum=0.9):
+        defaults = dict(lr=lr, momentum=momentum)
+        super().__init__(params, defaults)
+        self.custom_opts = {}
+
+    def step(self, closure=None):
+        loss = None
+        if closure is not None:
+            loss = closure()
+
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+                if id(p) not in self.custom_opts:
+                    self.custom_opts[id(p)] = CustomSGDNesterov(
+                        lr=group['lr'],
+                        beta=group['momentum']
+                    )
+                grad = p.grad.data.cpu().numpy()
+                param_np = p.data.cpu().numpy()
+                updated_param = self.custom_opts[id(p)].step(param_np.flatten(), grad.flatten())
+                p.data = torch.from_numpy(updated_param.reshape(param_np.shape)).to(p.device)
+
+        return loss
+
+
 class RMSPropWrapper(Optimizer):
     """PyTorch wrapper for custom RMSProp optimizer."""
     
@@ -153,9 +196,10 @@ class RMSPropWrapper(Optimizer):
                 
                 # Initialize optimizer for this parameter if needed
                 if id(p) not in self.custom_opts:
+                    # Map torch's alpha (smoothing) -> decay_rate in custom RMSProp
                     self.custom_opts[id(p)] = CustomRMSProp(
                         lr=group['lr'],
-                        alpha=group['alpha'],
+                        decay_rate=group['alpha'],
                         epsilon=group['epsilon']
                     )
                 
@@ -172,6 +216,41 @@ class RMSPropWrapper(Optimizer):
         return loss
 
 
+class AdamWWrapper(Optimizer):
+    """PyTorch wrapper for custom AdamW optimizer (decoupled weight decay)."""
+
+    def __init__(self, params, lr=0.001, betas=(0.9, 0.999), eps=1e-8, weight_decay=0.0):
+        beta1, beta2 = betas
+        defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
+        super().__init__(params, defaults)
+        self.custom_opts = {}
+
+    def step(self, closure=None):
+        loss = None
+        if closure is not None:
+            loss = closure()
+
+        for group in self.param_groups:
+            beta1, beta2 = group['betas']
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+                if id(p) not in self.custom_opts:
+                    self.custom_opts[id(p)] = CustomAdamW(
+                        lr=group['lr'],
+                        beta1=beta1,
+                        beta2=beta2,
+                        epsilon=group['eps'],
+                        weight_decay=group['weight_decay']
+                    )
+                grad = p.grad.data.cpu().numpy()
+                param_np = p.data.cpu().numpy()
+                updated_param = self.custom_opts[id(p)].step(param_np.flatten(), grad.flatten())
+                p.data = torch.from_numpy(updated_param.reshape(param_np.shape)).to(p.device)
+
+        return loss
+
+
 if __name__ == '__main__':
     # Test the wrappers
     print("Testing PyTorch optimizer wrappers...")
@@ -183,7 +262,9 @@ if __name__ == '__main__':
     optimizers = {
         'SGD': SGDWrapper(model.parameters(), lr=0.01),
         'SGDMomentum': SGDMomentumWrapper(model.parameters(), lr=0.01, momentum=0.9),
+        'SGDNesterov': SGDNesterovWrapper(model.parameters(), lr=0.01, momentum=0.9),
         'Adam': AdamWrapper(model.parameters(), lr=0.001),
+        'AdamW': AdamWWrapper(model.parameters(), lr=0.001, betas=(0.9, 0.999), eps=1e-8, weight_decay=0.01),
         'RMSProp': RMSPropWrapper(model.parameters(), lr=0.01)
     }
     
