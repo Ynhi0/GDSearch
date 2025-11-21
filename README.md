@@ -1,4 +1,4 @@
-# GDSearch v2.0.0 - Optimizer Dynamics Research Platform
+# GDSearch - Optimizer Dynamics Research Platform
 
 A comprehensive Python framework for comparing gradient descent algorithms on 2D test functions and neural networks (MNIST/CIFAR-10/IMDB). Features systematic hyperparameter tuning, convergence analysis, curvature tracking, loss landscape visualization, **multi-seed experiments**, **statistical analysis**, and **NLP support**.
 
