@@ -513,7 +513,7 @@ def main():
                        help='Comma-separated rho values for sensitivity analysis (e.g., "0.01,0.05,0.1,0.2")')
     parser.add_argument('--batch-size', type=int, default=128,
                        help='Batch size')
-    parser.add_argument('--epochs', type=int, default=5,
+    parser.add_argument('--epochs', type=int, default=20,
                        help='Number of epochs')
     parser.add_argument('--lr', type=float, default=0.001,
                        help='Learning rate')

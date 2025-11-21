@@ -535,7 +535,7 @@ def compute_statistics(results_dir: str):
 def main():
     parser = argparse.ArgumentParser(description='MNIST Benchmark Experiments (Kaggle-ready)')
     parser.add_argument('--seeds', type=str, default='1,2,3,4,5,6,7,8,9,10', help='comma-separated seeds')
-    parser.add_argument('--epochs', type=int, default=10)
+    parser.add_argument('--epochs', type=int, default=20)
     parser.add_argument('--batch-size', type=int, default=128)
     parser.add_argument('--results-dir', type=str, default='results')
     parser.add_argument('--quick', action='store_true', help='quick run: seeds=1..3, epochs=3')
@@ -557,7 +557,7 @@ def main():
 def main():
     parser = argparse.ArgumentParser(description='MNIST Benchmark Experiments (Kaggle-ready)')
     parser.add_argument('--seeds', type=str, default='1,2,3,4,5,6,7,8,9,10', help='comma-separated seeds')
-    parser.add_argument('--epochs', type=int, default=10)
+    parser.add_argument('--epochs', type=int, default=20)
     parser.add_argument('--batch-size', type=int, default=128)
     parser.add_argument('--batch-size-sweep', type=str, default=None, 
                        help='Comma-separated batch sizes for scalability study (e.g., "64,256,1024")')
