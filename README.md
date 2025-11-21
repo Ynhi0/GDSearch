@@ -1,18 +1,18 @@
-# GDSearch - Optimizer Dynamics Research Platform
+# GDSearch v2.0.0 - Optimizer Dynamics Research Platform
 
 A comprehensive Python framework for comparing gradient descent algorithms on 2D test functions and neural networks (MNIST/CIFAR-10/IMDB). Features systematic hyperparameter tuning, convergence analysis, curvature tracking, loss landscape visualization, **multi-seed experiments**, **statistical analysis**, and **NLP support**.
 
 ##  Features
 
 ### Core Capabilities
--  **6 Optimization Algorithms:** SGD, SGD+Momentum, RMSProp, Adam/AdamW, **SAM** (Sharpness-Aware Minimization), **Lookahead**
--  **7 Test Functions:** Rosenbrock, Ill-Conditioned Quadratic, Saddle Point, Rastrigin, Ackley, Sphere, Schwefel
+-  **9 Optimization Algorithms:** SGD, SGD+Momentum, SGD+Nesterov, RMSProp, Adam, AdamW, AMSGrad, **SAM** (Sharpness-Aware Minimization), **Lookahead**
+-  **7 Test Functions:** Rosenbrock, Ill-Conditioned Quadratic, Saddle Point, Ackley2D, Rastrigin, Ackley, Sphere, Schwefel
 -  **High-Dimensional Benchmarks:** Rastrigin, Ackley, Sphere, Schwefel (N-dimensional, tested up to 100D)
 -  **Neural Networks:** SimpleMLP (MNIST), SimpleCNN/ConvNet (CIFAR-10), **ResNet-18** (CIFAR-10), NLP models (IMDB)
 -  **Deep Architectures:** ResNet-18 (18 layers, 11M parameters, residual connections)
 -  **NLP Models:** SimpleRNN, SimpleLSTM, BiLSTM, TextCNN (Kim 2014)
 -  **Systematic Hyperparameter Tuning:** Two-stage pipeline (LR sweep → parameter sweep) + Optuna integration
--  **Learning Rate Schedulers:** Step, Cosine, Exponential, Warmup, OneCycle, and more
+-  **Learning Rate Schedulers:** Constant, Step, MultiStep, Exponential, Cosine, Warmup, Polynomial, OneCycle (9 schedulers)
 -  **Convergence Detection:** Dual conditions (grad norm threshold OR loss delta)
 -  **Advanced Analysis:**
   - Hessian eigenvalue tracking (λ_min, λ_max, condition number)
@@ -40,7 +40,7 @@ A comprehensive Python framework for comparing gradient descent algorithms on 2D
 -  **Flatness Analysis:** Quantitative metrics for minimum quality assessment
 -  **Computational Cost Analysis:** Wall-clock time metrics (SAM requires 2x forward/backward passes)
 -  **Thesis Defense Ready:** Technically audited implementation with mathematical correctness verification
--  **Unit Tests:** 170+ tests verifying gradients, optimizers, schedulers, NLP, ResNet, high-dim functions, statistics, and visualizations (pytest)
+-  **Unit Tests:** 183 tests verifying gradients, optimizers, schedulers, NLP, ResNet, high-dim functions, statistics, and visualizations (pytest)
 -  **Input Validation:** Comprehensive error checking and input sanitization
 -  **Ablation Studies:** Component-wise isolation to quantify contributions
 -  **Baseline Comparisons:** Compare custom implementations with PyTorch built-ins
@@ -50,82 +50,110 @@ A comprehensive Python framework for comparing gradient descent algorithms on 2D
 
 ```
 GDSearch/
- src/                        #  All source code (organized!)
-    core/                   # Core implementations
-       optimizers.py           # SGD, Adam, RMSProp, SAM, Lookahead (2D + ND)
-       test_functions.py       # 2D test functions with analytic derivatives
-       models.py               # PyTorch NN models (MLP, CNN, ConvNet, ResNet-18)
-       nlp_models.py           #  NLP models (RNN, LSTM, BiLSTM, TextCNN)
-       nlp_data_utils.py       #  IMDB dataset loading & vocabulary
-       pytorch_optimizers.py   #  PyTorch wrappers for custom optimizers
-       data_utils.py           # MNIST/CIFAR-10 loaders
-       lr_schedulers.py        #  Learning rate scheduling (9 schedulers)
-       optuna_tuner.py         #  Optuna hyperparameter optimization
-       validation.py           # Input validation & error handling
-   
-    experiments/            # Experiment runners
-       run_experiment.py       # 2D experiments with Hessian tracking
-       run_nn_experiment.py    # NN training with convergence detection
-       run_multi_seed.py       # Multi-seed experiment framework
-       run_full_analysis.py    # Complete pipeline: experiments → stats → plots
-   
-    analysis/               # Statistical analysis
-       statistical_analysis.py # T-tests, effect sizes, confidence intervals
-       sensitivity_analysis.py # Hyperparameter sensitivity
-       ablation_study.py       # Component-wise ablation
-       baseline_comparison.py  # Compare with PyTorch optimizers
-   
-    visualization/          # Plotting utilities
-        plot_results.py         # Comprehensive plotting (with error bars!)
-        plot_eigenvalues.py     # Hessian eigenvalue visualization
-        loss_landscape.py       # Loss surface probing
-
- tests/                      # Unit tests (123 tests, 100% passing)
-    test_gradients.py       # Numerical gradient verification
-    test_optimizers.py      # Optimizer correctness tests
-    test_lr_schedulers.py   #  LR scheduler tests
-    test_optuna_tuner.py    #  Optuna integration tests
-    test_nlp.py             #  NLP models & data tests
-    test_resnet.py          #  ResNet-18 architecture tests
-    test_highdim_functions.py  #  High-dimensional function tests
-
- configs/                    # Experiment configurations
-    nn_tuning.json          # MNIST hyperparameter sweeps
-    cifar10_tuning.json     # CIFAR-10 configurations
-
- scripts/                    # Utility scripts
-    run_all.py              # Complete reproducibility pipeline
-    tune_nn.py              # Two-stage hyperparameter tuning
-    demo_imdb_training.py   #  IMDB sentiment analysis demo
-    demo_highdim_optimization.py  #  High-dimensional function optimization
-    analyze_flatness.py     # Flatness analysis of optimizer minima
-    visualize_flatness_comparison.py  # Loss landscape visualization (Adam vs SAM)
-
- docs/                       #  All documentation (consolidated!)
-    INDEX.md                # Documentation navigation hub
-    LIMITATIONS.md          # Known limitations & assumptions
-    MULTISEED_GUIDE.md      # Guide for multi-seed experiments
-    IMPROVEMENT_PROGRESS.md # Progress tracking
-    CRITICAL_VALIDATION_REPORT.md  # Scientific validation
-    REPORT.md               # Synthesis report with ablation study
-    PHASE11_NLP_SUMMARY.md  # NLP implementation summary
-    PHASE12_RESNET_SUMMARY.md  #  ResNet-18 deep network summary
-    hypothesis_matrix.md    # Theory ⇄ Experiment mapping
-
- kaggle/                     #  Kaggle GPU experiments
-    QUICKSTART.md           # How to run experiments on Kaggle
-    INSTRUCTIONS.md         # Detailed step-by-step guide
-    resnet18_cifar10.py     # ResNet-18 training script
-    RESULTS_resnet18.md     #  Kaggle experiment results (85.51% accuracy)
-    verify_local.py         # Local verification script
-
- results/                    # CSV outputs (experiments, summaries)
- plots/                      # All visualizations (PNG)
- data/                       # Dataset utilities
-
- pyproject.toml              #  Modern Python project configuration
- requirements.txt            # Dependencies
- README.md                   # This file
+├── src/                        # All source code (organized!)
+│   ├── core/                   # Core implementations
+│   │   ├── optimizers.py           # SGD, Adam, RMSProp, SAM, Lookahead (2D + ND)
+│   │   ├── test_functions.py       # 2D test functions with analytic derivatives
+│   │   ├── models.py               # PyTorch NN models (MLP, CNN, ConvNet, ResNet-18)
+│   │   ├── nlp_models.py           # NLP models (RNN, LSTM, BiLSTM, TextCNN)
+│   │   ├── nlp_data_utils.py       # IMDB dataset loading & vocabulary
+│   │   ├── pytorch_optimizers.py   # PyTorch wrappers for custom optimizers
+│   │   ├── data_utils.py           # MNIST/CIFAR-10 loaders
+│   │   ├── lr_schedulers.py        # Learning rate scheduling (9 schedulers)
+│   │   ├── optuna_tuner.py         # Optuna hyperparameter optimization
+│   │   ├── validation.py           # Input validation & error handling
+│   │   └── optimizer_wrappers.py   # Additional optimizer utilities
+│   ├── experiments/            # Experiment runners
+│   │   ├── run_experiment.py       # 2D experiments with Hessian tracking
+│   │   ├── run_nn_experiment.py    # NN training with convergence detection
+│   │   ├── run_multi_seed.py       # Multi-seed experiment framework
+│   │   ├── run_full_analysis.py    # Complete pipeline: experiments → stats → plots
+│   │   ├── run_cifar10.py          # CIFAR-10 specific experiments
+│   │   ├── run_initial_condition_robustness.py  # Robustness analysis
+│   │   ├── run_medical_segmentation.py  # Medical imaging experiments
+│   │   ├── run_optimizer_ablation.py   # Optimizer ablation studies
+│   │   └── run_transformer_nlp.py     # Transformer NLP fine-tuning
+│   ├── analysis/               # Statistical analysis
+│   │   ├── statistical_analysis.py # T-tests, effect sizes, confidence intervals
+│   │   ├── sensitivity_analysis.py # Hyperparameter sensitivity
+│   │   ├── ablation_study.py       # Component-wise ablation
+│   │   └── baseline_comparison.py  # Compare with PyTorch optimizers
+│   └── visualization/          # Plotting utilities
+│       ├── plot_results.py         # Comprehensive plotting (with error bars!)
+│       ├── plot_eigenvalues.py     # Hessian eigenvalue visualization
+│       ├── loss_landscape.py       # Loss surface probing
+│       ├── interactive_plots.py    # Interactive Plotly visualizations
+│       ├── create_separate_plots.py # Separate plot generation
+│       └── run_loss_landscape.py   # Loss landscape runner
+├── tests/                      # Unit tests (183 tests, 100% passing)
+│   ├── test_gradients.py       # Numerical gradient verification
+│   ├── test_optimizers.py      # Optimizer correctness tests
+│   ├── test_lr_schedulers.py   # LR scheduler tests
+│   ├── test_optuna_tuner.py    # Optuna integration tests
+│   ├── test_nlp.py             # NLP models & data tests
+│   ├── test_resnet.py          # ResNet-18 architecture tests
+│   ├── test_highdim_functions.py  # High-dimensional function tests
+│   ├── test_ackley2d.py        # Ackley 2D function tests
+│   ├── test_interactive_plots.py # Interactive plotting tests
+│   └── test_statistical_enhancements.py # Statistical analysis tests
+├── configs/                    # Experiment configurations
+│   ├── nn_tuning.json          # MNIST hyperparameter sweeps
+│   └── cifar10_tuning.json     # CIFAR-10 configurations
+├── scripts/                    # Utility scripts
+│   ├── run_all.py              # Complete reproducibility pipeline
+│   ├── tune_nn.py              # Two-stage hyperparameter tuning
+│   ├── demo_imdb_training.py   # IMDB sentiment analysis demo
+│   ├── demo_highdim_optimization.py  # High-dimensional function optimization
+│   ├── demo_lr_schedulers.py   # LR scheduler demonstration
+│   ├── demo_resnet18_training.py # ResNet-18 training demo
+│   ├── generate_summaries.py   # Summary table generation
+│   ├── generate_statistical_report.py # Statistical report generation
+│   ├── generate_cifar10_statistical_report.py # CIFAR-10 specific reports
+│   ├── generate_latex_tables.py # LaTeX table generation
+│   ├── generate_appendix.py    # Appendix generation
+│   ├── run_mnist_full.py       # Full MNIST pipeline
+│   ├── run_nn_ablation.py      # Neural network ablation
+│   ├── run_final_benchmarks.py # Final benchmark runs
+│   ├── optuna_tune_mnist.py    # Optuna MNIST tuning
+│   ├── compute_tradeoffs.py    # Tradeoff analysis
+│   └── so_what_analysis.py     # Impact analysis
+├── docs/                       # All documentation (consolidated!)
+│   ├── INDEX.md                # Documentation navigation hub
+│   ├── LIMITATIONS.md          # Known limitations & assumptions
+│   ├── MULTISEED_GUIDE.md      # Guide for multi-seed experiments
+│   ├── IMPROVEMENT_PROGRESS.md # Progress tracking
+│   ├── CRITICAL_VALIDATION_REPORT.md  # Scientific validation
+│   ├── FINAL_SUMMARY.md        # Final summary with ablation study
+│   ├── PHASE11_NLP_SUMMARY.md  # NLP implementation summary
+│   ├── PHASE12_RESNET_SUMMARY.md  # ResNet-18 deep network summary
+│   ├── PHASE13_HIGHDIM_SUMMARY.md  # High-dimensional optimization summary
+│   ├── PHASE14_STATISTICAL_SUMMARY.md  # Statistical analysis summary
+│   ├── PRACTITIONER_HANDBOOK.md # Practitioner handbook
+│   ├── QUICK_START.md          # Quick start guide
+│   ├── RESEARCH_JOURNAL.md     # Research journal
+│   ├── SCIENTIFIC_RIGOR_PROTOCOL.md # Scientific rigor protocol
+│   └── archive/                # Archived documentation
+├── kaggle/                     # Kaggle GPU experiments
+│   ├── QUICKSTART.md           # How to run experiments on Kaggle
+│   ├── INSTRUCTIONS.md         # Detailed step-by-step guide
+│   ├── resnet18_cifar10.py     # ResNet-18 training script
+│   ├── RESULTS_resnet18.md     # Kaggle experiment results (85.51% accuracy)
+│   ├── verify_local.py         # Local verification script
+│   ├── visualize_landscape.py  # Loss landscape visualization
+│   ├── nlp_benchmark.py        # NLP benchmark script
+│   ├── analysis_visualization.ipynb # Analysis notebook
+│   ├── cifar10_benchmark/      # CIFAR-10 benchmark experiments
+│   ├── medical_benchmark/      # Medical imaging benchmarks
+│   ├── mnist_benchmark/        # MNIST benchmark experiments
+│   ├── nlp_benchmark/          # NLP benchmark experiments
+│   ├── resnet18_experiment/    # ResNet-18 experiments
+│   └── notebooks/              # Kaggle notebooks
+├── results/                    # CSV outputs (experiments, summaries)
+├── plots/                      # All visualizations (PNG)
+├── data/                       # Dataset utilities
+├── pyproject.toml              # Modern Python project configuration (v2.0.0)
+├── requirements.txt            # Dependencies
+└── README.md                   # This file
 ```
 
 ##  Quick Start
@@ -140,7 +168,7 @@ cd /workspaces/GDSearch
 pip install -r requirements.txt
 ```
 
-**Dependencies:** numpy, pandas, matplotlib, scipy, torch, torchvision, tqdm, pytest
+**Dependencies:** numpy, pandas, matplotlib, scipy, torch, torchvision, tqdm, pytest, optuna, datasets, plotly
 
 ### Running Tests (Verify Installation)
 
@@ -148,7 +176,7 @@ pip install -r requirements.txt
 # Run all tests (gradients + optimizers)
 pytest tests/ -v
 
-# Expected: 35 tests passed 
+# Expected: 183 tests passed 
 ```
 
 ### Running Experiments
@@ -252,13 +280,13 @@ python scripts/generate_summaries.py
 python src/visualization/plot_eigenvalues.py
 ```
 
-#### Option 6: Quick Demo
+#### Option 7: Quick Demo
 ```bash
 # Run short MNIST demo (2 epochs)
-python scripts/nn_workflow.py
+python scripts/demo_resnet18_training.py --epochs 2
 ```
 
-#### Option 7: NLP Experiments (NEW! )
+#### Option 8: NLP Experiments 
 ```bash
 # Train sentiment classifier on IMDB dataset
 python scripts/demo_imdb_training.py \
@@ -491,7 +519,7 @@ If you use this codebase in your research, please cite:
 
 ```
 @software{gdsearch2025,
-  title={GDSearch: Optimizer Dynamics Research Platform},
+  title={GDSearch v2.0.0: Optimizer Dynamics Research Platform},
   author={Le Tran Minh Phuc},
   year={2025},
   url={https://github.com/Ynhi0/GDSearch}
