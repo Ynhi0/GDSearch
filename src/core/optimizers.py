@@ -502,6 +502,10 @@ class SAM(Optimizer):
     Paper: "Sharpness-Aware Minimization for Efficiently Improving Generalization"
     (Foret et al., ICLR 2021)
     
+    NOTE: This base implementation is primarily for 2D function optimization.
+    For neural network training, use SAMWrapper in pytorch_optimizers.py
+    which properly handles the closure for computing adversarial gradients.
+    
     Algorithm:
     1. Compute gradient at current point: g(θ)
     2. Take adversarial step: θ_adv = θ + ρ * ||g(θ)||_2 * g(θ) / ||g(θ)||_2
@@ -603,7 +607,7 @@ class SAM(Optimizer):
         Args:
             params: Current parameters
             gradients: Gradients at current parameters
-            loss_fn: Loss function (needed for PyTorch version, None for 2D)
+            loss_fn: Loss function (needed for 2D case to compute adversarial gradients)
             adversarial_gradients: Pre-computed gradients at adversarial point (optional)
             
         Returns:
@@ -612,14 +616,14 @@ class SAM(Optimizer):
         if adversarial_gradients is not None:
             # Use pre-computed adversarial gradients (for PyTorch integration)
             return self.base_opt.step(params, adversarial_gradients)
-        else:
-            # Standard SAM procedure (for 2D functions)
-            # Compute adversarial point
+        elif loss_fn is not None:
+            # Compute adversarial gradients for 2D case
             adv_params = self._compute_adversarial_step(params, gradients)
-            
-            # For 2D functions, we assume adversarial_gradients are provided
-            # or computed externally. For now, fall back to base optimizer
-            # In practice, this would need the loss function to compute gradients at adv_params
+            adv_gradients = loss_fn(adv_params)  # loss_fn should return gradients
+            return self.base_opt.step(params, adv_gradients)
+        else:
+            # Fallback for backward compatibility (not correct SAM)
+            print("Warning: SAM without adversarial gradients - using base optimizer only")
             return self.base_opt.step(params, gradients)
     
     def reset(self):
@@ -656,6 +660,12 @@ class Lookahead(Optimizer):
         self.k = k
         self.alpha = alpha
         self.name = f"Lookahead({base_optimizer.name}, k={k}, alpha={alpha})"
+        
+        # Warning about adaptive optimizers
+        if 'Adam' in base_optimizer.name or 'RMSProp' in base_optimizer.name:
+            print(f"⚠️  WARNING: Lookahead with {base_optimizer.name} may interfere with internal optimizer state (running averages).")
+            print("   Consider using Lookahead only with SGD for reliable behavior.")
+            print("   This is mentioned in the thesis for educational purposes but not recommended for production use.")
         
         # State
         self.step_count = 0

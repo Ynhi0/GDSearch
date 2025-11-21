@@ -120,6 +120,11 @@ def compute_flatness_metrics(history_df: pd.DataFrame) -> Dict[str, float]:
 def analyze_optimizer_flatness(results: Dict[str, Tuple[nn.Module, pd.DataFrame]]) -> pd.DataFrame:
     """
     Analyze flatness characteristics of different optimizers.
+    
+    Note: For SAM optimizers, ensure they were trained using the proper PyTorch
+    SAMWrapper implementation which correctly computes adversarial gradients
+    via closure functions. The base SAM class in optimizers.py is for 2D
+    visualization only.
 
     Args:
         results: Dictionary from load_model_and_results
