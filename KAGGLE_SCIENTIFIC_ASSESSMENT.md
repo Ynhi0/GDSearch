@@ -1,7 +1,7 @@
 # Kaggle Folder Scientific Research Assessment
 
 **Date**: Final Review  
-**Purpose**: Evaluate Kaggle experimental suites for Vietnamese thesis publication readiness  
+**Purpose**: Evaluate Kaggle experimental suites for Vietnamese thesis benchmark readiness  
 **Thesis**: "Tốc độ hội tụ của Gradient Descent trong tối ưu hóa hàm mất mát" (Convergence rate of Gradient Descent in optimizing loss functions)
 
 ---
@@ -10,7 +10,7 @@
 
 ✅ **PUBLICATION-READY STATUS: APPROVED**
 
-The Kaggle folder contains **4 complete publication suites** that meet rigorous scientific research standards for the Vietnamese thesis on gradient descent convergence rates. All suites implement:
+The Kaggle folder contains **4 complete benchmark suites** that meet rigorous scientific research standards for the Vietnamese thesis on gradient descent convergence rates. All suites implement:
 - Multi-seed experiments (5-10 seeds per optimizer)
 - Statistical rigor (Shapiro-Wilk, paired tests, Holm-Bonferroni correction, effect sizes)
 - Reproducibility guarantees (deterministic seeding with CUDNN)
@@ -52,11 +52,11 @@ The Kaggle folder contains **4 complete publication suites** that meet rigorous 
 
 ## Publication Suite Inventory
 
-### 1. MNIST Publication Suite (`kaggle/mnist_publication/`)
+### 1. MNIST Publication Suite (`kaggle/mnist_benchmark/`)
 
 **Files**:
-- ✅ `mnist_publication.py` (379 lines, standalone)
-- ✅ `mnist_publication.ipynb` (notebook wrapper)
+- ✅ `mnist_benchmark.py` (379 lines, standalone)
+- ✅ `mnist_benchmark.ipynb` (notebook wrapper)
 - ✅ `README.md` (comprehensive documentation)
 
 **Experimental Design**:
@@ -91,15 +91,15 @@ def set_seed(seed):
 - Elapsed time (wall-clock)
 - Peak GPU memory usage
 
-**Output**: `NN_SimpleMLP_MNIST_{optimizer}_lr{lr}_seed{seed}_publication.csv`
+**Output**: `NN_SimpleMLP_MNIST_{optimizer}_lr{lr}_seed{seed}_benchmark.csv`
 
 ---
 
-### 2. CIFAR-10 Publication Suite (`kaggle/cifar10_publication/`)
+### 2. CIFAR-10 Publication Suite (`kaggle/cifar10_benchmark/`)
 
 **Files**:
-- ✅ `cifar10_publication.py` (standalone)
-- ✅ `cifar10_publication.ipynb` (notebook wrapper)
+- ✅ `cifar10_benchmark.py` (standalone)
+- ✅ `cifar10_benchmark.ipynb` (notebook wrapper)
 - ✅ `README.md` (comprehensive documentation)
 
 **Experimental Design**:
@@ -117,15 +117,15 @@ def set_seed(seed):
 - Automatic CIFAR-10 download via torchvision
 - GPU telemetry with torch.cuda.max_memory_allocated()
 
-**Output**: `NN_SimpleCIFAR10_{optimizer}_lr{lr}_seed{seed}_publication.csv`
+**Output**: `NN_SimpleCIFAR10_{optimizer}_lr{lr}_seed{seed}_benchmark.csv`
 
 ---
 
-### 3. NLP Publication Suite (`kaggle/nlp_publication/`)
+### 3. NLP Publication Suite (`kaggle/nlp_benchmark/`)
 
 **Files**:
-- ✅ `nlp_publication.py` (standalone)
-- ✅ `nlp_publication.ipynb` (notebook wrapper)
+- ✅ `nlp_benchmark.py` (standalone)
+- ✅ `nlp_benchmark.ipynb` (notebook wrapper)
 - ✅ `README.md` (comprehensive documentation)
 
 **Experimental Design**:
@@ -144,15 +144,15 @@ def set_seed(seed):
 - Longer training time (~30-60 min per run on GPU)
 - Max sequence length: 512 tokens
 
-**Output**: `NN_DistilBERT_IMDB_{optimizer}_lr{lr}_seed{seed}_publication.csv`
+**Output**: `NN_DistilBERT_IMDB_{optimizer}_lr{lr}_seed{seed}_benchmark.csv`
 
 ---
 
-### 4. Medical Publication Suite (`kaggle/medical_publication/`)
+### 4. Medical Publication Suite (`kaggle/medical_benchmark/`)
 
 **Files**:
-- ✅ `medical_publication.py` (standalone)
-- ✅ `medical_publication.ipynb` (notebook wrapper)
+- ✅ `medical_benchmark.py` (standalone)
+- ✅ `medical_benchmark.ipynb` (notebook wrapper)
 - ✅ `README.md` (comprehensive documentation)
 
 **Experimental Design**:
@@ -171,15 +171,15 @@ def set_seed(seed):
 - Synthetic fallback dataset: 1000 images with geometric shapes
 - Pure PyTorch implementation (no external U-Net libraries)
 
-**Output**: `medical_{optimizer}_lr{lr}_seed{seed}_publication.csv`
+**Output**: `medical_{optimizer}_lr{lr}_seed{seed}_benchmark.csv`
 
 ---
 
 ## Result Aggregation Pipeline
 
-### Aggregation Notebook (`kaggle/publication_figures.ipynb`)
+### Aggregation Notebook (`kaggle/benchmark_figures.ipynb`)
 
-**Purpose**: Collect final metrics across all seeds and generate publication-quality figures
+**Purpose**: Collect final metrics across all seeds and generate benchmark-quality figures
 
 **Helper Functions**:
 
@@ -198,7 +198,7 @@ def set_seed(seed):
 **Supported Analyses**:
 - MNIST accuracy/loss ablation
 - CIFAR-10 accuracy/loss ablation
-- Statistical comparisons (if `*_statistical_comparisons_publication.csv` exists)
+- Statistical comparisons (if `*_statistical_comparisons_benchmark.csv` exists)
 
 **Output Location**: `/kaggle/working/plots/` (Kaggle environment)
 
@@ -322,9 +322,9 @@ epoch,train_loss,train_acc,test_loss,test_acc,elapsed_time,peak_gpu_memory_mb
 ### ✅ Standardization (10/10)
 
 **Consistent Patterns**:
-1. File structure: `{suite}_publication/` with `.py`, `.ipynb`, `README.md`
+1. File structure: `{suite}_benchmark/` with `.py`, `.ipynb`, `README.md`
 2. CLI interface: argparse with `--seeds`, `--lr`, `--epochs`, `--resume`
-3. Output naming: `NN_{model}_{dataset}_{optimizer}_lr{lr}_seed{seed}_publication.csv`
+3. Output naming: `NN_{model}_{dataset}_{optimizer}_lr{lr}_seed{seed}_benchmark.csv`
 4. Function names: `set_seed()`, `train_one_epoch()`, `evaluate()`, `compute_statistics()`
 5. Statistical reporting: Same CSV format with p-value, effect size, test type
 
@@ -358,7 +358,7 @@ epoch,train_loss,train_acc,test_loss,test_acc,elapsed_time,peak_gpu_memory_mb
 3. **Synthetic Fallback**: Medical suite generates synthetic data if real dataset unavailable
 4. **Quick Mode**: CIFAR-10 suite includes `--quick` flag for rapid testing
 5. **Statistical Rigor**: Exceeds typical undergraduate thesis standards
-6. **Aggregation Pipeline**: `publication_figures.ipynb` automates result collection
+6. **Aggregation Pipeline**: `benchmark_figures.ipynb` automates result collection
 
 ---
 
@@ -372,7 +372,7 @@ epoch,train_loss,train_acc,test_loss,test_acc,elapsed_time,peak_gpu_memory_mb
 - ✅ Dynamics analysis (trajectories, instantaneous rates, oscillations)
 - ✅ Hyperparameter sensitivity (β for Momentum, β1/β2 for Adam)
 
-**Evidence**: All covered in publication suites + main repo 2D experiments
+**Evidence**: All covered in benchmark suites + main repo 2D experiments
 
 ---
 
@@ -454,7 +454,7 @@ epoch,train_loss,train_acc,test_loss,test_acc,elapsed_time,peak_gpu_memory_mb
 ### For Phúc (Implementation & Experiments Section)
 
 **Include in Thesis**:
-1. Table summarizing all 4 publication suites (model, dataset, optimizers, seeds, epochs)
+1. Table summarizing all 4 benchmark suites (model, dataset, optimizers, seeds, epochs)
 2. Reproducibility section citing `set_seed()` implementation
 3. Statistical methods section citing `compute_statistics()` implementation
 4. Resume capability diagram (flowchart showing checkpoint logic)
@@ -488,7 +488,7 @@ epoch,train_loss,train_acc,test_loss,test_acc,elapsed_time,peak_gpu_memory_mb
 
 ## Conclusion
 
-The Kaggle folder is **scientifically rigorous** and **publication-ready** for the Vietnamese undergraduate thesis. All experimental requirements from the thesis outline are met:
+The Kaggle folder is **scientifically rigorous** and **benchmark-ready** for the Vietnamese undergraduate thesis. All experimental requirements from the thesis outline are met:
 
 ✅ Multi-seed experiments for reproducibility  
 ✅ Statistical rigor (normality tests, paired tests, multiple comparison correction, effect sizes)  

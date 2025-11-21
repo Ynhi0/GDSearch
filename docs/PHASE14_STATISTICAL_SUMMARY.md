@@ -9,7 +9,7 @@
 
 ## Overview
 
-Enhanced the statistical analysis framework with power analysis, multiple comparison corrections, and robust edge case handling to support rigorous optimizer comparisons for publication-quality research.
+Enhanced the statistical analysis framework with power analysis, multiple comparison corrections, and robust edge case handling to support rigorous optimizer comparisons for benchmark-quality research.
 
 ## Implementation Details
 
@@ -316,7 +316,7 @@ else:
 
 ## Conclusion
 
-Phase 14 elevates GDSearch's statistical rigor to publication standards:
+Phase 14 elevates GDSearch's statistical rigor to benchmark standards:
 - **Power analysis** ensures experiments are adequately sized
 - **Multiple comparison corrections** control error rates
 - **Robust edge cases** eliminate warnings and handle degenerate data

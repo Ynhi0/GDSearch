@@ -793,7 +793,7 @@ Dự án GDSearch có **NỀN TẢNG KỸ THUẬT ĐÚNG** (implementations most
 - **Code that works**  (bạn có)
 - **Science that's trustworthy**  (bạn CHƯA có)
 
-**Cần ít nhất 3-5 ngày công** để fix Priority 1 + Priority 2 issues trước khi có thể claim "publication-ready".
+**Cần ít nhất 3-5 ngày công** để fix Priority 1 + Priority 2 issues trước khi có thể claim "benchmark-ready".
 
 ---
 

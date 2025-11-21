@@ -1,5 +1,5 @@
 """
-Generate publication-ready experimental results with proper statistical rigor.
+Generate benchmark-ready experimental results with proper statistical rigor.
 
 This script runs comprehensive experiments suitable for inclusion in a scientific paper:
 1. Multi-seed MNIST experiments (10 seeds) with all optimizers
@@ -271,7 +271,7 @@ def run_statistical_analysis(results_dir: str = 'results', plots_dir: str = 'plo
     
     # Save results
     df_stats = pd.DataFrame(summary_rows)
-    stats_path = os.path.join(results_dir, 'mnist_statistical_comparisons_publication.csv')
+    stats_path = os.path.join(results_dir, 'mnist_statistical_comparisons_benchmark.csv')
     df_stats.to_csv(stats_path, index=False)
     
     print(f"\n✅ Statistical analysis saved to: {stats_path}")
@@ -386,7 +386,7 @@ def run_ablation_study(results_dir: str = 'results', plots_dir: str = 'plots'):
 
 def main():
     """
-    Run all publication-quality experiments.
+    Run all benchmark-quality experiments.
     """
     print("\n" + "="*80)
     print(" PUBLICATION-QUALITY EXPERIMENT SUITE ")
@@ -445,9 +445,9 @@ def main():
     print("\n" + "="*80)
     print(" EXPERIMENT SUITE COMPLETE ")
     print("="*80)
-    print("\n📊 Results ready for publication:")
+    print("\n📊 Results ready for benchmark:")
     print(f"\n📁 Results directory: {results_dir}/")
-    print("   - mnist_statistical_comparisons_publication.csv")
+    print("   - mnist_statistical_comparisons_benchmark.csv")
     print("   - optimizer_ablation_summary.csv")
     print("   - initial_condition_robustness_*.csv")
     print("   - Individual experiment CSVs")
@@ -455,7 +455,7 @@ def main():
     print("   - optimizer_ablation_study.png")
     print("   - initial_condition_robustness_*.png")
     print("   - statistical_*_vs_*.png")
-    print("\n✅ All data is publication-ready with proper statistical rigor!")
+    print("\n✅ All data is benchmark-ready with proper statistical rigor!")
     print("="*80)
 
 

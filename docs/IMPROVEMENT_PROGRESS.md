@@ -129,7 +129,7 @@ p-value:     0.0324
 
 **Status**:  Complete and tested
 
-**Impact**: Professional publication-ready visualizations
+**Impact**: Professional benchmark-ready visualizations
 
 ---
 

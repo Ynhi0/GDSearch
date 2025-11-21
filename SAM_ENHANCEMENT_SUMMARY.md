@@ -8,7 +8,7 @@ This enhancement adds **Sharpness-Aware Minimization (SAM)** optimizer and **fla
 
 ### 1. SAM Optimizer Implementation
 
-**Location**: `src/core/optimizers.py`, `src/core/pytorch_optimizers.py`, `kaggle/mnist_publication/mnist_publication.py`
+**Location**: `src/core/optimizers.py`, `src/core/pytorch_optimizers.py`, `kaggle/mnist_benchmark/mnist_benchmark.py`
 
 **Algorithm**:
 - SAM minimizes both loss AND sharpness (worst-case loss in neighborhood)
@@ -28,7 +28,7 @@ perturbation = ρ * (g(θ) / grad_norm)  # ρ = neighborhood size
 
 ### 2. Kaggle Integration
 
-**Updated**: `kaggle/mnist_publication/mnist_publication.py`
+**Updated**: `kaggle/mnist_benchmark/mnist_benchmark.py`
 - Added `SAMSGD` and `SAMAdam` classes (standalone implementation)
 - Added to optimizer suite: 7 optimizers (5 original + 2 SAM variants)
 - Updated README and documentation
@@ -78,8 +78,8 @@ perturbation = ρ * (g(θ) / grad_norm)  # ρ = neighborhood size
 
 ### Run SAM Experiments
 ```bash
-cd kaggle/mnist_publication
-python mnist_publication.py --seeds 1,2,3,4,5 --results_dir /kaggle/working/results
+cd kaggle/mnist_benchmark
+python mnist_benchmark.py --seeds 1,2,3,4,5 --results_dir /kaggle/working/results
 ```
 
 ### Analyze Flatness
@@ -107,7 +107,7 @@ Based on SAM literature and our implementation:
 
 - **Loss Landscape**: `src/visualization/loss_landscape.py` can now analyze SAM-found minima
 - **Statistical Analysis**: Existing `compute_statistics()` works with SAM results
-- **Visualization**: `publication_figures.ipynb` includes SAM in comparisons
+- **Visualization**: `benchmark_figures.ipynb` includes SAM in comparisons
 
 ## Impact on Thesis Quality
 
@@ -128,7 +128,7 @@ Based on SAM literature and our implementation:
 
 **Root Cause**: SAM requires closure function for dual forward/backward passes (adversarial gradient computation)
 
-**Fix Applied**: Modified `train_one_epoch()` in `kaggle/mnist_publication/mnist_publication.py`:
+**Fix Applied**: Modified `train_one_epoch()` in `kaggle/mnist_benchmark/mnist_benchmark.py`:
 - Detect SAM optimizers using `isinstance(optimizer, (SAMSGD, SAMAdam))`
 - For SAM: Define closure function and pass to `optimizer.step(closure)`
 - For regular optimizers: Use standard `zero_grad()` → `backward()` → `step()` flow
@@ -137,7 +137,7 @@ Based on SAM literature and our implementation:
 **Impact**: SAM experiments now run correctly without errors
 
 ### 2. ✅ FIXED: Missing Time Metrics for Computational Cost Analysis
-**Issue**: `analyze_flatness.py` expected `epoch_time` column but `mnist_publication.py` didn't record timing
+**Issue**: `analyze_flatness.py` expected `epoch_time` column but `mnist_benchmark.py` didn't record timing
 
 **Root Cause**: No wall-clock time measurement in training loop
 
@@ -152,7 +152,7 @@ Based on SAM literature and our implementation:
 **Assessment**: Implementation is excellent and scientifically sound
 - Uses `_random_direction_like()` with same seed for fair comparison
 - Computes quantitative flatness metrics (variance, area ratios)
-- Creates publication-quality contour plots
+- Creates benchmark-quality contour plots
 - Provides empirical evidence for thesis claims
 
 ---
@@ -230,7 +230,7 @@ With these fixes, you can confidently defend:
 ## Quick Start for Thesis Defense
 
 1. **Run SAM experiments**: Get empirical data showing flatness differences
-2. **Generate analysis**: Use `analyze_flatness.py` for publication plots
+2. **Generate analysis**: Use `analyze_flatness.py` for benchmark plots
 3. **Key message**: "SAM demonstrates that convergence speed and generalization are not always aligned - sometimes slower optimization leads to better generalization through flatter minima"
 
 This enhancement transforms a good thesis on optimizer comparison into an excellent thesis on optimization landscape geometry and its impact on deep learning generalization.

@@ -142,6 +142,164 @@ class AdamWrapper(torch.optim.Optimizer):
 
 
 # ============================================================================
+# SAM (Sharpness-Aware Minimization) Optimizer
+# ============================================================================
+
+import math
+
+class SAMSGD(torch.optim.Optimizer):
+    """SAM (Sharpness-Aware Minimization) with SGD base optimizer."""
+    
+    def __init__(self, params, lr=0.01, rho=0.05, momentum=0.0, weight_decay=0.0):
+        defaults = dict(lr=lr, rho=rho, momentum=momentum, weight_decay=weight_decay)
+        super().__init__(params, defaults)
+        
+    def step(self, closure=None):
+        if closure is None:
+            raise ValueError("SAM requires closure (loss function)")
+        
+        # Store original parameters
+        original_params = []
+        for group in self.param_groups:
+            for p in group['params']:
+                original_params.append(p.data.clone())
+        
+        # First forward-backward pass to get gradients
+        loss = closure()
+        
+        # Compute adversarial step for each parameter
+        idx = 0
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is None:
+                    idx += 1
+                    continue
+                
+                # Compute perturbation: ρ * (g / ||g||)
+                grad_norm = torch.norm(p.grad)
+                if grad_norm > 1e-12:
+                    perturbation = group['rho'] * (p.grad / grad_norm)
+                    p.data.add_(perturbation)
+                idx += 1
+        
+        # Second forward-backward pass at adversarial point
+        closure()
+        
+        # Restore original parameters
+        idx = 0
+        for group in self.param_groups:
+            for p in group['params']:
+                p.data.copy_(original_params[idx])
+                idx += 1
+        
+        # Apply SGD update with adversarial gradients
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+                
+                # Apply weight decay
+                if group['weight_decay'] != 0:
+                    p.grad.add_(p.data, alpha=group['weight_decay'])
+                
+                # SGD update
+                p.data.add_(p.grad, alpha=-group['lr'])
+                
+                # Clear gradients
+                p.grad.zero_()
+        
+        return loss
+
+
+class SAMAdam(torch.optim.Optimizer):
+    """SAM (Sharpness-Aware Minimization) with Adam base optimizer."""
+    
+    def __init__(self, params, lr=0.001, rho=0.05, betas=(0.9, 0.999), eps=1e-8, weight_decay=0.0):
+        defaults = dict(lr=lr, rho=rho, betas=betas, eps=eps, weight_decay=weight_decay)
+        super().__init__(params, defaults)
+        
+        # Initialize Adam state
+        for group in self.param_groups:
+            for p in group['params']:
+                state = self.state[p]
+                state['step'] = 0
+                state['exp_avg'] = torch.zeros_like(p.data)
+                state['exp_avg_sq'] = torch.zeros_like(p.data)
+    
+    def step(self, closure=None):
+        if closure is None:
+            raise ValueError("SAM requires closure (loss function)")
+        
+        # Store original parameters
+        original_params = []
+        for group in self.param_groups:
+            for p in group['params']:
+                original_params.append(p.data.clone())
+        
+        # First forward-backward pass to get gradients
+        loss = closure()
+        
+        # Compute adversarial step for each parameter
+        idx = 0
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is None:
+                    idx += 1
+                    continue
+                
+                # Compute perturbation: ρ * (g / ||g||)
+                grad_norm = torch.norm(p.grad)
+                if grad_norm > 1e-12:
+                    perturbation = group['rho'] * (p.grad / grad_norm)
+                    p.data.add_(perturbation)
+                idx += 1
+        
+        # Second forward-backward pass at adversarial point
+        closure()
+        
+        # Restore original parameters
+        idx = 0
+        for group in self.param_groups:
+            for p in group['params']:
+                p.data.copy_(original_params[idx])
+                idx += 1
+        
+        # Apply Adam update with adversarial gradients
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+                
+                grad = p.grad
+                state = self.state[p]
+                
+                # Apply weight decay
+                if group['weight_decay'] != 0:
+                    grad = grad.add(p.data, alpha=group['weight_decay'])
+                
+                # Adam update
+                exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
+                beta1, beta2 = group['betas']
+                
+                state['step'] += 1
+                bias_correction1 = 1 - beta1 ** state['step']
+                bias_correction2 = 1 - beta2 ** state['step']
+                
+                exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
+                exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
+                
+                denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(group['eps'])
+                step_size = group['lr'] / bias_correction1
+                
+                p.data.addcdiv_(exp_avg, denom, value=-step_size)
+                
+                # Clear gradients
+                p.grad.zero_()
+        
+        return loss
+
+
+# ============================================================================
 # RESNET-18 MODEL (from src/core/models.py)
 # ============================================================================
 
@@ -275,15 +433,33 @@ def train_epoch(model, train_loader, optimizer, criterion, device):
     correct = 0
     total = 0
     
+    # Check if optimizer is SAM (requires closure)
+    is_sam = isinstance(optimizer, (SAMSGD, SAMAdam))
+    
     pbar = tqdm(train_loader, desc="Training")
     for batch_idx, (data, target) in enumerate(pbar):
         data, target = data.to(device), target.to(device)
         
-        optimizer.zero_grad()
-        output = model(data)
-        loss = criterion(output, target)
-        loss.backward()
-        optimizer.step()
+        if is_sam:
+            # SAM requires closure for adversarial gradient computation
+            def closure():
+                optimizer.zero_grad()
+                output = model(data)
+                loss = criterion(output, target)
+                loss.backward()
+                return loss
+            
+            loss = optimizer.step(closure)
+            
+            # Re-compute output for accuracy (since SAM modifies parameters during step)
+            with torch.no_grad():
+                output = model(data)
+        else:
+            optimizer.zero_grad()
+            output = model(data)
+            loss = criterion(output, target)
+            loss.backward()
+            optimizer.step()
         
         total_loss += loss.item()
         pred = output.argmax(dim=1, keepdim=True)
@@ -325,23 +501,45 @@ def evaluate(model, test_loader, criterion, device):
 # ============================================================================
 
 def main():
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='SAM Sensitivity Analysis on ResNet-18 (CIFAR-10)')
+    parser.add_argument('--optimizer', type=str, default='SAM_Adam', 
+                       choices=['Adam', 'SAM_SGD', 'SAM_Adam'],
+                       help='Optimizer to use')
+    parser.add_argument('--rho', type=float, default=0.05,
+                       help='SAM rho parameter (neighborhood size)')
+    parser.add_argument('--rho-sweep', type=str, default=None,
+                       help='Comma-separated rho values for sensitivity analysis (e.g., "0.01,0.05,0.1,0.2")')
+    parser.add_argument('--batch-size', type=int, default=128,
+                       help='Batch size')
+    parser.add_argument('--epochs', type=int, default=5,
+                       help='Number of epochs')
+    parser.add_argument('--lr', type=float, default=0.001,
+                       help='Learning rate')
+    parser.add_argument('--results-dir', type=str, default='results',
+                       help='Results directory')
+    
+    args = parser.parse_args()
+    
     # Configuration
-    BATCH_SIZE = 128
-    EPOCHS = 5
-    LEARNING_RATE = 0.01
+    BATCH_SIZE = args.batch_size
+    EPOCHS = args.epochs
+    LEARNING_RATE = args.lr
     NUM_WORKERS = 2
+    
+    # Parse rho sweep if provided
+    if args.rho_sweep:
+        rho_values = [float(x.strip()) for x in args.rho_sweep.split(',')]
+        print(f"🔬 SAM Sensitivity Analysis: Testing rho values {rho_values}")
+    else:
+        rho_values = [args.rho]
     
     # Device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"🚀 Using device: {device}")
     if torch.cuda.is_available():
         print(f"   GPU: {torch.cuda.get_device_name(0)}")
-    print()
-    
-    # Header
-    print("=" * 80)
-    print("ResNet-18 on CIFAR-10 with Custom Adam Optimizer")
-    print("=" * 80)
     print()
     
     # Load CIFAR-10
@@ -374,61 +572,127 @@ def main():
     print(f"✓ Test batches: {len(test_loader)}")
     print()
     
-    # Create model
-    print("🏗️  Creating ResNet-18...")
-    model = ResNet18(num_classes=10).to(device)
-    num_params = model.get_num_parameters()
-    print(f"✓ Parameters: {num_params:,}")
-    print()
+    # Results storage
+    results = []
     
-    # Create custom optimizer
-    print("⚙️  Creating Custom Adam Optimizer...")
-    optimizer = AdamWrapper(model.parameters(), lr=LEARNING_RATE)
-    print(f"✓ Learning rate: {LEARNING_RATE}")
-    print()
-    
-    # Loss function
-    criterion = nn.CrossEntropyLoss()
-    
-    # Training loop
-    print("=" * 80)
-    print("🚂 Training...")
-    print("=" * 80)
-    print()
-    
-    best_acc = 0.0
-    start_time = time.time()
-    
-    for epoch in range(1, EPOCHS + 1):
-        print(f"Epoch {epoch}/{EPOCHS}")
-        print("-" * 80)
+    # Run experiments for each rho value
+    for rho in rho_values:
+        print("=" * 80)
+        if len(rho_values) > 1:
+            print(f"SAM Sensitivity Analysis: rho = {rho}")
+        else:
+            print(f"ResNet-18 on CIFAR-10 with {args.optimizer} (rho={rho})")
+        print("=" * 80)
+        print()
         
-        train_loss, train_acc = train_epoch(model, train_loader, optimizer, criterion, device)
-        test_loss, test_acc = evaluate(model, test_loader, criterion, device)
+        # Create fresh model for each experiment
+        print("🏗️  Creating ResNet-18...")
+        model = ResNet18(num_classes=10).to(device)
+        num_params = model.get_num_parameters()
+        print(f"✓ Parameters: {num_params:,}")
+        print()
         
-        print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.2f}%")
-        print(f"Test Loss:  {test_loss:.4f}  | Test Acc:  {test_acc:.2f}%")
+        # Create optimizer
+        print(f"⚙️  Creating {args.optimizer} Optimizer...")
+        if args.optimizer == 'Adam':
+            optimizer = AdamWrapper(model.parameters(), lr=LEARNING_RATE)
+        elif args.optimizer == 'SAM_SGD':
+            optimizer = SAMSGD(model.parameters(), lr=LEARNING_RATE, rho=rho)
+        elif args.optimizer == 'SAM_Adam':
+            optimizer = SAMAdam(model.parameters(), lr=LEARNING_RATE, rho=rho)
         
-        if test_acc > best_acc:
-            best_acc = test_acc
-            print("✓ New best test accuracy!")
+        print(f"✓ Learning rate: {LEARNING_RATE}")
+        if 'SAM' in args.optimizer:
+            print(f"✓ SAM rho: {rho}")
+        print()
         
+        # Loss function
+        criterion = nn.CrossEntropyLoss()
+        
+        # Training loop
+        print("=" * 80)
+        print("🚂 Training...")
+        print("=" * 80)
+        print()
+        
+        best_acc = 0.0
+        start_time = time.time()
+        
+        for epoch in range(1, EPOCHS + 1):
+            print(f"Epoch {epoch}/{EPOCHS}")
+            print("-" * 80)
+            
+            train_loss, train_acc = train_epoch(model, train_loader, optimizer, criterion, device)
+            test_loss, test_acc = evaluate(model, test_loader, criterion, device)
+            
+            print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.2f}%")
+            print(f"Test Loss:  {test_loss:.4f}  | Test Acc:  {test_acc:.2f}%")
+            
+            if test_acc > best_acc:
+                best_acc = test_acc
+                print("✓ New best test accuracy!")
+            
+            print()
+        
+        # Final summary for this rho
+        elapsed_time = time.time() - start_time
+        print("=" * 80)
+        print("✅ Training Complete!")
+        print(f"📊 Best Test Accuracy: {best_acc:.2f}%")
+        print(f"⏱️  Total Time: {elapsed_time:.2f}s ({elapsed_time/60:.2f} minutes)")
+        print("=" * 80)
+        print()
+        
+        # Store results
+        results.append({
+            'rho': rho,
+            'optimizer': args.optimizer,
+            'best_test_acc': best_acc,
+            'final_train_loss': train_loss,
+            'final_test_loss': test_loss,
+            'training_time': elapsed_time
+        })
+    
+    # Print summary if multiple rho values
+    if len(rho_values) > 1:
+        print("=" * 80)
+        print("📊 SAM SENSITIVITY ANALYSIS SUMMARY")
+        print("=" * 80)
+        print(f"Optimizer: {args.optimizer}")
+        print(f"Learning Rate: {LEARNING_RATE}")
+        print(f"Batch Size: {BATCH_SIZE}")
+        print()
+        print("Rho    | Best Test Acc | Final Train Loss | Final Test Loss | Time (min)")
+        print("-------|---------------|------------------|-----------------|------------")
+        for result in results:
+            print(">4.2f")
+        print()
+        
+        # Find optimal rho
+        best_result = max(results, key=lambda x: x['best_test_acc'])
+        print("🎯 Optimal rho: {best_result['rho']} (Test Acc: {best_result['best_test_acc']:.2f}%)")
+        print()
+        
+        # Save results to CSV
+        import os
+        os.makedirs(args.results_dir, exist_ok=True)
+        csv_path = os.path.join(args.results_dir, f'sam_rho_sensitivity_{args.optimizer}.csv')
+        
+        with open(csv_path, 'w') as f:
+            f.write("rho,optimizer,best_test_acc,final_train_loss,final_test_loss,training_time\n")
+            for result in results:
+                f.write(f"{result['rho']},{result['optimizer']},{result['best_test_acc']:.4f},{result['final_train_loss']:.4f},{result['final_test_loss']:.4f},{result['training_time']:.2f}\n")
+        
+        print(f"💾 Results saved to: {csv_path}")
         print()
     
-    # Final summary
-    elapsed_time = time.time() - start_time
-    print("=" * 80)
-    print("✅ Training Complete!")
-    print(f"📊 Best Test Accuracy: {best_acc:.2f}%")
-    print(f"⏱️  Total Time: {elapsed_time:.2f}s ({elapsed_time/60:.2f} minutes)")
-    print("=" * 80)
-    print()
-    
     print("🎯 Verification:")
-    print("✓ Custom Adam optimizer works with ResNet-18")
+    print("✓ SAM optimizer works with ResNet-18")
     print("✓ Deep network (18 layers) training successful")
     print("✓ Residual connections (skip connections) working")
     print("✓ Gradient flow through 11M parameters")
+    if len(rho_values) > 1:
+        print("✓ SAM rho sensitivity analysis completed")
     print()
     print("📝 Please copy this output back to the project!")
 

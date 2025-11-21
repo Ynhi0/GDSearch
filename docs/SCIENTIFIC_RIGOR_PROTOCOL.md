@@ -8,7 +8,7 @@ This protocol defines how experiments in GDSearch are conducted to ensure scient
 - Seed all RNGs (NumPy, PyTorch, CUDA) and enforce deterministic behavior where possible
 
 ## 2) Experimental Design
-- Multi-seed runs: at least 3 seeds per optimizer per setting; prefer 5–10 for publication
+- Multi-seed runs: at least 3 seeds per optimizer per setting; prefer 5–10 for benchmark
 - Baseline → Ablation Ladder:
   - SGD → SGD+Momentum → RMSProp → Adam → AdamW → AMSGrad
 - Convergence detection (when applicable): dual criteria
@@ -58,7 +58,7 @@ This protocol defines how experiments in GDSearch are conducted to ensure scient
 - Appendix with full environment and hyperparameters: `scripts/generate_appendix.py`
 
 ## 9) Kaggle Readiness
-- Standalone scripts: `kaggle/mnist_publication/`, `kaggle/cifar10_publication/`
+- Standalone scripts: `kaggle/mnist_benchmark/`, `kaggle/cifar10_benchmark/`
 - Notebooks for figures, NLP and medical case studies
 - Save outputs to `/kaggle/working/results`
 

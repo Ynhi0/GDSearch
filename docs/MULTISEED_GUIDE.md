@@ -204,7 +204,7 @@ python run_full_analysis.py \
 ### Workflow 2: Full Evaluation (5+ seeds)
 
 ```bash
-# Run 5 seeds for publication-ready results
+# Run 5 seeds for benchmark-ready results
 python run_full_analysis.py \
     --config configs/mnist_tuning.json \
     --seeds 1,2,3,4,5 \

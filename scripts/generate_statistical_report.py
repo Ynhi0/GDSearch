@@ -2,7 +2,7 @@
 """
 Generate Statistical Report (MNIST, Publication-ready)
 
-Reads per-seed MNIST CSVs (produced by kaggle/mnist_publication/mnist_publication.py),
+Reads per-seed MNIST CSVs (produced by kaggle/mnist_benchmark/mnist_benchmark.py),
 computes paired comparisons with normality checks, effect sizes, Holm-Bonferroni correction,
 and basic power analysis. Outputs a CSV and a Markdown report.
 
@@ -25,11 +25,11 @@ from src.analysis.statistical_analysis import power_analysis_report
 
 
 OPTIMIZER_PATTERNS = {
-    'SGD': 'NN_SimpleMLP_MNIST_SGD_*_publication.csv',
-    'SGD_Momentum': 'NN_SimpleMLP_MNIST_SGD_Momentum_*_publication.csv',
-    'Adam': 'NN_SimpleMLP_MNIST_Adam_*_publication.csv',
-    'AdamW': 'NN_SimpleMLP_MNIST_AdamW_*_publication.csv',
-    'AMSGrad': 'NN_SimpleMLP_MNIST_AMSGrad_*_publication.csv',
+    'SGD': 'NN_SimpleMLP_MNIST_SGD_*_benchmark.csv',
+    'SGD_Momentum': 'NN_SimpleMLP_MNIST_SGD_Momentum_*_benchmark.csv',
+    'Adam': 'NN_SimpleMLP_MNIST_Adam_*_benchmark.csv',
+    'AdamW': 'NN_SimpleMLP_MNIST_AdamW_*_benchmark.csv',
+    'AMSGrad': 'NN_SimpleMLP_MNIST_AMSGrad_*_benchmark.csv',
 }
 
 

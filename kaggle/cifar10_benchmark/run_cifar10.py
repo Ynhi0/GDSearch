@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Self-contained CIFAR-10 publication experiments for Kaggle.
+Self-contained CIFAR-10 benchmark experiments for Kaggle.
 - Trains a small ConvNet on CIFAR-10
 - 5 optimizers × N seeds
 - Saves per-run CSVs and statistical comparison CSV
@@ -215,7 +215,7 @@ def run_single_experiment(optimizer_name: str, seed: int, lr: float, epochs: int
     df = pd.DataFrame(history)
     df['elapsed_seconds'] = elapsed
     df['peak_gpu_mb'] = peak_mb
-    out_name = f"NN_SimpleCIFAR10_{optimizer_name}_lr{lr}_seed{seed}_publication.csv"
+    out_name = f"NN_SimpleCIFAR10_{optimizer_name}_lr{lr}_seed{seed}_benchmark.csv"
     out_path = results_dir / out_name
     df.to_csv(out_path, index=False)
 
@@ -262,12 +262,12 @@ def compute_statistics(results_dir: str):
 
     # Collect files per optimizer
     patterns = {
-        'SGD': f"{results_dir}/NN_SimpleCIFAR10_SGD_*_publication.csv",
-        'SGD_Momentum': f"{results_dir}/NN_SimpleCIFAR10_SGD_Momentum_*_publication.csv",
-        'RMSProp': f"{results_dir}/NN_SimpleCIFAR10_RMSProp_*_publication.csv",
-        'Adam': f"{results_dir}/NN_SimpleCIFAR10_Adam_*_publication.csv",
-        'AdamW': f"{results_dir}/NN_SimpleCIFAR10_AdamW_*_publication.csv",
-        'AMSGrad': f"{results_dir}/NN_SimpleCIFAR10_AMSGrad_*_publication.csv",
+        'SGD': f"{results_dir}/NN_SimpleCIFAR10_SGD_*_benchmark.csv",
+        'SGD_Momentum': f"{results_dir}/NN_SimpleCIFAR10_SGD_Momentum_*_benchmark.csv",
+        'RMSProp': f"{results_dir}/NN_SimpleCIFAR10_RMSProp_*_benchmark.csv",
+        'Adam': f"{results_dir}/NN_SimpleCIFAR10_Adam_*_benchmark.csv",
+        'AdamW': f"{results_dir}/NN_SimpleCIFAR10_AdamW_*_benchmark.csv",
+        'AMSGrad': f"{results_dir}/NN_SimpleCIFAR10_AMSGrad_*_benchmark.csv",
     }
 
     def parse_seed(path):
@@ -352,14 +352,14 @@ def compute_statistics(results_dir: str):
             break
     df['Significant (Holm-Bonferroni)'] = holm_sig
 
-    out = Path(results_dir) / 'cifar10_statistical_comparisons_publication.csv'
+    out = Path(results_dir) / 'cifar10_statistical_comparisons_benchmark.csv'
     df.to_csv(out, index=False)
     print(f"Saved statistical comparisons to: {out}")
     return df
 
 
 def main():
-    parser = argparse.ArgumentParser(description='CIFAR-10 Publication Experiments (Kaggle-ready)')
+    parser = argparse.ArgumentParser(description='CIFAR-10 Benchmark Experiments (Kaggle-ready)')
     parser.add_argument('--seeds', type=str, default='1,2,3,4,5')
     parser.add_argument('--epochs', type=int, default=10)
     parser.add_argument('--batch-size', type=int, default=128)
@@ -380,7 +380,7 @@ def main():
     results_dir = args.results_dir
 
     print("\n==========================================")
-    print(" CIFAR-10 Publication Experiments (Kaggle) ")
+    print(" CIFAR-10 Benchmark Experiments (Kaggle) ")
     print("==========================================")
     print(f"Device: {'cuda' if torch.cuda.is_available() else 'cpu'}")
     print(f"Seeds: {seeds}")

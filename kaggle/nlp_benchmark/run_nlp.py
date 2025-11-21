@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Kaggle-ready IMDB publication experiments (DistilBERT).
+Kaggle-ready IMDB benchmark experiments (DistilBERT).
 - Multi-seed runs across AdamW and SGD_Momentum
 - Per-epoch metrics, telemetry (elapsed_seconds, peak_gpu_mb)
 - Saves per-run CSVs and a paired statistical comparison CSV (Holm–Bonferroni)
@@ -192,7 +192,7 @@ def run_single(opt_name: str, seed: int, lr: float, epochs: int, batch_size: int
     df = pd.DataFrame(history)
     df['elapsed_seconds'] = elapsed
     df['peak_gpu_mb'] = peak_mb
-    out = results_dir / f"NN_DistilBERT_IMDB_{opt_name}_lr{lr}_seed{seed}_publication.csv"
+    out = results_dir / f"NN_DistilBERT_IMDB_{opt_name}_lr{lr}_seed{seed}_benchmark.csv"
     df.to_csv(out, index=False)
     return out
 
@@ -200,8 +200,8 @@ def run_single(opt_name: str, seed: int, lr: float, epochs: int, batch_size: int
 def compute_statistics(results_dir: str):
     import glob, re
     patterns = {
-        'AdamW': f"{results_dir}/NN_DistilBERT_IMDB_AdamW_*_publication.csv",
-        'SGD_Momentum': f"{results_dir}/NN_DistilBERT_IMDB_SGD_Momentum_*_publication.csv",
+        'AdamW': f"{results_dir}/NN_DistilBERT_IMDB_AdamW_*_benchmark.csv",
+        'SGD_Momentum': f"{results_dir}/NN_DistilBERT_IMDB_SGD_Momentum_*_benchmark.csv",
     }
     data = {}
     for opt, pat in patterns.items():
@@ -240,13 +240,13 @@ def compute_statistics(results_dir: str):
         })
     df = pd.DataFrame(rows)
     if not df.empty:
-        out = Path(results_dir) / 'imdb_statistical_comparisons_publication.csv'
+        out = Path(results_dir) / 'imdb_statistical_comparisons_benchmark.csv'
         df.to_csv(out, index=False)
         print(f"Saved: {out}")
 
 
 def main():
-    parser = argparse.ArgumentParser(description='IMDB (DistilBERT) Kaggle Publication Suite')
+    parser = argparse.ArgumentParser(description='IMDB (DistilBERT) Kaggle Benchmark Suite')
     parser.add_argument('--seeds', type=str, default='1,2,3,4,5')
     parser.add_argument('--epochs', type=int, default=3)
     parser.add_argument('--batch-size', type=int, default=16)

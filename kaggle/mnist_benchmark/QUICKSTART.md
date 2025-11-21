@@ -1,4 +1,4 @@
-# Quick Start: MNIST Publication Experiments on Kaggle
+# Quick Start: MNIST Benchmark Experiments on Kaggle
 
 Follow these steps to run the MNIST experiment suite in a Kaggle Notebook.
 
@@ -11,7 +11,7 @@ Follow these steps to run the MNIST experiment suite in a Kaggle Notebook.
 
 3) Add files
 - Upload these two files into the notebook session (left sidebar → Add data → Upload):
-  - `mnist_publication.py`
+  - `mnist_benchmark.py`
   - (optional) `requirements.txt` — only if you need to install packages not already preinstalled
 
 4) Install dependencies (optional)
@@ -26,7 +26,7 @@ Follow these steps to run the MNIST experiment suite in a Kaggle Notebook.
 - In a code cell, run:
 
 ```python
-!python mnist_publication.py --seeds 1,2,3,4,5,6,7,8,9,10 --epochs 10 --results-dir results
+!python mnist_benchmark.py --seeds 1,2,3,4,5,6,7,8,9,10 --epochs 10 --results-dir results
 ```
 
 Flags:
@@ -37,8 +37,8 @@ Flags:
 
 6) Outputs
 - Files appear in `/kaggle/working/results`:
-  - Per-run CSVs: `NN_SimpleMLP_MNIST_<Optimizer>_lr<lr>_seed<seed>_publication.csv`
-  - Statistical comparison CSV: `mnist_statistical_comparisons_publication.csv`
+  - Per-run CSVs: `NN_SimpleMLP_MNIST_<Optimizer>_lr<lr>_seed<seed>_benchmark.csv`
+  - Statistical comparison CSV: `mnist_statistical_comparisons_benchmark.csv`
 
 7) Shorten runtime (if needed)
 - Use `--quick` to run 3 seeds × 5 optimizers = 15 runs, 3 epochs each

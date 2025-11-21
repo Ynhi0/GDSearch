@@ -214,8 +214,8 @@ python scripts/run_all.py --quick
 #### Option 5: SAM Flatness Analysis (Modern Optimization)
 ```bash
 # Run SAM experiments with flatness analysis
-cd kaggle/mnist_publication
-python mnist_publication.py --seeds 1,2,3,4,5
+cd kaggle/mnist_benchmark
+python mnist_benchmark.py --seeds 1,2,3,4,5
 
 # Analyze flatness of different optimizers
 python analyze_flatness.py --results_dir results/ --output_dir flatness_analysis/
@@ -314,6 +314,52 @@ python scripts/demo_imdb_training.py \
 - `loss_landscape_1d.png`: 1D loss slice along random direction
 - `loss_landscape_2d_surface.png`: 2D loss surface around trained weights
 - `loss_landscape_2d_contour.png`: Contour map of loss landscape
+
+##  Visualization Scripts
+
+### `create_separate_plots.py` - Multi-Panel Analysis
+Creates 6 high-resolution PNG plots (300 DPI) from multi-seed experiment results:
+
+```bash
+python src/visualization/create_separate_plots.py \
+    --summary results/optimizer_summary.csv \
+    --stats results/statistical_comparisons.csv \
+    --detailed results/multiseed_detailed.csv \
+    --output plots
+```
+
+**Generated Plots:**
+1. **`01_final_loss_comparison.png`**: Final loss comparison with error bars
+2. **`02_distance_to_optimum.png`**: Distance to global optimum (1,1)
+3. **`03_convergence_rate.png`**: Success rate across seeds
+4. **`04_loss_distribution_boxplot.png`**: Loss distribution across seeds
+5. **`05_training_curves.png`**: Loss curves with confidence bands
+6. **`06_statistical_summary.png`**: T-test results and effect sizes
+
+### `visualize_flatness_comparison.py` - SAM Analysis
+Creates contour plots comparing loss landscapes of Adam vs SAM minima:
+
+```bash
+python visualize_flatness_comparison.py \
+    --adam_model path/to/adam_model.pt \
+    --sam_model path/to/sam_model.pt \
+    --output_dir plots/
+```
+
+**Features:**
+- Quantitative flatness metrics (variance, area ratios)
+- Controlled random directions for fair comparison
+- Publication-quality contour plots
+- Empirical evidence for SAM's flatter minima
+
+### `plot_eigenvalues.py` - Curvature Analysis
+Visualizes Hessian eigenvalue evolution during optimization:
+
+```bash
+python src/visualization/plot_eigenvalues.py
+```
+
+**Shows:** λ_min, λ_max, condition number over training iterations.
 
 ##  Understanding the Outputs
 

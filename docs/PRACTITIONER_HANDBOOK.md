@@ -41,8 +41,8 @@ A concise, actionable guide to pick, tune, and debug optimizers across tasks.
 - Use multi-seed; report means, std, and corrected p-values
 
 ## 6) Reproducible Templates
-- MNIST (Kaggle-ready): `kaggle/mnist_publication/`
-- CIFAR-10 (Kaggle-ready): `kaggle/cifar10_publication/`
+- MNIST (Kaggle-ready): `kaggle/mnist_benchmark/`
+- CIFAR-10 (Kaggle-ready): `kaggle/cifar10_benchmark/`
 - 2D dynamics: `src/experiments/run_experiment.py`
 
 ## 7) When to Switch Optimizers

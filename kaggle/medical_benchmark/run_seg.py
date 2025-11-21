@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Kaggle-ready 2D medical segmentation publication experiments.
+Kaggle-ready 2D medical segmentation benchmark experiments.
 - Loads 2D images and binary masks from a dataset under /kaggle/input/<name> (images/, masks/)
 - Trains a small 2D U-Net
 - Multi-seed comparison of Adam vs SGD+Momentum
@@ -254,7 +254,7 @@ def run_single(opt_name: str, seed: int, epochs: int, batch_size: int, data_root
     df = pd.DataFrame(history)
     df['elapsed_seconds'] = elapsed
     df['peak_gpu_mb'] = peak_mb
-    out = results_dir / f'NN_UNet2D_MedSeg_{opt_name}_seed{seed}_publication.csv'
+    out = results_dir / f'NN_UNet2D_MedSeg_{opt_name}_seed{seed}_benchmark.csv'
     df.to_csv(out, index=False)
     return out
 
@@ -262,8 +262,8 @@ def run_single(opt_name: str, seed: int, epochs: int, batch_size: int, data_root
 def compute_statistics(results_dir: str):
     import glob, re
     patterns = {
-        'Adam': f"{results_dir}/NN_UNet2D_MedSeg_Adam_*_publication.csv",
-        'SGD_Momentum': f"{results_dir}/NN_UNet2D_MedSeg_SGD_Momentum_*_publication.csv",
+        'Adam': f"{results_dir}/NN_UNet2D_MedSeg_Adam_*_benchmark.csv",
+        'SGD_Momentum': f"{results_dir}/NN_UNet2D_MedSeg_SGD_Momentum_*_benchmark.csv",
     }
     data = {}
     for opt, pat in patterns.items():
@@ -302,13 +302,13 @@ def compute_statistics(results_dir: str):
         })
     df = pd.DataFrame(rows)
     if not df.empty:
-        out = Path(results_dir) / 'medseg_statistical_comparisons_publication.csv'
+        out = Path(results_dir) / 'medseg_statistical_comparisons_benchmark.csv'
         df.to_csv(out, index=False)
         print(f"Saved: {out}")
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Medical Segmentation (2D U-Net) Kaggle Publication Suite')
+    parser = argparse.ArgumentParser(description='Medical Segmentation (2D U-Net) Kaggle Benchmark Suite')
     parser.add_argument('--data-root', type=str, default='')
     parser.add_argument('--seeds', type=str, default='1,2,3,4,5')
     parser.add_argument('--epochs', type=int, default=10)

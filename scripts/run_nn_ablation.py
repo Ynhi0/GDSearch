@@ -2,8 +2,8 @@
 """
 NN Ablation Study (Publication-ready)
 
-Aggregates multi-seed MNIST results produced by kaggle/mnist_publication/mnist_publication.py
-and generates publication-ready summaries and plots with error bars.
+Aggregates multi-seed MNIST results produced by kaggle/mnist_benchmark/mnist_benchmark.py
+and generates benchmark-ready summaries and plots with error bars.
 
 Outputs (default dirs results/ and plots/):
   - results/nn_ablation_summary.csv
@@ -28,11 +28,11 @@ import matplotlib.pyplot as plt
 
 
 OPTIMIZER_PATTERNS = {
-    'SGD': 'NN_SimpleMLP_MNIST_SGD_*_publication.csv',
-    'SGD_Momentum': 'NN_SimpleMLP_MNIST_SGD_Momentum_*_publication.csv',
-    'Adam': 'NN_SimpleMLP_MNIST_Adam_*_publication.csv',
-    'AdamW': 'NN_SimpleMLP_MNIST_AdamW_*_publication.csv',
-    'AMSGrad': 'NN_SimpleMLP_MNIST_AMSGrad_*_publication.csv',
+    'SGD': 'NN_SimpleMLP_MNIST_SGD_*_benchmark.csv',
+    'SGD_Momentum': 'NN_SimpleMLP_MNIST_SGD_Momentum_*_benchmark.csv',
+    'Adam': 'NN_SimpleMLP_MNIST_Adam_*_benchmark.csv',
+    'AdamW': 'NN_SimpleMLP_MNIST_AdamW_*_benchmark.csv',
+    'AMSGrad': 'NN_SimpleMLP_MNIST_AMSGrad_*_benchmark.csv',
 }
 
 
@@ -120,7 +120,7 @@ def main():
 
     df = build_summary(args.results_dir)
     if df.empty:
-        print("No runs found. Ensure MNIST publication experiments have been executed.")
+        print("No runs found. Ensure MNIST benchmark experiments have been executed.")
         return 1
     out_csv = Path(args.results_dir) / 'nn_ablation_summary.csv'
     df.to_csv(out_csv, index=False)

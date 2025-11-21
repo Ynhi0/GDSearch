@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Self-contained MNIST publication experiments for Kaggle.
+Self-contained MNIST benchmark experiments for Kaggle.
 - Trains SimpleMLP on MNIST
 - 5 optimizers × N seeds
 - Saves per-run CSVs and statistical comparison CSV
@@ -382,18 +382,18 @@ def run_single_experiment(optimizer_name: str, seed: int, lr: float, epochs: int
     # Attach run-level telemetry (constant per-row for convenience)
     df['elapsed_seconds'] = elapsed
     df['peak_gpu_mb'] = peak_mb
-    out_name = f"NN_SimpleMLP_MNIST_{optimizer_name}_lr{lr}_seed{seed}_publication.csv"
+    out_name = f"NN_SimpleMLP_MNIST_{optimizer_name}_lr{lr}_seed{seed}_benchmark.csv"
     out_path = results_dir / out_name
     df.to_csv(out_path, index=False)
 
     return df, elapsed
 
 
-def run_suite(seeds, epochs, batch_size, results_dir: str, *, resume: bool = False, ckpt_dir: str | None = None):
+def run_suite(seeds, epochs, batch_size, results_dir: str, *, resume: bool = False, ckpt_dir: str | None = None, optimizer_filter: list | None = None):
     results_dir = Path(results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    optimizers = [
+    all_optimizers = [
         ('SGD', 0.01),
         ('SGD_Momentum', 0.05),
         ('Adam', 0.001),
@@ -402,6 +402,12 @@ def run_suite(seeds, epochs, batch_size, results_dir: str, *, resume: bool = Fal
         ('SAM_SGD', 0.01),
         ('SAM_Adam', 0.001),
     ]
+    
+    # Filter optimizers if specified
+    if optimizer_filter:
+        optimizers = [(name, lr) for name, lr in all_optimizers if name in optimizer_filter]
+    else:
+        optimizers = all_optimizers
 
     total_runs = len(optimizers) * len(seeds)
     print(f"Total experiments to run: {total_runs}")
@@ -430,11 +436,11 @@ def compute_statistics(results_dir: str):
 
     # Collect files per optimizer
     patterns = {
-        'SGD': f"{results_dir}/NN_SimpleMLP_MNIST_SGD_*_publication.csv",
-        'SGD_Momentum': f"{results_dir}/NN_SimpleMLP_MNIST_SGD_Momentum_*_publication.csv",
-        'Adam': f"{results_dir}/NN_SimpleMLP_MNIST_Adam_*_publication.csv",
-        'AdamW': f"{results_dir}/NN_SimpleMLP_MNIST_AdamW_*_publication.csv",
-        'AMSGrad': f"{results_dir}/NN_SimpleMLP_MNIST_AMSGrad_*_publication.csv",
+        'SGD': f"{results_dir}/NN_SimpleMLP_MNIST_SGD_*_benchmark.csv",
+        'SGD_Momentum': f"{results_dir}/NN_SimpleMLP_MNIST_SGD_Momentum_*_benchmark.csv",
+        'Adam': f"{results_dir}/NN_SimpleMLP_MNIST_Adam_*_benchmark.csv",
+        'AdamW': f"{results_dir}/NN_SimpleMLP_MNIST_AdamW_*_benchmark.csv",
+        'AMSGrad': f"{results_dir}/NN_SimpleMLP_MNIST_AMSGrad_*_benchmark.csv",
     }
 
     # Extract final test_loss per seed
@@ -520,14 +526,14 @@ def compute_statistics(results_dir: str):
             break
     df['Significant (Holm-Bonferroni)'] = holm_sig
 
-    out = Path(results_dir) / 'mnist_statistical_comparisons_publication.csv'
+    out = Path(results_dir) / 'mnist_statistical_comparisons_benchmark.csv'
     df.to_csv(out, index=False)
     print(f"Saved statistical comparisons to: {out}")
     return df
 
 
 def main():
-    parser = argparse.ArgumentParser(description='MNIST Publication Experiments (Kaggle-ready)')
+    parser = argparse.ArgumentParser(description='MNIST Benchmark Experiments (Kaggle-ready)')
     parser.add_argument('--seeds', type=str, default='1,2,3,4,5,6,7,8,9,10', help='comma-separated seeds')
     parser.add_argument('--epochs', type=int, default=10)
     parser.add_argument('--batch-size', type=int, default=128)
@@ -548,18 +554,108 @@ def main():
     batch_size = args.batch_size
     results_dir = args.results_dir
 
+def main():
+    parser = argparse.ArgumentParser(description='MNIST Benchmark Experiments (Kaggle-ready)')
+    parser.add_argument('--seeds', type=str, default='1,2,3,4,5,6,7,8,9,10', help='comma-separated seeds')
+    parser.add_argument('--epochs', type=int, default=10)
+    parser.add_argument('--batch-size', type=int, default=128)
+    parser.add_argument('--batch-size-sweep', type=str, default=None, 
+                       help='Comma-separated batch sizes for scalability study (e.g., "64,256,1024")')
+    parser.add_argument('--optimizer-filter', type=str, default=None,
+                       help='Comma-separated optimizers to run (e.g., "Adam,SAM_Adam")')
+    parser.add_argument('--results-dir', type=str, default='results')
+    parser.add_argument('--quick', action='store_true', help='quick run: seeds=1..3, epochs=3')
+    parser.add_argument('--resume', action='store_true', help='resume from checkpoints if available')
+    parser.add_argument('--ckpt-dir', type=str, default='checkpoints_mnist')
+    # Use parse_known_args to ignore Jupyter/Colab/Kaggle hidden args like '-f <kernel.json>'
+    args, _unknown = parser.parse_known_args()
+
+    if args.quick:
+        seeds = [1, 2, 3]
+        epochs = 3
+    else:
+        seeds = [int(s.strip()) for s in args.seeds.split(',') if s.strip()]
+        epochs = args.epochs
+
+    # Parse batch size sweep
+    if args.batch_size_sweep:
+        batch_sizes = [int(bs.strip()) for bs in args.batch_size_sweep.split(',') if bs.strip()]
+        print(f"🔬 Batch Size Scalability Study: Testing batch sizes {batch_sizes}")
+    else:
+        batch_sizes = [args.batch_size]
+    
+    # Parse optimizer filter
+    if args.optimizer_filter:
+        optimizer_filter = [opt.strip() for opt in args.optimizer_filter.split(',') if opt.strip()]
+        print(f"🎯 Optimizer Filter: Running only {optimizer_filter}")
+    else:
+        optimizer_filter = None
+
+    results_dir = args.results_dir
+
     print("\n========================================")
-    print(" MNIST Publication Experiments (Kaggle) ")
+    if len(batch_sizes) > 1:
+        print(" MNIST Batch Size Scalability Study ")
+    else:
+        print(" MNIST Benchmark Experiments (Kaggle) ")
     print("========================================")
     print(f"Device: {'cuda' if torch.cuda.is_available() else 'cpu'}")
     print(f"Seeds: {seeds}")
     print(f"Epochs per run: {epochs}")
-    print(f"Batch size: {batch_size}")
+    print(f"Batch sizes: {batch_sizes}")
+    if optimizer_filter:
+        print(f"Optimizers: {optimizer_filter}")
     print(f"Results dir: {results_dir}")
     print("========================================\n")
 
-    run_suite(seeds, epochs, batch_size, results_dir, resume=args.resume, ckpt_dir=args.ckpt_dir)
-    compute_statistics(results_dir)
+    # Run experiments for each batch size
+    all_results = []
+    for batch_size in batch_sizes:
+        print(f"\n🔬 Testing Batch Size: {batch_size}")
+        print("=" * 50)
+        
+        batch_results_dir = f"{results_dir}_bs{batch_size}"
+        run_suite(seeds, epochs, batch_size, batch_results_dir, 
+                 resume=args.resume, ckpt_dir=args.ckpt_dir, 
+                 optimizer_filter=optimizer_filter)
+        
+        # Store results for summary
+        all_results.append({
+            'batch_size': batch_size,
+            'results_dir': batch_results_dir
+        })
+    
+    # Print scalability summary if multiple batch sizes
+    if len(batch_sizes) > 1:
+        print("\n" + "=" * 80)
+        print("📊 BATCH SIZE SCALABILITY SUMMARY")
+        print("=" * 80)
+        print("Batch Size | Generalization Gap | Notes")
+        print("-----------|-------------------|-------")
+        
+        for result in all_results:
+            bs = result['batch_size']
+            # Try to read the statistical comparison file
+            stats_file = os.path.join(result['results_dir'], 'mnist_statistical_comparisons_benchmark.csv')
+            if os.path.exists(stats_file):
+                try:
+                    df = pd.read_csv(stats_file)
+                    # Calculate average generalization gap (test_loss - train_loss)
+                    adam_rows = df[df['optimizer_1'] == 'Adam']
+                    sam_rows = df[df['optimizer_1'] == 'SAM_Adam']
+                    
+                    if not adam_rows.empty:
+                        adam_gap = adam_rows['mean_diff'].mean()
+                        print(">4d")
+                    else:
+                        print(">4d")
+                except Exception as e:
+                    print(">4d")
+            else:
+                print(">4d")
+        
+        print("\n💾 Individual results saved in respective directories")
+        print("   Use analyze_batch_scalability.py to generate detailed plots")
 
 
 if __name__ == '__main__':

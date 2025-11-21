@@ -41,8 +41,8 @@ def load_model_and_results(results_dir: Path, model_class: nn.Module) -> Dict[st
     """
     results = {}
 
-    # Find all publication CSV files
-    csv_files = list(results_dir.glob("*_publication.csv"))
+    # Find all benchmark CSV files
+    csv_files = list(results_dir.glob("*_benchmark.csv"))
 
     for csv_file in csv_files:
         # Parse filename to extract optimizer info
@@ -172,7 +172,7 @@ def analyze_optimizer_flatness(results: Dict[str, Tuple[nn.Module, pd.DataFrame]
 
 def create_flatness_comparison_plot(analysis_df: pd.DataFrame, output_dir: Path):
     """
-    Create publication-quality plots comparing optimizer flatness.
+    Create benchmark-quality plots comparing optimizer flatness.
 
     Args:
         analysis_df: DataFrame from analyze_optimizer_flatness
@@ -320,7 +320,7 @@ def statistical_comparison_flatness(analysis_df: pd.DataFrame, output_dir: Path)
 def main():
     parser = argparse.ArgumentParser(description='Analyze optimizer flatness characteristics')
     parser.add_argument('--results_dir', type=str, required=True,
-                       help='Directory containing publication CSV results')
+                       help='Directory containing benchmark CSV results')
     parser.add_argument('--output_dir', type=str, default='./flatness_analysis',
                        help='Directory to save analysis results')
     parser.add_argument('--model_class', type=str, default='SimpleMLP',

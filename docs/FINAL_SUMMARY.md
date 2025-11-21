@@ -17,7 +17,7 @@
 | 5 | Phân tích ảnh hưởng β, β1, β2 | ✅ DONE | Hyperparameter sweeps |
 | 6 | Multi-seed experiments | ✅ DONE | 5 seeds với variance |
 | 7 | Statistical analysis | ✅ DONE | T-tests, p-values, effect sizes |
-| 8 | Visualization | ✅ DONE | 20+ plots publication-ready |
+| 8 | Visualization | ✅ DONE | 20+ plots benchmark-ready |
 | 9 | Documentation | ✅ DONE | 12 markdown files |
 | 10 | Reproducibility | ✅ DONE | 177 unit tests passing |
 
@@ -208,7 +208,7 @@ ls plots/
 - ✅ **5 seeds** for statistical reliability
 - ✅ **4 optimizers** compared
 - ✅ **6 pairwise comparisons** with t-tests
-- ✅ **20+ visualizations** publication-ready
+- ✅ **20+ visualizations** benchmark-ready
 
 ---
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Run publication-quality MNIST experiments with multiple seeds.
+Run benchmark-quality MNIST experiments with multiple seeds.
 
-This script runs comprehensive MNIST experiments for scientific publication:
+This script runs comprehensive MNIST experiments for scientific benchmark:
 - 10 seeds per optimizer for robust statistics
 - 5 optimizers: SGD, SGD+Momentum, Adam, AdamW, AMSGrad
 - Statistical analysis with paired tests and Holm-Bonferroni correction
@@ -29,7 +29,7 @@ def run_mnist_experiments(seeds=None, results_dir='results'):
         results_dir: Directory to save results
     """
     if seeds is None:
-        seeds = list(range(1, 11))  # 10 seeds for publication
+        seeds = list(range(1, 11))  # 10 seeds for benchmark
     
     print("=" * 80)
     print("MNIST EXPERIMENTS - PUBLICATION QUALITY")
@@ -44,33 +44,33 @@ def run_mnist_experiments(seeds=None, results_dir='results'):
             'name': 'SGD',
             'optimizer': 'SGD',
             'lr': 0.01,
-            'tag': 'publication'
+            'tag': 'benchmark'
         },
         {
             'name': 'SGD_Momentum',
             'optimizer': 'SGD_Momentum',
             'lr': 0.05,
             'momentum': 0.9,
-            'tag': 'publication'
+            'tag': 'benchmark'
         },
         {
             'name': 'Adam',
             'optimizer': 'Adam',
             'lr': 0.001,
-            'tag': 'publication'
+            'tag': 'benchmark'
         },
         {
             'name': 'AdamW',
             'optimizer': 'AdamW',
             'lr': 0.001,
             'weight_decay': 0.0001,
-            'tag': 'publication'
+            'tag': 'benchmark'
         },
         {
             'name': 'AMSGrad',
             'optimizer': 'AMSGrad',
             'lr': 0.001,
-            'tag': 'publication'
+            'tag': 'benchmark'
         }
     ]
     
@@ -122,7 +122,7 @@ def run_mnist_experiments(seeds=None, results_dir='results'):
         for seed in seeds:
             opt_name = opt_config['name']
             lr = opt_config['lr']
-            filename = f"NN_SimpleMLP_MNIST_{opt_name}_lr{lr}_seed{seed}_publication.csv"
+            filename = f"NN_SimpleMLP_MNIST_{opt_name}_lr{lr}_seed{seed}_benchmark.csv"
             expected_files.append(filename)
     
     found_files = []
@@ -173,8 +173,8 @@ def run_statistical_comparison(results_dir='results'):
         try:
             # Find result files
             import glob
-            pattern_a = f"{results_dir}/NN_SimpleMLP_MNIST_{opt_a}_*_publication.csv"
-            pattern_b = f"{results_dir}/NN_SimpleMLP_MNIST_{opt_b}_*_publication.csv"
+            pattern_a = f"{results_dir}/NN_SimpleMLP_MNIST_{opt_a}_*_benchmark.csv"
+            pattern_b = f"{results_dir}/NN_SimpleMLP_MNIST_{opt_b}_*_benchmark.csv"
             
             files_a = glob.glob(pattern_a)
             files_b = glob.glob(pattern_b)
@@ -304,7 +304,7 @@ def run_statistical_comparison(results_dir='results'):
     df['Significant (Holm-Bonferroni)'] = corrected_sig
     
     # Save results
-    output_path = f"{results_dir}/mnist_statistical_comparisons_publication.csv"
+    output_path = f"{results_dir}/mnist_statistical_comparisons_benchmark.csv"
     df.to_csv(output_path, index=False)
     
     print(f"\n✅ Statistical analysis saved to: {output_path}")
@@ -317,7 +317,7 @@ def main():
     """Main execution."""
     import argparse
     
-    parser = argparse.ArgumentParser(description='Run publication-quality MNIST experiments')
+    parser = argparse.ArgumentParser(description='Run benchmark-quality MNIST experiments')
     parser.add_argument('--seeds', type=str, default='1,2,3,4,5,6,7,8,9,10',
                         help='Comma-separated list of seeds (default: 1-10)')
     parser.add_argument('--results-dir', type=str, default='results',
@@ -331,7 +331,7 @@ def main():
     seeds = [int(s.strip()) for s in args.seeds.split(',')]
     
     print("\n" + "=" * 80)
-    print(" MNIST PUBLICATION EXPERIMENTS ")
+    print(" MNIST BENCHMARK EXPERIMENTS ")
     print("=" * 80)
     print(f"\nSeeds: {seeds}")
     print(f"Results directory: {args.results_dir}")
@@ -346,12 +346,12 @@ def main():
     run_statistical_comparison(results_dir=args.results_dir)
     
     print("\n" + "=" * 80)
-    print("✅ MNIST PUBLICATION EXPERIMENTS COMPLETE")
+    print("✅ MNIST BENCHMARK EXPERIMENTS COMPLETE")
     print("=" * 80)
     print("\nNext steps:")
     print("1. Run: python scripts/generate_latex_tables.py")
     print("   → Generates LaTeX tables and Excel files")
-    print("2. Check: results/mnist_statistical_comparisons_publication.csv")
+    print("2. Check: results/mnist_statistical_comparisons_benchmark.csv")
     print("   → Statistical comparison results")
     print("3. Review: results/RESULTS_README.md")
     print("   → Guide for using results in your paper")

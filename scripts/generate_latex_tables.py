@@ -571,7 +571,7 @@ def main():
     print("="*80)
     
     # 1. MNIST comparison table
-    mnist_stats = f"{results_dir}/mnist_statistical_comparisons_publication.csv"
+    mnist_stats = f"{results_dir}/mnist_statistical_comparisons_benchmark.csv"
     if Path(mnist_stats).exists():
         print("\n📄 Generating MNIST comparison table...")
         latex = generate_mnist_comparison_table(

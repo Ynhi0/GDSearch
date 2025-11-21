@@ -336,5 +336,5 @@ pytest tests/test_optimizers.py -v
 **Chú thích:**
 - Tất cả kết quả đã được **verify** bằng unit tests
 - Statistical analysis tuân theo **best practices**
-- Visualization **publication-ready**
+- Visualization **benchmark-ready**
 - Code **fully reproducible**

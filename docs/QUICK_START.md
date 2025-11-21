@@ -43,7 +43,7 @@ AdamW vs SGD+Momentum:
 - `plot_final_metric_comparison()` - bar charts with error bars
 ## Publication add-ons (MNIST)
 
-- After running the Kaggle MNIST suite (see `kaggle/mnist_publication/README.md`), aggregate and plot NN ablation:
+- After running the Kaggle MNIST suite (see `kaggle/mnist_benchmark/README.md`), aggregate and plot NN ablation:
     - Summaries: `results/nn_ablation_summary.csv`
     - Plots: `plots/nn_ablation_accuracy.png` and `plots/nn_ablation_loss.png`
     - Script: `scripts/run_nn_ablation.py`

@@ -548,7 +548,7 @@ This document outlines known limitations, assumptions, and areas for future impr
 - `plot_multi_optimizer_comparison()`: 4-panel comparison dashboard
 
 **Impact**: 
-- Professional, publication-ready interactive figures
+- Professional, benchmark-ready interactive figures
 - Easy exploration of loss landscapes
 - Engaging presentations and demonstrations
 - Web-based sharing without Python dependencies

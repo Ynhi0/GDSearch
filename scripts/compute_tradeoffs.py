@@ -5,7 +5,7 @@ Compute and visualize trade-offs:
 - Accuracy vs Peak GPU Memory
 
 Reads result CSVs in `results/` produced by Kaggle-ready scripts or internal runners.
-Outputs summary CSVs and publication-ready plots in `plots/`.
+Outputs summary CSVs and benchmark-ready plots in `plots/`.
 """
 from __future__ import annotations
 
