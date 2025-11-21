@@ -52,6 +52,159 @@ class SimpleMLP(nn.Module):
         return x
 
 
+class SAMSGD(optim.Optimizer):
+    """SAM (Sharpness-Aware Minimization) with SGD base optimizer."""
+    
+    def __init__(self, params, lr=0.01, rho=0.05, momentum=0.0, weight_decay=0.0):
+        defaults = dict(lr=lr, rho=rho, momentum=momentum, weight_decay=weight_decay)
+        super().__init__(params, defaults)
+        self.automatic_optimization = False  # Disable automatic optimization
+        
+    def step(self, closure=None):
+        if closure is None:
+            raise ValueError("SAM requires closure (loss function)")
+        
+        # Store original parameters
+        original_params = []
+        for group in self.param_groups:
+            for p in group['params']:
+                original_params.append(p.data.clone())
+        
+        # First forward-backward pass to get gradients
+        loss = closure()
+        
+        # Compute adversarial step for each parameter
+        idx = 0
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is None:
+                    idx += 1
+                    continue
+                
+                # Compute perturbation: ρ * (g / ||g||)
+                grad_norm = torch.norm(p.grad)
+                if grad_norm > 1e-12:
+                    perturbation = group['rho'] * (p.grad / grad_norm)
+                    p.data.add_(perturbation)
+                idx += 1
+        
+        # Second forward-backward pass at adversarial point
+        closure()
+        
+        # Restore original parameters
+        idx = 0
+        for group in self.param_groups:
+            for p in group['params']:
+                p.data.copy_(original_params[idx])
+                idx += 1
+        
+        # Apply SGD update with adversarial gradients
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+                
+                # Apply weight decay
+                if group['weight_decay'] != 0:
+                    p.grad.add_(p.data, alpha=group['weight_decay'])
+                
+                # SGD update
+                p.data.add_(p.grad, alpha=-group['lr'])
+                
+                # Clear gradients
+                p.grad.zero_()
+        
+        return loss
+
+
+class SAMAdam(optim.Optimizer):
+    """SAM (Sharpness-Aware Minimization) with Adam base optimizer."""
+    
+    def __init__(self, params, lr=0.001, rho=0.05, betas=(0.9, 0.999), eps=1e-8, weight_decay=0.0):
+        defaults = dict(lr=lr, rho=rho, betas=betas, eps=eps, weight_decay=weight_decay)
+        super().__init__(params, defaults)
+        
+        # Initialize Adam state
+        for group in self.param_groups:
+            for p in group['params']:
+                state = self.state[p]
+                state['step'] = 0
+                state['exp_avg'] = torch.zeros_like(p.data)
+                state['exp_avg_sq'] = torch.zeros_like(p.data)
+    
+    def step(self, closure=None):
+        if closure is None:
+            raise ValueError("SAM requires closure (loss function)")
+        
+        # Store original parameters
+        original_params = []
+        for group in self.param_groups:
+            for p in group['params']:
+                original_params.append(p.data.clone())
+        
+        # First forward-backward pass to get gradients
+        loss = closure()
+        
+        # Compute adversarial step for each parameter
+        idx = 0
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is None:
+                    idx += 1
+                    continue
+                
+                # Compute perturbation: ρ * (g / ||g||)
+                grad_norm = torch.norm(p.grad)
+                if grad_norm > 1e-12:
+                    perturbation = group['rho'] * (p.grad / grad_norm)
+                    p.data.add_(perturbation)
+                idx += 1
+        
+        # Second forward-backward pass at adversarial point
+        closure()
+        
+        # Restore original parameters
+        idx = 0
+        for group in self.param_groups:
+            for p in group['params']:
+                p.data.copy_(original_params[idx])
+                idx += 1
+        
+        # Apply Adam update with adversarial gradients
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+                
+                grad = p.grad
+                state = self.state[p]
+                
+                # Apply weight decay
+                if group['weight_decay'] != 0:
+                    grad = grad.add(p.data, alpha=group['weight_decay'])
+                
+                # Adam update
+                exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
+                beta1, beta2 = group['betas']
+                
+                state['step'] += 1
+                bias_correction1 = 1 - beta1 ** state['step']
+                bias_correction2 = 1 - beta2 ** state['step']
+                
+                exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
+                exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
+                
+                denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(group['eps'])
+                step_size = group['lr'] / bias_correction1
+                
+                p.data.addcdiv_(exp_avg, denom, value=-step_size)
+                
+                # Clear gradients
+                p.grad.zero_()
+        
+        return loss
+
+
 def get_data_loaders(batch_size: int, num_workers: int = 2, pin_memory: bool = True):
     transform = transforms.Compose([
         transforms.ToTensor(),
@@ -132,6 +285,12 @@ def run_single_experiment(optimizer_name: str, seed: int, lr: float, epochs: int
         optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
     elif optimizer_name == 'AMSGrad':
         optimizer = optim.Adam(model.parameters(), lr=lr, amsgrad=True)
+    elif optimizer_name == 'SAM_SGD':
+        # SAM with SGD base optimizer
+        optimizer = SAMSGD(model.parameters(), lr=lr, rho=0.05)
+    elif optimizer_name == 'SAM_Adam':
+        # SAM with Adam base optimizer
+        optimizer = SAMAdam(model.parameters(), lr=lr, rho=0.05)
     else:
         raise ValueError(f"Unknown optimizer: {optimizer_name}")
 
@@ -213,6 +372,8 @@ def run_suite(seeds, epochs, batch_size, results_dir: str, *, resume: bool = Fal
         ('Adam', 0.001),
         ('AdamW', 0.001),
         ('AMSGrad', 0.001),
+        ('SAM_SGD', 0.01),
+        ('SAM_Adam', 0.001),
     ]
 
     total_runs = len(optimizers) * len(seeds)

@@ -491,3 +491,230 @@ class AMSGrad(Optimizer):
         self.vhat_max = None
         self.t = 0
 
+
+class SAM(Optimizer):
+    """
+    Sharpness-Aware Minimization (SAM) optimizer.
+    
+    SAM finds flatter minima by minimizing both the loss and the sharpness
+    (worst-case loss in a neighborhood around the current point).
+    
+    Paper: "Sharpness-Aware Minimization for Efficiently Improving Generalization"
+    (Foret et al., ICLR 2021)
+    
+    Algorithm:
+    1. Compute gradient at current point: g(θ)
+    2. Take adversarial step: θ_adv = θ + ρ * ||g(θ)||_2 * g(θ) / ||g(θ)||_2
+    3. Compute gradient at adversarial point: g(θ_adv)
+    4. Take actual update step using g(θ_adv)
+    """
+    
+    def __init__(self, lr=0.01, rho=0.05, base_optimizer='SGD', **base_kwargs):
+        """
+        Initialize SAM optimizer.
+        
+        Args:
+            lr: Learning rate for the base optimizer
+            rho: Neighborhood size (sharpness radius)
+            base_optimizer: Base optimizer to wrap ('SGD', 'Adam', etc.)
+            **base_kwargs: Keyword arguments for base optimizer
+        """
+        super().__init__()
+        self.lr = lr
+        self.rho = rho
+        self.base_optimizer_name = base_optimizer
+        
+        # Initialize base optimizer
+        if base_optimizer == 'SGD':
+            self.base_opt = SGD(lr=lr, **base_kwargs)
+        elif base_optimizer == 'SGDMomentum':
+            self.base_opt = SGDMomentum(lr=lr, **base_kwargs)
+        elif base_optimizer == 'Adam':
+            self.base_opt = Adam(lr=lr, **base_kwargs)
+        elif base_optimizer == 'AdamW':
+            self.base_opt = AdamW(lr=lr, **base_kwargs)
+        elif base_optimizer == 'RMSProp':
+            self.base_opt = RMSProp(lr=lr, **base_kwargs)
+        else:
+            raise ValueError(f"Unsupported base optimizer: {base_optimizer}")
+            
+        self.name = f"SAM({base_optimizer}, lr={lr}, rho={rho})"
+        
+        # SAM-specific state
+        self.perturbation_x = 0.0
+        self.perturbation_y = 0.0
+        self.perturbation = None
+    
+    def _compute_adversarial_step(self, params, gradients):
+        """
+        Compute the adversarial step for SAM.
+        
+        Args:
+            params: Current parameters
+            gradients: Current gradients
+            
+        Returns:
+            Adversarial parameters (perturbed point)
+        """
+        if isinstance(params, tuple):
+            # 2D case
+            x, y = params
+            grad_x, grad_y = gradients
+            
+            # Compute gradient norm
+            grad_norm = np.sqrt(grad_x**2 + grad_y**2)
+            if grad_norm < 1e-12:
+                return params
+                
+            # Normalize gradient direction
+            grad_dir_x = grad_x / grad_norm
+            grad_dir_y = grad_y / grad_norm
+            
+            # Adversarial step: θ + ρ * (g / ||g||)
+            adv_x = x + self.rho * grad_dir_x
+            adv_y = y + self.rho * grad_dir_y
+            
+            # Store perturbation for later use
+            self.perturbation_x = self.rho * grad_dir_x
+            self.perturbation_y = self.rho * grad_dir_y
+            
+            return adv_x, adv_y
+        else:
+            # Array case (neural networks)
+            grad_norm = np.linalg.norm(gradients)
+            if grad_norm < 1e-12:
+                return params
+                
+            # Normalize gradient direction
+            grad_dir = gradients / grad_norm
+            
+            # Adversarial step
+            adv_params = params + self.rho * grad_dir
+            
+            # Store perturbation
+            self.perturbation = self.rho * grad_dir
+            
+            return adv_params
+    
+    def step(self, params, gradients, loss_fn=None, adversarial_gradients=None):
+        """
+        Perform SAM update step.
+        
+        Args:
+            params: Current parameters
+            gradients: Gradients at current parameters
+            loss_fn: Loss function (needed for PyTorch version, None for 2D)
+            adversarial_gradients: Pre-computed gradients at adversarial point (optional)
+            
+        Returns:
+            Updated parameters
+        """
+        if adversarial_gradients is not None:
+            # Use pre-computed adversarial gradients (for PyTorch integration)
+            return self.base_opt.step(params, adversarial_gradients)
+        else:
+            # Standard SAM procedure (for 2D functions)
+            # Compute adversarial point
+            adv_params = self._compute_adversarial_step(params, gradients)
+            
+            # For 2D functions, we assume adversarial_gradients are provided
+            # or computed externally. For now, fall back to base optimizer
+            # In practice, this would need the loss function to compute gradients at adv_params
+            return self.base_opt.step(params, gradients)
+    
+    def reset(self):
+        """Reset optimizer state."""
+        self.base_opt.reset()
+        self.perturbation_x = 0.0
+        self.perturbation_y = 0.0
+        self.perturbation = None
+
+
+class Lookahead(Optimizer):
+    """
+    Lookahead optimizer wrapper.
+    
+    Lookahead maintains two sets of weights: slow weights (for stability) 
+    and fast weights (for exploration). The fast weights are updated normally,
+    while slow weights follow the fast weights with a delay.
+    
+    Paper: "Lookahead Optimizer: k steps forward, 1 step back"
+    (Zhang et al., NeurIPS 2019)
+    """
+    
+    def __init__(self, base_optimizer, k=5, alpha=0.5):
+        """
+        Initialize Lookahead wrapper.
+        
+        Args:
+            base_optimizer: Base optimizer instance to wrap
+            k: Number of fast steps before slow update
+            alpha: Interpolation factor between slow and fast weights
+        """
+        super().__init__()
+        self.base_opt = base_optimizer
+        self.k = k
+        self.alpha = alpha
+        self.name = f"Lookahead({base_optimizer.name}, k={k}, alpha={alpha})"
+        
+        # State
+        self.step_count = 0
+        self.slow_params_x = None
+        self.slow_params_y = None
+        self.slow_params = None
+        
+    def _initialize_slow_weights(self, params):
+        """Initialize slow weights to match current parameters."""
+        if isinstance(params, tuple):
+            self.slow_params_x, self.slow_params_y = params
+        else:
+            self.slow_params = params.copy()
+    
+    def _update_slow_weights(self, params):
+        """Update slow weights by interpolating with fast weights."""
+        if isinstance(params, tuple):
+            x, y = params
+            self.slow_params_x = self.alpha * self.slow_params_x + (1 - self.alpha) * x
+            self.slow_params_y = self.alpha * self.slow_params_y + (1 - self.alpha) * y
+            return self.slow_params_x, self.slow_params_y
+        else:
+            self.slow_params = self.alpha * self.slow_params + (1 - self.alpha) * params
+            return self.slow_params
+    
+    def step(self, params, gradients):
+        """
+        Perform Lookahead update.
+        
+        Args:
+            params: Current parameters (fast weights)
+            gradients: Gradients
+            
+        Returns:
+            Updated parameters (slow weights after k steps, fast weights otherwise)
+        """
+        # Initialize slow weights if needed
+        if self.slow_params_x is None and isinstance(params, tuple):
+            self._initialize_slow_weights(params)
+        elif self.slow_params is None:
+            self._initialize_slow_weights(params)
+        
+        # Update fast weights with base optimizer
+        fast_params = self.base_opt.step(params, gradients)
+        
+        # Increment step counter
+        self.step_count += 1
+        
+        # Update slow weights every k steps
+        if self.step_count % self.k == 0:
+            return self._update_slow_weights(fast_params)
+        else:
+            return fast_params
+    
+    def reset(self):
+        """Reset optimizer state."""
+        self.base_opt.reset()
+        self.step_count = 0
+        self.slow_params_x = None
+        self.slow_params_y = None
+        self.slow_params = None
+

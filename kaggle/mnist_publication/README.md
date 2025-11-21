@@ -1,12 +1,21 @@
 # Kaggle MNIST Publication Experiments
 
-This folder contains a fully self-contained MNIST experiment suite designed for Kaggle Notebooks. It runs multiple seeds across 5 optimizers and produces publication-ready CSV outputs and statistical comparisons.
+This folder contains a fully self-contained MNIST experiment suite designed for Kaggle Notebooks. It runs multiple seeds across 7 optimizers and produces publication-ready CSV outputs and statistical comparisons.
 
 ## What it does
 - Trains SimpleMLP on MNIST for 10 epochs per run
-- Runs 5 optimizers × 10 seeds = 50 runs (configurable)
+- Runs 7 optimizers × 10 seeds = 70 runs (configurable)
 - Saves per-run CSVs and a statistical comparison CSV
 - Uses paired tests when seeds match + Holm-Bonferroni correction
+
+## Optimizers
+- SGD (lr=0.01)
+- SGD_Momentum (lr=0.05, momentum=0.9)
+- Adam (lr=0.001)
+- AdamW (lr=0.001, weight_decay=1e-4)
+- AMSGrad (lr=0.001, amsgrad=True)
+- SAM_SGD (lr=0.01, rho=0.05) - Sharpness-Aware Minimization with SGD base
+- SAM_Adam (lr=0.001, rho=0.05) - Sharpness-Aware Minimization with Adam base
 
 ## Files
 - `mnist_publication.py` — all-in-one script (self-contained; no project imports)
