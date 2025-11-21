@@ -112,7 +112,22 @@ def compute_flatness_metrics(history_df: pd.DataFrame) -> Dict[str, float]:
     # 4. Training efficiency (how quickly it reaches low loss)
     min_loss = history_df['train_loss'].min()
     epochs_to_converge = (history_df['train_loss'] - min_loss).abs().idxmin()
-    metrics['convergence_speed'] = epochs_to_converge
+    metrics['convergence_speed_epochs'] = epochs_to_converge
+
+    # 5. Computational cost (wall-clock time to convergence)
+    # SAM requires 2x forward/backward passes per step, so time metrics are crucial
+    if 'epoch_time' in history_df.columns:
+        # If timing data is available, compute time-based metrics
+        cumulative_time = history_df['epoch_time'].cumsum()
+        time_to_converge = cumulative_time.iloc[int(epochs_to_converge)]
+        metrics['time_to_convergence'] = time_to_converge
+        metrics['avg_epoch_time'] = history_df['epoch_time'].mean()
+        metrics['total_training_time'] = cumulative_time.iloc[-1]
+    else:
+        # Fallback: estimate based on epochs (less accurate for SAM vs SGD comparison)
+        metrics['time_to_convergence'] = float('nan')
+        metrics['avg_epoch_time'] = float('nan')
+        metrics['total_training_time'] = float('nan')
 
     return metrics
 
@@ -125,6 +140,13 @@ def analyze_optimizer_flatness(results: Dict[str, Tuple[nn.Module, pd.DataFrame]
     SAMWrapper implementation which correctly computes adversarial gradients
     via closure functions. The base SAM class in optimizers.py is for 2D
     visualization only.
+    
+    Computational Cost Analysis:
+    - SAM requires 2 forward/backward passes per optimization step
+    - This makes SAM ~2x slower in wall-clock time compared to SGD/Adam
+    - However, SAM often converges in fewer epochs and finds flatter minima
+    - The trade-off analysis shows: "SAM takes 2x time but achieves X% better accuracy
+      with Y% flatter minima, making it worthwhile for generalization-critical tasks"
 
     Args:
         results: Dictionary from load_model_and_results
