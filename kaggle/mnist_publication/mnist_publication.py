@@ -230,11 +230,32 @@ def train_one_epoch(model, loader, optimizer, device):
 
     for data, target in loader:
         data, target = data.to(device), target.to(device)
-        optimizer.zero_grad()
-        output = model(data)
-        loss = F.cross_entropy(output, target)
-        loss.backward()
-        optimizer.step()
+        
+        # Check if optimizer is SAM (requires closure)
+        is_sam = isinstance(optimizer, (SAMSGD, SAMAdam))
+        
+        if is_sam:
+            # SAM requires closure for adversarial gradient computation
+            def closure():
+                optimizer.zero_grad()
+                output = model(data)
+                loss = F.cross_entropy(output, target)
+                loss.backward()
+                return loss
+            
+            # SAM handles zero_grad internally in step()
+            loss = optimizer.step(closure)
+            
+            # Re-compute output for accuracy (since SAM modifies parameters during step)
+            with torch.no_grad():
+                output = model(data)
+        else:
+            # Standard optimizers (SGD, Adam, etc.)
+            optimizer.zero_grad()
+            output = model(data)
+            loss = F.cross_entropy(output, target)
+            loss.backward()
+            optimizer.step()
 
         total_loss += loss.item() * data.size(0)
         pred = output.argmax(dim=1)
@@ -321,14 +342,20 @@ def run_single_experiment(optimizer_name: str, seed: int, lr: float, epochs: int
         torch.cuda.reset_peak_memory_stats()
     start = time.time()
     for epoch in range(start_epoch, epochs + 1):
+        epoch_start_time = time.time()  # Record epoch start time
+        
         train_loss, train_acc = train_one_epoch(model, train_loader, optimizer, device)
         test_loss, test_acc = evaluate(model, test_loader, device)
+        
+        epoch_duration = time.time() - epoch_start_time  # Calculate epoch duration
+        
         history.append({
             'epoch': epoch,
             'train_loss': train_loss,
             'train_acc': train_acc,
             'test_loss': test_loss,
             'test_acc': test_acc,
+            'epoch_time': epoch_duration,  # Add timing data for computational cost analysis
         })
         tqdm.write(f"Seed {seed} | {optimizer_name} | Epoch {epoch}/{epochs} | "
                    f"train_loss={train_loss:.4f}, train_acc={train_acc:.2%}, test_loss={test_loss:.4f}, test_acc={test_acc:.2%}")
