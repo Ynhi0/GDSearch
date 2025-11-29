@@ -31,7 +31,6 @@ import argparse
 import logging
 import json
 import psutil
-import GPUtil
 from contextlib import contextmanager
 from typing import Dict, List, Optional, Any
 import traceback
@@ -316,6 +315,7 @@ def get_system_info() -> Dict[str, Any]:
 
     # Try to get GPU utilization
     try:
+        import GPUtil
         gpus = GPUtil.getGPUs()
         if gpus:
             info['gpu_utilization'] = gpus[0].load * 100
@@ -2711,21 +2711,93 @@ def create_kaggle_notebook():
                     "# Download datasets\n",
                     "import os\n",
                     "import torchvision\n",
+                    "import urllib.request\n",
+                    "import tarfile\n",
+                    "import gzip\n",
+                    "import shutil\n",
                     "\n",
                     "# Create data directory\n",
                     "os.makedirs('./data', exist_ok=True)\n",
+                    "os.makedirs('./data/MNIST/raw', exist_ok=True)\n",
+                    "os.makedirs('./data/cifar-10-batches-py', exist_ok=True)\n",
                     "\n",
-                    "# Download MNIST\n",
-                    "print(\"📥 Downloading MNIST...\")\n",
-                    "torchvision.datasets.MNIST('./data', train=True, download=True)\n",
-                    "torchvision.datasets.MNIST('./data', train=False, download=True)\n",
+                    "# Function to download and extract files\n",
+                    "def download_file(url, dest_path):\n",
+                    "    print(f\"Downloading {url}...\")\n",
+                    "    try:\n",
+                    "        urllib.request.urlretrieve(url, dest_path)\n",
+                    "        print(f\"✅ Downloaded {dest_path}\")\n",
+                    "        return True\n",
+                    "    except Exception as e:\n",
+                    "        print(f\"❌ Failed to download {url}: {e}\")\n",
+                    "        return False\n",
                     "\n",
-                    "# Download CIFAR-10\n",
-                    "print(\"📥 Downloading CIFAR-10...\")\n",
-                    "torchvision.datasets.CIFAR10('./data', train=True, download=True)\n",
-                    "torchvision.datasets.CIFAR10('./data', train=False, download=True)\n",
+                    "def extract_gz(gz_path, dest_path):\n",
+                    "    print(f\"Extracting {gz_path}...\")\n",
+                    "    try:\n",
+                    "        with gzip.open(gz_path, 'rb') as f_in:\n",
+                    "            with open(dest_path, 'wb') as f_out:\n",
+                    "                shutil.copyfileobj(f_in, f_out)\n",
+                    "        print(f\"✅ Extracted to {dest_path}\")\n",
+                    "        return True\n",
+                    "    except Exception as e:\n",
+                    "        print(f\"❌ Failed to extract {gz_path}: {e}\")\n",
+                    "        return False\n",
                     "\n",
-                    "print(\"✅ Dataset download complete!\")\n",
+                    "# Download MNIST manually\n",
+                    "print(\"📥 Downloading MNIST manually...\")\n",
+                    "mnist_base = \"http://yann.lecun.com/exdb/mnist/\"\n",
+                    "mnist_files = [\n",
+                    "    ('train-images-idx3-ubyte.gz', 'train-images-idx3-ubyte'),\n",
+                    "    ('train-labels-idx1-ubyte.gz', 'train-labels-idx1-ubyte'),\n",
+                    "    ('t10k-images-idx3-ubyte.gz', 't10k-images-idx3-ubyte'),\n",
+                    "    ('t10k-labels-idx1-ubyte.gz', 't10k-labels-idx1-ubyte')\n",
+                    "]\n",
+                    "\n",
+                    "for gz_file, raw_file in mnist_files:\n",
+                    "    gz_path = f'./data/MNIST/raw/{gz_file}'\n",
+                    "    raw_path = f'./data/MNIST/raw/{raw_file}'\n",
+                    "    if not os.path.exists(raw_path):\n",
+                    "        if download_file(mnist_base + gz_file, gz_path):\n",
+                    "            extract_gz(gz_path, raw_path)\n",
+                    "    else:\n",
+                    "        print(f\"✅ {raw_file} already exists\")\n",
+                    "\n",
+                    "# Download CIFAR-10 manually\n",
+                    "print(\"📥 Downloading CIFAR-10 manually...\")\n",
+                    "cifar_url = \"https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz\"\n",
+                    "cifar_tar = \"./data/cifar-10-python.tar.gz\"\n",
+                    "cifar_extract_dir = \"./data\"\n",
+                    "\n",
+                    "if not os.path.exists('./data/cifar-10-batches-py/data_batch_1'):\n",
+                    "    if download_file(cifar_url, cifar_tar):\n",
+                    "        print(\"Extracting CIFAR-10...\")\n",
+                    "        try:\n",
+                    "            with tarfile.open(cifar_tar, 'r:gz') as tar:\n",
+                    "                tar.extractall(cifar_extract_dir)\n",
+                    "            print(\"✅ CIFAR-10 extracted\")\n",
+                    "        except Exception as e:\n",
+                    "            print(f\"❌ Failed to extract CIFAR-10: {e}\")\n",
+                    "else:\n",
+                    "    print(\"✅ CIFAR-10 already exists\")\n",
+                    "\n",
+                    "# Verify datasets can be loaded\n",
+                    "print(\"🔍 Verifying dataset loading...\")\n",
+                    "try:\n",
+                    "    mnist_train = torchvision.datasets.MNIST('./data', train=True, download=False)\n",
+                    "    mnist_test = torchvision.datasets.MNIST('./data', train=False, download=False)\n",
+                    "    print(f\"✅ MNIST: {len(mnist_train)} train, {len(mnist_test)} test samples\")\n",
+                    "except Exception as e:\n",
+                    "    print(f\"❌ MNIST verification failed: {e}\")\n",
+                    "\n",
+                    "try:\n",
+                    "    cifar_train = torchvision.datasets.CIFAR10('./data', train=True, download=False)\n",
+                    "    cifar_test = torchvision.datasets.CIFAR10('./data', train=False, download=False)\n",
+                    "    print(f\"✅ CIFAR-10: {len(cifar_train)} train, {len(cifar_test)} test samples\")\n",
+                    "except Exception as e:\n",
+                    "    print(f\"❌ CIFAR-10 verification failed: {e}\")\n",
+                    "\n",
+                    "print(\"✅ Dataset download and verification complete!\")\n",
                     "print(\"Setup complete! Run the main benchmark below.\")"
                 ]
             },
@@ -3238,21 +3310,93 @@ def download_datasets():
     try:
         import torchvision
         import os
+        import urllib.request
+        import tarfile
+        import gzip
+        import shutil
 
         # Create data directory
         os.makedirs('./data', exist_ok=True)
+        os.makedirs('./data/MNIST/raw', exist_ok=True)
+        os.makedirs('./data/cifar-10-batches-py', exist_ok=True)
 
-        # Download MNIST
-        print("📥 Downloading MNIST...")
-        torchvision.datasets.MNIST('./data', train=True, download=True)
-        torchvision.datasets.MNIST('./data', train=False, download=True)
+        # Function to download and extract files
+        def download_file(url, dest_path):
+            print(f"Downloading {url}...")
+            try:
+                urllib.request.urlretrieve(url, dest_path)
+                print(f"✅ Downloaded {dest_path}")
+                return True
+            except Exception as e:
+                print(f"❌ Failed to download {url}: {e}")
+                return False
 
-        # Download CIFAR-10
-        print("📥 Downloading CIFAR-10...")
-        torchvision.datasets.CIFAR10('./data', train=True, download=True)
-        torchvision.datasets.CIFAR10('./data', train=False, download=True)
+        def extract_gz(gz_path, dest_path):
+            print(f"Extracting {gz_path}...")
+            try:
+                with gzip.open(gz_path, 'rb') as f_in:
+                    with open(dest_path, 'wb') as f_out:
+                        shutil.copyfileobj(f_in, f_out)
+                print(f"✅ Extracted to {dest_path}")
+                return True
+            except Exception as e:
+                print(f"❌ Failed to extract {gz_path}: {e}")
+                return False
 
-        print("✅ Dataset download complete!")
+        # Download MNIST manually
+        print("📥 Downloading MNIST manually...")
+        mnist_base = "http://yann.lecun.com/exdb/mnist/"
+        mnist_files = [
+            ('train-images-idx3-ubyte.gz', 'train-images-idx3-ubyte'),
+            ('train-labels-idx1-ubyte.gz', 'train-labels-idx1-ubyte'),
+            ('t10k-images-idx3-ubyte.gz', 't10k-images-idx3-ubyte'),
+            ('t10k-labels-idx1-ubyte.gz', 't10k-labels-idx1-ubyte')
+        ]
+
+        for gz_file, raw_file in mnist_files:
+            gz_path = f'./data/MNIST/raw/{gz_file}'
+            raw_path = f'./data/MNIST/raw/{raw_file}'
+            if not os.path.exists(raw_path):
+                if download_file(mnist_base + gz_file, gz_path):
+                    extract_gz(gz_path, raw_path)
+            else:
+                print(f"✅ {raw_file} already exists")
+
+        # Download CIFAR-10 manually
+        print("📥 Downloading CIFAR-10 manually...")
+        cifar_url = "https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz"
+        cifar_tar = "./data/cifar-10-python.tar.gz"
+        cifar_extract_dir = "./data"
+
+        if not os.path.exists('./data/cifar-10-batches-py/data_batch_1'):
+            if download_file(cifar_url, cifar_tar):
+                print("Extracting CIFAR-10...")
+                try:
+                    with tarfile.open(cifar_tar, 'r:gz') as tar:
+                        tar.extractall(cifar_extract_dir)
+                    print("✅ CIFAR-10 extracted")
+                except Exception as e:
+                    print(f"❌ Failed to extract CIFAR-10: {e}")
+        else:
+            print("✅ CIFAR-10 already exists")
+
+        # Verify datasets can be loaded
+        print("🔍 Verifying dataset loading...")
+        try:
+            mnist_train = torchvision.datasets.MNIST('./data', train=True, download=False)
+            mnist_test = torchvision.datasets.MNIST('./data', train=False, download=False)
+            print(f"✅ MNIST: {len(mnist_train)} train, {len(mnist_test)} test samples")
+        except Exception as e:
+            print(f"❌ MNIST verification failed: {e}")
+
+        try:
+            cifar_train = torchvision.datasets.CIFAR10('./data', train=True, download=False)
+            cifar_test = torchvision.datasets.CIFAR10('./data', train=False, download=False)
+            print(f"✅ CIFAR-10: {len(cifar_train)} train, {len(cifar_test)} test samples")
+        except Exception as e:
+            print(f"❌ CIFAR-10 verification failed: {e}")
+
+        print("✅ Dataset download and verification complete!")
 
     except Exception as e:
         print(f"⚠️  Dataset download failed: {e}")
