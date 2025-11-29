@@ -2673,34 +2673,312 @@ def optimize_for_kaggle_t4():
 
 def create_kaggle_notebook():
     """Generate optimized Kaggle notebook code"""
-    notebook_code = '''# GDSearch Kaggle T4 Optimized Benchmark
-# Run this notebook on Kaggle with T4 GPU accelerator
+    notebook_content = {
+        "cells": [
+            {
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": [
+                    "# GDSearch Kaggle T4 Optimized Benchmark\n",
+                    "\n",
+                    "Run this notebook on Kaggle with T4 GPU accelerator for optimal performance.\n",
+                    "\n",
+                    "**Time Estimate:** ~30-60 minutes for quick mode, 2-4 hours for full benchmark\n",
+                    "\n",
+                    "**Requirements:**\n",
+                    "- GPU Accelerator: T4 x2\n",
+                    "- Internet: Enabled\n",
+                    "- Persistence: Files only (for results)"
+                ]
+            },
+            {
+                "cell_type": "code",
+                "execution_count": None,
+                "metadata": {},
+                "outputs": [],
+                "source": [
+                    "# Install requirements (run this cell first)\n",
+                    "!pip install -r /kaggle/input/gdsearch-repository/requirements.txt\n",
+                    "!pip install transformers datasets accelerate scipy mlflow"
+                ]
+            },
+            {
+                "cell_type": "code",
+                "execution_count": None,
+                "metadata": {},
+                "outputs": [],
+                "source": [
+                    "# Download datasets\n",
+                    "import os\n",
+                    "import torchvision\n",
+                    "\n",
+                    "# Create data directory\n",
+                    "os.makedirs('./data', exist_ok=True)\n",
+                    "\n",
+                    "# Download MNIST\n",
+                    "print(\"📥 Downloading MNIST...\")\n",
+                    "torchvision.datasets.MNIST('./data', train=True, download=True)\n",
+                    "torchvision.datasets.MNIST('./data', train=False, download=True)\n",
+                    "\n",
+                    "# Download CIFAR-10\n",
+                    "print(\"📥 Downloading CIFAR-10...\")\n",
+                    "torchvision.datasets.CIFAR10('./data', train=True, download=True)\n",
+                    "torchvision.datasets.CIFAR10('./data', train=False, download=True)\n",
+                    "\n",
+                    "print(\"✅ Dataset download complete!\")\n",
+                    "print(\"Setup complete! Run the main benchmark below.\")"
+                ]
+            },
+            {
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": [
+                    "## Quick Test (Recommended First)\n",
+                    "\n",
+                    "Run this cell for a quick test to ensure everything works:"
+                ]
+            },
+            {
+                "cell_type": "code",
+                "execution_count": None,
+                "metadata": {},
+                "outputs": [],
+                "source": [
+                    "# Quick benchmark test (30-60 minutes)\n",
+                    "!python /kaggle/input/gdsearch-repository/run_all_kaggle.py --quick --kaggle-t4 --results-dir /kaggle/working/results"
+                ]
+            },
+            {
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": [
+                    "## Full Benchmark (Complete Research Suite)\n",
+                    "\n",
+                    "Run this cell for the complete benchmark suite (2-4 hours):"
+                ]
+            },
+            {
+                "cell_type": "code",
+                "execution_count": None,
+                "metadata": {},
+                "outputs": [],
+                "source": [
+                    "# Full benchmark suite (2-4 hours)\n",
+                    "!python /kaggle/input/gdsearch-repository/run_all_kaggle.py --kaggle-t4 --results-dir /kaggle/working/results"
+                ]
+            },
+            {
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": [
+                    "## Results Location\n",
+                    "\n",
+                    "After completion, check the **Output** tab for results:\n",
+                    "- `/kaggle/working/results/` - All CSV results and summaries\n",
+                    "- `experiment_summary.json` - Complete benchmark summary\n",
+                    "- Individual experiment CSVs for each optimizer comparison\n",
+                    "\n",
+                    "## Troubleshooting\n",
+                    "\n",
+                    "If you encounter issues:\n",
+                    "1. **Memory errors**: The `--kaggle-t4` flag optimizes for T4 GPUs\n",
+                    "2. **Import errors**: Ensure all packages installed in cell 1\n",
+                    "3. **Download failures**: Datasets will download during experiments if needed\n",
+                    "4. **Time limits**: Use `--quick` for faster iteration\n",
+                    "\n",
+                    "## What's Included\n",
+                    "\n",
+                    "- **MNIST**: Neural network optimization\n",
+                    "- **CIFAR-10**: Convolutional network training\n",
+                    "- **ResNet18**: Deep residual networks\n",
+                    "- **NLP**: Transformer-based sentiment analysis\n",
+                    "- **High-Dimensional**: Optimization in high dimensions\n",
+                    "- **Medical**: U-Net segmentation\n",
+                    "\n",
+                    "All experiments compare: SGD, SGD+Momentum, Adam, AdamW, RMSProp, SAM"
+                ]
+            }
+        ],
+        "metadata": {
+            "kernelspec": {
+                "display_name": "Python 3",
+                "language": "python",
+                "name": "python3"
+            },
+            "language_info": {
+                "codemirror_mode": {
+                    "name": "ipython",
+                    "version": 3
+                },
+                "file_extension": ".py",
+                "mimetype": "text/x-python",
+                "name": "python",
+                "nbconvert_exporter": "python",
+                "pygments_lexer": "ipython3",
+                "version": "3.11.0"
+            }
+        },
+        "nbformat": 4,
+        "nbformat_minor": 4
+    }
 
-import sys
-import os
-
-# Install requirements (run this cell first)
-!pip install -r requirements.txt
-!pip install transformers datasets accelerate scipy mlflow
-
-# Download datasets
-import torchvision
-os.makedirs('./data', exist_ok=True)
-torchvision.datasets.MNIST('./data', train=True, download=True)
-torchvision.datasets.MNIST('./data', train=False, download=True)
-torchvision.datasets.CIFAR10('./data', train=True, download=True)
-torchvision.datasets.CIFAR10('./data', train=False, download=True)
-
-print("Setup complete! Run the main benchmark below.")
-
-# Main benchmark (run this cell after setup)
-!python run_all_kaggle.py --quick --results-dir /kaggle/working/results
-'''
-
+    import json
     with open("kaggle_benchmark.ipynb", "w") as f:
-        f.write(notebook_code)
+        json.dump(notebook_content, f, indent=1)
 
     print("📓 Kaggle notebook generated: kaggle_benchmark.ipynb")
+    print("   This is a proper Jupyter notebook (.ipynb) file")
+    print("   Upload it to Kaggle or use the GitHub import method")
+    print("")
+    print("💡 Alternative: For simpler setup, you can also run:")
+    print("   !pip install torch torchvision")
+    print("   !git clone https://github.com/Ynhi0/GDSearch.git")
+    print("   !cd GDSearch && python run_all_kaggle.py --quick --kaggle-t4")
+    print("")
+    print("📄 Also created: kaggle_simple.py (standalone script)")
+
+    # Create a simple standalone script as well
+    create_simple_kaggle_script()
+
+def create_simple_kaggle_script():
+    """Create a simple standalone script for Kaggle that doesn't require the full repo"""
+    script_content = '''#!/usr/bin/env python3
+"""
+Simple GDSearch Kaggle Benchmark - Standalone Script
+Run this directly on Kaggle without importing the full repository.
+"""
+
+import os
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torchvision
+import torchvision.transforms as transforms
+from torch.utils.data import DataLoader
+import numpy as np
+import pandas as pd
+import time
+import random
+
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+def create_simple_model():
+    """Simple MLP for MNIST"""
+    return nn.Sequential(
+        nn.Flatten(),
+        nn.Linear(28*28, 128),
+        nn.ReLU(),
+        nn.Linear(128, 64),
+        nn.ReLU(),
+        nn.Linear(64, 10)
+    )
+
+def run_quick_benchmark():
+    """Run a quick benchmark comparing SGD and Adam on MNIST"""
+    print("🚀 GDSearch Quick Kaggle Benchmark")
+    print("=" * 50)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Device: {device}")
+
+    # Data loading
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.1307,), (0.3081,))
+    ])
+
+    train_dataset = torchvision.datasets.MNIST(
+        './data', train=True, download=True, transform=transform
+    )
+    test_dataset = torchvision.datasets.MNIST(
+        './data', train=False, download=True, transform=transform
+    )
+
+    train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=256, shuffle=False)
+
+    results = []
+
+    for optimizer_name in ['SGD', 'Adam']:
+        print(f"\\n🎯 Testing {optimizer_name}")
+
+        for seed in [42, 123, 456]:
+            set_seed(seed)
+
+            model = create_simple_model().to(device)
+            criterion = nn.CrossEntropyLoss()
+
+            if optimizer_name == 'SGD':
+                optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
+            else:
+                optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+            # Quick training (3 epochs)
+            start_time = time.time()
+
+            for epoch in range(3):
+                model.train()
+                for inputs, targets in train_loader:
+                    inputs, targets = inputs.to(device), targets.to(device)
+
+                    optimizer.zero_grad()
+                    outputs = model(inputs)
+                    loss = criterion(outputs, targets)
+                    loss.backward()
+                    optimizer.step()
+
+            # Evaluation
+            model.eval()
+            correct = 0
+            total = 0
+            with torch.no_grad():
+                for inputs, targets in test_loader:
+                    inputs, targets = inputs.to(device), targets.to(device)
+                    outputs = model(inputs)
+                    _, predicted = outputs.max(1)
+                    correct += (predicted == targets).sum().item()
+                    total += targets.size(0)
+
+            accuracy = 100. * correct / total
+            training_time = time.time() - start_time
+
+            results.append({
+                'optimizer': optimizer_name,
+                'seed': seed,
+                'test_accuracy': accuracy,
+                'training_time': training_time
+            })
+
+            print(".2f")
+
+    # Save results
+    os.makedirs('/kaggle/working/results', exist_ok=True)
+    df = pd.DataFrame(results)
+    df.to_csv('/kaggle/working/results/quick_benchmark_results.csv', index=False)
+
+    print("\\n💾 Results saved to /kaggle/working/results/quick_benchmark_results.csv")
+
+    # Summary
+    summary = df.groupby('optimizer')['test_accuracy'].agg(['mean', 'std']).round(2)
+    print("\\n📊 Summary:")
+    print(summary)
+
+    return df
+
+if __name__ == "__main__":
+    run_quick_benchmark()
+    print("\\n✅ Quick benchmark completed!")
+'''
+
+    with open("kaggle_simple.py", "w") as f:
+        f.write(script_content)
+
+    print("📄 Simple standalone script created: kaggle_simple.py")
     """Run pre-flight checks to ensure smooth execution"""
     print("\n" + "="*80)
     print("✈️  PRE-FLIGHT CHECKS")
