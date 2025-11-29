@@ -3423,6 +3423,8 @@ Examples:
         """
     )
 
+    parser.add_argument('--skip-setup', action='store_true',
+                       help='Skip environment setup and dataset download')
     parser.add_argument('--results-dir', default='results',
                        help='Directory to save results (default: results)')
     parser.add_argument('--quick', action='store_true',
