@@ -289,6 +289,15 @@ def _ckpt_path(ckpt_dir: Path, optimizer_name: str, seed: int, lr: float) -> Pat
 
 
 def run_single_experiment(optimizer_name: str, seed: int, lr: float, epochs: int, batch_size: int, results_dir: Path, *, resume: bool = False, ckpt_dir: Path | None = None):
+    
+    # [FIX] Thêm đoạn code này ngay đầu hàm
+    # ---------------------------------------------------------
+    out_name = f"NN_SimpleMLP_MNIST_{optimizer_name}_lr{lr}_seed{seed}_benchmark.csv"
+    if (results_dir / out_name).exists():
+        print(f"⏩ SKIP: {out_name} (Already exists)")
+        return pd.DataFrame(), 0.0
+    # ---------------------------------------------------------
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     set_seed(seed)
 
