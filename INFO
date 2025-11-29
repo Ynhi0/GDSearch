@@ -1,0 +1,4 @@
+2025-11-29 15:03:04,696 - INFO - Starting experiment 1/5: MNIST
+2025-11-29 15:03:04,696 - ERROR - ❌ Error in Experiment MNIST: run_mnist_experiment() takes from 0 to 5 positional arguments but 7 were given
+2025-11-29 15:03:04,696 - ERROR - Experiment MNIST failed: run_mnist_experiment() takes from 0 to 5 positional arguments but 7 were given
+2025-11-29 15:03:04,697 - ERROR - Critical experiment failed, stopping execution

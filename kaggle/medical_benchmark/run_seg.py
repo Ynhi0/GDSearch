@@ -11,6 +11,7 @@ This script is standalone (no repository imports) for easy Kaggle usage.
 import os
 import time
 import argparse
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -247,7 +248,7 @@ def run_single(opt_name: str, seed: int, epochs: int, batch_size: int, data_root
                 'seed': seed,
             }, ckpt_file)
         except Exception as e:
-            print('Warning: failed to save checkpoint:', e)
+            logging.warning('Failed to save checkpoint: %s', e)
     elapsed = time.time() - start
     peak_mb = torch.cuda.max_memory_allocated() / (1024 ** 2) if torch.cuda.is_available() else None
 

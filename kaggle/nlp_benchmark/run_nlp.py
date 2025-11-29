@@ -11,6 +11,7 @@ Requires GPU + Internet (datasets, model weights).
 import os
 import time
 import argparse
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -160,9 +161,9 @@ def run_single(opt_name: str, seed: int, lr: float, epochs: int, batch_size: int
                 optimizer.load_state_dict(state['optimizer'])
             start_epoch = int(state.get('epoch', 0)) + 1
             history = state.get('history', [])
-            print(f"Resuming from epoch {start_epoch} using checkpoint: {ckpt_file}")
+            logging.info("Resuming from epoch %d using checkpoint: %s", start_epoch, ckpt_file)
         except Exception as e:
-            print('Resume failed:', e)
+            logging.warning('Resume failed: %s', e)
     if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
     start = time.time()
@@ -185,7 +186,7 @@ def run_single(opt_name: str, seed: int, lr: float, epochs: int, batch_size: int
                 'model_name': model_name,
             }, ckpt_file)
         except Exception as e:
-            print('Warning: failed to save checkpoint:', e)
+            logging.warning('Failed to save checkpoint: %s', e)
 
     elapsed = time.time() - start
     peak_mb = torch.cuda.max_memory_allocated() / (1024 ** 2) if torch.cuda.is_available() else None

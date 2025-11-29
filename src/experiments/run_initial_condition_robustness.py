@@ -14,6 +14,7 @@ import pandas as pd
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from typing import List, Tuple, Dict
+import argparse
 
 from src.core.test_functions import Rosenbrock, IllConditionedQuadratic, SaddlePoint
 from src.core.optimizers import SGD, SGDMomentum, SGDNesterov, RMSProp, Adam, AdamW, AMSGrad
@@ -271,6 +272,11 @@ def run_robustness_experiment(
 
 def main():
     """Example robustness experiment on Rosenbrock."""
+    parser = argparse.ArgumentParser(description='2D Initial Condition Robustness Experiment')
+    parser.add_argument('--results-dir', type=str, default='results')
+    parser.add_argument('--plots-dir', type=str, default='plots')
+    args = parser.parse_args()
+    
     print("="*70)
     print("2D Initial Condition Robustness Experiment")
     print("="*70)
@@ -308,8 +314,8 @@ def main():
         initial_points=initial_points,
         max_iterations=5000,
         convergence_threshold=1e-6,
-        results_dir='results',
-        plots_dir='plots'
+        results_dir=args.results_dir,
+        plots_dir=args.plots_dir
     )
     
     print("\n✅ Robustness experiment complete!")

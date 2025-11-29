@@ -48,7 +48,7 @@ def get_mnist_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optiona
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
-        pin_memory=True,
+        pin_memory=torch.cuda.is_available(),
         worker_init_fn=_worker_init_fn if seed is not None else None,
         generator=generator,
     )
@@ -57,7 +57,7 @@ def get_mnist_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optiona
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
-        pin_memory=True,
+        pin_memory=torch.cuda.is_available(),
         worker_init_fn=_worker_init_fn if seed is not None else None,
         generator=generator,
     )
@@ -108,7 +108,7 @@ def get_cifar10_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optio
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
-        pin_memory=True,
+        pin_memory=torch.cuda.is_available(),
         worker_init_fn=_worker_init_fn if seed is not None else None,
         generator=generator,
     )
@@ -117,7 +117,7 @@ def get_cifar10_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optio
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
-        pin_memory=True,
+        pin_memory=torch.cuda.is_available(),
         worker_init_fn=_worker_init_fn if seed is not None else None,
         generator=generator,
     )

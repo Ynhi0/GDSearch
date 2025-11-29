@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import os
 import glob
+import logging
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -80,7 +81,7 @@ def build_summary(results_dir: str = 'results') -> pd.DataFrame:
     
     # [FIX] Kiểm tra nếu không có dữ liệu thì trả về DataFrame rỗng
     if df.empty or 'Optimizer' not in df.columns:
-        print(f"⚠️ Warning: No valid results found in {results_dir}")
+        logging.warning(f"No valid results found in {results_dir}")
         return pd.DataFrame()
         
     df = df.sort_values('Optimizer')

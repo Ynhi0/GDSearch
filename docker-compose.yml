@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  gdsearch:
+    build: .
+    runtime: nvidia
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+    volumes:
+      - ./results:/workspace/results
+      - ./data:/workspace/data
+    command: ["python", "run_all_kaggle.py", "--results-dir", "/workspace/results"]

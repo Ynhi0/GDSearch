@@ -11,6 +11,7 @@ This script is standalone (no external project imports) for easy Kaggle usage.
 import os
 import time
 import argparse
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -72,6 +73,7 @@ def get_data_loaders(batch_size: int, num_workers: int = 2, pin_memory: bool = T
     train = torchvision.datasets.CIFAR10(root=root, train=True, download=True, transform=transform_train)
     test = torchvision.datasets.CIFAR10(root=root, train=False, download=True, transform=transform_test)
 
+    pin_memory = torch.cuda.is_available()
     train_loader = DataLoader(train, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=pin_memory)
     test_loader = DataLoader(test, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=pin_memory)
     return train_loader, test_loader
@@ -206,7 +208,7 @@ def run_single_experiment(optimizer_name: str, seed: int, lr: float, epochs: int
                 'lr': lr,
             }, ckpt_file)
         except Exception as e:
-            print('Warning: failed to save checkpoint:', e)
+            logging.warning(f'Failed to save checkpoint: {e}')
 
     elapsed = time.time() - start
     peak_mb = torch.cuda.max_memory_allocated() / (1024 ** 2) if torch.cuda.is_available() else None

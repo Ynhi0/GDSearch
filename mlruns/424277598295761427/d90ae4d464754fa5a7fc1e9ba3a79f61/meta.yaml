@@ -1,0 +1,14 @@
+artifact_uri: file:///workspaces/GDSearch/mlruns/424277598295761427/d90ae4d464754fa5a7fc1e9ba3a79f61/artifacts
+end_time: null
+entry_point_name: ''
+experiment_id: '424277598295761427'
+lifecycle_stage: active
+run_id: d90ae4d464754fa5a7fc1e9ba3a79f61
+run_name: auspicious-bat-473
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1764428864432
+status: 1
+tags: []
+user_id: codespace

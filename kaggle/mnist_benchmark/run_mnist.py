@@ -215,6 +215,7 @@ def get_data_loaders(batch_size: int, num_workers: int = 2, pin_memory: bool = T
     train_dataset = datasets.MNIST(root="/kaggle/working/data", train=True, download=True, transform=transform)
     test_dataset = datasets.MNIST(root="/kaggle/working/data", train=False, download=True, transform=transform)
 
+    pin_memory = torch.cuda.is_available()
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
                               num_workers=num_workers, pin_memory=pin_memory)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False,
@@ -536,33 +537,6 @@ def compute_statistics(results_dir: str):
     df['Significant (Holm-Bonferroni)'] = holm_sig
 
     out = Path(results_dir) / 'mnist_statistical_comparisons_benchmark.csv'
-    df.to_csv(out, index=False)
-    print(f"Saved statistical comparisons to: {out}")
-    return df
-
-
-def main():
-    parser = argparse.ArgumentParser(description='MNIST Benchmark Experiments (Kaggle-ready)')
-    parser.add_argument('--seeds', type=str, default='1,2,3,4,5,6,7,8,9,10', help='comma-separated seeds')
-    parser.add_argument('--epochs', type=int, default=20)
-    parser.add_argument('--batch-size', type=int, default=128)
-    parser.add_argument('--results-dir', type=str, default='results')
-    parser.add_argument('--quick', action='store_true', help='quick run: seeds=1..3, epochs=3')
-    parser.add_argument('--resume', action='store_true', help='resume from checkpoints if available')
-    parser.add_argument('--ckpt-dir', type=str, default='checkpoints_mnist')
-    # Use parse_known_args to ignore Jupyter/Colab/Kaggle hidden args like '-f <kernel.json>'
-    args, _unknown = parser.parse_known_args()
-
-    if args.quick:
-        seeds = [1, 2, 3]
-        epochs = 3
-    else:
-        seeds = [int(s.strip()) for s in args.seeds.split(',') if s.strip()]
-        epochs = args.epochs
-
-    batch_size = args.batch_size
-    results_dir = args.results_dir
-
 def main():
     parser = argparse.ArgumentParser(description='MNIST Benchmark Experiments (Kaggle-ready)')
     parser.add_argument('--seeds', type=str, default='1,2,3,4,5,6,7,8,9,10', help='comma-separated seeds')
@@ -655,13 +629,13 @@ def main():
                     
                     if not adam_rows.empty:
                         adam_gap = adam_rows['mean_diff'].mean()
-                        print(">4d")
+                        print(f"{bs:>4d} | {adam_gap:.3f} | Adam gap calculated")
                     else:
-                        print(">4d")
+                        print(f"{bs:>4d} | N/A | No Adam data")
                 except Exception as e:
-                    print(">4d")
+                    print(f"{bs:>4d} | Error | {str(e)[:20]}...")
             else:
-                print(">4d")
+                print(f"{bs:>4d} | N/A | Stats file missing")
         
         print("\n💾 Individual results saved in respective directories")
         print("   Use analyze_batch_scalability.py to generate detailed plots")

@@ -3,6 +3,7 @@ Module định nghĩa các thuật toán tối ưu hóa (optimizers).
 """
 
 import numpy as np
+import logging
 
 
 class Optimizer:
@@ -623,7 +624,7 @@ class SAM(Optimizer):
             return self.base_opt.step(params, adv_gradients)
         else:
             # Fallback for backward compatibility (not correct SAM)
-            print("Warning: SAM without adversarial gradients - using base optimizer only")
+            logging.warning("SAM without adversarial gradients - using base optimizer only")
             return self.base_opt.step(params, gradients)
     
     def reset(self):
@@ -663,9 +664,9 @@ class Lookahead(Optimizer):
         
         # Warning about adaptive optimizers
         if 'Adam' in base_optimizer.name or 'RMSProp' in base_optimizer.name:
-            print(f"⚠️  WARNING: Lookahead with {base_optimizer.name} may interfere with internal optimizer state (running averages).")
-            print("   Consider using Lookahead only with SGD for reliable behavior.")
-            print("   This is mentioned in the thesis for educational purposes but not recommended for production use.")
+            logging.warning("Lookahead with %s may interfere with internal optimizer state (running averages).", base_optimizer.name)
+            logging.warning("Consider using Lookahead only with SGD for reliable behavior.")
+            logging.warning("This is mentioned in the thesis for educational purposes but not recommended for production use.")
         
         # State
         self.step_count = 0
