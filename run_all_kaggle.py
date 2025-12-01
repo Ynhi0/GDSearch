@@ -233,14 +233,44 @@ class RobustCheckpointManager:
                         experiment_name: str) -> bool:
         """Save checkpoint with backup and validation"""
         ckpt_path = self.base_dir / filename
-
         try:
             # Create backup if file exists
             if ckpt_path.exists():
                 self._create_backup(ckpt_path, experiment_name)
 
-            # Save checkpoint
-            torch.save(checkpoint_data, ckpt_path)
+            # Ensure rng states are included for reproducibility
+            try:
+                rng = {
+                    'python_random_state': random.getstate(),
+                    'numpy_random_state': np.random.get_state(),
+                    'torch_cpu_rng_state': torch.get_rng_state()
+                }
+                if torch.cuda.is_available():
+                    try:
+                        rng['torch_cuda_rng_state_all'] = torch.cuda.get_rng_state_all()
+                    except Exception:
+                        rng['torch_cuda_rng_state_all'] = None
+                checkpoint_data.setdefault('rng_states', rng)
+            except Exception:
+                logging.debug('Could not capture full RNG state for checkpoint')
+
+            # Atomic save: write to temp file in same directory then replace
+            tmp_path = ckpt_path.with_suffix('.tmp')
+            try:
+                # Use binary write file handle to ensure fsync works
+                with open(tmp_path, 'wb') as f:
+                    torch.save(checkpoint_data, f)
+                    f.flush()
+                    os.fsync(f.fileno())
+
+                # Atomically replace
+                os.replace(str(tmp_path), str(ckpt_path))
+            finally:
+                if tmp_path.exists():
+                    try:
+                        tmp_path.unlink()
+                    except Exception:
+                        pass
 
             # Validate checkpoint
             if self._validate_checkpoint(ckpt_path, checkpoint_data):
@@ -439,6 +469,115 @@ def get_system_info() -> Dict[str, Any]:
         pass
 
     return info
+
+
+def save_run_artifacts(base_results_dir: str, dataset: str, model_name: str, optimizer_name: str,
+                       seed: int, history: List[Dict[str, Any]], params: Dict[str, Any],
+                       device: Optional[torch.device] = None, tracker: Optional[ExperimentTracker] = None):
+    """Save per-run CSV and metadata sidecar using a canonical filename.
+
+    Filename pattern: <dataset>_<model>_<optimizer>_seed<seed>.csv
+    Sidecar metadata: same name + .meta.json
+    """
+    try:
+        results_base = Path(base_results_dir) / dataset.lower()
+        results_base.mkdir(parents=True, exist_ok=True)
+
+        file_stem = f"{dataset}_{model_name}_{optimizer_name}_seed{seed}"
+        csv_path = results_base / f"{file_stem}.csv"
+        meta_path = results_base / f"{file_stem}.meta.json"
+
+        # Save history as per-epoch rows
+        if isinstance(history, list):
+            df_hist = pd.DataFrame(history)
+        else:
+            df_hist = pd.DataFrame([history])
+
+        df_hist.to_csv(csv_path, index=False)
+
+        # Metadata
+        meta = {
+            'timestamp': datetime.now().isoformat(),
+            'dataset': dataset,
+            'model': model_name,
+            'optimizer': optimizer_name,
+            'seed': seed,
+            'rows': len(df_hist),
+            'params': params,
+            'system': get_system_info()
+        }
+
+        with open(meta_path, 'w') as f:
+            json.dump(meta, f, indent=2)
+
+        # Optional tracker artifact upload
+        if tracker:
+            try:
+                tracker.log_artifact(str(csv_path), artifact_path=f"{dataset}/results")
+                tracker.log_artifact(str(meta_path), artifact_path=f"{dataset}/meta")
+            except Exception:
+                logging.debug("Tracker artifact logging failed for %s", file_stem)
+
+        logging.info(f"Saved run artifacts: {csv_path} and {meta_path}")
+        return str(csv_path), str(meta_path)
+
+    except Exception as e:
+        logging.error(f"Failed to save run artifacts for {dataset} {optimizer_name} seed {seed}: {e}")
+        return None, None
+
+
+def make_dataloader(dataset, batch_size=64, shuffle=False, seed: Optional[int] = None,
+                    num_workers: int = 0, pin_memory: bool = False, collate_fn=None,
+                    sampler=None, drop_last: bool = False):
+    """Create a DataLoader with deterministic worker seeding when `seed` is provided.
+
+    - If `seed` is not None, a `torch.Generator` is created and `worker_init_fn` seeds
+      python, numpy and torch RNGs for each worker deterministically.
+    - If `sampler` is provided, it will be used and `shuffle` will be ignored.
+    """
+    generator = None
+    worker_init_fn = None
+
+    if seed is not None:
+        try:
+            generator = torch.Generator()
+            generator.manual_seed(int(seed))
+
+            def _worker_init(worker_id):
+                worker_seed = int(seed) + worker_id + 1
+                np.random.seed(worker_seed)
+                random.seed(worker_seed)
+                try:
+                    torch.manual_seed(worker_seed)
+                except Exception:
+                    pass
+
+            worker_init_fn = _worker_init
+        except Exception:
+            generator = None
+            worker_init_fn = None
+
+    dl_kwargs = dict(
+        batch_size=batch_size,
+        shuffle=shuffle if sampler is None else False,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        drop_last=drop_last,
+    )
+
+    if collate_fn is not None:
+        dl_kwargs['collate_fn'] = collate_fn
+
+    if sampler is not None:
+        dl_kwargs['sampler'] = sampler
+
+    if worker_init_fn is not None:
+        dl_kwargs['worker_init_fn'] = worker_init_fn
+
+    if generator is not None and sampler is None:
+        dl_kwargs['generator'] = generator
+
+    return DataLoader(dataset, **dl_kwargs)
 
 # Global instances for enhanced functionality
 profiler = PerformanceProfiler()
@@ -780,8 +919,10 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[1,2,3], quick=False
                         optimizer = opt_func(model.parameters())
                         criterion = nn.CrossEntropyLoss()
 
-                        train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True, pin_memory=True)
-                        test_loader = DataLoader(test_dataset, batch_size=256, shuffle=False, pin_memory=True)
+                        train_loader = make_dataloader(train_dataset, batch_size=128, shuffle=True,
+                                                         seed=seed, num_workers=2, pin_memory=True)
+                        test_loader = make_dataloader(test_dataset, batch_size=256, shuffle=False,
+                                                        seed=seed, num_workers=2, pin_memory=True)
 
                         # Enhanced resume logic with robust checkpointing
                         ckpt_file = f"MNIST_{opt_name}_seed{seed}.pt"
@@ -883,6 +1024,17 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[1,2,3], quick=False
 
                         training_time = time.time() - start_time
 
+                        # Save per-run artifacts (CSV history + metadata)
+                        params = {
+                            'batch_size_train': 128,
+                            'batch_size_test': 256,
+                            'epochs': epochs,
+                            'optimizer_name': opt_name,
+                        }
+
+                        save_run_artifacts(results_dir, 'MNIST', 'SimpleMLP', opt_name,
+                                           seed, history, params, device=device, tracker=tracker)
+
                         results.append({
                             'optimizer': opt_name,
                             'seed': seed,
@@ -968,8 +1120,11 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[1,2,3], quick=F
     train_dataset = torchvision.datasets.CIFAR10('./data', train=True, download=True, transform=transform_train)
     test_dataset = torchvision.datasets.CIFAR10('./data', train=False, download=True, transform=transform_test)
 
-    train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True, pin_memory=True, num_workers=2)
-    test_loader = DataLoader(test_dataset, batch_size=256, shuffle=False, pin_memory=True, num_workers=2)
+    seed0 = seeds[0] if seeds else None
+    train_loader = make_dataloader(train_dataset, batch_size=128, shuffle=True,
+                                     seed=seed0, num_workers=2, pin_memory=True)
+    test_loader = make_dataloader(test_dataset, batch_size=256, shuffle=False,
+                                    seed=seed0, num_workers=2, pin_memory=True)
 
     model = ResNet18(num_classes=10).to(device)
     optimizer = optim.Adam(model.parameters(), lr=0.001)
@@ -1033,7 +1188,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[1,2,3], quick=F
                 'cifar10_test_acc': test_acc
             }, step=epoch)
 
-        print(".1f")
+        print(f"Epoch {epoch+1}/{epochs} - Train: {train_acc:.1f}% | Test: {test_acc:.1f}%")
 
         # Save checkpoint
         if checkpoint_manager:
@@ -1062,8 +1217,19 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[1,2,3], quick=F
         tracker.log_artifact(f"{results_dir}/cifar10_results.csv", "results")
         tracker.end_run()
 
+    # Also save a per-run artifact (use first seed as representative if multiple provided)
+    seed0 = seeds[0] if seeds else None
+    try:
+        save_run_artifacts(results_dir, 'CIFAR10', 'ResNet18', 'Adam', seed0, results, params={
+            'epochs': epochs,
+            'batch_size': 128
+        }, device=device, tracker=tracker)
+    except Exception:
+        logging.debug("Failed to save per-run CIFAR10 artifact")
+
     print(f"\n💾 Results saved to {results_dir}/cifar10_results.csv")
     return df
+
 
 def run_nlp_experiment(results_dir="results_nlp", seeds=[1,2,3], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None):
     """Run full IMDB sentiment analysis with DistilBERT"""
@@ -1165,8 +1331,10 @@ def run_nlp_experiment(results_dir="results_nlp", seeds=[1,2,3], quick=False, sk
                     batch["attention_mask"] = attention_mask
                 return batch
 
-            train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
-            test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
+            train_loader = make_dataloader(train_ds, batch_size=batch_size, shuffle=True,
+                                           seed=seed, num_workers=2, collate_fn=collate_fn)
+            test_loader = make_dataloader(test_ds, batch_size=batch_size, shuffle=False,
+                                          seed=seed, num_workers=2, collate_fn=collate_fn)
 
             # Setup optimizer
             if opt_name == 'AdamW':
@@ -1290,6 +1458,13 @@ def run_nlp_experiment(results_dir="results_nlp", seeds=[1,2,3], quick=False, sk
                 'epochs_completed': len(history)
             })
 
+            # Save per-run artifacts for this optimizer/seed
+            try:
+                params = {'lr': lr, 'epochs': epochs, 'batch_size': batch_size, 'model_name': model_name}
+                save_run_artifacts(results_dir, 'IMDB', model_name.replace('/', '_'), opt_name, seed, history, params, device=device, tracker=tracker)
+            except Exception:
+                logging.debug("Failed to save per-run NLP artifact for %s seed %s", opt_name, seed)
+
     # End profiling
     if profiler:
         perf_metrics = profiler.end_profiling("NLP_Experiment")
@@ -1382,8 +1557,10 @@ def run_medical_experiment(results_dir="results_medical", seeds=[1,2,3], quick=F
             train_ds = SyntheticMedicalDataset(num_samples=200 if quick else 500, img_size=img_size, seed=seed)
             test_ds = SyntheticMedicalDataset(num_samples=50 if quick else 100, img_size=img_size, seed=seed+1000)
 
-            train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
-            test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False)
+            train_loader = make_dataloader(train_ds, batch_size=batch_size, shuffle=True,
+                                           seed=seed, num_workers=2)
+            test_loader = make_dataloader(test_ds, batch_size=batch_size, shuffle=False,
+                                          seed=seed, num_workers=2)
 
             # Initialize U-Net model
             model = UNet2D(in_channels=1, out_channels=1, features=[32, 64, 128]).to(device)
@@ -1511,6 +1688,13 @@ def run_medical_experiment(results_dir="results_medical", seeds=[1,2,3], quick=F
                 'epochs_completed': len(history)
             })
 
+            # Save per-run artifacts for this optimizer/seed
+            try:
+                params = {'lr': lr, 'epochs': epochs, 'batch_size': batch_size}
+                save_run_artifacts(results_dir, 'Medical', 'UNet2D', opt_name, seed, history, params, device=device, tracker=tracker)
+            except Exception:
+                logging.debug("Failed to save per-run Medical artifact for %s seed %s", opt_name, seed)
+
     # End profiling
     if profiler:
         perf_metrics = profiler.end_profiling("Medical_Experiment")
@@ -1527,8 +1711,8 @@ def run_medical_experiment(results_dir="results_medical", seeds=[1,2,3], quick=F
     print(f"\n💾 Results saved to {results_dir}/medical_results.csv")
     return df
 
-def run_statistical_analysis(results_dir="results_stats", plots_dir="plots"):
-    """Run statistical analysis combining all experiment results"""
+def run_statistical_analysis(results_dir="results", plots_dir="plots"):
+    """Run statistical analysis combining all experiment results from per-run CSVs"""
     print("\n" + "="*80)
     print("📊 STATISTICAL ANALYSIS & COMPARISONS")
     print("="*80)
@@ -1540,24 +1724,57 @@ def run_statistical_analysis(results_dir="results_stats", plots_dir="plots"):
         print("⚠️  scipy not available, skipping statistical tests")
         return pd.DataFrame()
 
-    # Load MNIST results
-    mnist_file = f"{results_dir}/mnist/mnist_results.csv"
-    if os.path.exists(mnist_file):
-        mnist_df = pd.read_csv(mnist_file)
-        print(f"📥 Loaded MNIST results: {len(mnist_df)} samples")
+    # Aggregate per-run MNIST CSV files
+    mnist_dir = Path(results_dir) / "mnist"
+    mnist_df = None
+    if mnist_dir.exists():
+        csv_files = list(mnist_dir.glob("MNIST_*.csv"))
+        if csv_files:
+            all_dfs = []
+            for csv_file in csv_files:
+                df = pd.read_csv(csv_file)
+                # Extract optimizer and seed from filename
+                # Pattern: MNIST_SimpleMLP_<optimizer>_seed<seed>.csv
+                parts = csv_file.stem.split('_')
+                if len(parts) >= 4 and parts[-1].startswith('seed'):
+                    seed = int(parts[-1].replace('seed', ''))
+                    optimizer = '_'.join(parts[2:-1])
+                    df['optimizer'] = optimizer
+                    df['seed'] = seed
+                    all_dfs.append(df)
+            if all_dfs:
+                mnist_df = pd.concat(all_dfs, ignore_index=True)
+    
+    if mnist_df is not None and len(mnist_df) > 0:
+        print(f"📥 Aggregated MNIST results: {len(mnist_df)} rows from {len(csv_files)} files")
 
+        # Get final epoch results per seed/optimizer for comparison
+        final_results = mnist_df.groupby(['optimizer', 'seed']).last().reset_index()
+        
         # Perform statistical comparisons for MNIST
-        optimizers = mnist_df['optimizer'].unique()
+        optimizers = final_results['optimizer'].unique()
         comparisons = []
 
         for i, opt1 in enumerate(optimizers):
             for opt2 in optimizers[i+1:]:
-                opt1_data = mnist_df[mnist_df['optimizer'] == opt1]['test_acc']
-                opt2_data = mnist_df[mnist_df['optimizer'] == opt2]['test_acc']
+                opt1_data = final_results[final_results['optimizer'] == opt1]['test_acc']
+                opt2_data = final_results[final_results['optimizer'] == opt2]['test_acc']
 
                 if len(opt1_data) > 1 and len(opt2_data) > 1:
-                    # Paired t-test
-                    t_stat, p_value = stats.ttest_ind(opt1_data, opt2_data)
+                    # Use paired t-test if seeds match, otherwise independent
+                    opt1_seeds = set(final_results[final_results['optimizer'] == opt1]['seed'])
+                    opt2_seeds = set(final_results[final_results['optimizer'] == opt2]['seed'])
+                    
+                    if opt1_seeds == opt2_seeds and len(opt1_seeds) > 1:
+                        # Paired test - same seeds used
+                        opt1_sorted = final_results[final_results['optimizer'] == opt1].sort_values('seed')['test_acc']
+                        opt2_sorted = final_results[final_results['optimizer'] == opt2].sort_values('seed')['test_acc']
+                        t_stat, p_value = stats.ttest_rel(opt1_sorted, opt2_sorted)
+                        test_type = 'paired'
+                    else:
+                        # Independent test - different seeds
+                        t_stat, p_value = stats.ttest_ind(opt1_data, opt2_data)
+                        test_type = 'independent'
 
                     # Effect size (Cohen's d)
                     mean_diff = opt1_data.mean() - opt2_data.mean()
@@ -1574,6 +1791,8 @@ def run_statistical_analysis(results_dir="results_stats", plots_dir="plots"):
                         't_statistic': t_stat,
                         'p_value': p_value,
                         'cohens_d': cohens_d,
+                        'test_type': test_type,
+                        'n_samples': len(opt1_data),
                         'significant': p_value < 0.05
                     })
 
@@ -1589,7 +1808,7 @@ def run_statistical_analysis(results_dir="results_stats", plots_dir="plots"):
                 print(f"\n🎯 Significant differences found: {len(sig_comparisons)}")
                 for _, row in sig_comparisons.iterrows():
                     better = row['optimizer_1'] if row['mean_diff'] > 0 else row['optimizer_2']
-                    print(".2f")
+                    print(f"   {better} wins (d={row['cohens_d']:.2f}, p={row['p_value']:.4f})")
             else:
                 print("\n📈 No significant differences detected (may need more samples)")
 
@@ -1663,18 +1882,28 @@ def run_2d_experiments(results_dir="results_2d", seeds=[1,2,3]):
                 for i in range(max_iter):
                     optimizer.zero_grad()
 
-                    # Convert to numpy for function evaluation
+                    # Evaluate function
                     x_np = x.detach().numpy()
-                    loss = torch.tensor(func(x_np), dtype=torch.float32)
-                    loss.backward()
+                    loss_value = func(x_np)
+                    
+                    # Manually set gradient using analytical gradient from function
+                    if hasattr(func, 'gradient'):
+                        grad = func.gradient(x_np)
+                        x.grad = torch.tensor(grad, dtype=torch.float32)
+                    else:
+                        # Skip if no gradient available
+                        logging.warning(f"Function {func_name} has no gradient method")
+                        break
 
                     if opt_name.startswith('SAM'):
                         def closure():
                             optimizer.zero_grad()
-                            x_np = x.detach().numpy()
-                            loss = torch.tensor(func(x_np), dtype=torch.float32)
-                            loss.backward()
-                            return loss
+                            x_np_c = x.detach().numpy()
+                            loss_c = func(x_np_c)
+                            if hasattr(func, 'gradient'):
+                                grad_c = func.gradient(x_np_c)
+                                x.grad = torch.tensor(grad_c, dtype=torch.float32)
+                            return torch.tensor(loss_c, dtype=torch.float32)
                         optimizer.step(closure)
                     else:
                         optimizer.step()
@@ -1682,24 +1911,33 @@ def run_2d_experiments(results_dir="results_2d", seeds=[1,2,3]):
                     history.append({
                         'iteration': i,
                         'x': x.detach().numpy().copy(),
-                        'loss': loss.item()
+                        'loss': loss_value
                     })
 
                     # Convergence check
-                    if loss.item() < 1e-6:
+                    if loss_value < 1e-6:
                         break
 
                 results.append({
                     'function': func_name,
                     'optimizer': opt_name,
                     'seed': seed,
-                    'final_loss': loss.item(),
+                    'final_loss': loss_value if history else float('nan'),
                     'final_x': x.detach().numpy().tolist(),
                     'iterations': len(history),
-                    'converged': loss.item() < 1e-6
+                    'converged': loss_value < 1e-6 if history else False
                 })
 
-                print(f"  {opt_name} (seed {seed}): Loss={loss.item():.6f}, Iters={len(history)}, Converged={loss.item() < 1e-6}")
+                # Save per-run artifact for this 2D optimization run
+                try:
+                    params = {'function': func_name, 'optimizer': opt_name, 'max_iter': max_iter}
+                    save_run_artifacts(results_dir, '2D', func_name, opt_name, seed, history, params, device=None, tracker=None)
+                except Exception:
+                    logging.debug("Failed to save 2D artifact for %s %s seed %s", func_name, opt_name, seed)
+
+                final_loss = history[-1]['loss'] if history else float('nan')
+                converged = final_loss < 1e-6 if history else False
+                print(f"  {opt_name} (seed {seed}): Loss={final_loss:.6f}, Iters={len(history)}, Converged={converged}")
 
     # Save results
     os.makedirs(results_dir, exist_ok=True)
@@ -1774,6 +2012,12 @@ def run_robustness_analysis(results_dir="results_robustness"):
                 'converged': converged
             })
 
+            # Save per-run artifact for robustness run (fixed seed)
+            try:
+                save_run_artifacts(results_dir, 'Robustness', 'Rosenbrock', opt_name, 42, [{'final_loss': loss.item(), 'iterations': i+1, 'initial_point': start_point}], {'converged': converged}, device=None, tracker=None)
+            except Exception:
+                logging.debug("Failed to save robustness artifact for start %s", start_point)
+
             print(f"  Start {start_point}: Loss={loss.item():.6f}, Iters={i+1}, Converged={converged}")
 
     # Save results
@@ -1799,7 +2043,7 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity"):
     ])
 
     train_dataset = torchvision.datasets.MNIST('./data', train=True, download=True, transform=transform)
-    train_loader = DataLoader(train_dataset, batch_size=256, shuffle=True, pin_memory=True)
+    train_loader = make_dataloader(train_dataset, batch_size=256, shuffle=True, seed=42, num_workers=2, pin_memory=True)
 
     rho_values = [0.01, 0.02, 0.05, 0.1, 0.2]
     results = []
@@ -1838,6 +2082,13 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity"):
             'rho': rho,
             'final_loss': epoch_loss
         })
+
+        # Save per-run artifact for this rho
+        try:
+            params = {'rho': rho, 'epochs': 3, 'batch_size': 256}
+            save_run_artifacts(results_dir, 'MNIST', 'SimpleMLP', f'SAM_rho_{rho}', 42, [{'final_loss': epoch_loss}], params, device=device, tracker=None)
+        except Exception:
+            logging.debug("Failed to save SAM sensitivity artifact for rho %s", rho)
 
     # Save results
     os.makedirs(results_dir, exist_ok=True)
@@ -1911,6 +2162,13 @@ def run_ablation_study(results_dir="results_ablation"):
             'iterations': i + 1,
             'converged': loss.item() < 1e-6
         })
+
+        # Save per-run artifact for ablation configuration
+        try:
+            params = params if isinstance(params, dict) else {'params': params}
+            save_run_artifacts(results_dir, 'Ablation', '2D_Rosenbrock', opt_name, 42, [{'final_loss': loss.item(), 'iterations': i+1}], params, device=None, tracker=None)
+        except Exception:
+            logging.debug("Failed to save ablation artifact for %s", opt_name)
 
         print(f"  Loss: {loss.item():.6f}, Iters: {i+1}, Converged: {loss.item() < 1e-6}")
 
@@ -2109,7 +2367,7 @@ def run_advanced_architecture_experiment(results_dir="results_advanced_arch", ep
     ])
 
     train_dataset = torchvision.datasets.CIFAR10('./data', train=True, download=True, transform=transform)
-    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+    train_loader = make_dataloader(train_dataset, batch_size=32, shuffle=True, seed=None, num_workers=0)
 
     # Simple ViT for small images
     model = VisionTransformer(
@@ -2576,8 +2834,8 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=[1,2,3], quick=Fal
     train_dataset = torchvision.datasets.CIFAR10('./data', train=True, download=True, transform=transform)
     test_dataset = torchvision.datasets.CIFAR10('./data', train=False, download=True, transform=transform)
 
-    train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True, pin_memory=True)
-    test_loader = DataLoader(test_dataset, batch_size=256, shuffle=False, pin_memory=True)
+    train_loader = make_dataloader(train_dataset, batch_size=128, shuffle=True, seed=seeds[0] if seeds else None, num_workers=2, pin_memory=True)
+    test_loader = make_dataloader(test_dataset, batch_size=256, shuffle=False, seed=seeds[0] if seeds else None, num_workers=2, pin_memory=True)
 
     model = ResNet18(num_classes=10).to(device)
     optimizer = optim.Adam(model.parameters(), lr=0.001)
@@ -2655,9 +2913,17 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=[1,2,3], quick=Fal
     if tracker:
         tracker.log_artifact(f"{results_dir}/resnet_results.csv", "results")
         tracker.end_run()
+    # Save a per-run artifact (representative seed)
+    try:
+        seed0 = seeds[0] if seeds else None
+        params = {'epochs': epochs, 'batch_size': 128}
+        save_run_artifacts(results_dir, 'ResNet18', 'ResNet18', 'Adam', seed0, results, params, device=device, tracker=tracker)
+    except Exception:
+        logging.debug("Failed to save per-run ResNet artifact")
 
     print(f"\n💾 Results saved to {results_dir}/resnet_results.csv")
     return df
+
 
 def run_highdim_experiment(results_dir="results_highdim", seeds=[1,2,3], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None):
     """Run high-dimensional optimization experiment"""
@@ -2746,6 +3012,13 @@ def run_highdim_experiment(results_dir="results_highdim", seeds=[1,2,3], quick=F
                     'converged': loss.item() < 1e-6
                 })
 
+                # Save per-run artifact for this high-dim run
+                try:
+                    params = {'dimension': dim, 'optimizer': opt_name, 'max_iter': max_iter}
+                    save_run_artifacts(results_dir, 'HighDim', f'Dim{dim}', opt_name, seed, history, params, device=device, tracker=tracker)
+                except Exception:
+                    logging.debug("Failed to save highdim artifact for dim %s opt %s seed %s", dim, opt_name, seed)
+
                 if tracker:
                     tracker.log_metrics({
                         f'highdim_{dim}_{opt_name}_seed_{seed}_final_loss': loss.item(),
@@ -2769,3 +3042,224 @@ def run_highdim_experiment(results_dir="results_highdim", seeds=[1,2,3], quick=F
 
     print(f"\n💾 Results saved to {results_dir}/highdim_results.csv")
     return df
+
+
+# ==============================================================================
+# MAIN EXECUTION & CLI
+# ==============================================================================
+
+def main():
+    """Main execution orchestrator with CLI argument parsing"""
+    import argparse
+    
+    parser = argparse.ArgumentParser(
+        description="GDSearch Kaggle Benchmark Suite - Reproducible Optimizer Comparisons",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Quick test with 3 seeds
+  python run_all_kaggle.py --quick --seeds 42,123,456
+  
+  # Full reproducible run with 10 seeds
+  python run_all_kaggle.py --seeds 42,123,456,789,1011,1213,1415,1617,1819,2021
+  
+  # Run only MNIST and CIFAR-10
+  python run_all_kaggle.py --experiments mnist,cifar10 --quick
+  
+  # Skip hyperparameter tuning (use defaults)
+  python run_all_kaggle.py --skip-tuning
+  
+  # Force deterministic mode (may be slower)
+  python run_all_kaggle.py --deterministic
+        """
+    )
+    
+    parser.add_argument('--quick', action='store_true',
+                        help='Quick mode: fewer epochs, smaller datasets')
+    parser.add_argument('--skip-tuning', action='store_true',
+                        help='Skip Optuna hyperparameter tuning')
+    parser.add_argument('--seeds', type=str, default='42,123,456',
+                        help='Comma-separated random seeds (default: 42,123,456)')
+    parser.add_argument('--experiments', type=str, default='all',
+                        help='Comma-separated experiment names (mnist,cifar10,nlp,medical,2d,robustness,sam,ablation,resnet,highdim) or "all"')
+    parser.add_argument('--results-dir', type=str, default='results',
+                        help='Output directory for results (default: results/)')
+    parser.add_argument('--deterministic', action='store_true',
+                        help='Force deterministic mode (use_deterministic_algorithms + CUBLAS_WORKSPACE_CONFIG)')
+    parser.add_argument('--no-mlflow', action='store_true',
+                        help='Disable MLflow tracking even if available')
+    parser.add_argument('--profile', action='store_true',
+                        help='Enable performance profiling')
+    
+    args = parser.parse_args()
+    
+    # Parse seeds
+    seeds = [int(s.strip()) for s in args.seeds.split(',')]
+    
+    # Parse experiment selection
+    if args.experiments == 'all':
+        selected_experiments = ['mnist', 'cifar10', 'nlp', 'medical', '2d', 
+                                'robustness', 'sam', 'ablation', 'resnet', 'highdim']
+    else:
+        selected_experiments = [e.strip() for e in args.experiments.split(',')]
+    
+    # Deterministic mode setup
+    if args.deterministic:
+        print("🔒 Forcing deterministic mode...")
+        torch.use_deterministic_algorithms(True)
+        os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
+        print("   ✓ torch.use_deterministic_algorithms(True)")
+        print("   ✓ CUBLAS_WORKSPACE_CONFIG=:4096:8")
+    
+    # Setup results directory first
+    results_dir = Path(args.results_dir)
+    results_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Initialize utilities
+    profiler = PerformanceProfiler() if args.profile else None
+    tracker = None if args.no_mlflow else (ExperimentTracker() if HAS_MLFLOW else None)
+    checkpoint_manager = RobustCheckpointManager(
+        base_dir=str(results_dir / "checkpoints"),
+        max_backups=3
+    )
+    
+    print("="*80)
+    print("🚀 GDSEARCH KAGGLE BENCHMARK SUITE")
+    print("="*80)
+    print(f"Configuration:")
+    print(f"  Seeds: {seeds}")
+    print(f"  Quick mode: {args.quick}")
+    print(f"  Skip tuning: {args.skip_tuning}")
+    print(f"  Deterministic: {args.deterministic}")
+    print(f"  Experiments: {', '.join(selected_experiments)}")
+    print(f"  Results dir: {results_dir}")
+    print(f"  MLflow: {'disabled' if args.no_mlflow else 'enabled' if HAS_MLFLOW else 'unavailable'}")
+    print(f"  Profiling: {'enabled' if args.profile else 'disabled'}")
+    print("="*80 + "\\n")
+    
+    # Execute selected experiments
+    experiment_results = {}
+    
+    if 'mnist' in selected_experiments:
+        with error_context("MNIST Experiment"):
+            experiment_results['mnist'] = run_mnist_experiment(
+                results_dir=str(results_dir / "mnist"),
+                seeds=seeds,
+                quick=args.quick,
+                skip_tuning=args.skip_tuning,
+                profiler=profiler,
+                tracker=tracker,
+                checkpoint_manager=checkpoint_manager
+            )
+    
+    if 'cifar10' in selected_experiments:
+        with error_context("CIFAR-10 Experiment"):
+            experiment_results['cifar10'] = run_cifar10_experiment(
+                results_dir=str(results_dir / "cifar10"),
+                seeds=seeds,
+                quick=args.quick,
+                skip_tuning=args.skip_tuning,
+                profiler=profiler,
+                tracker=tracker,
+                checkpoint_manager=checkpoint_manager
+            )
+    
+    if 'nlp' in selected_experiments and HAS_HF:
+        with error_context("NLP Experiment"):
+            experiment_results['nlp'] = run_nlp_experiment(
+                results_dir=str(results_dir / "nlp"),
+                seeds=seeds,
+                quick=args.quick,
+                profiler=profiler,
+                tracker=tracker,
+                checkpoint_manager=checkpoint_manager
+            )
+    elif 'nlp' in selected_experiments:
+        print("⚠️  Skipping NLP experiment (transformers/datasets not available)")
+    
+    if 'medical' in selected_experiments:
+        with error_context("Medical Experiment"):
+            experiment_results['medical'] = run_medical_experiment(
+                results_dir=str(results_dir / "medical"),
+                seeds=seeds,
+                quick=args.quick,
+                profiler=profiler,
+                tracker=tracker,
+                checkpoint_manager=checkpoint_manager
+            )
+    
+    if '2d' in selected_experiments:
+        with error_context("2D Optimization Experiment"):
+            experiment_results['2d'] = run_2d_experiments(
+                results_dir=str(results_dir / "2d_optimization"),
+                seeds=seeds
+            )
+    
+    if 'robustness' in selected_experiments:
+        with error_context("Robustness Experiment"):
+            experiment_results['robustness'] = run_robustness_analysis(
+                results_dir=str(results_dir / "robustness")
+            )
+    
+    if 'sam' in selected_experiments:
+        with error_context("SAM Sensitivity Experiment"):
+            experiment_results['sam'] = run_sam_sensitivity(
+                results_dir=str(results_dir / "sam_sensitivity")
+            )
+    
+    if 'ablation' in selected_experiments:
+        with error_context("Ablation Study"):
+            experiment_results['ablation'] = run_ablation_study(
+                results_dir=str(results_dir / "ablation")
+            )
+    
+    if 'resnet' in selected_experiments:
+        with error_context("ResNet Experiment"):
+            experiment_results['resnet'] = run_resnet_experiment(
+                results_dir=str(results_dir / "resnet"),
+                seeds=seeds,
+                quick=args.quick,
+                profiler=profiler,
+                tracker=tracker,
+                checkpoint_manager=checkpoint_manager
+            )
+    
+    if 'highdim' in selected_experiments:
+        with error_context("High-Dimensional Experiment"):
+            experiment_results['highdim'] = run_highdim_experiment(
+                results_dir=str(results_dir / "highdim"),
+                seeds=seeds,
+                quick=args.quick,
+                profiler=profiler,
+                tracker=tracker
+            )
+    
+    # Run statistical analysis if scipy available
+    if HAS_SCIPY:
+        print("\\n" + "="*80)
+        print("📊 RUNNING STATISTICAL ANALYSIS...")
+        print("="*80)
+        with error_context("Statistical Analysis"):
+            stats_df = run_statistical_analysis(results_dir=str(results_dir))
+            experiment_results['statistics'] = stats_df
+    
+    # Final summary
+    print("\\n" + "="*80)
+    print("✅ BENCHMARK SUITE COMPLETED")
+    print("="*80)
+    print(f"Results saved to: {results_dir}")
+    print(f"Experiments completed: {len(experiment_results)}")
+    for exp_name, exp_df in experiment_results.items():
+        if exp_df is not None and hasattr(exp_df, '__len__'):
+            print(f"  - {exp_name}: {len(exp_df)} result rows")
+    print("="*80)
+    
+    if profiler:
+        print("\\n📊 Performance Summary:")
+        profiler.print_summary()
+    
+    return experiment_results
+
+
+if __name__ == "__main__":
+    main()
