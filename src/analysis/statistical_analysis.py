@@ -46,6 +46,45 @@ def extract_final_metric(dfs: List[pd.DataFrame], metric: str = 'test_accuracy')
     return np.array(values)
 
 
+def compare_two_optimizers(
+    results_A: np.ndarray,
+    results_B: np.ndarray,
+    opt1_name: str = "Optimizer A",
+    opt2_name: str = "Optimizer B",
+    alpha: float = 0.05,
+    metric: str = "test_accuracy"
+) -> Dict:
+    """
+    Compare two optimizers with statistical testing.
+    
+    Simplified interface that wraps compare_optimizers_ttest for backward compatibility.
+    
+    Args:
+        results_A: Array of metric values for first optimizer
+        results_B: Array of metric values for second optimizer
+        opt1_name: Name of first optimizer
+        opt2_name: Name of second optimizer
+        alpha: Significance level (default: 0.05)
+        metric: Metric name for display
+        
+    Returns:
+        Dictionary with comparison results including:
+        - mean_diff: Mean difference (A - B)
+        - p_value: P-value from t-test
+        - cohens_d: Effect size (Cohen's d)
+        - is_significant: Boolean indicating statistical significance
+        - Additional fields from compare_optimizers_ttest
+    """
+    result = compare_optimizers_ttest(results_A, results_B, opt1_name, opt2_name, metric)
+    
+    # Add simplified fields for backward compatibility
+    result['mean_diff'] = result['mean_A'] - result['mean_B']
+    result['is_significant'] = result['p_value'] < alpha
+    result['alpha'] = alpha
+    
+    return result
+
+
 def compare_optimizers_ttest(
     results_A: np.ndarray, 
     results_B: np.ndarray, 

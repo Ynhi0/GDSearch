@@ -43,12 +43,16 @@ warnings.filterwarnings('ignore')
 sys.path.insert(0, str(Path(__file__).parent))
 
 # Try to import integrated analysis modules
+HAS_CONVERGENCE = False
+HAS_INTERACTIVE = False
+HAS_LANDSCAPE = False
+HAS_STATS = False
+
 try:
     from src.experiments.convergence_analysis import ConvergenceAnalyzer, analyze_non_convex_convergence
     HAS_CONVERGENCE = True
-except ImportError:
-    HAS_CONVERGENCE = False
-    logging.warning("Convergence analysis module not available")
+except ImportError as e:
+    logging.debug(f"Convergence analysis not available: {e}")
 
 try:
     from src.visualization.interactive_plots import (
@@ -57,16 +61,14 @@ try:
         animate_convergence
     )
     HAS_INTERACTIVE = True
-except ImportError:
-    HAS_INTERACTIVE = False
-    logging.warning("Interactive plots module not available (install plotly)")
+except ImportError as e:
+    logging.debug(f"Interactive plots not available: {e}")
 
 try:
     from src.visualization.loss_landscape import probe_loss_2d, evaluate_loss
     HAS_LANDSCAPE = True
-except ImportError:
-    HAS_LANDSCAPE = False
-    logging.warning("Loss landscape module not available")
+except ImportError as e:
+    logging.debug(f"Loss landscape not available: {e}")
 
 try:
     from src.analysis.statistical_analysis import (
@@ -75,9 +77,8 @@ try:
         power_analysis_report
     )
     HAS_STATS = True
-except ImportError:
-    HAS_STATS = False
-    logging.warning("Statistical analysis module not available")
+except ImportError as e:
+    logging.debug(f"Statistical analysis not available: {e}")
 
 # Try to import optional dependencies
 try:
@@ -4228,6 +4229,24 @@ Examples:
                                 'robustness', 'sam', 'ablation', 'resnet', 'highdim']
     else:
         selected_experiments = [e.strip() for e in args.experiments.split(',')]
+    
+    # Display module availability status
+    print("\n🔍 Optional Module Status:")
+    modules_status = [
+        ("Statistical Analysis", HAS_STATS, "scipy"),
+        ("Interactive Plots", HAS_INTERACTIVE, "plotly, kaleido"),
+        ("Loss Landscape", HAS_LANDSCAPE, "scipy"),
+        ("Convergence Analysis", HAS_CONVERGENCE, "scipy")
+    ]
+    
+    for name, available, deps in modules_status:
+        status = "✅" if available else "⚠️ "
+        availability = "Available" if available else f"Not available (install {deps})"
+        print(f"   {status} {name}: {availability}")
+    
+    if not all(status[1] for status in modules_status):
+        print("\n💡 Note: Missing modules are optional. Core experiments will run successfully.")
+        print("   For full functionality: pip install scipy plotly kaleido\n")
     
     # Deterministic mode setup
     if args.deterministic:
