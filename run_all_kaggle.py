@@ -919,10 +919,14 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[1,2,3], quick=False
                         optimizer = opt_func(model.parameters())
                         criterion = nn.CrossEntropyLoss()
 
-                        train_loader = make_dataloader(train_dataset, batch_size=128, shuffle=True,
-                                                         seed=seed, num_workers=2, pin_memory=True)
-                        test_loader = make_dataloader(test_dataset, batch_size=256, shuffle=False,
-                                                        seed=seed, num_workers=2, pin_memory=True)
+                        # Get optimized batch sizes and DataLoader kwargs
+                        train_bs, test_bs = get_batch_size('mnist', default_train=128, default_test=256)
+                        dl_kwargs = get_dataloader_kwargs()
+                        
+                        train_loader = make_dataloader(train_dataset, batch_size=train_bs, shuffle=True,
+                                                         seed=seed, **dl_kwargs)
+                        test_loader = make_dataloader(test_dataset, batch_size=test_bs, shuffle=False,
+                                                        seed=seed, **dl_kwargs)
 
                         # Enhanced resume logic with robust checkpointing
                         ckpt_file = f"MNIST_{opt_name}_seed{seed}.pt"
@@ -1120,11 +1124,15 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[1,2,3], quick=F
     train_dataset = torchvision.datasets.CIFAR10('./data', train=True, download=True, transform=transform_train)
     test_dataset = torchvision.datasets.CIFAR10('./data', train=False, download=True, transform=transform_test)
 
+    # Get optimized batch sizes and DataLoader kwargs
     seed0 = seeds[0] if seeds else None
-    train_loader = make_dataloader(train_dataset, batch_size=128, shuffle=True,
-                                     seed=seed0, num_workers=2, pin_memory=True)
-    test_loader = make_dataloader(test_dataset, batch_size=256, shuffle=False,
-                                    seed=seed0, num_workers=2, pin_memory=True)
+    train_bs, test_bs = get_batch_size('cifar10', default_train=128, default_test=256)
+    dl_kwargs = get_dataloader_kwargs()
+    
+    train_loader = make_dataloader(train_dataset, batch_size=train_bs, shuffle=True,
+                                     seed=seed0, **dl_kwargs)
+    test_loader = make_dataloader(test_dataset, batch_size=test_bs, shuffle=False,
+                                    seed=seed0, **dl_kwargs)
 
     model = ResNet18(num_classes=10).to(device)
     optimizer = optim.Adam(model.parameters(), lr=0.001)
@@ -1267,7 +1275,8 @@ def run_nlp_experiment(results_dir="results_nlp", seeds=[1,2,3], quick=False, sk
 
     # Configuration
     model_name = 'distilbert-base-uncased'
-    batch_size = 16
+    train_bs, test_bs = get_batch_size('nlp', default_train=16, default_test=32)
+    batch_size = train_bs  # For compatibility with existing code
     lr_adamw = 5e-5
     lr_sgd = 1e-3
     train_size = 1000 if quick else (5000 if not torch.cuda.is_available() else 10000)  # Smaller for CPU
@@ -1528,7 +1537,9 @@ def run_medical_experiment(results_dir="results_medical", seeds=[1,2,3], quick=F
         })
 
     # Configuration
-    batch_size = 4
+    train_bs, test_bs = get_batch_size('medical', default_train=4, default_test=4)
+    batch_size = train_bs  # For compatibility with existing code
+    dl_kwargs = get_dataloader_kwargs()
     lr_adam = 1e-4
     lr_sgd = 1e-3
     img_size = 128  # Smaller for speed
@@ -1557,10 +1568,10 @@ def run_medical_experiment(results_dir="results_medical", seeds=[1,2,3], quick=F
             train_ds = SyntheticMedicalDataset(num_samples=200 if quick else 500, img_size=img_size, seed=seed)
             test_ds = SyntheticMedicalDataset(num_samples=50 if quick else 100, img_size=img_size, seed=seed+1000)
 
-            train_loader = make_dataloader(train_ds, batch_size=batch_size, shuffle=True,
-                                           seed=seed, num_workers=2)
-            test_loader = make_dataloader(test_ds, batch_size=batch_size, shuffle=False,
-                                          seed=seed, num_workers=2)
+            train_loader = make_dataloader(train_ds, batch_size=train_bs, shuffle=True,
+                                           seed=seed, **dl_kwargs)
+            test_loader = make_dataloader(test_ds, batch_size=test_bs, shuffle=False,
+                                          seed=seed, **dl_kwargs)
 
             # Initialize U-Net model
             model = UNet2D(in_channels=1, out_channels=1, features=[32, 64, 128]).to(device)
@@ -2834,8 +2845,14 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=[1,2,3], quick=Fal
     train_dataset = torchvision.datasets.CIFAR10('./data', train=True, download=True, transform=transform)
     test_dataset = torchvision.datasets.CIFAR10('./data', train=False, download=True, transform=transform)
 
-    train_loader = make_dataloader(train_dataset, batch_size=128, shuffle=True, seed=seeds[0] if seeds else None, num_workers=2, pin_memory=True)
-    test_loader = make_dataloader(test_dataset, batch_size=256, shuffle=False, seed=seeds[0] if seeds else None, num_workers=2, pin_memory=True)
+    # Get optimized batch sizes and DataLoader kwargs
+    train_bs, test_bs = get_batch_size('resnet', default_train=128, default_test=256)
+    dl_kwargs = get_dataloader_kwargs()
+    
+    train_loader = make_dataloader(train_dataset, batch_size=train_bs, shuffle=True, 
+                                     seed=seeds[0] if seeds else None, **dl_kwargs)
+    test_loader = make_dataloader(test_dataset, batch_size=test_bs, shuffle=False, 
+                                    seed=seeds[0] if seeds else None, **dl_kwargs)
 
     model = ResNet18(num_classes=10).to(device)
     optimizer = optim.Adam(model.parameters(), lr=0.001)
@@ -3048,6 +3065,117 @@ def run_highdim_experiment(results_dir="results_highdim", seeds=[1,2,3], quick=F
 # MAIN EXECUTION & CLI
 # ==============================================================================
 
+def get_kaggle_t4_config():
+    """
+    Get optimized configuration for Kaggle T4 GPU environment.
+    
+    T4 specs:
+    - 16GB VRAM
+    - 2560 CUDA cores
+    - Mixed precision (FP16/FP32) support
+    - Typical Kaggle: 2 CPU cores, 13GB RAM
+    
+    Returns:
+        dict: Configuration with batch_size, num_workers, use_amp, etc.
+    """
+    config = {
+        'batch_size_mnist': 256,      # T4 can handle larger batches
+        'batch_size_cifar10': 256,
+        'batch_size_resnet': 128,     # ResNet is memory-intensive
+        'batch_size_nlp': 64,         # NLP models use more VRAM
+        'batch_size_medical': 128,
+        'num_workers': 2,              # Kaggle typically has 2 CPU cores
+        'pin_memory': True,
+        'use_amp': True,               # Mixed precision for speed
+        'cudnn_benchmark': True,       # Auto-tune cuDNN for speed
+        'persistent_workers': True,    # Keep workers alive between epochs
+    }
+    
+    # Detect multiple GPUs (rare on Kaggle but possible)
+    if torch.cuda.is_available():
+        n_gpus = torch.cuda.device_count()
+        config['n_gpus'] = n_gpus
+        config['multi_gpu'] = n_gpus > 1
+        
+        # Get actual GPU memory
+        gpu_mem_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
+        config['gpu_memory_gb'] = gpu_mem_gb
+        
+        # Adjust batch sizes based on actual memory
+        if gpu_mem_gb < 12:  # Smaller GPU
+            config['batch_size_resnet'] = 64
+            config['batch_size_cifar10'] = 128
+            config['batch_size_mnist'] = 128
+        elif gpu_mem_gb >= 20:  # Larger GPU (e.g., A100)
+            config['batch_size_resnet'] = 256
+            config['batch_size_cifar10'] = 512
+            config['batch_size_mnist'] = 512
+            
+        print(f"🎯 Kaggle T4 Optimizations Enabled:")
+        print(f"   GPUs: {n_gpus} ({config['gpu_memory_gb']:.1f}GB VRAM)")
+        print(f"   Batch sizes: MNIST={config['batch_size_mnist']}, "
+              f"CIFAR10={config['batch_size_cifar10']}, "
+              f"ResNet={config['batch_size_resnet']}")
+        print(f"   Mixed precision (AMP): {config['use_amp']}")
+        print(f"   DataLoader workers: {config['num_workers']}")
+        print(f"   cuDNN benchmark: {config['cudnn_benchmark']}")
+    else:
+        config['n_gpus'] = 0
+        config['multi_gpu'] = False
+        config['gpu_memory_gb'] = 0
+        config['use_amp'] = False
+        print("⚠️  No GPU detected - T4 optimizations disabled")
+    
+    return config
+
+
+def get_batch_size(experiment_type, default_train=128, default_test=256):
+    """
+    Get batch size from Kaggle config if available, otherwise use defaults.
+    
+    Args:
+        experiment_type: 'mnist', 'cifar10', 'resnet', 'nlp', 'medical'
+        default_train: Default training batch size
+        default_test: Default test batch size (typically 2x train)
+    
+    Returns:
+        tuple: (train_batch_size, test_batch_size)
+    """
+    if 'KAGGLE_CONFIG' in globals():
+        config = globals()['KAGGLE_CONFIG']
+        key = f'batch_size_{experiment_type}'
+        if key in config:
+            train_bs = config[key]
+            test_bs = train_bs * 2  # Test can use larger batches (no gradients)
+            return train_bs, test_bs
+    
+    return default_train, default_test
+
+
+def get_dataloader_kwargs():
+    """
+    Get DataLoader kwargs from Kaggle config if available.
+    
+    Returns:
+        dict: kwargs for DataLoader (num_workers, pin_memory, etc.)
+    """
+    defaults = {
+        'num_workers': 2,
+        'pin_memory': True,
+        'persistent_workers': False
+    }
+    
+    if 'KAGGLE_CONFIG' in globals():
+        config = globals()['KAGGLE_CONFIG']
+        return {
+            'num_workers': config.get('num_workers', 2),
+            'pin_memory': config.get('pin_memory', True),
+            'persistent_workers': config.get('persistent_workers', False)
+        }
+    
+    return defaults
+
+
 def main():
     """Main execution orchestrator with CLI argument parsing"""
     import argparse
@@ -3071,6 +3199,10 @@ Examples:
   
   # Force deterministic mode (may be slower)
   python run_all_kaggle.py --deterministic
+  
+  # Kaggle T4 GPU optimizations (larger batches, mixed precision)
+  python run_all_kaggle.py --kaggle-t4 --quick
+  python run_all_kaggle.py --kaggle-t4 --results-dir /kaggle/working/results
         """
     )
     
@@ -3090,6 +3222,8 @@ Examples:
                         help='Disable MLflow tracking even if available')
     parser.add_argument('--profile', action='store_true',
                         help='Enable performance profiling')
+    parser.add_argument('--kaggle-t4', action='store_true',
+                        help='Optimize for Kaggle T4 GPU (larger batches, mixed precision, optimized workers)')
     
     args = parser.parse_args()
     
@@ -3111,6 +3245,22 @@ Examples:
         print("   ✓ torch.use_deterministic_algorithms(True)")
         print("   ✓ CUBLAS_WORKSPACE_CONFIG=:4096:8")
     
+    # Kaggle T4 optimization setup
+    kaggle_config = None
+    if args.kaggle_t4:
+        kaggle_config = get_kaggle_t4_config()
+        
+        # Enable PyTorch optimizations
+        if kaggle_config['cudnn_benchmark']:
+            torch.backends.cudnn.benchmark = True
+            print("   ✓ torch.backends.cudnn.benchmark = True")
+        
+        if kaggle_config['use_amp']:
+            print("   ✓ Automatic Mixed Precision (AMP) enabled")
+        
+        # Store in global config for experiment functions to access
+        globals()['KAGGLE_CONFIG'] = kaggle_config
+    
     # Setup results directory first
     results_dir = Path(args.results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -3131,6 +3281,7 @@ Examples:
     print(f"  Quick mode: {args.quick}")
     print(f"  Skip tuning: {args.skip_tuning}")
     print(f"  Deterministic: {args.deterministic}")
+    print(f"  Kaggle T4 optimizations: {args.kaggle_t4}")
     print(f"  Experiments: {', '.join(selected_experiments)}")
     print(f"  Results dir: {results_dir}")
     print(f"  MLflow: {'disabled' if args.no_mlflow else 'enabled' if HAS_MLFLOW else 'unavailable'}")
