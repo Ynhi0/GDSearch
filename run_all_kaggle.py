@@ -318,7 +318,7 @@ class RobustCheckpointManager:
                 logging.info(f"Checkpoint saved: {ckpt_path}")
                 return True
             else:
-                logging.error(f"Checkpoint validation failed: {ckpt_path}")
+                logging.debug(f"Checkpoint validation failed: {ckpt_path}")
                 return False
 
         except Exception as e:
@@ -336,7 +336,7 @@ class RobustCheckpointManager:
                 logging.info(f"Loaded checkpoint: {ckpt_path}")
                 return checkpoint
             except Exception as e:
-                logging.error(f"Failed to load primary checkpoint: {e}")
+                logging.warning(f"Failed to load primary checkpoint: {e}")
 
         # Try backup checkpoints
         for i in range(self.max_backups):
@@ -347,22 +347,33 @@ class RobustCheckpointManager:
                     logging.info(f"Loaded backup checkpoint: {backup_path}")
                     return checkpoint
                 except Exception as e:
-                    logging.error(f"Failed to load backup {i}: {e}")
+                    logging.debug(f"Failed to load backup {i}: {e}")
 
-        logging.error(f"No valid checkpoint found for {filename}")
+        logging.debug(f"No valid checkpoint found for {filename} (first run or checkpoint missing)")
         return None
 
     def _create_backup(self, ckpt_path: Path, experiment_name: str):
-        """Create rolling backup"""
+        """Create rolling backup - only if checkpoint exists"""
+        if not ckpt_path.exists():
+            return
+            
+        # Roll existing backups
         for i in range(self.max_backups - 1, 0, -1):
             src = self.base_dir / f"{ckpt_path.name}.backup_{i-1}"
             dst = self.base_dir / f"{ckpt_path.name}.backup_{i}"
             if src.exists():
-                src.replace(dst)
+                try:
+                    src.replace(dst)
+                except Exception as e:
+                    logging.debug(f"Failed to rotate backup {i}: {e}")
 
-        # Create new backup
+        # Create new backup from current checkpoint
         backup_path = self.base_dir / f"{ckpt_path.name}.backup_0"
-        ckpt_path.replace(backup_path)
+        try:
+            import shutil
+            shutil.copy2(str(ckpt_path), str(backup_path))
+        except Exception as e:
+            logging.debug(f"Failed to create backup: {e}")
 
     def _validate_checkpoint(self, ckpt_path: Path, expected_data: Dict) -> bool:
         """Validate checkpoint integrity"""
