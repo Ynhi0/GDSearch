@@ -860,6 +860,128 @@ def dice_coefficient(pred, target, smooth=1e-6):
     return dice.mean()
 
 # ==============================================================================
+# HYPERPARAMETER TUNING FUNCTIONS
+# ==============================================================================
+
+def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, test_loader, 
+                        device, epochs=3, n_trials=10, seed=42):
+    """
+    Quick hyperparameter tuning for an optimizer.
+    
+    Args:
+        optimizer_name: Name of optimizer ('SGD', 'Adam', etc.)
+        model_fn: Function that returns a new model instance
+        train_loader: Training DataLoader
+        test_loader: Test DataLoader
+        device: torch.device
+        epochs: Number of epochs for each trial
+        n_trials: Number of tuning trials
+        seed: Random seed
+        
+    Returns:
+        Dict with best hyperparameters
+    """
+    try:
+        import optuna
+        from optuna.samplers import TPESampler
+    except ImportError:
+        logging.warning("Optuna not available, using default hyperparameters")
+        return get_default_hyperparameters(optimizer_name)
+    
+    logging.info(f"  🔍 Tuning {optimizer_name} ({n_trials} trials, {epochs} epochs each)")
+    
+    def objective(trial):
+        set_seed(seed + trial.number)
+        model = model_fn().to(device)
+        
+        # Suggest hyperparameters based on optimizer type
+        if optimizer_name == 'SGD':
+            lr = trial.suggest_float('lr', 1e-4, 1e-1, log=True)
+            optimizer = optim.SGD(model.parameters(), lr=lr)
+        elif optimizer_name == 'SGD_Momentum':
+            lr = trial.suggest_float('lr', 1e-4, 1e-1, log=True)
+            momentum = trial.suggest_float('momentum', 0.5, 0.99)
+            optimizer = optim.SGD(model.parameters(), lr=lr, momentum=momentum)
+        elif optimizer_name == 'Adam':
+            lr = trial.suggest_float('lr', 1e-5, 1e-2, log=True)
+            beta1 = trial.suggest_float('beta1', 0.85, 0.95)
+            beta2 = trial.suggest_float('beta2', 0.9, 0.9999)
+            optimizer = optim.Adam(model.parameters(), lr=lr, betas=(beta1, beta2))
+        elif optimizer_name == 'AdamW':
+            lr = trial.suggest_float('lr', 1e-5, 1e-2, log=True)
+            beta1 = trial.suggest_float('beta1', 0.85, 0.95)
+            beta2 = trial.suggest_float('beta2', 0.9, 0.9999)
+            wd = trial.suggest_float('weight_decay', 1e-6, 1e-2, log=True)
+            optimizer = optim.AdamW(model.parameters(), lr=lr, betas=(beta1, beta2), weight_decay=wd)
+        elif optimizer_name == 'AMSGrad':
+            lr = trial.suggest_float('lr', 1e-5, 1e-2, log=True)
+            beta1 = trial.suggest_float('beta1', 0.85, 0.95)
+            beta2 = trial.suggest_float('beta2', 0.9, 0.9999)
+            optimizer = optim.Adam(model.parameters(), lr=lr, betas=(beta1, beta2), amsgrad=True)
+        else:
+            return get_default_hyperparameters(optimizer_name)
+        
+        criterion = nn.CrossEntropyLoss()
+        
+        # Quick training
+        for epoch in range(epochs):
+            model.train()
+            for inputs, targets in train_loader:
+                inputs, targets = inputs.to(device), targets.to(device)
+                optimizer.zero_grad()
+                outputs = model(inputs)
+                loss = criterion(outputs, targets)
+                loss.backward()
+                optimizer.step()
+        
+        # Evaluate
+        model.eval()
+        correct = 0
+        total = 0
+        with torch.no_grad():
+            for inputs, targets in test_loader:
+                inputs, targets = inputs.to(device), targets.to(device)
+                outputs = model(inputs)
+                _, predicted = outputs.max(1)
+                correct += predicted.eq(targets).sum().item()
+                total += targets.size(0)
+        
+        accuracy = correct / total
+        return accuracy
+    
+    # Run optimization
+    study = optuna.create_study(
+        direction='maximize',
+        sampler=TPESampler(seed=seed),
+        pruner=optuna.pruners.MedianPruner()
+    )
+    
+    study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
+    
+    best_params = study.best_params
+    best_value = study.best_value
+    
+    logging.info(f"    Best params: {best_params}")
+    logging.info(f"    Best val acc: {best_value:.4f}")
+    
+    return best_params
+
+
+def get_default_hyperparameters(optimizer_name: str) -> Dict:
+    """Get default hyperparameters when tuning is skipped."""
+    defaults = {
+        'SGD': {'lr': 0.01},
+        'SGD_Momentum': {'lr': 0.05, 'momentum': 0.9},
+        'Adam': {'lr': 0.001, 'beta1': 0.9, 'beta2': 0.999},
+        'AdamW': {'lr': 0.001, 'beta1': 0.9, 'beta2': 0.999, 'weight_decay': 1e-4},
+        'AMSGrad': {'lr': 0.001, 'beta1': 0.9, 'beta2': 0.999},
+        'SAM_SGD': {'lr': 0.01, 'rho': 0.05},
+        'SAM_Adam': {'lr': 0.001, 'rho': 0.05}
+    }
+    return defaults.get(optimizer_name, {'lr': 0.001})
+
+
+# ==============================================================================
 # EXPERIMENT FUNCTIONS
 # ==============================================================================
 
@@ -901,17 +1023,70 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[1,2,3], quick=False
             train_dataset = torchvision.datasets.MNIST('./data', train=True, download=True, transform=transform)
             test_dataset = torchvision.datasets.MNIST('./data', train=False, download=True, transform=transform)
 
+            # Hyperparameter tuning (if enabled)
+            tuned_params = {}
+            if not skip_tuning:
+                logging.info("\n📊 HYPERPARAMETER TUNING PHASE")
+                logging.info("-" * 80)
+                
+                # Create small tuning loaders
+                tune_size = min(5000, len(train_dataset))
+                val_size = min(1000, len(test_dataset))
+                tune_subset = torch.utils.data.Subset(train_dataset, range(tune_size))
+                val_subset = torch.utils.data.Subset(test_dataset, range(val_size))
+                
+                train_bs, test_bs = get_batch_size('mnist', 128, 256)
+                dl_kwargs = get_dataloader_kwargs()
+                
+                tune_loader = make_dataloader(tune_subset, batch_size=train_bs, shuffle=True, **dl_kwargs)
+                val_loader = make_dataloader(val_subset, batch_size=test_bs, shuffle=False, **dl_kwargs)
+                
+                n_trials = 5 if quick else 15
+                tune_epochs = 2 if quick else 3
+                
+                for opt_name in ['SGD', 'SGD_Momentum', 'Adam', 'AdamW', 'AMSGrad']:
+                    tuned_params[opt_name] = quick_tune_optimizer(
+                        opt_name, SimpleMLP, tune_loader, val_loader,
+                        device, epochs=tune_epochs, n_trials=n_trials, seed=seeds[0]
+                    )
+                
+                logging.info("\n✅ Tuning complete!\n")
+            
             results = []
 
-            optimizers_config = [
-                ('SGD', lambda params: optim.SGD(params, lr=0.01)),
-                ('SGD_Momentum', lambda params: optim.SGD(params, lr=0.05, momentum=0.9)),
-                ('Adam', lambda params: optim.Adam(params, lr=0.001)),
-                ('AdamW', lambda params: optim.AdamW(params, lr=0.001, weight_decay=1e-4)),
+            # Build optimizers with tuned or default parameters
+            optimizers_config = []
+            for opt_name in ['SGD', 'SGD_Momentum', 'Adam', 'AdamW', 'AMSGrad', 'SAM_SGD', 'SAM_Adam']:
+                params = tuned_params.get(opt_name, get_default_hyperparameters(opt_name))
+                
+                if opt_name == 'SGD':
+                    optimizers_config.append((opt_name, lambda p, lr=params['lr']: optim.SGD(p, lr=lr)))
+                elif opt_name == 'SGD_Momentum':
+                    optimizers_config.append((opt_name, lambda p, lr=params['lr'], m=params['momentum']: 
+                                            optim.SGD(p, lr=lr, momentum=m)))
+                elif opt_name == 'Adam':
+                    optimizers_config.append((opt_name, lambda p, lr=params['lr'], b1=params['beta1'], b2=params['beta2']: 
+                                            optim.Adam(p, lr=lr, betas=(b1, b2))))
+                elif opt_name == 'AdamW':
+                    optimizers_config.append((opt_name, lambda p, lr=params['lr'], b1=params['beta1'], b2=params['beta2'], wd=params['weight_decay']: 
+                                            optim.AdamW(p, lr=lr, betas=(b1, b2), weight_decay=wd)))
+                elif opt_name == 'AMSGrad':
+                    optimizers_config.append((opt_name, lambda p, lr=params['lr'], b1=params['beta1'], b2=params['beta2']: 
+                                            optim.Adam(p, lr=lr, betas=(b1, b2), amsgrad=True)))
+                elif opt_name == 'SAM_SGD':
+                    optimizers_config.append((opt_name, lambda p, lr=params['lr'], rho=params.get('rho', 0.05): 
+                                            SAM(p, optim.SGD, lr=lr, rho=rho)))
+                elif opt_name == 'SAM_Adam':
+                    optimizers_config.append((opt_name, lambda p, lr=params['lr'], rho=params.get('rho', 0.05): 
+                                            SAM(p, optim.Adam, lr=lr, rho=rho)))
+
+            logging.info("="*80)
+            logging.info("🚀 RUNNING EXPERIMENTS WITH TUNED HYPERPARAMETERS")
+            logging.info("="*80)
                 ('AMSGrad', lambda params: optim.Adam(params, lr=0.001, amsgrad=True)),
                 ('SAM_SGD', lambda params: SAM(params, optim.SGD, lr=0.01, rho=0.05)),
                 ('SAM_Adam', lambda params: SAM(params, optim.Adam, lr=0.001, rho=0.05)),
-            ]
+            
 
             results_dir = Path(results_dir)
             results_dir.mkdir(parents=True, exist_ok=True)
