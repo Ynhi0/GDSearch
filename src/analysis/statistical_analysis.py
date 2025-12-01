@@ -699,7 +699,8 @@ def main():
     effect_names = ['Small', 'Medium', 'Large']
     
     print("Required sample sizes for 80% power (α=0.05, two-sided):")
-    print(f"{'Effect Size':<15} {'Cohen\'s d':<12} {'Required n':<12}")
+    cohens_d_label = "Cohen's d"
+    print(f"{'Effect Size':<15} {cohens_d_label:<12} {'Required n':<12}")
     print("-" * 40)
     
     for name, d in zip(effect_names, effect_sizes):
