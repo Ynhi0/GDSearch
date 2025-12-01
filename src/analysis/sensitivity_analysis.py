@@ -10,13 +10,17 @@ Detective Question: "Is the 'best' hyperparameter value robust, or just lucky?"
 
 import os
 import json
+import sys
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from typing import Dict, List, Tuple, Optional
 from pathlib import Path
 
-from run_nn_experiment import train_and_evaluate, result_filename
+# Add parent directories to path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+from src.experiments.run_nn_experiment import train_and_evaluate
 
 
 def generate_sensitivity_grid(

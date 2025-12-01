@@ -12,7 +12,7 @@ import pandas as pd
 from typing import Dict, List
 import matplotlib.pyplot as plt
 
-from src.experiments.run_nn_experiment import run_nn_experiment
+from src.experiments.run_nn_experiment import train_and_evaluate
 from src.analysis.statistical_analysis import compare_optimizers_ttest, print_ttest_results
 
 
@@ -150,7 +150,7 @@ def run_ablation_study(
             config_with_seed['seed'] = seed
             
             # Run experiment
-            df = run_nn_experiment(config_with_seed)
+            df = train_and_evaluate(config_with_seed)
             
             # Save result
             filename = f"{config_name}_seed{seed}.csv"

@@ -4206,7 +4206,7 @@ Examples:
     parser.add_argument('--seeds', type=str, default='42,123,456',
                         help='Comma-separated random seeds (default: 42,123,456)')
     parser.add_argument('--experiments', type=str, default='all',
-                        help='Comma-separated experiment names (mnist,cifar10,nlp,medical,2d,robustness,sam,ablation,resnet,highdim) or "all"')
+                        help='Comma-separated experiment names (mnist,cifar10,nlp,medical,2d,robustness,sam,ablation,batch_ablation,lr_ablation,resnet,highdim) or "all"')
     parser.add_argument('--results-dir', type=str, default='results',
                         help='Output directory for results (default: results/)')
     parser.add_argument('--deterministic', action='store_true',
@@ -4226,7 +4226,7 @@ Examples:
     # Parse experiment selection
     if args.experiments == 'all':
         selected_experiments = ['mnist', 'cifar10', 'nlp', 'medical', '2d', 
-                                'robustness', 'sam', 'ablation', 'resnet', 'highdim']
+                                'robustness', 'sam', 'ablation', 'batch_ablation', 'lr_ablation', 'resnet', 'highdim']
     else:
         selected_experiments = [e.strip() for e in args.experiments.split(',')]
     
@@ -4374,10 +4374,72 @@ Examples:
             )
     
     if 'ablation' in selected_experiments:
-        with error_context("Ablation Study"):
+        with error_context("Optimizer Component Ablation Study"):
             experiment_results['ablation'] = run_ablation_study(
                 results_dir=str(experiments_dir / "ablation")
             )
+    
+    if 'batch_ablation' in selected_experiments:
+        with error_context("Batch Size Ablation Study"):
+            print("\n" + "="*80)
+            print("🔬 BATCH SIZE ABLATION STUDY")
+            print("="*80)
+            try:
+                from src.experiments.batch_size_ablation import run_batch_size_ablation
+                
+                base_config = {
+                    'dataset': 'MNIST',
+                    'model': 'SimpleMLP',
+                    'lr': 1e-3,
+                    'weight_decay': 1e-4,
+                    'epochs': 5 if args.quick else 10
+                }
+                
+                batch_sizes = [32, 64, 128] if args.quick else [16, 32, 64, 128, 256, 512]
+                optimizers = ['SGD', 'Adam'] if args.quick else ['SGD', 'SGD_Momentum', 'Adam', 'AdamW']
+                
+                experiment_results['batch_ablation'] = run_batch_size_ablation(
+                    base_config,
+                    batch_sizes=batch_sizes,
+                    optimizers=optimizers,
+                    seeds=seeds,
+                    results_dir=str(experiments_dir / "batch_ablation")
+                )
+                print("✅ Batch size ablation completed!")
+            except Exception as e:
+                logging.error(f"Batch size ablation failed: {e}")
+                experiment_results['batch_ablation'] = None
+    
+    if 'lr_ablation' in selected_experiments:
+        with error_context("Learning Rate Ablation Study"):
+            print("\n" + "="*80)
+            print("🔬 LEARNING RATE ABLATION STUDY")
+            print("="*80)
+            try:
+                from src.experiments.learning_rate_ablation import run_learning_rate_ablation
+                
+                base_config = {
+                    'dataset': 'MNIST',
+                    'model': 'SimpleMLP',
+                    'weight_decay': 0.0,
+                    'epochs': 5 if args.quick else 10,
+                    'batch_size': 128
+                }
+                
+                learning_rates = [1e-3, 1e-2] if args.quick else [1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2]
+                optimizers = ['SGD', 'Adam'] if args.quick else ['SGD', 'SGD_Momentum', 'Adam', 'AdamW']
+                
+                experiment_results['lr_ablation'] = run_learning_rate_ablation(
+                    base_config,
+                    learning_rates=learning_rates,
+                    optimizers=optimizers,
+                    seeds=seeds,
+                    results_dir=str(experiments_dir / "lr_ablation")
+                )
+                print("✅ Learning rate ablation completed!")
+            except Exception as e:
+                logging.error(f"Learning rate ablation failed: {e}")
+                experiment_results['lr_ablation'] = None
     
     if 'resnet' in selected_experiments:
         with error_context("ResNet Experiment"):
