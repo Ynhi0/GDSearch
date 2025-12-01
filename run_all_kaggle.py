@@ -528,12 +528,13 @@ def save_run_artifacts(base_results_dir: str, dataset: str, model_name: str, opt
 
 def make_dataloader(dataset, batch_size=64, shuffle=False, seed: Optional[int] = None,
                     num_workers: int = 0, pin_memory: bool = False, collate_fn=None,
-                    sampler=None, drop_last: bool = False):
+                    sampler=None, drop_last: bool = False, persistent_workers: bool = False):
     """Create a DataLoader with deterministic worker seeding when `seed` is provided.
 
     - If `seed` is not None, a `torch.Generator` is created and `worker_init_fn` seeds
       python, numpy and torch RNGs for each worker deterministically.
     - If `sampler` is provided, it will be used and `shuffle` will be ignored.
+    - `persistent_workers` requires PyTorch >= 1.7.0 and num_workers > 0
     """
     generator = None
     worker_init_fn = None
@@ -576,6 +577,15 @@ def make_dataloader(dataset, batch_size=64, shuffle=False, seed: Optional[int] =
 
     if generator is not None and sampler is None:
         dl_kwargs['generator'] = generator
+
+    # Add persistent_workers only if PyTorch supports it and num_workers > 0
+    if persistent_workers and num_workers > 0:
+        try:
+            pytorch_version = tuple(int(x) for x in torch.__version__.split('.')[:2])
+            if pytorch_version >= (1, 7):
+                dl_kwargs['persistent_workers'] = True
+        except Exception:
+            pass  # Skip if version parsing fails
 
     return DataLoader(dataset, **dl_kwargs)
 
