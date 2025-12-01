@@ -17,6 +17,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import torch.distributed as dist
 from torch.utils.data import DataLoader, Dataset
 import torchvision
 import torchvision.transforms as transforms
@@ -37,6 +38,46 @@ import traceback
 from datetime import datetime
 import warnings
 warnings.filterwarnings('ignore')
+
+# Add src to path for integrated analysis modules
+sys.path.insert(0, str(Path(__file__).parent))
+
+# Try to import integrated analysis modules
+try:
+    from src.experiments.convergence_analysis import ConvergenceAnalyzer, analyze_non_convex_convergence
+    HAS_CONVERGENCE = True
+except ImportError:
+    HAS_CONVERGENCE = False
+    logging.warning("Convergence analysis module not available")
+
+try:
+    from src.visualization.interactive_plots import (
+        plot_multi_optimizer_comparison,
+        plot_trajectory_interactive,
+        animate_convergence
+    )
+    HAS_INTERACTIVE = True
+except ImportError:
+    HAS_INTERACTIVE = False
+    logging.warning("Interactive plots module not available (install plotly)")
+
+try:
+    from src.visualization.loss_landscape import probe_loss_2d, evaluate_loss
+    HAS_LANDSCAPE = True
+except ImportError:
+    HAS_LANDSCAPE = False
+    logging.warning("Loss landscape module not available")
+
+try:
+    from src.analysis.statistical_analysis import (
+        compare_two_optimizers,
+        compare_multiple_optimizers,
+        power_analysis_report
+    )
+    HAS_STATS = True
+except ImportError:
+    HAS_STATS = False
+    logging.warning("Statistical analysis module not available")
 
 # Try to import optional dependencies
 try:
@@ -480,12 +521,14 @@ def save_run_artifacts(base_results_dir: str, dataset: str, model_name: str, opt
     Sidecar metadata: same name + .meta.json
     """
     try:
-        results_base = Path(base_results_dir) / dataset.lower()
+        # Organized directory structure: results/experiments/{dataset}/
+        results_base = Path(base_results_dir) / "experiments" / dataset.lower()
         results_base.mkdir(parents=True, exist_ok=True)
 
+        # Descriptive filename: DATASET_MODEL_OPTIMIZER_seed{N}.csv
         file_stem = f"{dataset}_{model_name}_{optimizer_name}_seed{seed}"
         csv_path = results_base / f"{file_stem}.csv"
-        meta_path = results_base / f"{file_stem}.meta.json"
+        meta_path = results_base / f"{file_stem}.metadata.json"
 
         # Save history as per-epoch rows
         if isinstance(history, list):
@@ -1083,10 +1126,8 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[1,2,3], quick=False
             logging.info("="*80)
             logging.info("🚀 RUNNING EXPERIMENTS WITH TUNED HYPERPARAMETERS")
             logging.info("="*80)
-                ('AMSGrad', lambda params: optim.Adam(params, lr=0.001, amsgrad=True)),
-                ('SAM_SGD', lambda params: SAM(params, optim.SGD, lr=0.01, rho=0.05)),
-                ('SAM_Adam', lambda params: SAM(params, optim.Adam, lr=0.001, rho=0.05)),
-            
+
+            results = []
 
             results_dir = Path(results_dir)
             results_dir.mkdir(parents=True, exist_ok=True)
@@ -1266,6 +1307,15 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[1,2,3], quick=False
                 tracker.end_run()
 
             logging.info(f"Results saved to {results_file}")
+            
+            # Generate visualizations for MNIST experiment
+            try:
+                mnist_csvs = list(Path(results_dir).glob("*.csv"))
+                if mnist_csvs:
+                    create_experiment_visualizations('MNIST', str(results_dir.parent.parent), mnist_csvs)
+            except Exception as viz_e:
+                logging.warning(f"Could not create MNIST visualizations: {viz_e}")
+            
             return df
     except Exception as e:
         logging.error(f"Critical error during MNIST experiment: {e}")
@@ -1421,6 +1471,15 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[1,2,3], quick=F
         logging.debug("Failed to save per-run CIFAR10 artifact")
 
     print(f"\n💾 Results saved to {results_dir}/cifar10_results.csv")
+    
+    # Generate visualizations for CIFAR10 experiment
+    try:
+        cifar10_csvs = list(Path(results_dir).glob("*.csv"))
+        if cifar10_csvs:
+            create_experiment_visualizations('CIFAR10', str(results_dir.parent.parent), cifar10_csvs)
+    except Exception as viz_e:
+        logging.warning(f"Could not create CIFAR10 visualizations: {viz_e}")
+    
     return df
 
 
@@ -1673,6 +1732,15 @@ def run_nlp_experiment(results_dir="results_nlp", seeds=[1,2,3], quick=False, sk
         tracker.log_artifact(f"{results_dir}/nlp_results.csv", "results")
 
     print(f"\n💾 Results saved to {results_dir}/nlp_results.csv")
+    
+    # Generate visualizations for NLP experiment
+    try:
+        nlp_csvs = list(Path(results_dir).glob("*.csv"))
+        if nlp_csvs:
+            create_experiment_visualizations('NLP', str(results_dir.parent.parent), nlp_csvs)
+    except Exception as viz_e:
+        logging.warning(f"Could not create NLP visualizations: {viz_e}")
+    
     return df
 
 def run_nlp_experiment_simple(results_dir="results_nlp", seeds=[1,2,3], epochs=3):
@@ -1905,9 +1973,683 @@ def run_medical_experiment(results_dir="results_medical", seeds=[1,2,3], quick=F
         tracker.log_artifact(f"{results_dir}/medical_results.csv", "results")
 
     print(f"\n💾 Results saved to {results_dir}/medical_results.csv")
+    
+    # Generate visualizations for Medical experiment
+    try:
+        medical_csvs = list(Path(results_dir).glob("*.csv"))
+        if medical_csvs:
+            create_experiment_visualizations('Medical', str(results_dir.parent.parent), medical_csvs)
+    except Exception as viz_e:
+        logging.warning(f"Could not create Medical visualizations: {viz_e}")
+    
     return df
 
 def run_statistical_analysis(results_dir="results", plots_dir="plots"):
+    """Run statistical analysis combining all experiment results from per-run CSVs"""
+    print("\n" + "="*80)
+    print("📊 STATISTICAL ANALYSIS & COMPARISONS")
+    print("="*80)
+
+    try:
+        from scipy import stats as scipy_stats
+    except ImportError:
+        print("   ⚠️  scipy not available, using basic statistics")
+        return generate_basic_stats(results_dir)
+
+    # Aggregate per-run MNIST CSV files
+    mnist_dir = Path(results_dir) / "mnist"
+    mnist_df = None
+    if mnist_dir.exists():
+        csv_files = list(mnist_dir.glob("MNIST_*.csv"))
+        if csv_files:
+            dfs = []
+            for f in csv_files:
+                try:
+                    df = pd.read_csv(f)
+                    dfs.append(df)
+                except Exception as e:
+                    logging.warning(f"Could not load {f}: {e}")
+            if dfs:
+                mnist_df = pd.concat(dfs, ignore_index=True)
+    
+    if mnist_df is not None and len(mnist_df) > 0:
+        # Use integrated statistical analysis if available
+        if HAS_STATS:
+            print("\n✅ Using integrated statistical analysis module")
+            analyze_with_integrated_stats(mnist_df, results_dir, plots_dir)
+        else:
+            print("\n   Using basic statistical analysis")
+            analyze_with_basic_stats(mnist_df, results_dir, plots_dir)
+    
+    # Run convergence analysis if available
+    if HAS_CONVERGENCE:
+        run_convergence_analysis_on_results(results_dir)
+    
+    # Generate interactive plots if available
+    if HAS_INTERACTIVE:
+        generate_interactive_visualizations(results_dir, plots_dir)
+
+    print("⚠️  Statistical analysis complete")
+    return
+
+
+def analyze_with_integrated_stats(df, results_dir, plots_dir):
+    """Use integrated statistical analysis module for rigorous comparisons"""
+    from src.analysis.statistical_analysis import compare_multiple_optimizers
+    
+    print("   Running multi-optimizer comparison with t-tests...")
+    
+    # Group by optimizer and extract final accuracies
+    optimizer_results = {}
+    for opt in df['optimizer'].unique():
+        opt_data = df[df['optimizer'] == opt]
+        if 'test_accuracy' in opt_data.columns or 'test_acc' in opt_data.columns:
+            acc_col = 'test_accuracy' if 'test_accuracy' in opt_data.columns else 'test_acc'
+            # Get final accuracy per seed
+            if 'seed' in opt_data.columns:
+                final_accs = opt_data.groupby('seed')[acc_col].last().values
+            else:
+                final_accs = [opt_data[acc_col].iloc[-1]]
+            optimizer_results[opt] = final_accs.tolist()
+    
+    if len(optimizer_results) >= 2:
+        try:
+            stats_df = compare_multiple_optimizers(optimizer_results, alpha=0.05)
+            
+            # Save results to organized analysis directory
+            analysis_dir = Path(results_dir) / "analysis"
+            analysis_dir.mkdir(exist_ok=True)
+            output_path = analysis_dir / "statistical_comparison_tests.csv"
+            stats_df.to_csv(output_path, index=False)
+            print(f"   ✓ Statistical comparison saved to {output_path}")
+            
+            # Print summary
+            print("\n   Statistical Summary:")
+            print(stats_df.to_string(index=False))
+        except Exception as e:
+            print(f"   ⚠️  Statistical comparison failed: {e}")
+
+
+def analyze_with_basic_stats(df, results_dir, plots_dir):
+    """Basic statistical analysis without scipy"""
+    print("   Computing basic statistics...")
+    
+    summary = []
+    for opt in df['optimizer'].unique():
+        opt_data = df[df['optimizer'] == opt]
+        if 'test_accuracy' in opt_data.columns or 'test_acc' in opt_data.columns:
+            acc_col = 'test_accuracy' if 'test_accuracy' in opt_data.columns else 'test_acc'
+            mean_acc = opt_data[acc_col].mean()
+            std_acc = opt_data[acc_col].std()
+            max_acc = opt_data[acc_col].max()
+            summary.append({
+                'optimizer': opt,
+                'mean_accuracy': mean_acc,
+                'std_accuracy': std_acc,
+                'max_accuracy': max_acc,
+                'n_runs': len(opt_data)
+            })
+    
+    summary_df = pd.DataFrame(summary)
+    # Organized output path
+    analysis_dir = Path(results_dir) / "analysis"
+    analysis_dir.mkdir(exist_ok=True)
+    output_path = analysis_dir / "optimizer_basic_statistics.csv"
+    summary_df.to_csv(output_path, index=False)
+    print(f"   ✓ Basic statistics saved to {output_path}")
+    print("\n" + summary_df.to_string(index=False))
+
+
+def run_convergence_analysis_on_results(results_dir):
+    """Run convergence analysis on all experiment results"""
+    print("\n" + "="*80)
+    print("📈 CONVERGENCE ANALYSIS")
+    print("="*80)
+    
+    results_path = Path(results_dir)
+    all_csvs = list(results_path.glob("**/*.csv"))
+    
+    if not all_csvs:
+        print("   No CSV files found for convergence analysis")
+        return
+    
+    # Create analysis output directory
+    analysis_dir = results_path / "analysis"
+    analysis_dir.mkdir(parents=True, exist_ok=True)
+    
+    analyzer = ConvergenceAnalyzer(tolerance=1e-4, window_size=20)
+    convergence_results = []
+    
+    for csv_file in all_csvs:
+        try:
+            df = pd.read_csv(csv_file)
+            
+            # Skip if no loss column
+            if 'test_loss' not in df.columns and 'train_loss' not in df.columns:
+                continue
+            
+            loss_col = 'test_loss' if 'test_loss' in df.columns else 'train_loss'
+            losses = df[loss_col].values
+            
+            # Skip if too few data points
+            if len(losses) < 10:
+                continue
+            
+            # Analyze convergence
+            metrics = analyzer.analyze_trajectory({'losses': losses})
+            
+            # Extract metadata from filename
+            stem = csv_file.stem
+            parts = stem.split('_')
+            
+            result = {
+                'file': csv_file.name,
+                'convergence_rate': metrics['convergence_rate'],
+                'converged_epoch': metrics['convergence_epoch'],
+                'final_loss': metrics['final_loss'],
+                'stagnation_detected': metrics['stagnation_detected'],
+            }
+            
+            # Try to extract optimizer/model info
+            if len(parts) >= 2:
+                result['optimizer'] = parts[-1] if 'seed' not in parts[-1] else parts[-2]
+            
+            convergence_results.append(result)
+            
+        except Exception as e:
+            logging.debug(f"Could not analyze {csv_file.name}: {e}")
+            continue
+    
+    if convergence_results:
+        conv_df = pd.DataFrame(convergence_results)
+        # Organized output path
+        analysis_dir = results_path / "analysis"
+        analysis_dir.mkdir(exist_ok=True)
+        output_path = analysis_dir / "convergence_rates.csv"
+        conv_df.to_csv(output_path, index=False)
+        
+        print(f"\n   ✓ Analyzed {len(convergence_results)} experiment runs")
+        print(f"   ✓ Results saved to {output_path}")
+        
+        # Print summary
+        print("\n   Convergence Summary:")
+        summary_cols = ['optimizer', 'convergence_rate', 'converged_epoch', 'final_loss'] if 'optimizer' in conv_df.columns else conv_df.columns[:4]
+        print(conv_df[summary_cols].head(10).to_string(index=False))
+    else:
+        print("   No convergence data to analyze")
+
+
+def create_experiment_visualizations(experiment_name, results_dir, csv_files):
+    """Create both static and interactive visualizations for a single experiment
+    
+    Args:
+        experiment_name: Name of experiment (e.g., 'MNIST', 'CIFAR10')
+        results_dir: Base results directory
+        csv_files: List of CSV file paths from this experiment
+    """
+    if not csv_files:
+        return
+    
+    results_path = Path(results_dir)
+    viz_dir = results_path / "visualizations"
+    static_dir = viz_dir / "static" / experiment_name.lower()
+    interactive_dir = viz_dir / "interactive"
+    
+    static_dir.mkdir(parents=True, exist_ok=True)
+    interactive_dir.mkdir(parents=True, exist_ok=True)
+    
+    print(f"\n📊 Creating visualizations for {experiment_name}...")
+    
+    # Load and combine all CSVs for this experiment
+    dfs = []
+    for csv_file in csv_files:
+        try:
+            df = pd.read_csv(csv_file)
+            # Extract optimizer from filename
+            stem = csv_file.stem
+            if 'optimizer' not in df.columns:
+                parts = stem.split('_')
+                for i, part in enumerate(parts):
+                    if 'seed' in part and i > 0:
+                        df['optimizer'] = parts[i-1]
+                        break
+            # Extract seed
+            if 'seed' not in df.columns:
+                for part in parts:
+                    if 'seed' in part:
+                        df['seed'] = int(part.replace('seed', ''))
+                        break
+            dfs.append(df)
+        except Exception as e:
+            logging.debug(f"Could not load {csv_file}: {e}")
+    
+    if not dfs:
+        return
+    
+    combined_df = pd.concat(dfs, ignore_index=True)
+    
+    # Check what columns we have
+    has_epoch = 'epoch' in combined_df.columns
+    has_optimizer = 'optimizer' in combined_df.columns
+    
+    # === STATIC PLOTS (using matplotlib) ===
+    import matplotlib.pyplot as plt
+    
+    # 1. Training/Test Loss Curves
+    if has_epoch and has_optimizer and 'train_loss' in combined_df.columns:
+        try:
+            plt.figure(figsize=(10, 6))
+            for opt in combined_df['optimizer'].unique():
+                opt_data = combined_df[combined_df['optimizer'] == opt]
+                if 'seed' in opt_data.columns:
+                    # Plot mean with std band
+                    grouped = opt_data.groupby('epoch')['train_loss'].agg(['mean', 'std'])
+                    plt.plot(grouped.index, grouped['mean'], label=opt, linewidth=2)
+                    plt.fill_between(grouped.index, 
+                                   grouped['mean'] - grouped['std'],
+                                   grouped['mean'] + grouped['std'],
+                                   alpha=0.2)
+                else:
+                    plt.plot(opt_data['epoch'], opt_data['train_loss'], label=opt, linewidth=2)
+            
+            plt.xlabel('Epoch', fontsize=12)
+            plt.ylabel('Training Loss', fontsize=12)
+            plt.title(f'{experiment_name} - Training Loss over Epochs', fontsize=14, fontweight='bold')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+            plt.tight_layout()
+            plt.savefig(static_dir / f'{experiment_name.lower()}_train_loss.png', dpi=300, bbox_inches='tight')
+            plt.close()
+            print(f"   ✓ Created {experiment_name.lower()}_train_loss.png")
+        except Exception as e:
+            logging.debug(f"Could not create train loss plot: {e}")
+    
+    # 2. Test Accuracy Curves
+    acc_col = None
+    for col in ['test_acc', 'test_accuracy', 'val_accuracy']:
+        if col in combined_df.columns:
+            acc_col = col
+            break
+    
+    if has_epoch and has_optimizer and acc_col:
+        try:
+            plt.figure(figsize=(10, 6))
+            for opt in combined_df['optimizer'].unique():
+                opt_data = combined_df[combined_df['optimizer'] == opt]
+                if 'seed' in opt_data.columns:
+                    grouped = opt_data.groupby('epoch')[acc_col].agg(['mean', 'std'])
+                    plt.plot(grouped.index, grouped['mean'] * 100, label=opt, linewidth=2)
+                    plt.fill_between(grouped.index,
+                                   (grouped['mean'] - grouped['std']) * 100,
+                                   (grouped['mean'] + grouped['std']) * 100,
+                                   alpha=0.2)
+                else:
+                    plt.plot(opt_data['epoch'], opt_data[acc_col] * 100, label=opt, linewidth=2)
+            
+            plt.xlabel('Epoch', fontsize=12)
+            plt.ylabel('Test Accuracy (%)', fontsize=12)
+            plt.title(f'{experiment_name} - Test Accuracy over Epochs', fontsize=14, fontweight='bold')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+            plt.tight_layout()
+            plt.savefig(static_dir / f'{experiment_name.lower()}_test_accuracy.png', dpi=300, bbox_inches='tight')
+            plt.close()
+            print(f"   ✓ Created {experiment_name.lower()}_test_accuracy.png")
+        except Exception as e:
+            logging.debug(f"Could not create accuracy plot: {e}")
+    
+    # 3. Final Performance Comparison (Bar Chart)
+    if has_optimizer and acc_col:
+        try:
+            plt.figure(figsize=(10, 6))
+            # Get final epoch results per optimizer
+            final_results = combined_df.groupby('optimizer')[acc_col].agg(['mean', 'std'])
+            
+            x = range(len(final_results))
+            plt.bar(x, final_results['mean'] * 100, yerr=final_results['std'] * 100,
+                   capsize=5, alpha=0.7, edgecolor='black', linewidth=1.5)
+            plt.xticks(x, final_results.index, rotation=45, ha='right')
+            plt.ylabel('Final Test Accuracy (%)', fontsize=12)
+            plt.title(f'{experiment_name} - Final Performance Comparison', fontsize=14, fontweight='bold')
+            plt.grid(axis='y', alpha=0.3)
+            
+            # Add value labels
+            for i, (mean, std) in enumerate(zip(final_results['mean'], final_results['std'])):
+                plt.text(i, mean * 100, f'{mean*100:.1f}%\n±{std*100:.1f}', 
+                        ha='center', va='bottom', fontsize=9)
+            
+            plt.tight_layout()
+            plt.savefig(static_dir / f'{experiment_name.lower()}_final_comparison.png', dpi=300, bbox_inches='tight')
+            plt.close()
+            print(f"   ✓ Created {experiment_name.lower()}_final_comparison.png")
+        except Exception as e:
+            logging.debug(f"Could not create comparison plot: {e}")
+    
+    # === INTERACTIVE PLOTS (using Plotly) ===
+    if HAS_INTERACTIVE and has_epoch and has_optimizer:
+        try:
+            import plotly.graph_objects as go
+            from plotly.subplots import make_subplots
+            
+            # Create interactive multi-metric plot
+            metric_cols = []
+            for col in ['train_loss', 'test_loss', 'train_acc', 'test_acc', 'test_accuracy']:
+                if col in combined_df.columns:
+                    metric_cols.append(col)
+            
+            if metric_cols:
+                # Determine subplot layout
+                n_metrics = min(len(metric_cols), 4)
+                rows = (n_metrics + 1) // 2
+                cols = 2
+                
+                fig = make_subplots(
+                    rows=rows, cols=cols,
+                    subplot_titles=[col.replace('_', ' ').title() for col in metric_cols[:n_metrics]]
+                )
+                
+                # Plot each metric
+                for idx, metric in enumerate(metric_cols[:n_metrics]):
+                    row = (idx // 2) + 1
+                    col = (idx % 2) + 1
+                    
+                    for opt in combined_df['optimizer'].unique():
+                        opt_data = combined_df[combined_df['optimizer'] == opt]
+                        
+                        if 'seed' in opt_data.columns:
+                            # Plot mean with error bars
+                            grouped = opt_data.groupby('epoch')[metric].agg(['mean', 'std'])
+                            
+                            # Add mean line
+                            fig.add_trace(
+                                go.Scatter(
+                                    x=grouped.index,
+                                    y=grouped['mean'],
+                                    name=opt,
+                                    mode='lines',
+                                    showlegend=(idx == 0),
+                                    legendgroup=opt,
+                                    hovertemplate=f'<b>{opt}</b><br>Epoch: %{{x}}<br>{metric}: %{{y:.4f}}<extra></extra>'
+                                ),
+                                row=row, col=col
+                            )
+                            
+                            # Add uncertainty band
+                            fig.add_trace(
+                                go.Scatter(
+                                    x=grouped.index.tolist() + grouped.index.tolist()[::-1],
+                                    y=(grouped['mean'] + grouped['std']).tolist() + (grouped['mean'] - grouped['std']).tolist()[::-1],
+                                    fill='toself',
+                                    fillcolor='rgba(0,0,0,0.1)',
+                                    line=dict(color='rgba(255,255,255,0)'),
+                                    showlegend=False,
+                                    legendgroup=opt,
+                                    hoverinfo='skip'
+                                ),
+                                row=row, col=col
+                            )
+                        else:
+                            # Single run - just plot the line
+                            fig.add_trace(
+                                go.Scatter(
+                                    x=opt_data['epoch'],
+                                    y=opt_data[metric],
+                                    name=opt,
+                                    mode='lines+markers',
+                                    showlegend=(idx == 0),
+                                    legendgroup=opt,
+                                    hovertemplate=f'<b>{opt}</b><br>Epoch: %{{x}}<br>{metric}: %{{y:.4f}}<extra></extra>'
+                                ),
+                                row=row, col=col
+                            )
+                
+                fig.update_layout(
+                    title_text=f"{experiment_name} - Interactive Optimizer Comparison",
+                    height=300 * rows,
+                    hovermode='x unified',
+                    template='plotly_white'
+                )
+                
+                output_path = interactive_dir / f"{experiment_name.lower()}_interactive_comparison.html"
+                fig.write_html(str(output_path))
+                print(f"   ✓ Created {experiment_name.lower()}_interactive_comparison.html")
+                
+        except Exception as e:
+            logging.warning(f"Could not create interactive plot: {e}")
+    
+    print(f"   ✓ {experiment_name} visualizations complete")
+
+
+def generate_interactive_visualizations(results_dir, plots_dir):
+    """Generate interactive HTML plots using Plotly"""
+    print("\n" + "="*80)
+    print("🎨 GENERATING INTERACTIVE VISUALIZATIONS")
+    print("="*80)
+    
+    results_path = Path(results_dir)
+    # Use organized visualizations directory
+    plots_path = Path(results_dir) / "visualizations"
+    plots_path.mkdir(parents=True, exist_ok=True)
+    
+    # Find all CSV files
+    all_csvs = list(results_path.glob("**/*.csv"))
+    
+    # Try to create multi-optimizer comparison
+    for dataset_dir in results_path.iterdir():
+        if not dataset_dir.is_dir():
+            continue
+        
+        csv_files = list(dataset_dir.glob("*.csv"))
+        if not csv_files:
+            continue
+        
+        # Load and combine data
+        dfs = []
+        for csv_file in csv_files:
+            try:
+                df = pd.read_csv(csv_file)
+                # Extract optimizer from filename
+                stem = csv_file.stem
+                if 'optimizer' not in df.columns:
+                    # Try to extract from filename
+                    parts = stem.split('_')
+                    for i, part in enumerate(parts):
+                        if 'seed' in part and i > 0:
+                            df['optimizer'] = parts[i-1]
+                            break
+                dfs.append(df)
+            except Exception as e:
+                logging.debug(f"Could not load {csv_file}: {e}")
+                continue
+        
+        if not dfs:
+            continue
+        
+        combined_df = pd.concat(dfs, ignore_index=True)
+        
+        # Check if we have the required columns
+        has_epoch = 'epoch' in combined_df.columns
+        has_metrics = any(col in combined_df.columns for col in ['test_acc', 'test_accuracy', 'train_loss', 'test_loss'])
+        
+        if has_epoch and has_metrics and 'optimizer' in combined_df.columns:
+            try:
+                # Determine metric columns
+                metric_cols = []
+                for col in ['train_loss', 'test_loss', 'train_acc', 'test_acc', 'test_accuracy']:
+                    if col in combined_df.columns:
+                        metric_cols.append(col)
+                
+                if metric_cols:
+                    # Descriptive filename
+                    output_path = plots_path / f"interactive_{dataset_dir.name}_optimizer_comparison.html"
+                    fig = plot_multi_optimizer_comparison(
+                        combined_df,
+                        optimizer_col='optimizer',
+                        epoch_col='epoch',
+                        metric_cols=metric_cols[:4],  # Max 4 metrics
+                        title=f"{dataset_dir.name.upper()} Optimizer Comparison"
+                    )
+                    fig.write_html(str(output_path))
+                    print(f"   ✓ Created {output_path.name}")
+            except Exception as e:
+                logging.debug(f"Could not create plot for {dataset_dir.name}: {e}")
+                continue
+    
+    print("   Interactive visualizations complete")
+
+
+def generate_basic_stats(results_dir):
+    """Generate basic statistics when scipy unavailable"""
+    print("   Generating basic statistics...")
+    
+    results_path = Path(results_dir)
+    all_csvs = list(results_path.glob("**/*.csv"))
+    
+    stats_summary = []
+    for csv_file in all_csvs:
+        try:
+            df = pd.read_csv(csv_file)
+            
+            # Extract metrics
+            metrics = {}
+            for col in df.columns:
+                if 'acc' in col.lower() or 'loss' in col.lower():
+                    metrics[col] = {
+                        'mean': df[col].mean(),
+                        'std': df[col].std(),
+                        'min': df[col].min(),
+                        'max': df[col].max()
+                    }
+            
+            if metrics:
+                stats_summary.append({
+                    'file': csv_file.name,
+                    'metrics': json.dumps(metrics)
+                })
+        except Exception:
+            continue
+    
+    if stats_summary:
+        summary_df = pd.DataFrame(stats_summary)
+        # Organized output path
+        analysis_dir = results_path / "analysis"
+        analysis_dir.mkdir(exist_ok=True)
+        output_path = analysis_dir / "basic_statistics_summary.csv"
+        summary_df.to_csv(output_path, index=False)
+        print(f"   ✓ Basic stats saved to {output_path}")
+    
+    return pd.DataFrame()
+
+
+def generate_final_summary_report(results_dir, experiment_results):
+    """Generate comprehensive summary report with all integrated analyses"""
+    print("   Creating comprehensive summary report...")
+    
+    # Create organized reports directory
+    reports_dir = results_dir / "reports"
+    reports_dir.mkdir(exist_ok=True)
+    
+    report_path = reports_dir / "experiment_summary_report.md"
+    
+    with open(report_path, 'w') as f:
+        f.write("# GDSearch Benchmark Suite - Comprehensive Experiment Report\n\n")
+        f.write(f"**Generated**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        f.write("---\n\n")
+        
+        f.write("## 📊 Experiments Completed\n\n")
+        for exp_name, exp_df in experiment_results.items():
+            if exp_df is not None:
+                f.write(f"- **{exp_name.upper()}**: {len(exp_df)} data points\n")
+        
+        f.write("\n## 📁 Results Directory Structure\n\n")
+        f.write("```\n")
+        f.write(f"{results_dir.name}/\n")
+        f.write("├── experiments/           # Experiment-specific results\n")
+        f.write("│   ├── mnist/            # MNIST classification results\n")
+        f.write("│   ├── cifar10/          # CIFAR-10 image classification\n")
+        f.write("│   ├── nlp/              # NLP sentiment analysis\n")
+        f.write("│   └── medical/          # Medical image segmentation\n")
+        f.write("├── visualizations/       # Interactive HTML plots\n")
+        f.write("│   └── *.html            # Open in browser for interactive charts\n")
+        f.write("├── analysis/             # Statistical & convergence analysis\n")
+        f.write("│   ├── convergence_rates.csv\n")
+        f.write("│   ├── statistical_comparison.csv\n")
+        f.write("│   └── basic_statistics_summary.csv\n")
+        f.write("├── reports/              # Summary reports\n")
+        f.write("│   └── experiment_summary_report.md  # This file\n")
+        f.write("└── checkpoints/          # Model checkpoints (if enabled)\n")
+        f.write("```\n\n")
+        
+        f.write("## 🔬 Integrated Analysis Features\n\n")
+        
+        if HAS_CONVERGENCE:
+            f.write("### ✅ Convergence Analysis\n")
+            f.write("- **Purpose**: Empirical convergence rate detection\n")
+            f.write("- **Metrics**: Convergence rate, stagnation detection, epoch analysis\n")
+            f.write("- **Location**: `analysis/convergence_rates.csv`\n\n")
+        
+        if HAS_INTERACTIVE:
+            f.write("### ✅ Interactive Visualizations\n")
+            f.write("- **Purpose**: Multi-optimizer comparison with interactive charts\n")
+            f.write("- **Features**: Pan, zoom, hover tooltips, multi-metric subplots\n")
+            f.write("- **Location**: `visualizations/*.html`\n")
+            f.write("- **Usage**: Open HTML files in any web browser\n\n")
+        
+        if HAS_STATS:
+            f.write("### ✅ Statistical Analysis\n")
+            f.write("- **Purpose**: Rigorous statistical comparisons\n")
+            f.write("- **Tests**: T-tests, Cohen's d effect sizes, confidence intervals\n")
+            f.write("- **Location**: `analysis/statistical_comparison.csv`\n\n")
+        
+        f.write("## 📖 How to Use Results\n\n")
+        f.write("### View Interactive Plots\n")
+        f.write("```bash\n")
+        f.write("# Open visualizations in browser\n")
+        f.write(f"open {results_dir}/visualizations/*.html  # macOS\n")
+        f.write(f"xdg-open {results_dir}/visualizations/*.html  # Linux\n")
+        f.write("```\n\n")
+        
+        f.write("### Analyze Results Programmatically\n")
+        f.write("```python\n")
+        f.write("import pandas as pd\n\n")
+        f.write("# Load convergence analysis\n")
+        f.write(f"conv = pd.read_csv('{results_dir}/analysis/convergence_rates.csv')\n")
+        f.write("print(conv.groupby('optimizer')['convergence_rate'].mean())\n\n")
+        f.write("# Load statistical comparison\n")
+        f.write(f"stats = pd.read_csv('{results_dir}/analysis/statistical_comparison.csv')\n")
+        f.write("print(stats[stats['is_significant']])\n\n")
+        f.write("# Load experiment data\n")
+        f.write(f"mnist = pd.read_csv('{results_dir}/experiments/mnist/MNIST_MLP_Adam_seed42.csv')\n")
+        f.write("print(mnist[['epoch', 'test_acc']].tail())\n")
+        f.write("```\n\n")
+        
+        f.write("## 🎯 Key Findings\n\n")
+        f.write("1. **Convergence Analysis**: Review convergence rates to understand optimization dynamics\n")
+        f.write("2. **Statistical Tests**: Check p-values and effect sizes for rigorous comparisons\n")
+        f.write("3. **Interactive Plots**: Use visualizations for presentation and exploration\n")
+        f.write("4. **Per-Experiment Data**: Detailed CSV files for custom analysis\n\n")
+        
+        f.write("## 🚀 Next Steps\n\n")
+        f.write("1. Open `visualizations/*.html` for interactive exploration\n")
+        f.write("2. Review `analysis/convergence_rates.csv` for convergence insights\n")
+        f.write("3. Check `analysis/statistical_comparison.csv` for rigorous comparisons\n")
+        f.write("4. Use experiment CSVs for custom analysis and visualization\n\n")
+        
+        f.write("## 📚 Citation\n\n")
+        f.write("If you use these results, please cite:\n")
+        f.write("```\n")
+        f.write("GDSearch: Gradient Descent Optimizer Comparison Platform\n")
+        f.write("Multi-seed reproducible experiments with statistical rigor\n")
+        f.write("```\n\n")
+        
+        f.write("---\n")
+        f.write(f"*Report generated by GDSearch v1.0 on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*\n")
+    
+    print(f"   ✓ Summary report saved to {report_path}")
+    return str(report_path)
+
+
+def run_statistical_analysis_OLD(results_dir="results", plots_dir="plots"):
     """Run statistical analysis combining all experiment results from per-run CSVs"""
     print("\n" + "="*80)
     print("📊 STATISTICAL ANALYSIS & COMPARISONS")
@@ -2141,6 +2883,15 @@ def run_2d_experiments(results_dir="results_2d", seeds=[1,2,3]):
     df.to_csv(f"{results_dir}/2d_optimization_results.csv", index=False)
 
     print(f"\n💾 Results saved to {results_dir}/2d_optimization_results.csv")
+    
+    # Generate visualizations for 2D experiment
+    try:
+        twod_csvs = list(Path(results_dir).glob("*.csv"))
+        if twod_csvs:
+            create_experiment_visualizations('2D_Optimization', str(results_dir.parent.parent), twod_csvs)
+    except Exception as viz_e:
+        logging.warning(f"Could not create 2D visualizations: {viz_e}")
+    
     return df
 
 def run_robustness_analysis(results_dir="results_robustness"):
@@ -2222,6 +2973,15 @@ def run_robustness_analysis(results_dir="results_robustness"):
     df.to_csv(f"{results_dir}/robustness_results.csv", index=False)
 
     print(f"\n💾 Results saved to {results_dir}/robustness_results.csv")
+    
+    # Generate visualizations for Robustness experiment
+    try:
+        robustness_csvs = list(Path(results_dir).glob("*.csv"))
+        if robustness_csvs:
+            create_experiment_visualizations('Robustness', str(results_dir.parent.parent), robustness_csvs)
+    except Exception as viz_e:
+        logging.warning(f"Could not create Robustness visualizations: {viz_e}")
+    
     return df
 
 def run_sam_sensitivity(results_dir="results_sam_sensitivity"):
@@ -2292,6 +3052,15 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity"):
     df.to_csv(f"{results_dir}/sam_sensitivity_results.csv", index=False)
 
     print(f"\n💾 Results saved to {results_dir}/sam_sensitivity_results.csv")
+    
+    # Generate visualizations for SAM experiment
+    try:
+        sam_csvs = list(Path(results_dir).glob("*.csv"))
+        if sam_csvs:
+            create_experiment_visualizations('SAM_Sensitivity', str(results_dir.parent.parent), sam_csvs)
+    except Exception as viz_e:
+        logging.warning(f"Could not create SAM visualizations: {viz_e}")
+    
     return df
 
 def run_ablation_study(results_dir="results_ablation"):
@@ -2374,6 +3143,15 @@ def run_ablation_study(results_dir="results_ablation"):
     df.to_csv(f"{results_dir}/ablation_results.csv", index=False)
 
     print(f"\n💾 Results saved to {results_dir}/ablation_results.csv")
+    
+    # Generate visualizations for Ablation experiment
+    try:
+        ablation_csvs = list(Path(results_dir).glob("*.csv"))
+        if ablation_csvs:
+            create_experiment_visualizations('Ablation', str(results_dir.parent.parent), ablation_csvs)
+    except Exception as viz_e:
+        logging.warning(f"Could not create Ablation visualizations: {viz_e}")
+    
     return df
 
 # ==============================================================================
@@ -3124,6 +3902,15 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=[1,2,3], quick=Fal
         logging.debug("Failed to save per-run ResNet artifact")
 
     print(f"\n💾 Results saved to {results_dir}/resnet_results.csv")
+    
+    # Generate visualizations for ResNet experiment
+    try:
+        resnet_csvs = list(Path(results_dir).glob("*.csv"))
+        if resnet_csvs:
+            create_experiment_visualizations('ResNet18', str(results_dir.parent.parent), resnet_csvs)
+    except Exception as viz_e:
+        logging.warning(f"Could not create ResNet visualizations: {viz_e}")
+    
     return df
 
 
@@ -3243,6 +4030,15 @@ def run_highdim_experiment(results_dir="results_highdim", seeds=[1,2,3], quick=F
         tracker.log_artifact(f"{results_dir}/highdim_results.csv", "results")
 
     print(f"\n💾 Results saved to {results_dir}/highdim_results.csv")
+    
+    # Generate visualizations for HighDim experiment
+    try:
+        highdim_csvs = list(Path(results_dir).glob("*.csv"))
+        if highdim_csvs:
+            create_experiment_visualizations('HighDim', str(results_dir.parent.parent), highdim_csvs)
+    except Exception as viz_e:
+        logging.warning(f"Could not create HighDim visualizations: {viz_e}")
+    
     return df
 
 
@@ -3476,10 +4272,14 @@ Examples:
     # Execute selected experiments
     experiment_results = {}
     
+    # Create experiments subdirectory
+    experiments_dir = results_dir / "experiments"
+    experiments_dir.mkdir(parents=True, exist_ok=True)
+    
     if 'mnist' in selected_experiments:
         with error_context("MNIST Experiment"):
             experiment_results['mnist'] = run_mnist_experiment(
-                results_dir=str(results_dir / "mnist"),
+                results_dir=str(experiments_dir / "mnist"),
                 seeds=seeds,
                 quick=args.quick,
                 skip_tuning=args.skip_tuning,
@@ -3491,7 +4291,7 @@ Examples:
     if 'cifar10' in selected_experiments:
         with error_context("CIFAR-10 Experiment"):
             experiment_results['cifar10'] = run_cifar10_experiment(
-                results_dir=str(results_dir / "cifar10"),
+                results_dir=str(experiments_dir / "cifar10"),
                 seeds=seeds,
                 quick=args.quick,
                 skip_tuning=args.skip_tuning,
@@ -3503,7 +4303,7 @@ Examples:
     if 'nlp' in selected_experiments and HAS_HF:
         with error_context("NLP Experiment"):
             experiment_results['nlp'] = run_nlp_experiment(
-                results_dir=str(results_dir / "nlp"),
+                results_dir=str(experiments_dir / "nlp"),
                 seeds=seeds,
                 quick=args.quick,
                 profiler=profiler,
@@ -3516,7 +4316,7 @@ Examples:
     if 'medical' in selected_experiments:
         with error_context("Medical Experiment"):
             experiment_results['medical'] = run_medical_experiment(
-                results_dir=str(results_dir / "medical"),
+                results_dir=str(experiments_dir / "medical"),
                 seeds=seeds,
                 quick=args.quick,
                 profiler=profiler,
@@ -3527,32 +4327,32 @@ Examples:
     if '2d' in selected_experiments:
         with error_context("2D Optimization Experiment"):
             experiment_results['2d'] = run_2d_experiments(
-                results_dir=str(results_dir / "2d_optimization"),
+                results_dir=str(experiments_dir / "2d_optimization"),
                 seeds=seeds
             )
     
     if 'robustness' in selected_experiments:
         with error_context("Robustness Experiment"):
             experiment_results['robustness'] = run_robustness_analysis(
-                results_dir=str(results_dir / "robustness")
+                results_dir=str(experiments_dir / "robustness")
             )
     
     if 'sam' in selected_experiments:
         with error_context("SAM Sensitivity Experiment"):
             experiment_results['sam'] = run_sam_sensitivity(
-                results_dir=str(results_dir / "sam_sensitivity")
+                results_dir=str(experiments_dir / "sam_sensitivity")
             )
     
     if 'ablation' in selected_experiments:
         with error_context("Ablation Study"):
             experiment_results['ablation'] = run_ablation_study(
-                results_dir=str(results_dir / "ablation")
+                results_dir=str(experiments_dir / "ablation")
             )
     
     if 'resnet' in selected_experiments:
         with error_context("ResNet Experiment"):
             experiment_results['resnet'] = run_resnet_experiment(
-                results_dir=str(results_dir / "resnet"),
+                results_dir=str(experiments_dir / "resnet"),
                 seeds=seeds,
                 quick=args.quick,
                 profiler=profiler,
@@ -3563,7 +4363,7 @@ Examples:
     if 'highdim' in selected_experiments:
         with error_context("High-Dimensional Experiment"):
             experiment_results['highdim'] = run_highdim_experiment(
-                results_dir=str(results_dir / "highdim"),
+                results_dir=str(experiments_dir / "highdim"),
                 seeds=seeds,
                 quick=args.quick,
                 profiler=profiler,
@@ -3579,6 +4379,41 @@ Examples:
             stats_df = run_statistical_analysis(results_dir=str(results_dir))
             experiment_results['statistics'] = stats_df
     
+    # INTEGRATED ANALYSIS PIPELINE
+    print("\\n" + "="*80)
+    print("🔬 RUNNING INTEGRATED ANALYSIS PIPELINE")
+    print("="*80)
+    
+    # Convergence analysis
+    if HAS_CONVERGENCE:
+        print("\\n1️⃣  Convergence Analysis...")
+        try:
+            run_convergence_analysis_on_results(str(results_dir))
+            print("   ✓ Convergence analysis complete")
+        except Exception as e:
+            logging.error(f"   ✗ Convergence analysis failed: {e}")
+    else:
+        print("\\n1️⃣  Convergence Analysis: SKIPPED (module not available)")
+    
+    # Interactive visualizations
+    if HAS_INTERACTIVE:
+        print("\\n2️⃣  Interactive Visualizations...")
+        try:
+            generate_interactive_visualizations(str(results_dir), str(results_dir / "visualizations"))
+            print("   ✓ Interactive plots generated")
+        except Exception as e:
+            logging.error(f"   ✗ Visualization failed: {e}")
+    else:
+        print("\\n2️⃣  Interactive Visualizations: SKIPPED (install plotly)")
+    
+    # Generate comprehensive summary report
+    print("\\n3️⃣  Final Summary Report...")
+    try:
+        generate_final_summary_report(results_dir, experiment_results)
+        print("   ✓ Summary report generated")
+    except Exception as e:
+        logging.error(f"   ✗ Report generation failed: {e}")
+    
     # Final summary
     print("\\n" + "="*80)
     print("✅ BENCHMARK SUITE COMPLETED")
@@ -3588,11 +4423,50 @@ Examples:
     for exp_name, exp_df in experiment_results.items():
         if exp_df is not None and hasattr(exp_df, '__len__'):
             print(f"  - {exp_name}: {len(exp_df)} result rows")
+    
+    # Print feature integration status
+    print("\\n" + "="*80)
+    print("📦 INTEGRATED FEATURES STATUS")
+    print("="*80)
+    print(f"  Convergence Analysis: {'✅ ENABLED' if HAS_CONVERGENCE else '❌ DISABLED'}")
+    print(f"  Interactive Plots: {'✅ ENABLED' if HAS_INTERACTIVE else '❌ DISABLED (install plotly)'}")
+    print(f"  Loss Landscapes: {'✅ ENABLED' if HAS_LANDSCAPE else '❌ DISABLED'}")
+    print(f"  Statistical Analysis: {'✅ ENABLED' if HAS_STATS else '❌ DISABLED'}")
+    print(f"  MLflow Tracking: {'✅ ENABLED' if HAS_MLFLOW and not args.no_mlflow else '❌ DISABLED'}")
     print("="*80)
     
     if profiler:
         print("\\n📊 Performance Summary:")
         profiler.print_summary()
+    
+    print("\\n" + "="*80)
+    print("📖 QUICK ACCESS GUIDE")
+    print("="*80)
+    print(f"  📁 Main directory: {results_dir}/")
+    print(f"")
+    print(f"  📊 Analysis Results:")
+    print(f"     - Basic stats: {results_dir}/analysis/00_basic_statistics.csv")
+    if HAS_CONVERGENCE:
+        print(f"     - Convergence: {results_dir}/analysis/01_convergence_rates.csv")
+    if HAS_STATS:
+        print(f"     - Statistical: {results_dir}/analysis/02_statistical_comparison.csv")
+    print(f"")
+    if HAS_INTERACTIVE:
+        print(f"  📈 Visualizations:")
+        print(f"     - Interactive (per-experiment): {results_dir}/visualizations/interactive/*_interactive_comparison.html")
+        print(f"     - Static plots (per-experiment): {results_dir}/visualizations/static/*/")
+        print(f"       · Training/test loss curves")
+        print(f"       · Accuracy progression plots")
+        print(f"       · Final performance comparisons")
+        print(f"")
+    print(f"  📄 Reports:")
+    print(f"     - Summary: {results_dir}/reports/00_EXPERIMENT_SUMMARY.md")
+    print(f"     - Structure: {results_dir}/README.md")
+    print(f"")
+    print(f"  🔬 Experiment Data:")
+    print(f"     - Location: {results_dir}/experiments/*/")
+    print(f"     - Format: {{DATASET}}_{{MODEL}}_{{OPTIMIZER}}_seed{{N}}.csv")
+    print("="*80)
     
     return experiment_results
 
