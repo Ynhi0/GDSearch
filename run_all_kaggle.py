@@ -4206,7 +4206,7 @@ Examples:
     parser.add_argument('--seeds', type=str, default='42,123,456',
                         help='Comma-separated random seeds (default: 42,123,456)')
     parser.add_argument('--experiments', type=str, default='all',
-                        help='Comma-separated experiment names (mnist,cifar10,nlp,medical,2d,robustness,sam,ablation,batch_ablation,lr_ablation,resnet,highdim) or "all"')
+                        help='Comma-separated experiment names (mnist,cifar10,nlp,medical,2d,robustness,sam,ablation,batch_ablation,lr_ablation,wd_ablation,scheduler_ablation,optimizer_comparison,resnet,highdim) or "all"')
     parser.add_argument('--results-dir', type=str, default='results',
                         help='Output directory for results (default: results/)')
     parser.add_argument('--deterministic', action='store_true',
@@ -4226,7 +4226,8 @@ Examples:
     # Parse experiment selection
     if args.experiments == 'all':
         selected_experiments = ['mnist', 'cifar10', 'nlp', 'medical', '2d', 
-                                'robustness', 'sam', 'ablation', 'batch_ablation', 'lr_ablation', 'resnet', 'highdim']
+                                'robustness', 'sam', 'ablation', 'batch_ablation', 'lr_ablation', 
+                                'wd_ablation', 'scheduler_ablation', 'optimizer_comparison', 'resnet', 'highdim']
     else:
         selected_experiments = [e.strip() for e in args.experiments.split(',')]
     
@@ -4440,6 +4441,98 @@ Examples:
             except Exception as e:
                 logging.error(f"Learning rate ablation failed: {e}")
                 experiment_results['lr_ablation'] = None
+    
+    if 'wd_ablation' in selected_experiments:
+        with error_context("Weight Decay Ablation Study"):
+            print("\n" + "="*80)
+            print("🔬 WEIGHT DECAY ABLATION STUDY")
+            print("="*80)
+            try:
+                from src.experiments.weight_decay_ablation import run_weight_decay_ablation
+                
+                base_config = {
+                    'dataset': 'MNIST',
+                    'model': 'SimpleMLP',
+                    'lr': 1e-3,
+                    'epochs': 5 if args.quick else 10,
+                    'batch_size': 128
+                }
+                
+                weight_decays = [0.0, 1e-4, 1e-3] if args.quick else [0.0, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2]
+                optimizers = ['SGD', 'Adam'] if args.quick else ['SGD', 'SGD_Momentum', 'Adam', 'AdamW']
+                
+                experiment_results['wd_ablation'] = run_weight_decay_ablation(
+                    base_config,
+                    weight_decays=weight_decays,
+                    optimizers=optimizers,
+                    seeds=seeds,
+                    results_dir=str(experiments_dir / "wd_ablation")
+                )
+                print("✅ Weight decay ablation completed!")
+            except Exception as e:
+                logging.error(f"Weight decay ablation failed: {e}")
+                experiment_results['wd_ablation'] = None
+    
+    if 'scheduler_ablation' in selected_experiments:
+        with error_context("Scheduler Ablation Study"):
+            print("\n" + "="*80)
+            print("🔬 LEARNING RATE SCHEDULER ABLATION STUDY")
+            print("="*80)
+            try:
+                from src.experiments.scheduler_ablation import run_scheduler_ablation
+                
+                base_config = {
+                    'dataset': 'MNIST',
+                    'model': 'SimpleMLP',
+                    'lr': 1e-3,
+                    'weight_decay': 1e-4,
+                    'epochs': 5 if args.quick else 15,
+                    'batch_size': 128
+                }
+                
+                schedulers = ['None', 'StepLR'] if args.quick else ['None', 'StepLR', 'ExponentialLR', 'CosineAnnealingLR']
+                optimizers = ['SGD', 'Adam'] if args.quick else ['SGD', 'Adam', 'AdamW']
+                
+                experiment_results['scheduler_ablation'] = run_scheduler_ablation(
+                    base_config,
+                    schedulers=schedulers,
+                    optimizers=optimizers,
+                    seeds=seeds,
+                    results_dir=str(experiments_dir / "scheduler_ablation")
+                )
+                print("✅ Scheduler ablation completed!")
+            except Exception as e:
+                logging.error(f"Scheduler ablation failed: {e}")
+                experiment_results['scheduler_ablation'] = None
+    
+    if 'optimizer_comparison' in selected_experiments and HAS_STATS:
+        with error_context("Optimizer Comparison Matrix"):
+            print("\n" + "="*80)
+            print("📊 OPTIMIZER COMPARISON MATRIX")
+            print("="*80)
+            try:
+                from src.analysis.optimizer_comparison_matrix import run_optimizer_comparison_matrix
+                
+                # Use MNIST results if available
+                mnist_results_dir = str(experiments_dir / "mnist")
+                if os.path.exists(mnist_results_dir):
+                    optimizers = ['SGD', 'SGD_Momentum', 'Adam', 'AdamW', 'AMSGrad']
+                    
+                    run_optimizer_comparison_matrix(
+                        results_dir=mnist_results_dir,
+                        optimizers=optimizers,
+                        metric='test_accuracy',
+                        output_dir=str(experiments_dir / "optimizer_comparison"),
+                        alpha=0.05
+                    )
+                    experiment_results['optimizer_comparison'] = "Completed"
+                    print("✅ Optimizer comparison matrix completed!")
+                else:
+                    print("⚠️  MNIST results not found - run MNIST experiments first")
+                    experiment_results['optimizer_comparison'] = None
+            except Exception as e:
+                logging.error(f"Optimizer comparison failed: {e}")
+                experiment_results['optimizer_comparison'] = None
     
     if 'resnet' in selected_experiments:
         with error_context("ResNet Experiment"):
