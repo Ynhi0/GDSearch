@@ -560,6 +560,64 @@ def is_experiment_completed(results_dir: str, dataset: str, model_name: str, opt
         return False
 
 
+def load_experiment_config(config_path: str = None) -> Dict[str, Any]:
+    """Load experiment configuration from JSON file.
+    
+    Args:
+        config_path: Path to config JSON file. If None, returns default config.
+    
+    Returns:
+        dict: Configuration dictionary with experiment parameters
+    """
+    default_config = {
+        'dataset': 'MNIST',
+        'model': 'SimpleMLP',
+        'seed': 42,
+        'batch_size': 128,
+        'epochs': {
+            'quick': 10,
+            'full': 20
+        },
+        'learning_rates': {
+            'SGD': 0.01,
+            'SGD_Momentum': 0.05,
+            'Adam': 0.001,
+            'AdamW': 0.001,
+            'AMSGrad': 0.001
+        },
+        'weight_decay': 1e-4,
+        'convergence': {
+            'grad_norm_threshold': 1e-6,
+            'loss_delta_threshold': 1e-7,
+            'loss_window': 200
+        }
+    }
+    
+    if config_path is None:
+        return default_config
+    
+    try:
+        config_file = Path(config_path)
+        if config_file.exists():
+            with open(config_file, 'r') as f:
+                user_config = json.load(f)
+            # Merge with defaults (user config takes precedence)
+            merged_config = default_config.copy()
+            for key, value in user_config.items():
+                if isinstance(value, dict) and key in merged_config and isinstance(merged_config[key], dict):
+                    merged_config[key].update(value)
+                else:
+                    merged_config[key] = value
+            logging.info(f"✓ Loaded config from {config_path}")
+            return merged_config
+        else:
+            logging.warning(f"Config file not found: {config_path}, using defaults")
+            return default_config
+    except Exception as e:
+        logging.warning(f"Error loading config: {e}, using defaults")
+        return default_config
+
+
 def save_run_artifacts(base_results_dir: str, dataset: str, model_name: str, optimizer_name: str,
                        seed: int, history: List[Dict[str, Any]], params: Dict[str, Any],
                        device: Optional[torch.device] = None, tracker: Optional[ExperimentTracker] = None):
@@ -2651,6 +2709,187 @@ def generate_basic_stats(results_dir):
     return pd.DataFrame()
 
 
+def aggregate_cross_experiment_results(results_dir: Path, experiment_results: Dict[str, Any]) -> pd.DataFrame:
+    """Aggregate results across all experiments for cross-experiment analysis.
+    
+    Creates a unified summary combining:
+    - All optimizer comparisons
+    - Statistical significance tests
+    - Effect sizes across all experiments
+    
+    Args:
+        results_dir: Path to results directory
+        experiment_results: Dictionary of experiment name -> DataFrame results
+    
+    Returns:
+        DataFrame with aggregated cross-experiment results
+    """
+    print("\n📊 CROSS-EXPERIMENT RESULT AGGREGATION")
+    print("-" * 50)
+    
+    aggregated = []
+    optimizer_performance = {}  # optimizer -> list of (experiment, metric, value)
+    
+    # Collect results from all experiments
+    for exp_name, exp_df in experiment_results.items():
+        if exp_df is None or not hasattr(exp_df, 'columns'):
+            continue
+        
+        try:
+            # Different experiments have different column names
+            if 'optimizer' in exp_df.columns:
+                opt_col = 'optimizer'
+            elif 'Optimizer' in exp_df.columns:
+                opt_col = 'Optimizer'
+            else:
+                continue
+            
+            # Find accuracy/loss columns
+            acc_col = None
+            loss_col = None
+            for col in exp_df.columns:
+                if 'test_acc' in col.lower() or 'accuracy' in col.lower():
+                    acc_col = col
+                if 'loss' in col.lower() and 'train' not in col.lower():
+                    loss_col = col
+            
+            # Aggregate by optimizer
+            for opt in exp_df[opt_col].unique():
+                opt_data = exp_df[exp_df[opt_col] == opt]
+                
+                entry = {
+                    'experiment': exp_name,
+                    'optimizer': opt,
+                    'n_runs': len(opt_data),
+                }
+                
+                if acc_col and acc_col in opt_data.columns:
+                    # Get final accuracy (last row per run or max)
+                    if 'seed' in opt_data.columns:
+                        final_accs = opt_data.groupby('seed')[acc_col].last().values
+                    else:
+                        final_accs = opt_data[acc_col].values
+                    
+                    entry['mean_accuracy'] = np.mean(final_accs)
+                    entry['std_accuracy'] = np.std(final_accs) if len(final_accs) > 1 else 0.0
+                    
+                if loss_col and loss_col in opt_data.columns:
+                    if 'seed' in opt_data.columns:
+                        final_losses = opt_data.groupby('seed')[loss_col].last().values
+                    else:
+                        final_losses = opt_data[loss_col].values
+                    
+                    entry['mean_loss'] = np.mean(final_losses)
+                    entry['std_loss'] = np.std(final_losses) if len(final_losses) > 1 else 0.0
+                
+                aggregated.append(entry)
+                
+                # Track for cross-experiment comparison
+                if opt not in optimizer_performance:
+                    optimizer_performance[opt] = []
+                optimizer_performance[opt].append({
+                    'experiment': exp_name,
+                    'accuracy': entry.get('mean_accuracy'),
+                    'loss': entry.get('mean_loss')
+                })
+                
+        except Exception as e:
+            logging.warning(f"Could not aggregate {exp_name}: {e}")
+            continue
+    
+    if not aggregated:
+        print("   ⚠️ No data to aggregate")
+        return pd.DataFrame()
+    
+    # Create aggregated DataFrame
+    agg_df = pd.DataFrame(aggregated)
+    
+    # Save aggregated results
+    analysis_dir = results_dir / "analysis"
+    analysis_dir.mkdir(parents=True, exist_ok=True)
+    
+    agg_path = analysis_dir / "cross_experiment_aggregation.csv"
+    agg_df.to_csv(agg_path, index=False)
+    print(f"   ✓ Aggregated results saved to {agg_path}")
+    
+    # Compute cross-experiment optimizer rankings
+    if 'mean_accuracy' in agg_df.columns:
+        rankings = []
+        for opt in agg_df['optimizer'].unique():
+            opt_data = agg_df[agg_df['optimizer'] == opt]
+            rankings.append({
+                'optimizer': opt,
+                'experiments_count': len(opt_data),
+                'avg_accuracy': opt_data['mean_accuracy'].mean(),
+                'avg_loss': opt_data['mean_loss'].mean() if 'mean_loss' in opt_data.columns else np.nan,
+            })
+        
+        ranking_df = pd.DataFrame(rankings)
+        if 'avg_accuracy' in ranking_df.columns:
+            ranking_df = ranking_df.sort_values('avg_accuracy', ascending=False)
+        
+        ranking_path = analysis_dir / "optimizer_rankings.csv"
+        ranking_df.to_csv(ranking_path, index=False)
+        print(f"   ✓ Optimizer rankings saved to {ranking_path}")
+        
+        # Print rankings
+        print("\n   📊 Optimizer Rankings (by avg accuracy):")
+        for i, row in ranking_df.iterrows():
+            acc_str = f"{row['avg_accuracy']:.2f}%" if pd.notna(row.get('avg_accuracy')) else "N/A"
+            print(f"      {row['optimizer']:20s}: {acc_str} (across {int(row['experiments_count'])} experiments)")
+    
+    # Statistical comparison across experiments (if scipy available)
+    if HAS_SCIPY and len(optimizer_performance) >= 2:
+        print("\n   🔬 Cross-Experiment Statistical Analysis:")
+        
+        stat_results = []
+        optimizers = list(optimizer_performance.keys())
+        
+        for i, opt_a in enumerate(optimizers):
+            for opt_b in optimizers[i+1:]:
+                # Get comparable experiments
+                exps_a = {p['experiment']: p['accuracy'] for p in optimizer_performance[opt_a] if p['accuracy'] is not None}
+                exps_b = {p['experiment']: p['accuracy'] for p in optimizer_performance[opt_b] if p['accuracy'] is not None}
+                
+                common_exps = set(exps_a.keys()) & set(exps_b.keys())
+                
+                if len(common_exps) >= 2:
+                    vals_a = [exps_a[e] for e in common_exps]
+                    vals_b = [exps_b[e] for e in common_exps]
+                    
+                    # Paired comparison
+                    try:
+                        t_stat, p_val = stats.ttest_rel(vals_a, vals_b)
+                        
+                        # Effect size (Cohen's d for paired)
+                        diff = np.array(vals_a) - np.array(vals_b)
+                        cohens_d = diff.mean() / (diff.std() + 1e-10)
+                        
+                        stat_results.append({
+                            'optimizer_a': opt_a,
+                            'optimizer_b': opt_b,
+                            'n_experiments': len(common_exps),
+                            'mean_diff': np.mean(vals_a) - np.mean(vals_b),
+                            't_statistic': t_stat,
+                            'p_value': p_val,
+                            'cohens_d': cohens_d,
+                            'significant': p_val < 0.05
+                        })
+                        
+                        sig_mark = "*" if p_val < 0.05 else ""
+                        print(f"      {opt_a} vs {opt_b}: p={p_val:.4f}{sig_mark}, d={cohens_d:.3f}")
+                    except Exception as e:
+                        logging.debug(f"Could not compare {opt_a} vs {opt_b}: {e}")
+        
+        if stat_results:
+            stat_df = pd.DataFrame(stat_results)
+            stat_path = analysis_dir / "cross_experiment_statistics.csv"
+            stat_df.to_csv(stat_path, index=False)
+            print(f"\n   ✓ Cross-experiment statistics saved to {stat_path}")
+    
+    return agg_df
+
+
 def generate_final_summary_report(results_dir, experiment_results):
     """Generate comprehensive summary report with all integrated analyses"""
     print("   Creating comprehensive summary report...")
@@ -2893,8 +3132,12 @@ class Rastrigin:
     def gradient(self, x):
         return 2*x + 2*np.pi*self.A*np.sin(2*np.pi*x)
 
-def run_2d_experiments(results_dir="results_2d", seeds=[1,2,3]):
-    """Run 2D optimization experiments on test functions"""
+def run_2d_experiments(results_dir="results_2d", seeds=[1,2,3], resume=False):
+    """Run 2D optimization experiments on test functions
+    
+    Args:
+        resume: If True, skip experiments that already have result files
+    """
     print("\n" + "="*80)
     print("📐 2D OPTIMIZATION EXPERIMENTS")
     print("="*80)
@@ -2918,6 +3161,11 @@ def run_2d_experiments(results_dir="results_2d", seeds=[1,2,3]):
 
         for opt_name, opt_func in optimizers_2d:
             for seed in seeds:
+                # Check if this specific experiment is already completed
+                if resume and is_experiment_completed(str(results_dir), '2D', func_name, opt_name, seed):
+                    logging.info(f"⏭️  Skipping 2D {func_name} {opt_name} seed {seed} (already completed)")
+                    continue
+                
                 set_seed(seed)
 
                 # Convert to torch tensors
@@ -3004,8 +3252,13 @@ def run_2d_experiments(results_dir="results_2d", seeds=[1,2,3]):
     
     return df
 
-def run_robustness_analysis(results_dir="results_robustness"):
-    """Run initial condition robustness analysis"""
+def run_robustness_analysis(results_dir="results_robustness", seeds=[42], resume=False):
+    """Run initial condition robustness analysis
+    
+    Args:
+        seeds: List of seeds for reproducibility (uses first seed)
+        resume: If True, skip experiments that already have result files
+    """
     print("\n" + "="*80)
     print("🎲 INITIAL CONDITION ROBUSTNESS ANALYSIS")
     print("="*80)
@@ -3023,14 +3276,27 @@ def run_robustness_analysis(results_dir="results_robustness"):
         ('SAM_SGD', lambda params: SAM(params, optim.SGD, lr=0.01, rho=0.05)),
     ]
 
+    # Check if experiment is already completed (single CSV output)
+    if resume:
+        result_file = Path(results_dir) / "robustness_results.csv"
+        if result_file.exists():
+            try:
+                df = pd.read_csv(result_file)
+                if len(df) > 0:
+                    logging.info(f"⏭️  Skipping Robustness experiment (already completed)")
+                    return df
+            except Exception:
+                pass
+
     results = []
+    seed = seeds[0] if seeds else 42
 
     for opt_name, opt_func in optimizers_robust:
         print(f"\n🎯 Testing Optimizer: {opt_name}")
         print("-" * 50)
 
         for start_point in initial_points:
-            set_seed(42)  # Fixed seed for reproducibility
+            set_seed(seed)  # Fixed seed for reproducibility
 
             x = torch.tensor(start_point, dtype=torch.float32, requires_grad=True)
             optimizer = opt_func([x])
@@ -3094,13 +3360,31 @@ def run_robustness_analysis(results_dir="results_robustness"):
     
     return df
 
-def run_sam_sensitivity(results_dir="results_sam_sensitivity"):
-    """Run SAM sensitivity analysis with different rho values"""
+def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=[42], resume=False):
+    """Run SAM sensitivity analysis with different rho values
+    
+    Args:
+        seeds: List of seeds for reproducibility (uses first seed)
+        resume: If True, skip experiments that already have result files
+    """
     print("\n" + "="*80)
     print("🎛️  SAM SENSITIVITY ANALYSIS")
     print("="*80)
 
+    # Check if experiment is already completed
+    if resume:
+        result_file = Path(results_dir) / "sam_sensitivity_results.csv"
+        if result_file.exists():
+            try:
+                df = pd.read_csv(result_file)
+                if len(df) > 0:
+                    logging.info(f"⏭️  Skipping SAM Sensitivity experiment (already completed)")
+                    return df
+            except Exception:
+                pass
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    seed = seeds[0] if seeds else 42
 
     # Simple dataset for quick testing
     transform = transforms.Compose([
@@ -3116,7 +3400,7 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity"):
     urllib.request.install_opener(opener)
     
     train_dataset = torchvision.datasets.MNIST('./data', train=True, download=True, transform=transform)
-    train_loader = make_dataloader(train_dataset, batch_size=256, shuffle=True, seed=42, num_workers=2, pin_memory=True)
+    train_loader = make_dataloader(train_dataset, batch_size=256, shuffle=True, seed=seed, num_workers=2, pin_memory=True)
 
     rho_values = [0.01, 0.02, 0.05, 0.1, 0.2]
     results = []
@@ -3180,14 +3464,32 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity"):
     
     return df
 
-def run_ablation_study(results_dir="results_ablation"):
-    """Run optimizer component ablation study"""
+def run_ablation_study(results_dir="results_ablation", seeds=[42], resume=False):
+    """Run optimizer component ablation study
+    
+    Args:
+        seeds: List of seeds for reproducibility (uses first seed)
+        resume: If True, skip experiments that already have result files
+    """
     print("\n" + "="*80)
     print("🔬 OPTIMIZER COMPONENT ABLATION STUDY")
     print("="*80)
 
+    # Check if experiment is already completed
+    if resume:
+        result_file = Path(results_dir) / "ablation_results.csv"
+        if result_file.exists():
+            try:
+                df = pd.read_csv(result_file)
+                if len(df) > 0:
+                    logging.info(f"⏭️  Skipping Ablation Study experiment (already completed)")
+                    return df
+            except Exception:
+                pass
+
     rosenbrock = Rosenbrock()
     initial_point = (-1.5, 2.0)
+    seed = seeds[0] if seeds else 42
 
     # Different optimizer variants
     ablation_configs = [
@@ -3204,7 +3506,7 @@ def run_ablation_study(results_dir="results_ablation"):
         print(f"\n🎯 Testing: {opt_name}")
         print("-" * 30)
 
-        set_seed(42)
+        set_seed(seed)
         x = torch.tensor(initial_point, dtype=torch.float32, requires_grad=True)
 
         if opt_name == 'SGD':
@@ -3892,11 +4194,27 @@ def print_system_info():
         print(f"  {k}: {v}")
     print()
 
-def run_resnet_experiment(results_dir="results_resnet", seeds=[1,2,3], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None):
-    """Run ResNet18 experiment with enhanced monitoring"""
+def run_resnet_experiment(results_dir="results_resnet", seeds=[1,2,3], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
+    """Run ResNet18 experiment with enhanced monitoring
+    
+    Args:
+        resume: If True, skip experiments that already have result files
+    """
     print("\n" + "="*80)
     print("🏗️  RESNET18 EXPERIMENT")
     print("="*80)
+
+    # Check if experiment is already completed
+    if resume:
+        result_file = Path(results_dir) / "resnet_results.csv"
+        if result_file.exists():
+            try:
+                df = pd.read_csv(result_file)
+                if len(df) > 0:
+                    logging.info(f"⏭️  Skipping ResNet18 experiment (already completed)")
+                    return df
+            except Exception:
+                pass
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
@@ -4041,11 +4359,27 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=[1,2,3], quick=Fal
     return df
 
 
-def run_highdim_experiment(results_dir="results_highdim", seeds=[1,2,3], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None):
-    """Run high-dimensional optimization experiment"""
+def run_highdim_experiment(results_dir="results_highdim", seeds=[1,2,3], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
+    """Run high-dimensional optimization experiment
+    
+    Args:
+        resume: If True, skip experiments that already have result files
+    """
     print("\n" + "="*80)
     print("🌌 HIGH-DIMENSIONAL OPTIMIZATION EXPERIMENT")
     print("="*80)
+
+    # Check if experiment is already completed
+    if resume:
+        result_file = Path(results_dir) / "highdim_results.csv"
+        if result_file.exists():
+            try:
+                df = pd.read_csv(result_file)
+                if len(df) > 0:
+                    logging.info(f"⏭️  Skipping HighDim experiment (already completed)")
+                    return df
+            except Exception:
+                pass
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
@@ -4324,6 +4658,8 @@ Examples:
                         help='Comma-separated experiment names (mnist,cifar10,nlp,medical,2d,robustness,sam,ablation,batch_ablation,lr_ablation,wd_ablation,scheduler_ablation,optimizer_comparison,resnet,highdim) or "all"')
     parser.add_argument('--results-dir', type=str, default='results',
                         help='Output directory for results (default: results/)')
+    parser.add_argument('--config', type=str, default=None,
+                        help='Path to JSON config file (default: use built-in defaults)')
     parser.add_argument('--deterministic', action='store_true',
                         help='Force deterministic mode (use_deterministic_algorithms + CUBLAS_WORKSPACE_CONFIG)')
     parser.add_argument('--no-mlflow', action='store_true',
@@ -4419,7 +4755,7 @@ Examples:
     
     if args.resume:
         print(f"\n🔄 Resume mode enabled - will skip completed experiments")
-    print("="*80 + "\\n")
+    print("="*80 + "\n")
     
     # Execute selected experiments
     experiment_results = {}
@@ -4484,25 +4820,32 @@ Examples:
         with error_context("2D Optimization Experiment"):
             experiment_results['2d'] = run_2d_experiments(
                 results_dir=str(experiments_dir / "2d_optimization"),
-                seeds=seeds
+                seeds=seeds,
+                resume=args.resume
             )
     
     if 'robustness' in selected_experiments:
         with error_context("Robustness Experiment"):
             experiment_results['robustness'] = run_robustness_analysis(
-                results_dir=str(experiments_dir / "robustness")
+                results_dir=str(experiments_dir / "robustness"),
+                seeds=seeds,
+                resume=args.resume
             )
     
     if 'sam' in selected_experiments:
         with error_context("SAM Sensitivity Experiment"):
             experiment_results['sam'] = run_sam_sensitivity(
-                results_dir=str(experiments_dir / "sam_sensitivity")
+                results_dir=str(experiments_dir / "sam_sensitivity"),
+                seeds=seeds,
+                resume=args.resume
             )
     
     if 'ablation' in selected_experiments:
         with error_context("Optimizer Component Ablation Study"):
             experiment_results['ablation'] = run_ablation_study(
-                results_dir=str(experiments_dir / "ablation")
+                results_dir=str(experiments_dir / "ablation"),
+                seeds=seeds,
+                resume=args.resume
             )
     
     if 'batch_ablation' in selected_experiments:
@@ -4667,7 +5010,8 @@ Examples:
                 quick=args.quick,
                 profiler=profiler,
                 tracker=tracker,
-                checkpoint_manager=checkpoint_manager
+                checkpoint_manager=checkpoint_manager,
+                resume=args.resume
             )
     
     if 'highdim' in selected_experiments:
@@ -4677,12 +5021,13 @@ Examples:
                 seeds=seeds,
                 quick=args.quick,
                 profiler=profiler,
-                tracker=tracker
+                tracker=tracker,
+                resume=args.resume
             )
     
     # Run statistical analysis if scipy available
     if HAS_SCIPY:
-        print("\\n" + "="*80)
+        print("\n" + "="*80)
         print("📊 RUNNING STATISTICAL ANALYSIS...")
         print("="*80)
         with error_context("Statistical Analysis"):
@@ -4690,34 +5035,44 @@ Examples:
             experiment_results['statistics'] = stats_df
     
     # INTEGRATED ANALYSIS PIPELINE
-    print("\\n" + "="*80)
+    print("\n" + "="*80)
     print("🔬 RUNNING INTEGRATED ANALYSIS PIPELINE")
     print("="*80)
     
+    # Cross-experiment aggregation (Priority 3)
+    print("\n0️⃣  Cross-Experiment Aggregation...")
+    try:
+        aggregation_df = aggregate_cross_experiment_results(results_dir, experiment_results)
+        experiment_results['aggregation'] = aggregation_df
+        print("   ✓ Cross-experiment aggregation complete")
+    except Exception as e:
+        logging.error(f"   ✗ Cross-experiment aggregation failed: {e}")
+        experiment_results['aggregation'] = None
+    
     # Convergence analysis
     if HAS_CONVERGENCE:
-        print("\\n1️⃣  Convergence Analysis...")
+        print("\n1️⃣  Convergence Analysis...")
         try:
             run_convergence_analysis_on_results(str(results_dir))
             print("   ✓ Convergence analysis complete")
         except Exception as e:
             logging.error(f"   ✗ Convergence analysis failed: {e}")
     else:
-        print("\\n1️⃣  Convergence Analysis: SKIPPED (module not available)")
+        print("\n1️⃣  Convergence Analysis: SKIPPED (module not available)")
     
     # Interactive visualizations
     if HAS_INTERACTIVE:
-        print("\\n2️⃣  Interactive Visualizations...")
+        print("\n2️⃣  Interactive Visualizations...")
         try:
             generate_interactive_visualizations(str(results_dir), str(results_dir / "visualizations"))
             print("   ✓ Interactive plots generated")
         except Exception as e:
             logging.error(f"   ✗ Visualization failed: {e}")
     else:
-        print("\\n2️⃣  Interactive Visualizations: SKIPPED (install plotly)")
+        print("\n2️⃣  Interactive Visualizations: SKIPPED (install plotly)")
     
     # Generate comprehensive summary report
-    print("\\n3️⃣  Final Summary Report...")
+    print("\n3️⃣  Final Summary Report...")
     try:
         generate_final_summary_report(results_dir, experiment_results)
         print("   ✓ Summary report generated")
@@ -4725,7 +5080,7 @@ Examples:
         logging.error(f"   ✗ Report generation failed: {e}")
     
     # Final summary
-    print("\\n" + "="*80)
+    print("\n" + "="*80)
     print("✅ BENCHMARK SUITE COMPLETED")
     print("="*80)
     print(f"Results saved to: {results_dir}")
@@ -4735,7 +5090,7 @@ Examples:
             print(f"  - {exp_name}: {len(exp_df)} result rows")
     
     # Print feature integration status
-    print("\\n" + "="*80)
+    print("\n" + "="*80)
     print("📦 INTEGRATED FEATURES STATUS")
     print("="*80)
     print(f"  Convergence Analysis: {'✅ ENABLED' if HAS_CONVERGENCE else '❌ DISABLED'}")
@@ -4746,20 +5101,23 @@ Examples:
     print("="*80)
     
     if profiler:
-        print("\\n📊 Performance Summary:")
+        print("\n📊 Performance Summary:")
         profiler.print_summary()
     
-    print("\\n" + "="*80)
+    print("\n" + "="*80)
     print("📖 QUICK ACCESS GUIDE")
     print("="*80)
     print(f"  📁 Main directory: {results_dir}/")
     print(f"")
     print(f"  📊 Analysis Results:")
     print(f"     - Basic stats: {results_dir}/analysis/00_basic_statistics.csv")
+    print(f"     - Cross-experiment: {results_dir}/analysis/cross_experiment_aggregation.csv")
+    print(f"     - Optimizer rankings: {results_dir}/analysis/optimizer_rankings.csv")
     if HAS_CONVERGENCE:
         print(f"     - Convergence: {results_dir}/analysis/01_convergence_rates.csv")
     if HAS_STATS:
         print(f"     - Statistical: {results_dir}/analysis/02_statistical_comparison.csv")
+        print(f"     - Cross-exp stats: {results_dir}/analysis/cross_experiment_statistics.csv")
     print(f"")
     if HAS_INTERACTIVE:
         print(f"  📈 Visualizations:")

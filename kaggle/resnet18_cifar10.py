@@ -665,12 +665,12 @@ def main():
         print("Rho    | Best Test Acc | Final Train Loss | Final Test Loss | Time (min)")
         print("-------|---------------|------------------|-----------------|------------")
         for result in results:
-            print(">4.2f")
+            print(f"{result['rho']:>4.2f}   | {result['best_test_acc']:>12.2f}% | {result['final_train_loss']:>16.4f} | {result['final_test_loss']:>15.4f} | {result['training_time']/60:>10.2f}")
         print()
         
         # Find optimal rho
         best_result = max(results, key=lambda x: x['best_test_acc'])
-        print("🎯 Optimal rho: {best_result['rho']} (Test Acc: {best_result['best_test_acc']:.2f}%)")
+        print(f"🎯 Optimal rho: {best_result['rho']} (Test Acc: {best_result['best_test_acc']:.2f}%)")
         print()
         
         # Save results to CSV

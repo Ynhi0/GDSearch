@@ -682,14 +682,19 @@ class Lookahead(Optimizer):
             self.slow_params = params.copy()
     
     def _update_slow_weights(self, params):
-        """Update slow weights by interpolating with fast weights."""
+        """Update slow weights by interpolating with fast weights.
+        
+        Per Lookahead paper: slow = slow + alpha * (fast - slow)
+        Which equals: slow = (1 - alpha) * slow + alpha * fast
+        """
         if isinstance(params, tuple):
             x, y = params
-            self.slow_params_x = self.alpha * self.slow_params_x + (1 - self.alpha) * x
-            self.slow_params_y = self.alpha * self.slow_params_y + (1 - self.alpha) * y
+            # Lookahead: slow += alpha * (fast - slow)
+            self.slow_params_x = (1 - self.alpha) * self.slow_params_x + self.alpha * x
+            self.slow_params_y = (1 - self.alpha) * self.slow_params_y + self.alpha * y
             return self.slow_params_x, self.slow_params_y
         else:
-            self.slow_params = self.alpha * self.slow_params + (1 - self.alpha) * params
+            self.slow_params = (1 - self.alpha) * self.slow_params + self.alpha * params
             return self.slow_params
     
     def step(self, params, gradients):

@@ -383,9 +383,9 @@ class LookaheadWrapper(Optimizer):
             idx = 0
             for group in self.param_groups:
                 for p in group['params']:
-                    # Interpolate: slow = α * slow + (1-α) * fast
+                    # Lookahead: slow = slow + α * (fast - slow) = (1-α) * slow + α * fast
                     alpha = group['alpha']
-                    self.slow_params[idx] = alpha * self.slow_params[idx] + (1 - alpha) * p.data
+                    self.slow_params[idx] = (1 - alpha) * self.slow_params[idx] + alpha * p.data
                     p.data.copy_(self.slow_params[idx])
                     idx += 1
         

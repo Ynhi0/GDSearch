@@ -63,8 +63,9 @@ def test_quick_2d_pipeline():
         
         assert result.returncode == 0, f"2D experiment failed: {result.stderr}"
         
-        results_dir = Path(tmpdir) / "2d_optimization"
-        assert results_dir.exists(), "2D results directory not created"
+        # Results are stored in experiments/2d_optimization subdirectory
+        results_dir = Path(tmpdir) / "experiments" / "2d_optimization"
+        assert results_dir.exists(), f"2D results directory not created at {results_dir}"
         
         # Check for per-run artifacts - save_run_artifacts creates a subdirectory
         # Check both top-level and subdirectories for CSV files
@@ -106,7 +107,8 @@ def test_multi_seed_consistency():
         
         assert result.returncode == 0, f"Multi-seed run failed: {result.stderr}"
         
-        results_dir = Path(tmpdir) / "2d_optimization"
+        # Results are stored in experiments/2d_optimization subdirectory
+        results_dir = Path(tmpdir) / "experiments" / "2d_optimization"
         
         # Should have artifacts for each seed - check recursively
         for seed in [42, 123, 456]:

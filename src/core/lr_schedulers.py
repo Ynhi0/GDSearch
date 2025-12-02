@@ -292,11 +292,13 @@ class LinearWarmupScheduler(LRScheduler):
         """
         Args:
             optimizer: Optimizer to adjust
-            warmup_epochs: Number of warmup epochs
+            warmup_epochs: Number of warmup epochs (must be > 0)
             after_scheduler: Scheduler to use after warmup (optional)
             warmup_start_lr: Initial learning rate for warmup
             last_epoch: The index of last epoch
         """
+        if warmup_epochs <= 0:
+            raise ValueError(f"warmup_epochs must be positive, got {warmup_epochs}")
         self.warmup_epochs = warmup_epochs
         self.after_scheduler = after_scheduler
         self.warmup_start_lr = warmup_start_lr
@@ -305,7 +307,7 @@ class LinearWarmupScheduler(LRScheduler):
     def get_lr(self) -> float:
         """Calculate learning rate with warmup."""
         if self.last_epoch < self.warmup_epochs:
-            # Linear warmup
+            # Linear warmup (warmup_epochs guaranteed > 0)
             alpha = self.last_epoch / self.warmup_epochs
             lr = self.warmup_start_lr + alpha * (self.base_lr - self.warmup_start_lr)
             return lr
@@ -346,10 +348,12 @@ class PolynomialLR(LRScheduler):
         """
         Args:
             optimizer: Optimizer to adjust
-            max_epochs: Total number of training epochs
+            max_epochs: Total number of training epochs (must be > 0)
             power: Exponent of polynomial decay
             last_epoch: The index of last epoch
         """
+        if max_epochs <= 0:
+            raise ValueError(f"max_epochs must be positive, got {max_epochs}")
         self.max_epochs = max_epochs
         self.power = power
         super().__init__(optimizer, last_epoch)
@@ -385,12 +389,16 @@ class OneCycleLR(LRScheduler):
         Args:
             optimizer: Optimizer to adjust
             max_lr: Maximum learning rate
-            total_steps: Total number of training steps
-            pct_start: Percentage of cycle spent increasing LR
+            total_steps: Total number of training steps (must be > 0)
+            pct_start: Percentage of cycle spent increasing LR (0.0 to 1.0)
             div_factor: Initial LR = max_lr / div_factor
             final_div_factor: Final LR = max_lr / final_div_factor
             last_epoch: The index of last epoch
         """
+        if total_steps <= 0:
+            raise ValueError(f"total_steps must be positive, got {total_steps}")
+        if not (0.0 <= pct_start <= 1.0):
+            raise ValueError(f"pct_start must be between 0 and 1, got {pct_start}")
         self.max_lr = max_lr
         self.total_steps = total_steps
         self.pct_start = pct_start
