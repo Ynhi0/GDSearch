@@ -770,8 +770,9 @@ class SAM(torch.optim.Optimizer):
         closure = torch.enable_grad()(closure)  # the closure should do a full forward-backward pass
 
         self.first_step(zero_grad=True)
-        closure()
+        loss = closure()
         self.second_step()
+        return loss
 
     def _grad_norm(self):
         shared_device = self.param_groups[0]["params"][0].device
@@ -855,9 +856,7 @@ class UNet2D(nn.Module):
             self.decoder.append(
                 nn.Sequential(
                     nn.ConvTranspose2d(feature*2, feature, kernel_size=2, stride=2),
-                    nn.BatchNorm2d(feature),
-                    nn.ReLU(inplace=True),
-                    nn.Conv2d(feature, feature, kernel_size=3, padding=1),
+                    nn.Conv2d(feature*2, feature, kernel_size=3, padding=1),  # feature*2 because of concat
                     nn.BatchNorm2d(feature),
                     nn.ReLU(inplace=True),
                     nn.Conv2d(feature, feature, kernel_size=3, padding=1),
@@ -899,7 +898,9 @@ class UNet2D(nn.Module):
                 x = F.interpolate(x, size=skip_connection.shape[2:], mode='bilinear', align_corners=True)
 
             x = torch.cat((skip_connection, x), dim=1)
-            x = decoder[1:](x)  # Rest of decoder block
+            # Apply remaining decoder layers after concatenation
+            for layer in decoder[1:]:
+                x = layer(x)
 
         return self.final_conv(x)
 
@@ -1076,6 +1077,16 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[1,2,3], quick=False
                 transforms.Normalize((0.1307,), (0.3081,))
             ])
 
+            # Download MNIST with proper mirror handling
+            import urllib.request
+            import ssl
+            
+            # Create unverified SSL context for downloads (some mirrors have cert issues)
+            ssl_context = ssl._create_unverified_context()
+            opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ssl_context))
+            urllib.request.install_opener(opener)
+            
+            # Use PyTorch's automatic mirror fallback
             train_dataset = torchvision.datasets.MNIST('./data', train=True, download=True, transform=transform)
             test_dataset = torchvision.datasets.MNIST('./data', train=False, download=True, transform=transform)
 
@@ -1400,11 +1411,21 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[1,2,3], quick=F
         for inputs, targets in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}"):
             inputs, targets = inputs.to(device), targets.to(device)
 
-            optimizer.zero_grad()
-            outputs = model(inputs)
-            loss = criterion(outputs, targets)
-            loss.backward()
-            optimizer.step()
+            if isinstance(optimizer, SAM):
+                def closure():
+                    optimizer.zero_grad()
+                    outputs = model(inputs)
+                    loss = criterion(outputs, targets)
+                    loss.backward()
+                    return loss
+                loss = optimizer.step(closure)
+                outputs = model(inputs)  # Recompute after SAM step
+            else:
+                optimizer.zero_grad()
+                outputs = model(inputs)
+                loss = criterion(outputs, targets)
+                loss.backward()
+                optimizer.step()
 
             train_loss += loss.item()
             _, predicted = outputs.max(1)
@@ -1881,12 +1902,21 @@ def run_medical_experiment(results_dir="results_medical", seeds=[1,2,3], quick=F
                     images = images.to(device)
                     masks = masks.to(device)
 
-                    outputs = model(images)
-                    loss = criterion(outputs, masks)
-
-                    optimizer.zero_grad()
-                    loss.backward()
-                    optimizer.step()
+                    if isinstance(optimizer, SAM):
+                        def closure():
+                            optimizer.zero_grad()
+                            outputs = model(images)
+                            loss = criterion(outputs, masks)
+                            loss.backward()
+                            return loss
+                        loss = optimizer.step(closure)
+                        outputs = model(images)  # Recompute after SAM step
+                    else:
+                        outputs = model(images)
+                        loss = criterion(outputs, masks)
+                        optimizer.zero_grad()
+                        loss.backward()
+                        optimizer.step()
 
                     train_loss += float(loss.item()) * images.size(0)
                     train_dice += dice_coefficient(torch.sigmoid(outputs), masks).item() * images.size(0)
@@ -3011,6 +3041,13 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity"):
         transforms.Normalize((0.1307,), (0.3081,))
     ])
 
+    # Download MNIST with proper mirror handling
+    import urllib.request
+    import ssl
+    ssl_context = ssl._create_unverified_context()
+    opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ssl_context))
+    urllib.request.install_opener(opener)
+    
     train_dataset = torchvision.datasets.MNIST('./data', train=True, download=True, transform=transform)
     train_loader = make_dataloader(train_dataset, batch_size=256, shuffle=True, seed=42, num_workers=2, pin_memory=True)
 
@@ -3845,11 +3882,21 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=[1,2,3], quick=Fal
         for inputs, targets in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}"):
             inputs, targets = inputs.to(device), targets.to(device)
 
-            optimizer.zero_grad()
-            outputs = model(inputs)
-            loss = criterion(outputs, targets)
-            loss.backward()
-            optimizer.step()
+            if isinstance(optimizer, SAM):
+                def closure():
+                    optimizer.zero_grad()
+                    outputs = model(inputs)
+                    loss = criterion(outputs, targets)
+                    loss.backward()
+                    return loss
+                loss = optimizer.step(closure)
+                outputs = model(inputs)  # Recompute after SAM step
+            else:
+                optimizer.zero_grad()
+                outputs = model(inputs)
+                loss = criterion(outputs, targets)
+                loss.backward()
+                optimizer.step()
 
             train_loss += loss.item()
             _, predicted = outputs.max(1)
@@ -4202,8 +4249,8 @@ Examples:
     
     parser.add_argument('--quick', action='store_true',
                         help='Quick mode: fewer epochs, smaller datasets')
-    parser.add_argument('--skip-tuning', action='store_true',
-                        help='Skip Optuna hyperparameter tuning')
+    parser.add_argument('--skip-tuning', action='store_true', default=False,
+                        help='Skip Optuna hyperparameter tuning (default: False - tuning enabled)')
     parser.add_argument('--seeds', type=str, default='42,123,456',
                         help='Comma-separated random seeds (default: 42,123,456)')
     parser.add_argument('--experiments', type=str, default='all',
