@@ -331,7 +331,8 @@ def main():
             max_eig_str = f"{max_eig:.2f}"
             with open(os.path.join(args.output_dir, "hessian_metrics.txt"), "a") as f:
                 f.write(f"{os.path.basename(args.ckpt)},{opt_name},{max_eig:.4f}\n")
-        except: pass
+        except Exception as e:
+            logging.debug(f"Failed to compute Hessian eigenvalue: {e}")
 
     try:
         dir1 = get_random_direction(model)

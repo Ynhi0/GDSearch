@@ -104,8 +104,8 @@ def validate_epochs(epochs: int) -> int:
     if not isinstance(epochs, int):
         try:
             epochs = int(epochs)
-        except:
-            raise ValidationError(f"Epochs must be integer, got {type(epochs)}")
+        except (ValueError, TypeError) as e:
+            raise ValidationError(f"Epochs must be integer, got {type(epochs)}") from e
     
     if epochs <= 0:
         raise ValidationError(f"Epochs must be positive, got {epochs}")
@@ -121,8 +121,8 @@ def validate_batch_size(batch_size: int) -> int:
     if not isinstance(batch_size, int):
         try:
             batch_size = int(batch_size)
-        except:
-            raise ValidationError(f"Batch size must be integer, got {type(batch_size)}")
+        except (ValueError, TypeError) as e:
+            raise ValidationError(f"Batch size must be integer, got {type(batch_size)}") from e
     
     if batch_size <= 0:
         raise ValidationError(f"Batch size must be positive, got {batch_size}")
@@ -204,8 +204,8 @@ def validate_num_iterations(num_iter: int) -> int:
     if not isinstance(num_iter, int):
         try:
             num_iter = int(num_iter)
-        except:
-            raise ValidationError(f"Num iterations must be integer, got {type(num_iter)}")
+        except (ValueError, TypeError) as e:
+            raise ValidationError(f"Num iterations must be integer, got {type(num_iter)}") from e
     
     if num_iter <= 0:
         raise ValidationError(f"Num iterations must be positive, got {num_iter}")
@@ -294,8 +294,8 @@ def validate_seeds(seeds: Union[int, List[int]]) -> List[int]:
         if not isinstance(seed, int):
             try:
                 seed = int(seed)
-            except:
-                raise ValidationError(f"Seed must be integer, got {type(seed)}")
+            except (ValueError, TypeError) as e:
+                raise ValidationError(f"Seed must be integer, got {type(seed)}") from e
         
         if seed < 0:
             raise ValidationError(f"Seed must be non-negative, got {seed}")
