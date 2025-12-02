@@ -524,6 +524,42 @@ def get_system_info() -> Dict[str, Any]:
     return info
 
 
+def is_experiment_completed(results_dir: str, dataset: str, model_name: str, optimizer_name: str, seed: int) -> bool:
+    """Check if an experiment has already been completed by looking for result files.
+    
+    Args:
+        results_dir: Base results directory
+        dataset: Dataset name (e.g., 'MNIST', 'CIFAR10')
+        model_name: Model name (e.g., 'SimpleMLP', 'ResNet18')
+        optimizer_name: Optimizer name (e.g., 'SGD', 'Adam')
+        seed: Random seed
+    
+    Returns:
+        bool: True if the experiment result file exists and is valid
+    """
+    try:
+        results_base = Path(results_dir) / "experiments" / dataset.lower()
+        file_stem = f"{dataset}_{model_name}_{optimizer_name}_seed{seed}"
+        csv_path = results_base / f"{file_stem}.csv"
+        
+        # Check if file exists and is not empty
+        if csv_path.exists():
+            # Verify the file has content (at least header + 1 row)
+            try:
+                df = pd.read_csv(csv_path)
+                if len(df) > 0:
+                    logging.info(f"✓ Found existing result: {csv_path.name}")
+                    return True
+            except Exception:
+                # File exists but is corrupted, need to re-run
+                logging.warning(f"⚠ Corrupted result file: {csv_path.name}, will re-run")
+                return False
+        return False
+    except Exception as e:
+        logging.debug(f"Error checking experiment completion: {e}")
+        return False
+
+
 def save_run_artifacts(base_results_dir: str, dataset: str, model_name: str, optimizer_name: str,
                        seed: int, history: List[Dict[str, Any]], params: Dict[str, Any],
                        device: Optional[torch.device] = None, tracker: Optional[ExperimentTracker] = None):
@@ -1042,8 +1078,12 @@ def get_default_hyperparameters(optimizer_name: str) -> Dict:
 # EXPERIMENT FUNCTIONS
 # ==============================================================================
 
-def run_mnist_experiment(results_dir="results_mnist", seeds=[1,2,3], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None):
-    """Run MNIST benchmark with multiple optimizers - Enhanced with profiling and tracking"""
+def run_mnist_experiment(results_dir="results_mnist", seeds=[1,2,3], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
+    """Run MNIST benchmark with multiple optimizers - Enhanced with profiling and tracking
+    
+    Args:
+        resume: If True, skip experiments that already have result files
+    """
     experiment_name = "MNIST_Benchmark"
 
     # Enhanced error handling
@@ -1163,6 +1203,11 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[1,2,3], quick=False
                 logging.info("-" * 50)
 
                 for seed in seeds:
+                    # Check if this specific experiment is already completed
+                    if resume and is_experiment_completed(str(results_dir), 'MNIST', 'SimpleMLP', opt_name, seed):
+                        logging.info(f"⏭️  Skipping {opt_name} seed {seed} (already completed)")
+                        continue
+                    
                     with error_context(f"MNIST {opt_name} seed {seed}", continue_on_error=True):
                         set_seed(seed)
                         model = SimpleMLP().to(device)
@@ -1345,8 +1390,12 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[1,2,3], quick=False
         logging.error(f"Critical error during MNIST experiment: {e}")
         raise
 
-def run_cifar10_experiment(results_dir="results_cifar10", seeds=[1,2,3], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None):
-    """Run CIFAR-10 ResNet-18 experiment"""
+def run_cifar10_experiment(results_dir="results_cifar10", seeds=[1,2,3], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
+    """Run CIFAR-10 ResNet-18 experiment
+    
+    Args:
+        resume: If True, skip experiments that already have result files
+    """
     logging.info("="*80)
     logging.info("🖼️  CIFAR-10 RESNET-18 EXPERIMENT")
     logging.info("="*80)
@@ -1517,8 +1566,12 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[1,2,3], quick=F
     return df
 
 
-def run_nlp_experiment(results_dir="results_nlp", seeds=[1,2,3], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None):
-    """Run full IMDB sentiment analysis with DistilBERT"""
+def run_nlp_experiment(results_dir="results_nlp", seeds=[1,2,3], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
+    """Run full IMDB sentiment analysis with DistilBERT
+    
+    Args:
+        resume: If True, skip experiments that already have result files
+    """
     print("\n" + "="*80)
     print("📝 NLP SENTIMENT ANALYSIS EXPERIMENT (DistilBERT)")
     print("="*80)
@@ -1577,6 +1630,11 @@ def run_nlp_experiment(results_dir="results_nlp", seeds=[1,2,3], quick=False, sk
         print("-" * 50)
 
         for seed in seeds:
+            # Check if this specific experiment is already completed
+            if resume and is_experiment_completed(results_dir, 'IMDB', model_name.replace('/', '_'), opt_name, seed):
+                print(f"⏭️  Skipping {model_name} {opt_name} seed {seed} (already completed)")
+                continue
+            
             set_seed(seed)
 
             # Load tokenizer and model
@@ -1802,8 +1860,12 @@ def run_nlp_experiment_simple(results_dir="results_nlp", seeds=[1,2,3], epochs=3
     print(f"💾 Simplified results saved to {results_dir}/nlp_results.csv")
     return df
 
-def run_medical_experiment(results_dir="results_medical", seeds=[1,2,3], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None):
-    """Run full medical image segmentation with U-Net"""
+def run_medical_experiment(results_dir="results_medical", seeds=[1,2,3], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
+    """Run full medical image segmentation with U-Net
+    
+    Args:
+        resume: If True, skip experiments that already have result files
+    """
     logging.info("="*80)
     logging.info("🏥 MEDICAL IMAGE SEGMENTATION EXPERIMENT (U-Net)")
     logging.info("="*80)
@@ -1848,6 +1910,11 @@ def run_medical_experiment(results_dir="results_medical", seeds=[1,2,3], quick=F
         print("-" * 50)
 
         for seed in seeds:
+            # Check if this specific experiment is already completed
+            if resume and is_experiment_completed(results_dir, 'Medical', 'UNet2D', opt_name, seed):
+                logging.info(f"⏭️  Skipping {opt_name} seed {seed} (already completed)")
+                continue
+            
             set_seed(seed)
 
             # Create synthetic medical dataset (since real medical datasets require special access)
@@ -4265,6 +4332,8 @@ Examples:
                         help='Enable performance profiling')
     parser.add_argument('--kaggle-t4', action='store_true',
                         help='Optimize for Kaggle T4 GPU (larger batches, mixed precision, optimized workers)')
+    parser.add_argument('--resume', action='store_true',
+                        help='Resume from partial results - skip already completed experiments (checks for existing CSV files)')
     
     args = parser.parse_args()
     
@@ -4340,12 +4409,16 @@ Examples:
     print(f"  Seeds: {seeds}")
     print(f"  Quick mode: {args.quick}")
     print(f"  Skip tuning: {args.skip_tuning}")
+    print(f"  Resume mode: {args.resume}")
     print(f"  Deterministic: {args.deterministic}")
     print(f"  Kaggle T4 optimizations: {args.kaggle_t4}")
     print(f"  Experiments: {', '.join(selected_experiments)}")
     print(f"  Results dir: {results_dir}")
     print(f"  MLflow: {'disabled' if args.no_mlflow else 'enabled' if HAS_MLFLOW else 'unavailable'}")
     print(f"  Profiling: {'enabled' if args.profile else 'disabled'}")
+    
+    if args.resume:
+        print(f"\n🔄 Resume mode enabled - will skip completed experiments")
     print("="*80 + "\\n")
     
     # Execute selected experiments
@@ -4364,7 +4437,8 @@ Examples:
                 skip_tuning=args.skip_tuning,
                 profiler=profiler,
                 tracker=tracker,
-                checkpoint_manager=checkpoint_manager
+                checkpoint_manager=checkpoint_manager,
+                resume=args.resume
             )
     
     if 'cifar10' in selected_experiments:
@@ -4376,7 +4450,8 @@ Examples:
                 skip_tuning=args.skip_tuning,
                 profiler=profiler,
                 tracker=tracker,
-                checkpoint_manager=checkpoint_manager
+                checkpoint_manager=checkpoint_manager,
+                resume=args.resume
             )
     
     if 'nlp' in selected_experiments and HAS_HF:
@@ -4387,7 +4462,8 @@ Examples:
                 quick=args.quick,
                 profiler=profiler,
                 tracker=tracker,
-                checkpoint_manager=checkpoint_manager
+                checkpoint_manager=checkpoint_manager,
+                resume=args.resume
             )
     elif 'nlp' in selected_experiments:
         print("⚠️  Skipping NLP experiment (transformers/datasets not available)")
@@ -4398,6 +4474,7 @@ Examples:
                 results_dir=str(experiments_dir / "medical"),
                 seeds=seeds,
                 quick=args.quick,
+                resume=args.resume,
                 profiler=profiler,
                 tracker=tracker,
                 checkpoint_manager=checkpoint_manager
