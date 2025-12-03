@@ -189,8 +189,17 @@ def get_imdb_loaders(
     print("Loading IMDB dataset...")
     print("="*80)
     
-    # Load dataset
-    dataset = load_dataset('imdb')
+    # Load dataset with robust fallback for environment compatibility
+    try:
+        dataset = load_dataset('imdb', cache_dir='/tmp/hf_cache')
+    except (ValueError, Exception) as e:
+        print(f"Warning: Failed to load IMDB dataset via primary method: {e}")
+        print("Trying alternative loading method...")
+        try:
+            dataset = load_dataset('imdb', trust_remote_code=True)
+        except Exception as e2:
+            print(f"Error: Could not load IMDB dataset: {e2}")
+            raise RuntimeError("Failed to load IMDB dataset. Check HuggingFace/fsspec versions.") from e2
     
     # Extract train data
     train_texts = dataset['train']['text']

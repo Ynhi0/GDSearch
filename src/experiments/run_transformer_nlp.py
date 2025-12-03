@@ -88,8 +88,17 @@ def run_single_imdb(optimizer_name: str, seed: int, lr: float, epochs: int, batc
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     set_seed(seed)
 
-    # Data
-    raw = load_dataset('imdb')
+    # Data - robust loading with fallback for environment compatibility
+    try:
+        raw = load_dataset('imdb', cache_dir='/tmp/hf_cache')
+    except (ValueError, Exception) as e:
+        print(f"Warning: Failed to load IMDB dataset: {e}")
+        print("Trying alternative loading method...")
+        try:
+            raw = load_dataset('imdb', trust_remote_code=True)
+        except Exception as e2:
+            print(f"Error: Could not load IMDB dataset: {e2}")
+            raise RuntimeError("Failed to load IMDB dataset. Check HuggingFace/fsspec versions.") from e2
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
 
     def preprocess(examples):

@@ -115,7 +115,17 @@ def run_single(opt_name: str, seed: int, lr: float, epochs: int, batch_size: int
     set_seed(seed)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    raw = load_dataset('imdb')
+    # Robust dataset loading with fallback for environment compatibility
+    try:
+        raw = load_dataset('imdb', cache_dir='/tmp/hf_cache')
+    except (ValueError, Exception) as e:
+        print(f"Warning: Failed to load IMDB dataset: {e}")
+        print("Trying alternative loading method...")
+        try:
+            raw = load_dataset('imdb', trust_remote_code=True)
+        except Exception as e2:
+            print(f"Error: Could not load IMDB dataset: {e2}")
+            raise RuntimeError("Failed to load IMDB dataset. Check HuggingFace/fsspec versions.") from e2
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
     def preprocess(examples):

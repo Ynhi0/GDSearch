@@ -743,6 +743,54 @@ profiler = PerformanceProfiler()
 tracker = None  # Will be initialized in main
 checkpoint_manager = None  # Will be initialized per experiment
 
+
+def get_batch_size(experiment_type, default_train=128, default_test=256):
+    """
+    Get batch size from Kaggle config if available, otherwise use defaults.
+    
+    Args:
+        experiment_type: 'mnist', 'cifar10', 'resnet', 'nlp', 'medical'
+        default_train: Default training batch size
+        default_test: Default test batch size (typically 2x train)
+    
+    Returns:
+        tuple: (train_batch_size, test_batch_size)
+    """
+    if 'KAGGLE_CONFIG' in globals():
+        config = globals()['KAGGLE_CONFIG']
+        key = f'batch_size_{experiment_type}'
+        if key in config:
+            train_bs = config[key]
+            test_bs = train_bs * 2  # Test can use larger batches (no gradients)
+            return train_bs, test_bs
+    
+    return default_train, default_test
+
+
+def get_dataloader_kwargs():
+    """
+    Get DataLoader kwargs from Kaggle config if available.
+    
+    Returns:
+        dict: kwargs for DataLoader (num_workers, pin_memory, etc.)
+    """
+    defaults = {
+        'num_workers': 2,
+        'pin_memory': True,
+        'persistent_workers': False
+    }
+    
+    if 'KAGGLE_CONFIG' in globals():
+        config = globals()['KAGGLE_CONFIG']
+        return {
+            'num_workers': config.get('num_workers', 2),
+            'pin_memory': config.get('pin_memory', True),
+            'persistent_workers': config.get('persistent_workers', False)
+        }
+    
+    return defaults
+
+
 # ==============================================================================
 # SHARED UTILITIES AND MODELS
 # ==============================================================================
@@ -1308,7 +1356,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[1,2,3], quick=False
                             for inputs, targets in train_loader:
                                 inputs, targets = inputs.to(device), targets.to(device)
 
-                                if 'SAM' in opt_name:
+                                if isinstance(optimizer, SAM) or 'SAM' in opt_name:
                                     def closure():
                                         optimizer.zero_grad()
                                         outputs = model(inputs)
@@ -1316,6 +1364,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[1,2,3], quick=False
                                         loss.backward()
                                         return loss
                                     loss = optimizer.step(closure)
+                                    outputs = model(inputs)  # Recompute after SAM step
                                     train_loss += loss.item()
                                 else:
                                     optimizer.zero_grad()
@@ -1699,8 +1748,15 @@ def run_nlp_experiment(results_dir="results_nlp", seeds=[1,2,3], quick=False, sk
             tokenizer = AutoTokenizer.from_pretrained(model_name)
             model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2).to(device)
 
-            # Load dataset
-            raw = load_dataset('imdb')
+            # Load dataset with robust fallback for environment compatibility
+            try:
+                # Try loading with cache_dir first (may avoid fsspec pattern issues)
+                raw = load_dataset('imdb', cache_dir='/tmp/hf_cache')
+            except (ValueError, Exception) as dataset_err:
+                logging.warning(f"Failed to load IMDB dataset via HuggingFace: {dataset_err}")
+                logging.warning("Falling back to simplified NLP experiment...")
+                # Fallback: run simplified experiment and return early
+                return run_nlp_experiment_simple(results_dir, seeds, epochs)
 
             def preprocess(examples):
                 return tokenizer(examples['text'], truncation=True, padding=False, max_length=256)
@@ -4569,53 +4625,6 @@ def get_kaggle_t4_config():
         print("⚠️  No GPU detected - T4 optimizations disabled")
     
     return config
-
-
-def get_batch_size(experiment_type, default_train=128, default_test=256):
-    """
-    Get batch size from Kaggle config if available, otherwise use defaults.
-    
-    Args:
-        experiment_type: 'mnist', 'cifar10', 'resnet', 'nlp', 'medical'
-        default_train: Default training batch size
-        default_test: Default test batch size (typically 2x train)
-    
-    Returns:
-        tuple: (train_batch_size, test_batch_size)
-    """
-    if 'KAGGLE_CONFIG' in globals():
-        config = globals()['KAGGLE_CONFIG']
-        key = f'batch_size_{experiment_type}'
-        if key in config:
-            train_bs = config[key]
-            test_bs = train_bs * 2  # Test can use larger batches (no gradients)
-            return train_bs, test_bs
-    
-    return default_train, default_test
-
-
-def get_dataloader_kwargs():
-    """
-    Get DataLoader kwargs from Kaggle config if available.
-    
-    Returns:
-        dict: kwargs for DataLoader (num_workers, pin_memory, etc.)
-    """
-    defaults = {
-        'num_workers': 2,
-        'pin_memory': True,
-        'persistent_workers': False
-    }
-    
-    if 'KAGGLE_CONFIG' in globals():
-        config = globals()['KAGGLE_CONFIG']
-        return {
-            'num_workers': config.get('num_workers', 2),
-            'pin_memory': config.get('pin_memory', True),
-            'persistent_workers': config.get('persistent_workers', False)
-        }
-    
-    return defaults
 
 
 def main():
