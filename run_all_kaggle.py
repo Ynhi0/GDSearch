@@ -386,20 +386,36 @@ class RobustCheckpointManager:
         except Exception:
             return False
 
+# Global list to track failed experiments for summary reporting
+FAILED_EXPERIMENTS = []
+
 @contextmanager
 def error_context(context: str, continue_on_error: bool = False):
-    """Context manager for better error handling"""
+    """Context manager for better error handling with tracking"""
     try:
         yield
     except Exception as e:
         error_msg = f"Error in {context}: {str(e)}"
         logging.error(error_msg)
-        traceback.print_exc()
+        # Only print traceback once, avoid duplicate printing
+        import io
+        import sys
+        traceback_str = traceback.format_exc()
+        # Print a condensed error message
+        print(f"\n❌ {context} FAILED: {str(e)[:200]}")
+        
+        # Track failed experiments
+        FAILED_EXPERIMENTS.append({
+            'experiment': context,
+            'error': str(e)[:500],
+            'traceback': traceback_str
+        })
 
         if not continue_on_error:
             raise
         else:
-            logging.warning(f"Continuing despite error in {context}")
+            print(f"   ⚠️  Continuing with remaining experiments...")
+
 
 def check_system_requirements():
     """Perform comprehensive system requirements check"""
@@ -1676,21 +1692,48 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[1,2,3], quick=F
 def run_nlp_experiment(results_dir="results_nlp", seeds=[1,2,3], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
     """Run full IMDB sentiment analysis with DistilBERT
     
+    This function attempts to use HuggingFace DistilBERT for NLP experiments.
+    If any error occurs (401 Unauthorized, network issues, etc.), it automatically
+    falls back to the local RNN/LSTM implementation which works offline.
+    
     Args:
         resume: If True, skip experiments that already have result files
     """
     print("\n" + "="*80)
-    print("📝 NLP SENTIMENT ANALYSIS EXPERIMENT (DistilBERT)")
+    print("📝 NLP SENTIMENT ANALYSIS EXPERIMENT")
     print("="*80)
 
+    # Check if HuggingFace is available
     if not HAS_HF:
         print("⚠️  HuggingFace transformers/datasets not available.")
-        print("   Install with: pip install transformers datasets accelerate")
-        print("   Falling back to simplified version...")
-        return run_nlp_experiment_simple(results_dir, seeds, 3 if quick else 3)
+        print("   Using local LSTM/RNN models instead...")
+        return run_nlp_experiment_simple(results_dir, seeds, 3 if quick else 5)
 
+    # Wrap entire HuggingFace experiment in try/except for robustness
+    try:
+        return _run_nlp_experiment_huggingface(
+            results_dir=results_dir,
+            seeds=seeds,
+            quick=quick,
+            skip_tuning=skip_tuning,
+            profiler=profiler,
+            tracker=tracker,
+            checkpoint_manager=checkpoint_manager,
+            resume=resume
+        )
+    except Exception as e:
+        print(f"\n⚠️  HuggingFace experiment failed: {str(e)[:200]}")
+        print("   This is often due to authentication or network issues.")
+        print("   Falling back to local LSTM/RNN models (no download required)...")
+        return run_nlp_experiment_simple(results_dir, seeds, 3 if quick else 5)
+
+
+def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
+    """Internal function: Run NLP experiment using HuggingFace models"""
+    print("   Attempting to use HuggingFace DistilBERT...")
+    
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Device: {device}")
+    print(f"   Device: {device}")
 
     # Enhanced experiment setup
     if profiler:
@@ -1704,12 +1747,8 @@ def run_nlp_experiment(results_dir="results_nlp", seeds=[1,2,3], quick=False, sk
             'skip_tuning': skip_tuning
         })
 
-    try:
-        from transformers import AutoTokenizer, AutoModelForSequenceClassification
-        from datasets import load_dataset
-    except ImportError as e:
-        print(f"Import error: {e}")
-        return run_nlp_experiment_simple(results_dir, seeds, 3 if quick else 3)
+    from transformers import AutoTokenizer, AutoModelForSequenceClassification
+    from datasets import load_dataset
 
     # Configuration
     model_name = 'distilbert-base-uncased'
@@ -1744,9 +1783,15 @@ def run_nlp_experiment(results_dir="results_nlp", seeds=[1,2,3], quick=False, sk
             
             set_seed(seed)
 
-            # Load tokenizer and model
-            tokenizer = AutoTokenizer.from_pretrained(model_name)
-            model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2).to(device)
+            # Load tokenizer and model with robust error handling
+            try:
+                tokenizer = AutoTokenizer.from_pretrained(model_name)
+                model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2).to(device)
+            except (OSError, RuntimeError, Exception) as model_err:
+                logging.warning(f"Failed to load model '{model_name}': {model_err}")
+                logging.warning("This is often due to HuggingFace authentication or network issues.")
+                logging.warning("Falling back to simplified NLP experiment...")
+                return run_nlp_experiment_simple(results_dir, seeds, epochs)
 
             # Load dataset with robust fallback for environment compatibility
             try:
@@ -1950,29 +1995,285 @@ def run_nlp_experiment(results_dir="results_nlp", seeds=[1,2,3], quick=False, sk
     return df
 
 def run_nlp_experiment_simple(results_dir="results_nlp", seeds=[1,2,3], epochs=3):
-    """Simplified NLP experiment when HF is not available"""
-    print("   Using simplified implementation...")
-
+    """Robust NLP experiment using local LSTM/RNN models with synthetic or IMDB data
+    
+    This function provides a complete NLP benchmark that works even when HuggingFace
+    models are unavailable (401 errors, network issues, etc.)
+    """
+    print("\n" + "="*80)
+    print("📝 NLP SENTIMENT ANALYSIS EXPERIMENT (Local Models)")
+    print("="*80)
+    print("   Using local RNN/LSTM models (no external model downloads required)")
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"   Device: {device}")
+    
     results = []
-    for seed in seeds:
-        set_seed(seed)
-        # Simulate training
-        for epoch in range(epochs):
-            train_acc = 85.0 + np.random.uniform(-5, 5)
-            test_acc = 82.0 + np.random.uniform(-3, 3)
-            results.append({
-                'seed': seed,
-                'epoch': epoch + 1,
-                'train_acc': train_acc,
-                'test_acc': test_acc
-            })
-
+    all_history = []
+    
+    # Try to load IMDB data, fall back to synthetic if unavailable
+    try:
+        print("\n   Attempting to load IMDB dataset...")
+        from datasets import load_dataset
+        
+        # Try with different caching strategies
+        try:
+            raw_data = load_dataset('imdb', cache_dir='/tmp/hf_cache')
+            train_texts = raw_data['train']['text'][:2000]
+            train_labels = raw_data['train']['label'][:2000]
+            test_texts = raw_data['test']['text'][:500]
+            test_labels = raw_data['test']['label'][:500]
+            print("   ✅ IMDB dataset loaded successfully")
+            use_real_data = True
+        except Exception as e1:
+            # Try alternative loading
+            try:
+                raw_data = load_dataset('stanfordnlp/imdb', cache_dir='/tmp/hf_cache')
+                train_texts = raw_data['train']['text'][:2000]
+                train_labels = raw_data['train']['label'][:2000]
+                test_texts = raw_data['test']['text'][:500]
+                test_labels = raw_data['test']['label'][:500]
+                print("   ✅ IMDB dataset loaded (alternative source)")
+                use_real_data = True
+            except:
+                raise e1
+    except Exception as e:
+        print(f"   ⚠️  Could not load IMDB: {str(e)[:100]}")
+        print("   📊 Using synthetic sentiment data for demonstration")
+        use_real_data = False
+        
+        # Generate synthetic sentiment data
+        positive_templates = [
+            "This movie is amazing and wonderful",
+            "Great acting and fantastic story",
+            "I loved every moment of this film",
+            "Brilliant performance by the cast",
+            "One of the best movies I have ever seen",
+            "Highly recommended for everyone",
+            "Outstanding cinematography and direction",
+        ]
+        negative_templates = [
+            "This movie is terrible and boring",
+            "Awful acting and weak plot",
+            "I hated this waste of time",
+            "Poor performance by everyone",
+            "One of the worst movies ever made",
+            "Do not recommend this to anyone",
+            "Terrible direction and bad editing",
+        ]
+        
+        train_texts = []
+        train_labels = []
+        for _ in range(1000):
+            if np.random.random() > 0.5:
+                train_texts.append(positive_templates[np.random.randint(len(positive_templates))] + 
+                                   f" {np.random.choice(['excellent', 'superb', 'great', 'wonderful'])}")
+                train_labels.append(1)
+            else:
+                train_texts.append(negative_templates[np.random.randint(len(negative_templates))] + 
+                                   f" {np.random.choice(['horrible', 'bad', 'awful', 'terrible'])}")
+                train_labels.append(0)
+        
+        test_texts = []
+        test_labels = []
+        for _ in range(200):
+            if np.random.random() > 0.5:
+                test_texts.append(positive_templates[np.random.randint(len(positive_templates))])
+                test_labels.append(1)
+            else:
+                test_texts.append(negative_templates[np.random.randint(len(negative_templates))])
+                test_labels.append(0)
+    
+    # Build vocabulary
+    print("\n   Building vocabulary...")
+    word2idx = {'<PAD>': 0, '<UNK>': 1}
+    word_counts = {}
+    for text in train_texts:
+        for word in text.lower().split():
+            word = ''.join(c for c in word if c.isalnum())
+            if word:
+                word_counts[word] = word_counts.get(word, 0) + 1
+    
+    # Add top words to vocabulary
+    sorted_words = sorted(word_counts.items(), key=lambda x: -x[1])[:5000]
+    for word, _ in sorted_words:
+        if word not in word2idx:
+            word2idx[word] = len(word2idx)
+    
+    vocab_size = len(word2idx)
+    print(f"   Vocabulary size: {vocab_size}")
+    
+    # Encode texts
+    def encode_text(text, max_len=200):
+        words = text.lower().split()
+        indices = []
+        for word in words[:max_len]:
+            word = ''.join(c for c in word if c.isalnum())
+            indices.append(word2idx.get(word, 1))  # 1 = UNK
+        # Pad
+        while len(indices) < max_len:
+            indices.append(0)
+        return indices[:max_len]
+    
+    train_encoded = [encode_text(t) for t in train_texts]
+    test_encoded = [encode_text(t) for t in test_texts]
+    
+    # Create tensors
+    X_train = torch.tensor(train_encoded, dtype=torch.long)
+    y_train = torch.tensor(train_labels, dtype=torch.long)
+    X_test = torch.tensor(test_encoded, dtype=torch.long)
+    y_test = torch.tensor(test_labels, dtype=torch.long)
+    
+    train_dataset = torch.utils.data.TensorDataset(X_train, y_train)
+    test_dataset = torch.utils.data.TensorDataset(X_test, y_test)
+    
+    batch_size = 32
+    
+    # Define models to test
+    model_configs = [
+        ('SimpleLSTM', lambda: nn.Sequential(
+            nn.Embedding(vocab_size, 128, padding_idx=0),
+            SimpleLSTMLayer(128, 128),
+            nn.Linear(128, 2)
+        )),
+        ('BiLSTM', lambda: nn.Sequential(
+            nn.Embedding(vocab_size, 128, padding_idx=0),
+            BiLSTMLayer(128, 64),
+            nn.Linear(128, 2)
+        )),
+    ]
+    
+    # Optimizer configs
+    optimizer_configs = [
+        ('AdamW', lambda params: torch.optim.AdamW(params, lr=1e-3)),
+        ('SGD_Momentum', lambda params: torch.optim.SGD(params, lr=1e-2, momentum=0.9)),
+    ]
+    
+    for model_name, model_fn in model_configs:
+        for opt_name, opt_fn in optimizer_configs:
+            for seed in seeds:
+                print(f"\n   🎯 {model_name} + {opt_name} (seed {seed})")
+                set_seed(seed)
+                
+                # Create model
+                model = model_fn().to(device)
+                optimizer = opt_fn(model.parameters())
+                criterion = nn.CrossEntropyLoss()
+                
+                train_loader = torch.utils.data.DataLoader(
+                    train_dataset, batch_size=batch_size, shuffle=True
+                )
+                test_loader = torch.utils.data.DataLoader(
+                    test_dataset, batch_size=batch_size, shuffle=False
+                )
+                
+                history = []
+                for epoch in range(epochs):
+                    # Training
+                    model.train()
+                    train_loss = 0
+                    train_correct = 0
+                    train_total = 0
+                    
+                    for inputs, labels in train_loader:
+                        inputs, labels = inputs.to(device), labels.to(device)
+                        optimizer.zero_grad()
+                        outputs = model(inputs)
+                        loss = criterion(outputs, labels)
+                        loss.backward()
+                        optimizer.step()
+                        
+                        train_loss += loss.item()
+                        _, predicted = outputs.max(1)
+                        train_total += labels.size(0)
+                        train_correct += predicted.eq(labels).sum().item()
+                    
+                    train_loss /= len(train_loader)
+                    train_acc = 100.0 * train_correct / train_total
+                    
+                    # Evaluation
+                    model.eval()
+                    test_loss = 0
+                    test_correct = 0
+                    test_total = 0
+                    
+                    with torch.no_grad():
+                        for inputs, labels in test_loader:
+                            inputs, labels = inputs.to(device), labels.to(device)
+                            outputs = model(inputs)
+                            loss = criterion(outputs, labels)
+                            
+                            test_loss += loss.item()
+                            _, predicted = outputs.max(1)
+                            test_total += labels.size(0)
+                            test_correct += predicted.eq(labels).sum().item()
+                    
+                    test_loss /= len(test_loader)
+                    test_acc = 100.0 * test_correct / test_total
+                    
+                    history.append({
+                        'epoch': epoch + 1,
+                        'train_loss': train_loss,
+                        'train_acc': train_acc,
+                        'test_loss': test_loss,
+                        'test_acc': test_acc
+                    })
+                    
+                    if epoch == epochs - 1 or epoch == 0:
+                        print(f"      Epoch {epoch+1}/{epochs} - Train: {train_acc:.1f}% | Test: {test_acc:.1f}%")
+                
+                # Record final results
+                results.append({
+                    'model': model_name,
+                    'optimizer': opt_name,
+                    'seed': seed,
+                    'final_train_loss': history[-1]['train_loss'],
+                    'final_test_loss': history[-1]['test_loss'],
+                    'final_train_acc': history[-1]['train_acc'],
+                    'final_test_acc': history[-1]['test_acc'],
+                    'data_source': 'IMDB' if use_real_data else 'Synthetic',
+                    'epochs_completed': len(history)
+                })
+                all_history.extend(history)
+    
     os.makedirs(results_dir, exist_ok=True)
     df = pd.DataFrame(results)
     df.to_csv(f"{results_dir}/nlp_results.csv", index=False)
+    
+    # Save detailed history
+    history_df = pd.DataFrame(all_history)
+    history_df.to_csv(f"{results_dir}/nlp_training_history.csv", index=False)
 
-    print(f"💾 Simplified results saved to {results_dir}/nlp_results.csv")
+    print(f"\n💾 Results saved to {results_dir}/nlp_results.csv")
+    print(f"   Data source: {'IMDB (real)' if use_real_data else 'Synthetic (demonstration)'}")
+    
     return df
+
+
+# Helper LSTM layers for the simple NLP experiment
+class SimpleLSTMLayer(nn.Module):
+    """LSTM layer that takes embedded input and returns last hidden state"""
+    def __init__(self, input_size, hidden_size):
+        super().__init__()
+        self.lstm = nn.LSTM(input_size, hidden_size, batch_first=True)
+        
+    def forward(self, x):
+        # x: [batch, seq, embed] from embedding
+        _, (h_n, _) = self.lstm(x)
+        return h_n[-1]  # [batch, hidden]
+
+
+class BiLSTMLayer(nn.Module):
+    """Bidirectional LSTM layer"""
+    def __init__(self, input_size, hidden_size):
+        super().__init__()
+        self.lstm = nn.LSTM(input_size, hidden_size, batch_first=True, bidirectional=True)
+        
+    def forward(self, x):
+        _, (h_n, _) = self.lstm(x)
+        # h_n: [2, batch, hidden] for bidirectional
+        return torch.cat([h_n[0], h_n[1]], dim=1)  # [batch, hidden*2]
+
 
 def run_medical_experiment(results_dir="results_medical", seeds=[1,2,3], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
     """Run full medical image segmentation with U-Net
@@ -4774,7 +5075,7 @@ Examples:
     experiments_dir.mkdir(parents=True, exist_ok=True)
     
     if 'mnist' in selected_experiments:
-        with error_context("MNIST Experiment"):
+        with error_context("MNIST Experiment", continue_on_error=True):
             experiment_results['mnist'] = run_mnist_experiment(
                 results_dir=str(experiments_dir / "mnist"),
                 seeds=seeds,
@@ -4787,7 +5088,7 @@ Examples:
             )
     
     if 'cifar10' in selected_experiments:
-        with error_context("CIFAR-10 Experiment"):
+        with error_context("CIFAR-10 Experiment", continue_on_error=True):
             experiment_results['cifar10'] = run_cifar10_experiment(
                 results_dir=str(experiments_dir / "cifar10"),
                 seeds=seeds,
@@ -4800,7 +5101,7 @@ Examples:
             )
     
     if 'nlp' in selected_experiments and HAS_HF:
-        with error_context("NLP Experiment"):
+        with error_context("NLP Experiment", continue_on_error=True):
             experiment_results['nlp'] = run_nlp_experiment(
                 results_dir=str(experiments_dir / "nlp"),
                 seeds=seeds,
@@ -4814,7 +5115,7 @@ Examples:
         print("⚠️  Skipping NLP experiment (transformers/datasets not available)")
     
     if 'medical' in selected_experiments:
-        with error_context("Medical Experiment"):
+        with error_context("Medical Experiment", continue_on_error=True):
             experiment_results['medical'] = run_medical_experiment(
                 results_dir=str(experiments_dir / "medical"),
                 seeds=seeds,
@@ -4826,7 +5127,7 @@ Examples:
             )
     
     if '2d' in selected_experiments:
-        with error_context("2D Optimization Experiment"):
+        with error_context("2D Optimization Experiment", continue_on_error=True):
             experiment_results['2d'] = run_2d_experiments(
                 results_dir=str(experiments_dir / "2d_optimization"),
                 seeds=seeds,
@@ -4834,7 +5135,7 @@ Examples:
             )
     
     if 'robustness' in selected_experiments:
-        with error_context("Robustness Experiment"):
+        with error_context("Robustness Experiment", continue_on_error=True):
             experiment_results['robustness'] = run_robustness_analysis(
                 results_dir=str(experiments_dir / "robustness"),
                 seeds=seeds,
@@ -4842,7 +5143,7 @@ Examples:
             )
     
     if 'sam' in selected_experiments:
-        with error_context("SAM Sensitivity Experiment"):
+        with error_context("SAM Sensitivity Experiment", continue_on_error=True):
             experiment_results['sam'] = run_sam_sensitivity(
                 results_dir=str(experiments_dir / "sam_sensitivity"),
                 seeds=seeds,
@@ -4850,7 +5151,7 @@ Examples:
             )
     
     if 'ablation' in selected_experiments:
-        with error_context("Optimizer Component Ablation Study"):
+        with error_context("Optimizer Component Ablation Study", continue_on_error=True):
             experiment_results['ablation'] = run_ablation_study(
                 results_dir=str(experiments_dir / "ablation"),
                 seeds=seeds,
@@ -4858,7 +5159,7 @@ Examples:
             )
     
     if 'batch_ablation' in selected_experiments:
-        with error_context("Batch Size Ablation Study"):
+        with error_context("Batch Size Ablation Study", continue_on_error=True):
             print("\n" + "="*80)
             print("🔬 BATCH SIZE ABLATION STUDY")
             print("="*80)
@@ -4889,7 +5190,7 @@ Examples:
                 experiment_results['batch_ablation'] = None
     
     if 'lr_ablation' in selected_experiments:
-        with error_context("Learning Rate Ablation Study"):
+        with error_context("Learning Rate Ablation Study", continue_on_error=True):
             print("\n" + "="*80)
             print("🔬 LEARNING RATE ABLATION STUDY")
             print("="*80)
@@ -4920,7 +5221,7 @@ Examples:
                 experiment_results['lr_ablation'] = None
     
     if 'wd_ablation' in selected_experiments:
-        with error_context("Weight Decay Ablation Study"):
+        with error_context("Weight Decay Ablation Study", continue_on_error=True):
             print("\n" + "="*80)
             print("🔬 WEIGHT DECAY ABLATION STUDY")
             print("="*80)
@@ -4951,7 +5252,7 @@ Examples:
                 experiment_results['wd_ablation'] = None
     
     if 'scheduler_ablation' in selected_experiments:
-        with error_context("Scheduler Ablation Study"):
+        with error_context("Scheduler Ablation Study", continue_on_error=True):
             print("\n" + "="*80)
             print("🔬 LEARNING RATE SCHEDULER ABLATION STUDY")
             print("="*80)
@@ -4983,7 +5284,7 @@ Examples:
                 experiment_results['scheduler_ablation'] = None
     
     if 'optimizer_comparison' in selected_experiments and HAS_STATS:
-        with error_context("Optimizer Comparison Matrix"):
+        with error_context("Optimizer Comparison Matrix", continue_on_error=True):
             print("\n" + "="*80)
             print("📊 OPTIMIZER COMPARISON MATRIX")
             print("="*80)
@@ -5012,7 +5313,7 @@ Examples:
                 experiment_results['optimizer_comparison'] = None
     
     if 'resnet' in selected_experiments:
-        with error_context("ResNet Experiment"):
+        with error_context("ResNet Experiment", continue_on_error=True):
             experiment_results['resnet'] = run_resnet_experiment(
                 results_dir=str(experiments_dir / "resnet"),
                 seeds=seeds,
@@ -5024,7 +5325,7 @@ Examples:
             )
     
     if 'highdim' in selected_experiments:
-        with error_context("High-Dimensional Experiment"):
+        with error_context("High-Dimensional Experiment", continue_on_error=True):
             experiment_results['highdim'] = run_highdim_experiment(
                 results_dir=str(experiments_dir / "highdim"),
                 seeds=seeds,
@@ -5039,7 +5340,7 @@ Examples:
         print("\n" + "="*80)
         print("📊 RUNNING STATISTICAL ANALYSIS...")
         print("="*80)
-        with error_context("Statistical Analysis"):
+        with error_context("Statistical Analysis", continue_on_error=True):
             stats_df = run_statistical_analysis(results_dir=str(results_dir))
             experiment_results['statistics'] = stats_df
     
@@ -5090,13 +5391,29 @@ Examples:
     
     # Final summary
     print("\n" + "="*80)
-    print("✅ BENCHMARK SUITE COMPLETED")
+    if FAILED_EXPERIMENTS:
+        print("⚠️  BENCHMARK SUITE COMPLETED WITH ERRORS")
+    else:
+        print("✅ BENCHMARK SUITE COMPLETED SUCCESSFULLY")
     print("="*80)
     print(f"Results saved to: {results_dir}")
-    print(f"Experiments completed: {len(experiment_results)}")
+    
+    # Successful experiments
+    successful_count = len([v for v in experiment_results.values() if v is not None])
+    print(f"\n✅ Successful experiments: {successful_count}")
     for exp_name, exp_df in experiment_results.items():
         if exp_df is not None and hasattr(exp_df, '__len__'):
-            print(f"  - {exp_name}: {len(exp_df)} result rows")
+            print(f"   - {exp_name}: {len(exp_df)} result rows")
+    
+    # Failed experiments summary
+    if FAILED_EXPERIMENTS:
+        print(f"\n❌ Failed experiments: {len(FAILED_EXPERIMENTS)}")
+        for failed in FAILED_EXPERIMENTS:
+            print(f"   - {failed['experiment']}: {failed['error'][:100]}...")
+        print("\n   💡 Tip: Failed experiments can often be fixed by:")
+        print("      - Checking network connectivity")
+        print("      - Logging into HuggingFace (huggingface-cli login)")
+        print("      - Running with --resume to retry failed experiments")
     
     # Print feature integration status
     print("\n" + "="*80)
