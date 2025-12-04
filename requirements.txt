@@ -1,15 +1,22 @@
-numpy
+# Updated requirements to resolve dependency conflicts
+# Note: These are base requirements. Kaggle pre-installs torch with CUDA support.
+numpy>=1.26.0,<2.0  # Compatible with most packages
 matplotlib
 pandas
 scipy
+fsspec<=2025.10.0,>=2023.1.0  # Compatible with datasets
+pyarrow>=21.0.0  # Compatible with datasets
+huggingface-hub<1.0,>=0.30.0  # Compatible with transformers
 tqdm
-torch
+torch>=2.0.0  # Kaggle has torch 2.6.0+cu124 pre-installed
 torchvision
 pytest
 optuna
-datasets
+datasets>=4.4.0  # Compatible with fsspec and pyarrow
 plotly
 protobuf<=3.20.3
 torchtext>=0.14.0
 portalocker>=2.0.0
 medpy>=0.4.0
+pydantic>=2.0,<2.12  # Compatible with gradio
+rich>=12.4.4,<14  # Compatible with bigframes

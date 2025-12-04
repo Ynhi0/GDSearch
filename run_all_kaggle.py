@@ -1552,8 +1552,28 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[1,2,3], quick=F
         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
     ])
 
-    train_dataset = torchvision.datasets.CIFAR10('./data', train=True, download=True, transform=transform_train)
-    test_dataset = torchvision.datasets.CIFAR10('./data', train=False, download=True, transform=transform_test)
+    # Robust CIFAR-10 download with SSL handling and retries
+    import urllib.request
+    import ssl
+    ssl_context = ssl._create_unverified_context()
+    opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ssl_context))
+    urllib.request.install_opener(opener)
+    
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            train_dataset = torchvision.datasets.CIFAR10('./data', train=True, download=True, transform=transform_train)
+            test_dataset = torchvision.datasets.CIFAR10('./data', train=False, download=True, transform=transform_test)
+            logging.info("✅ CIFAR-10 dataset loaded successfully")
+            break
+        except Exception as e:
+            if attempt < max_retries - 1:
+                logging.warning(f"⚠️  CIFAR-10 download attempt {attempt+1} failed: {e}")
+                logging.info(f"   Retrying... ({attempt+2}/{max_retries})")
+                time.sleep(2)
+            else:
+                logging.error(f"❌ Failed to download CIFAR-10 after {max_retries} attempts")
+                raise
 
     # Get optimized batch sizes and DataLoader kwargs
     seed0 = seeds[0] if seeds else None
@@ -2015,28 +2035,44 @@ def run_nlp_experiment_simple(results_dir="results_nlp", seeds=[1,2,3], epochs=3
     try:
         print("\n   Attempting to load IMDB dataset...")
         from datasets import load_dataset
+        import os
         
-        # Try with different caching strategies
-        try:
-            raw_data = load_dataset('imdb', cache_dir='/tmp/hf_cache')
-            train_texts = raw_data['train']['text'][:2000]
-            train_labels = raw_data['train']['label'][:2000]
-            test_texts = raw_data['test']['text'][:500]
-            test_labels = raw_data['test']['label'][:500]
-            print("   ✅ IMDB dataset loaded successfully")
-            use_real_data = True
-        except Exception as e1:
-            # Try alternative loading
+        # Set environment variables to avoid download issues
+        os.environ['HF_HUB_DISABLE_TELEMETRY'] = '1'
+        os.environ['HF_HUB_OFFLINE'] = '0'
+        
+        # Try with different caching strategies and sources
+        load_attempts = [
+            ('imdb', '/tmp/hf_cache', {}),
+            ('imdb', None, {'trust_remote_code': False}),
+            ('stanfordnlp/imdb', '/tmp/hf_cache', {}),
+            ('imdb', '/tmp/hf_cache', {'download_mode': 'force_redownload'}),
+        ]
+        
+        use_real_data = False
+        last_error = None
+        
+        for dataset_name, cache_dir, extra_kwargs in load_attempts:
             try:
-                raw_data = load_dataset('stanfordnlp/imdb', cache_dir='/tmp/hf_cache')
+                print(f"   Trying to load from: {dataset_name} (cache: {cache_dir})...")
+                kwargs = {'cache_dir': cache_dir} if cache_dir else {}
+                kwargs.update(extra_kwargs)
+                
+                raw_data = load_dataset(dataset_name, **kwargs)
                 train_texts = raw_data['train']['text'][:2000]
                 train_labels = raw_data['train']['label'][:2000]
                 test_texts = raw_data['test']['text'][:500]
                 test_labels = raw_data['test']['label'][:500]
-                print("   ✅ IMDB dataset loaded (alternative source)")
+                print(f"   ✅ IMDB dataset loaded successfully from {dataset_name}")
                 use_real_data = True
-            except:
-                raise e1
+                break
+            except Exception as e:
+                last_error = e
+                print(f"   ⚠️  Failed with {dataset_name}: {str(e)[:80]}...")
+                continue
+        
+        if not use_real_data and last_error:
+            raise last_error
     except Exception as e:
         print(f"   ⚠️  Could not load IMDB: {str(e)[:100]}")
         print("   📊 Using synthetic sentiment data for demonstration")
@@ -3474,6 +3510,13 @@ class Rosenbrock:
     def __call__(self, x):
         return (self.a - x[0])**2 + self.b*(x[1] - x[0]**2)**2
 
+    def torch_loss(self, x):
+        """PyTorch-compatible loss computation for autograd."""
+        if isinstance(x, torch.Tensor):
+            return (self.a - x[0])**2 + self.b*(x[1] - x[0]**2)**2
+        else:
+            return self.__call__(x)
+
     def gradient(self, x):
         dx = -2*(self.a - x[0]) - 4*self.b*x[0]*(x[1] - x[0]**2)
         dy = 2*self.b*(x[1] - x[0]**2)
@@ -3485,6 +3528,13 @@ class Rastrigin:
 
     def __call__(self, x):
         return self.A*len(x) + sum(x**2 - self.A*np.cos(2*np.pi*x))
+
+    def torch_loss(self, x):
+        """PyTorch-compatible loss computation for autograd."""
+        if isinstance(x, torch.Tensor):
+            return self.A*len(x) + torch.sum(x**2 - self.A*torch.cos(2*np.pi*x))
+        else:
+            return self.__call__(x)
 
     def gradient(self, x):
         return 2*x + 2*np.pi*self.A*np.sin(2*np.pi*x)
@@ -3664,17 +3714,16 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=[42], resume
             for i in range(max_iter):
                 optimizer.zero_grad()
 
-                x_np = x.detach().numpy()
-                loss = torch.tensor(rosenbrock(x_np), dtype=torch.float32)
+                # Compute loss using PyTorch autograd
+                loss = rosenbrock.torch_loss(x)
                 loss.backward()
 
                 if opt_name.startswith('SAM'):
                     def closure():
                         optimizer.zero_grad()
-                        x_np = x.detach().numpy()
-                        loss = torch.tensor(rosenbrock(x_np), dtype=torch.float32)
-                        loss.backward()
-                        return loss
+                        loss_c = rosenbrock.torch_loss(x)
+                        loss_c.backward()
+                        return loss_c
                     optimizer.step(closure)
                 else:
                     optimizer.step()
@@ -3879,17 +3928,16 @@ def run_ablation_study(results_dir="results_ablation", seeds=[42], resume=False)
         for i in range(max_iter):
             optimizer.zero_grad()
 
-            x_np = x.detach().numpy()
-            loss = torch.tensor(rosenbrock(x_np), dtype=torch.float32)
+            # Compute loss using PyTorch autograd
+            loss = rosenbrock.torch_loss(x)
             loss.backward()
 
             if opt_name.startswith('SAM'):
                 def closure():
                     optimizer.zero_grad()
-                    x_np = x.detach().numpy()
-                    loss = torch.tensor(rosenbrock(x_np), dtype=torch.float32)
-                    loss.backward()
-                    return loss
+                    loss_c = rosenbrock.torch_loss(x)
+                    loss_c.backward()
+                    return loss_c
                 optimizer.step(closure)
             else:
                 optimizer.step()
@@ -4597,8 +4645,28 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=[1,2,3], quick=Fal
         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
     ])
 
-    train_dataset = torchvision.datasets.CIFAR10('./data', train=True, download=True, transform=transform)
-    test_dataset = torchvision.datasets.CIFAR10('./data', train=False, download=True, transform=transform)
+    # Robust CIFAR-10 download with SSL handling and retries
+    import urllib.request
+    import ssl
+    ssl_context = ssl._create_unverified_context()
+    opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ssl_context))
+    urllib.request.install_opener(opener)
+    
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            train_dataset = torchvision.datasets.CIFAR10('./data', train=True, download=True, transform=transform)
+            test_dataset = torchvision.datasets.CIFAR10('./data', train=False, download=True, transform=transform)
+            logging.info("✅ CIFAR-10 dataset loaded successfully for ResNet")
+            break
+        except Exception as e:
+            if attempt < max_retries - 1:
+                logging.warning(f"⚠️  CIFAR-10 download attempt {attempt+1} failed: {e}")
+                logging.info(f"   Retrying... ({attempt+2}/{max_retries})")
+                time.sleep(2)
+            else:
+                logging.error(f"❌ Failed to download CIFAR-10 after {max_retries} attempts")
+                raise
 
     # Get optimized batch sizes and DataLoader kwargs
     train_bs, test_bs = get_batch_size('resnet', default_train=128, default_test=256)
