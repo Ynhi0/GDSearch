@@ -1175,7 +1175,7 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, test_loade
                 correct += predicted.eq(targets).sum().item()
                 total += targets.size(0)
         
-        accuracy = correct / total
+        accuracy = 100.0 * correct / total
         return accuracy
     
     # Run optimization
@@ -1804,7 +1804,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
     lr_sgd = 1e-3
     train_size = 1000 if quick else (5000 if not torch.cuda.is_available() else 10000)  # Smaller for CPU
     test_size = 500 if quick else 2000
-    epochs = 2 if quick else 3
+    epochs = 3 if quick else 10  # Increased from 2/3 to 3/10 for proper transformer fine-tuning
 
     results_dir = Path(results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -1961,7 +1961,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
                         test_total += input_ids.size(0)
 
                 test_loss /= max(1, test_total)
-                test_acc = test_correct / max(1, test_total)
+                test_acc = 100.0 * test_correct / max(1, test_total)
 
                 history.append({
                     'epoch': epoch,
