@@ -12,6 +12,14 @@ All code self-contained - no external imports needed.
 
 import os
 import sys
+
+# Suppress CUDA plugin registration warnings FIRST (before any imports)
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TensorFlow warnings
+os.environ['CUDA_VISIBLE_DEVICES_ORDER'] = 'PCI_BUS_ID'
+# Suppress protobuf/gRPC warnings
+os.environ['GRPC_VERBOSITY'] = 'ERROR'
+os.environ['GLOG_minloglevel'] = '2'
+
 import time
 import torch
 import torch.nn as nn
@@ -33,6 +41,12 @@ import logging
 import json
 import psutil
 from contextlib import contextmanager
+
+# Filter CUDA and XLA warnings
+warnings.filterwarnings('ignore', message='.*cuFFT.*')
+warnings.filterwarnings('ignore', message='.*cuDNN.*')
+warnings.filterwarnings('ignore', message='.*cuBLAS.*')
+warnings.filterwarnings('ignore', message='.*register factory.*')
 from typing import Dict, List, Optional, Any
 import traceback
 from datetime import datetime
@@ -1767,8 +1781,20 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
             'skip_tuning': skip_tuning
         })
 
+    # Set environment variables to avoid warnings
+    import os
+    os.environ['TOKENIZERS_PARALLELISM'] = 'false'  # Prevent tokenizer fork warnings
+    
+    # Suppress unnecessary transformers warnings
+    import warnings
+    warnings.filterwarnings('ignore', message='Some weights.*were not initialized')
+    
     from transformers import AutoTokenizer, AutoModelForSequenceClassification
     from datasets import load_dataset
+    
+    # Set transformers logging to ERROR to suppress weight initialization messages
+    import transformers
+    transformers.logging.set_verbosity_error()
 
     # Configuration
     model_name = 'distilbert-base-uncased'
@@ -1855,10 +1881,11 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
                     batch["attention_mask"] = attention_mask
                 return batch
 
+            # Use num_workers=0 to avoid tokenizer parallelism issues with DataLoader forking
             train_loader = make_dataloader(train_ds, batch_size=batch_size, shuffle=True,
-                                           seed=seed, num_workers=2, collate_fn=collate_fn)
+                                           seed=seed, num_workers=0, collate_fn=collate_fn)
             test_loader = make_dataloader(test_ds, batch_size=batch_size, shuffle=False,
-                                          seed=seed, num_workers=2, collate_fn=collate_fn)
+                                          seed=seed, num_workers=0, collate_fn=collate_fn)
 
             # Setup optimizer
             if opt_name == 'AdamW':
@@ -2037,9 +2064,10 @@ def run_nlp_experiment_simple(results_dir="results_nlp", seeds=[1,2,3], epochs=3
         from datasets import load_dataset
         import os
         
-        # Set environment variables to avoid download issues
+        # Set environment variables to avoid download issues and warnings
         os.environ['HF_HUB_DISABLE_TELEMETRY'] = '1'
         os.environ['HF_HUB_OFFLINE'] = '0'
+        os.environ['TOKENIZERS_PARALLELISM'] = 'false'
         
         # Try with different caching strategies and sources
         load_attempts = [

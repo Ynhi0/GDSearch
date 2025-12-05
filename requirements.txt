@@ -14,7 +14,7 @@ pytest
 optuna
 datasets>=4.4.0  # Compatible with fsspec and pyarrow
 plotly
-protobuf<=3.20.3
+protobuf>=3.19.0,<3.21.0  # CRITICAL: 4.x breaks MLflow/transformers
 torchtext>=0.14.0
 portalocker>=2.0.0
 medpy>=0.4.0

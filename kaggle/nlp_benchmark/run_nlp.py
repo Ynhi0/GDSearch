@@ -113,6 +113,18 @@ def _ckpt_path(ckpt_dir: Path, opt_name: str, seed: int, lr: float, model_name: 
 def run_single(opt_name: str, seed: int, lr: float, epochs: int, batch_size: int, model_name: str, results_dir: Path, train_size: int, test_size: int, resume: bool, ckpt_dir: Path):
     AutoTokenizer, AutoModel, load_dataset = _try_import_hf()
     set_seed(seed)
+    
+    # Set environment variables to avoid warnings
+    import os
+    os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+    
+    # Suppress unnecessary transformers warnings
+    import warnings
+    warnings.filterwarnings('ignore', message='Some weights.*were not initialized')
+    
+    import transformers
+    transformers.logging.set_verbosity_error()
+    
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # Robust dataset loading with fallback for environment compatibility
@@ -143,8 +155,9 @@ def run_single(opt_name: str, seed: int, lr: float, epochs: int, batch_size: int
     test_ds = test_ds.remove_columns(rm_test)
 
     collate_fn = collate_fn_builder(tokenizer)
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
-    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
+    # Use num_workers=0 to avoid tokenizer parallelism issues
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, collate_fn=collate_fn, num_workers=0)
+    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_fn, num_workers=0)
 
     model = AutoModel.from_pretrained(model_name, num_labels=2).to(device)
 

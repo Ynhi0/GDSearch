@@ -85,6 +85,17 @@ def evaluate(model, loader, device) -> Tuple[float, float]:
 def run_single_imdb(optimizer_name: str, seed: int, lr: float, epochs: int, batch_size: int, results_dir: Path):
     BertTokenizer, BertForSequenceClassification, load_dataset = _try_import_hf()
 
+    # Set environment variables to avoid warnings
+    import os
+    os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+    
+    # Suppress unnecessary transformers warnings
+    import warnings
+    warnings.filterwarnings('ignore', message='Some weights.*were not initialized')
+    
+    import transformers
+    transformers.logging.set_verbosity_error()
+
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     set_seed(seed)
 
@@ -120,8 +131,9 @@ def run_single_imdb(optimizer_name: str, seed: int, lr: float, epochs: int, batc
         out = {k: torch.tensor([b[k] for b in batch]) for k in keys}
         return out
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
+    # Use num_workers=0 to avoid tokenizer parallelism issues
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn, num_workers=0)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn, num_workers=0)
 
     # Model
     model = BertForSequenceClassification.from_pretrained('bert-base-uncased', num_labels=2).to(device)
