@@ -198,6 +198,7 @@ def run_single(opt_name: str, seed: int, lr: float, epochs: int, batch_size: int
         print(f"seed={seed} {opt_name} [{epoch}/{epochs}] train_loss={tr_loss:.4f} test_acc={te_acc:.3f}")
         # Save checkpoint each epoch (last-writer-wins)
         try:
+            # FIXED: Use new zipfile serialization to avoid inline_container errors
             torch.save({
                 'model': model.state_dict(),
                 'optimizer': optimizer.state_dict(),
@@ -207,7 +208,7 @@ def run_single(opt_name: str, seed: int, lr: float, epochs: int, batch_size: int
                 'seed': seed,
                 'lr': lr,
                 'model_name': model_name,
-            }, ckpt_file)
+            }, ckpt_file, _use_new_zipfile_serialization=True)
         except Exception as e:
             logging.warning('Failed to save checkpoint: %s', e)
 

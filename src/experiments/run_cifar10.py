@@ -89,6 +89,9 @@ def train_one_epoch(model, loader, optimizer, device):
         pred = out.argmax(1)
         correct += (pred == y).sum().item()
         total += x.size(0)
+    # Avoid division by zero
+    if total == 0:
+        return 0.0, 0.0
     return total_loss / total, correct / total
 
 
@@ -106,6 +109,9 @@ def evaluate(model, loader, device):
             pred = out.argmax(1)
             correct += (pred == y).sum().item()
             total += x.size(0)
+    # Avoid division by zero
+    if total == 0:
+        return 0.0, 0.0
     return total_loss / total, correct / total
 
 

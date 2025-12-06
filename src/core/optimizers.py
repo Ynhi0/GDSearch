@@ -734,3 +734,309 @@ class Lookahead(Optimizer):
         self.slow_params_y = None
         self.slow_params = None
 
+
+class AdaBound(Optimizer):
+    """
+    AdaBound: Adaptive Gradient Methods with Dynamic Bound of Learning Rate.
+    
+    Combines benefits of adaptive methods and SGD by dynamically bounding the learning rate.
+    Reference: https://arxiv.org/abs/1902.09843
+    
+    Formula:
+        m_t = beta1 * m_{t-1} + (1 - beta1) * gradient
+        v_t = beta2 * v_{t-1} + (1 - beta2) * gradient^2
+        m_hat = m_t / (1 - beta1^t)
+        v_hat = v_t / (1 - beta2^t)
+        
+        lr_t = clip(lr / sqrt(v_hat), final_lr * (1 - 1/t), final_lr * (1 + 1/t))
+        theta_new = theta - lr_t * m_hat
+    """
+    
+    def __init__(self, lr=0.001, beta1=0.9, beta2=0.999, final_lr=0.1, epsilon=1e-8, gamma=1e-3):
+        """
+        Initialize AdaBound optimizer.
+        
+        Args:
+            lr: Initial learning rate
+            beta1: Exponential decay rate for first moment
+            beta2: Exponential decay rate for second moment
+            final_lr: Final (SGD) learning rate
+            epsilon: Small constant for numerical stability
+            gamma: Convergence speed parameter
+        """
+        super().__init__()
+        self.lr = lr
+        self.beta1 = beta1
+        self.beta2 = beta2
+        self.final_lr = final_lr
+        self.epsilon = epsilon
+        self.gamma = gamma
+        self.name = f"AdaBound(lr={lr}, final_lr={final_lr})"
+        
+        # Initialize moments
+        self.m_x, self.m_y = 0.0, 0.0
+        self.v_x, self.v_y = 0.0, 0.0
+        self.m, self.v = None, None
+        self.t = 0
+    
+    def step(self, params, gradients):
+        """Perform one AdaBound step."""
+        self.t += 1
+        
+        if isinstance(params, tuple):
+            x, y = params
+            grad_x, grad_y = gradients
+            
+            # Update biased first moment
+            self.m_x = self.beta1 * self.m_x + (1 - self.beta1) * grad_x
+            self.m_y = self.beta1 * self.m_y + (1 - self.beta1) * grad_y
+            
+            # Update biased second moment
+            self.v_x = self.beta2 * self.v_x + (1 - self.beta2) * grad_x ** 2
+            self.v_y = self.beta2 * self.v_y + (1 - self.beta2) * grad_y ** 2
+            
+            # Compute bias-corrected moments
+            m_x_hat = self.m_x / (1 - self.beta1 ** self.t)
+            m_y_hat = self.m_y / (1 - self.beta1 ** self.t)
+            v_x_hat = self.v_x / (1 - self.beta2 ** self.t)
+            v_y_hat = self.v_y / (1 - self.beta2 ** self.t)
+            
+            # Compute dynamic bounds
+            final_lr_t = self.final_lr * self.lr / self.gamma
+            lower_bound = final_lr_t * (1.0 - 1.0 / (self.gamma * self.t + 1.0))
+            upper_bound = final_lr_t * (1.0 + 1.0 / (self.gamma * self.t))
+            
+            # Compute step sizes with bounds
+            step_size_x = self.lr / (np.sqrt(v_x_hat) + self.epsilon)
+            step_size_y = self.lr / (np.sqrt(v_y_hat) + self.epsilon)
+            
+            step_size_x = np.clip(step_size_x, lower_bound, upper_bound)
+            step_size_y = np.clip(step_size_y, lower_bound, upper_bound)
+            
+            # Update parameters
+            new_x = x - step_size_x * m_x_hat
+            new_y = y - step_size_y * m_y_hat
+            return new_x, new_y
+        else:
+            # Array version
+            if self.m is None or self.m.shape != params.shape:
+                self.m = np.zeros_like(params)
+                self.v = np.zeros_like(params)
+            
+            self.m = self.beta1 * self.m + (1 - self.beta1) * gradients
+            self.v = self.beta2 * self.v + (1 - self.beta2) * gradients ** 2
+            
+            m_hat = self.m / (1 - self.beta1 ** self.t)
+            v_hat = self.v / (1 - self.beta2 ** self.t)
+            
+            final_lr_t = self.final_lr * self.lr / self.gamma
+            lower_bound = final_lr_t * (1.0 - 1.0 / (self.gamma * self.t + 1.0))
+            upper_bound = final_lr_t * (1.0 + 1.0 / (self.gamma * self.t))
+            
+            step_size = self.lr / (np.sqrt(v_hat) + self.epsilon)
+            step_size = np.clip(step_size, lower_bound, upper_bound)
+            
+            return params - step_size * m_hat
+    
+    def reset(self):
+        """Reset optimizer state."""
+        self.m_x, self.m_y = 0.0, 0.0
+        self.v_x, self.v_y = 0.0, 0.0
+        self.m, self.v = None, None
+        self.t = 0
+
+
+class RAdam(Optimizer):
+    """
+    RAdam: Rectified Adam optimizer.
+    
+    Addresses the bad convergence problem of Adam by rectifying the adaptive learning rate.
+    Reference: https://arxiv.org/abs/1908.03265
+    
+    Key idea: Use warmup heuristic based on variance of adaptive learning rate.
+    """
+    
+    def __init__(self, lr=0.001, beta1=0.9, beta2=0.999, epsilon=1e-8):
+        """Initialize RAdam optimizer."""
+        super().__init__()
+        self.lr = lr
+        self.beta1 = beta1
+        self.beta2 = beta2
+        self.epsilon = epsilon
+        self.name = f"RAdam(lr={lr})"
+        
+        # Initialize moments
+        self.m_x, self.m_y = 0.0, 0.0
+        self.v_x, self.v_y = 0.0, 0.0
+        self.m, self.v = None, None
+        self.t = 0
+        
+        # Compute rho_inf (maximum length of approximated SMA)
+        self.rho_inf = 2.0 / (1.0 - self.beta2) - 1.0
+    
+    def step(self, params, gradients):
+        """Perform one RAdam step."""
+        self.t += 1
+        
+        if isinstance(params, tuple):
+            x, y = params
+            grad_x, grad_y = gradients
+            
+            # Update biased first moment
+            self.m_x = self.beta1 * self.m_x + (1 - self.beta1) * grad_x
+            self.m_y = self.beta1 * self.m_y + (1 - self.beta1) * grad_y
+            
+            # Update biased second moment
+            self.v_x = self.beta2 * self.v_x + (1 - self.beta2) * grad_x ** 2
+            self.v_y = self.beta2 * self.v_y + (1 - self.beta2) * grad_y ** 2
+            
+            # Bias correction for first moment
+            m_x_hat = self.m_x / (1 - self.beta1 ** self.t)
+            m_y_hat = self.m_y / (1 - self.beta1 ** self.t)
+            
+            # Compute length of the approximated SMA
+            rho_t = self.rho_inf - 2.0 * self.t * (self.beta2 ** self.t) / (1.0 - self.beta2 ** self.t)
+            
+            # Check if variance is tractable
+            if rho_t > 4.0:
+                # Rectified update with bias correction
+                v_x_hat = self.v_x / (1 - self.beta2 ** self.t)
+                v_y_hat = self.v_y / (1 - self.beta2 ** self.t)
+                
+                r_t = np.sqrt(((rho_t - 4.0) * (rho_t - 2.0) * self.rho_inf) /
+                             ((self.rho_inf - 4.0) * (self.rho_inf - 2.0) * rho_t))
+                
+                new_x = x - self.lr * r_t * m_x_hat / (np.sqrt(v_x_hat) + self.epsilon)
+                new_y = y - self.lr * r_t * m_y_hat / (np.sqrt(v_y_hat) + self.epsilon)
+            else:
+                # Use un-adapted update (like SGD with momentum)
+                new_x = x - self.lr * m_x_hat
+                new_y = y - self.lr * m_y_hat
+            
+            return new_x, new_y
+        else:
+            # Array version
+            if self.m is None or self.m.shape != params.shape:
+                self.m = np.zeros_like(params)
+                self.v = np.zeros_like(params)
+            
+            self.m = self.beta1 * self.m + (1 - self.beta1) * gradients
+            self.v = self.beta2 * self.v + (1 - self.beta2) * gradients ** 2
+            
+            m_hat = self.m / (1 - self.beta1 ** self.t)
+            rho_t = self.rho_inf - 2.0 * self.t * (self.beta2 ** self.t) / (1.0 - self.beta2 ** self.t)
+            
+            if rho_t > 4.0:
+                v_hat = self.v / (1 - self.beta2 ** self.t)
+                r_t = np.sqrt(((rho_t - 4.0) * (rho_t - 2.0) * self.rho_inf) /
+                             ((self.rho_inf - 4.0) * (self.rho_inf - 2.0) * rho_t))
+                return params - self.lr * r_t * m_hat / (np.sqrt(v_hat) + self.epsilon)
+            else:
+                return params - self.lr * m_hat
+    
+    def reset(self):
+        """Reset optimizer state."""
+        self.m_x, self.m_y = 0.0, 0.0
+        self.v_x, self.v_y = 0.0, 0.0
+        self.m, self.v = None, None
+        self.t = 0
+
+
+class LAMB(Optimizer):
+    """
+    LAMB: Layer-wise Adaptive Moments optimizer for Batch training.
+    
+    Designed for large batch training, uses layer-wise adaptation.
+    Reference: https://arxiv.org/abs/1904.00962
+    
+    Key idea: Trust ratio based on layer-wise norms for better large-batch training.
+    """
+    
+    def __init__(self, lr=0.001, beta1=0.9, beta2=0.999, epsilon=1e-8, weight_decay=0.01):
+        """Initialize LAMB optimizer."""
+        super().__init__()
+        self.lr = lr
+        self.beta1 = beta1
+        self.beta2 = beta2
+        self.epsilon = epsilon
+        self.weight_decay = weight_decay
+        self.name = f"LAMB(lr={lr}, wd={weight_decay})"
+        
+        # Initialize moments
+        self.m_x, self.m_y = 0.0, 0.0
+        self.v_x, self.v_y = 0.0, 0.0
+        self.m, self.v = None, None
+        self.t = 0
+    
+    def step(self, params, gradients):
+        """Perform one LAMB step."""
+        self.t += 1
+        
+        if isinstance(params, tuple):
+            x, y = params
+            grad_x, grad_y = gradients
+            
+            # Update biased first moment
+            self.m_x = self.beta1 * self.m_x + (1 - self.beta1) * grad_x
+            self.m_y = self.beta1 * self.m_y + (1 - self.beta1) * grad_y
+            
+            # Update biased second moment
+            self.v_x = self.beta2 * self.v_x + (1 - self.beta2) * grad_x ** 2
+            self.v_y = self.beta2 * self.v_y + (1 - self.beta2) * grad_y ** 2
+            
+            # Bias correction
+            m_x_hat = self.m_x / (1 - self.beta1 ** self.t)
+            m_y_hat = self.m_y / (1 - self.beta1 ** self.t)
+            v_x_hat = self.v_x / (1 - self.beta2 ** self.t)
+            v_y_hat = self.v_y / (1 - self.beta2 ** self.t)
+            
+            # Adam update (before trust ratio)
+            update_x = m_x_hat / (np.sqrt(v_x_hat) + self.epsilon) + self.weight_decay * x
+            update_y = m_y_hat / (np.sqrt(v_y_hat) + self.epsilon) + self.weight_decay * y
+            
+            # Compute trust ratio
+            param_norm = np.sqrt(x**2 + y**2)
+            update_norm = np.sqrt(update_x**2 + update_y**2)
+            
+            if param_norm > 0 and update_norm > 0:
+                trust_ratio = param_norm / update_norm
+            else:
+                trust_ratio = 1.0
+            
+            # Apply trust ratio
+            new_x = x - self.lr * trust_ratio * update_x
+            new_y = y - self.lr * trust_ratio * update_y
+            
+            return new_x, new_y
+        else:
+            # Array version
+            if self.m is None or self.m.shape != params.shape:
+                self.m = np.zeros_like(params)
+                self.v = np.zeros_like(params)
+            
+            self.m = self.beta1 * self.m + (1 - self.beta1) * gradients
+            self.v = self.beta2 * self.v + (1 - self.beta2) * gradients ** 2
+            
+            m_hat = self.m / (1 - self.beta1 ** self.t)
+            v_hat = self.v / (1 - self.beta2 ** self.t)
+            
+            update = m_hat / (np.sqrt(v_hat) + self.epsilon) + self.weight_decay * params
+            
+            param_norm = np.linalg.norm(params)
+            update_norm = np.linalg.norm(update)
+            
+            if param_norm > 0 and update_norm > 0:
+                trust_ratio = param_norm / update_norm
+            else:
+                trust_ratio = 1.0
+            
+            return params - self.lr * trust_ratio * update
+    
+    def reset(self):
+        """Reset optimizer state."""
+        self.m_x, self.m_y = 0.0, 0.0
+        self.v_x, self.v_y = 0.0, 0.0
+        self.m, self.v = None, None
+        self.t = 0
+
+

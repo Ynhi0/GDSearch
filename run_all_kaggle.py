@@ -56,6 +56,45 @@ warnings.filterwarnings('ignore')
 # Add src to path for integrated analysis modules
 sys.path.insert(0, str(Path(__file__).parent))
 
+
+def check_gradient_health_quick(model, epoch=None, threshold=1e3, context=""):
+    """
+    Quick gradient health check for training loops.
+    
+    Args:
+        model: PyTorch model
+        epoch: Current epoch number (optional, for logging)
+        threshold: Gradient norm explosion threshold
+        context: Context string for logging (e.g., "CIFAR-10", "NLP")
+    
+    Returns:
+        grad_norm: Total gradient norm
+    """
+    try:
+        grad_norm = 0.0
+        has_bad_grad = False
+        
+        for param in model.parameters():
+            if param.grad is not None:
+                if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
+                    epoch_str = f" at epoch {epoch}" if epoch is not None else ""
+                    logging.warning(f"NaN/Inf gradient detected{epoch_str} ({context})")
+                    has_bad_grad = True
+                    break
+                grad_norm += param.grad.data.norm(2).item() ** 2
+        
+        if not has_bad_grad:
+            grad_norm = grad_norm ** 0.5
+            if grad_norm > threshold:
+                epoch_str = f" at epoch {epoch}" if epoch is not None else ""
+                logging.warning(f"Large gradient norm{epoch_str}: {grad_norm:.2e} ({context})")
+        
+        return grad_norm if not has_bad_grad else float('inf')
+    except Exception as e:
+        logging.debug(f"Gradient check failed ({context}): {e}")
+        return 0.0
+
+
 # Try to import integrated analysis modules
 HAS_CONVERGENCE = False
 HAS_INTERACTIVE = False
@@ -314,8 +353,9 @@ class RobustCheckpointManager:
             tmp_path = ckpt_path.with_suffix('.tmp')
             try:
                 # Use binary write file handle to ensure fsync works
+                # FIXED: Use new zipfile serialization to avoid inline_container errors with large models
                 with open(tmp_path, 'wb') as f:
-                    torch.save(checkpoint_data, f)
+                    torch.save(checkpoint_data, f, _use_new_zipfile_serialization=True)
                     f.flush()
                     os.fsync(f.fileno())
 
@@ -368,27 +408,54 @@ class RobustCheckpointManager:
         return None
 
     def _create_backup(self, ckpt_path: Path, experiment_name: str):
-        """Create rolling backup - only if checkpoint exists"""
+        """Create rolling backup - only if checkpoint exists. Thread-safe with file locking."""
         if not ckpt_path.exists():
             return
-            
-        # Roll existing backups
-        for i in range(self.max_backups - 1, 0, -1):
-            src = self.base_dir / f"{ckpt_path.name}.backup_{i-1}"
-            dst = self.base_dir / f"{ckpt_path.name}.backup_{i}"
-            if src.exists():
-                try:
-                    src.replace(dst)
-                except Exception as e:
-                    logging.debug(f"Failed to rotate backup {i}: {e}")
-
-        # Create new backup from current checkpoint
-        backup_path = self.base_dir / f"{ckpt_path.name}.backup_0"
+        
+        # Create lock file for atomic backup operations
+        lock_file = self.base_dir / f"{ckpt_path.name}.backup.lock"
+        
         try:
-            import shutil
-            shutil.copy2(str(ckpt_path), str(backup_path))
-        except Exception as e:
-            logging.debug(f"Failed to create backup: {e}")
+            # Try to acquire lock (with timeout)
+            import time
+            max_wait = 30  # seconds
+            wait_time = 0
+            while lock_file.exists() and wait_time < max_wait:
+                time.sleep(0.1)
+                wait_time += 0.1
+            
+            if lock_file.exists():
+                logging.warning(f"Backup lock timeout for {ckpt_path.name}, skipping backup")
+                return
+            
+            # Create lock file
+            lock_file.touch()
+            
+            # Roll existing backups
+            for i in range(self.max_backups - 1, 0, -1):
+                src = self.base_dir / f"{ckpt_path.name}.backup_{i-1}"
+                dst = self.base_dir / f"{ckpt_path.name}.backup_{i}"
+                if src.exists():
+                    try:
+                        src.replace(dst)
+                    except Exception as e:
+                        logging.debug(f"Failed to rotate backup {i}: {e}")
+
+            # Create new backup from current checkpoint
+            backup_path = self.base_dir / f"{ckpt_path.name}.backup_0"
+            try:
+                import shutil
+                shutil.copy2(str(ckpt_path), str(backup_path))
+            except Exception as e:
+                logging.debug(f"Failed to create backup: {e}")
+        
+        finally:
+            # Always release lock
+            try:
+                if lock_file.exists():
+                    lock_file.unlink()
+            except Exception as e:
+                logging.debug(f"Failed to remove lock file: {e}")
 
     def _validate_checkpoint(self, ckpt_path: Path, expected_data: Dict) -> bool:
         """Validate checkpoint integrity"""
@@ -399,6 +466,37 @@ class RobustCheckpointManager:
             return all(key in loaded for key in essential_keys)
         except Exception:
             return False
+    
+    def validate_optimizer_compatibility(self, checkpoint: Dict, optimizer_name: str) -> bool:
+        """Check if checkpoint optimizer matches current optimizer."""
+        if checkpoint is None:
+            return True  # No checkpoint, compatible by default
+        
+        # Get optimizer name from checkpoint
+        ckpt_opt_name = checkpoint.get('opt_name', None)
+        
+        if ckpt_opt_name is None:
+            # Old checkpoint without opt_name, warn and allow
+            logging.warning(f"Checkpoint missing optimizer name, assuming compatibility")
+            return True
+        
+        # Check exact match
+        if ckpt_opt_name == optimizer_name:
+            return True
+        
+        # Check if state dict shapes would match (for similar optimizers)
+        try:
+            ckpt_state = checkpoint.get('optimizer', {})
+            # If both are Adam-family optimizers, they might be compatible
+            adam_family = ['Adam', 'AdamW', 'AMSGrad', 'AdaBound', 'RAdam', 'LAMB']
+            if ckpt_opt_name in adam_family and optimizer_name in adam_family:
+                logging.warning(f"Loading {ckpt_opt_name} checkpoint into {optimizer_name} optimizer (Adam-family)")
+                return True
+        except Exception:
+            pass
+        
+        logging.warning(f"Optimizer mismatch: checkpoint has {ckpt_opt_name}, current is {optimizer_name}")
+        return False
 
 # Global list to track failed experiments for summary reporting
 FAILED_EXPERIMENTS = []
@@ -1161,6 +1259,22 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, test_loade
                 outputs = model(inputs)
                 loss = criterion(outputs, targets)
                 loss.backward()
+                
+                # Gradient health monitoring
+                try:
+                    grad_norm = 0.0
+                    for param in model.parameters():
+                        if param.grad is not None:
+                            if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
+                                logging.warning(f"NaN/Inf gradient detected in sanity check epoch {epoch}")
+                                break
+                            grad_norm += param.grad.data.norm(2).item() ** 2
+                    grad_norm = grad_norm ** 0.5
+                    if grad_norm > 1e3:
+                        logging.warning(f"Large gradient norm in sanity check: {grad_norm:.2e}")
+                except Exception as e:
+                    logging.debug(f"Gradient check failed: {e}")
+                
                 optimizer.step()
         
         # Evaluate
@@ -1205,7 +1319,10 @@ def get_default_hyperparameters(optimizer_name: str) -> Dict:
         'AdamW': {'lr': 0.001, 'beta1': 0.9, 'beta2': 0.999, 'weight_decay': 1e-4},
         'AMSGrad': {'lr': 0.001, 'beta1': 0.9, 'beta2': 0.999},
         'SAM_SGD': {'lr': 0.01, 'rho': 0.05},
-        'SAM_Adam': {'lr': 0.001, 'rho': 0.05}
+        'SAM_Adam': {'lr': 0.001, 'rho': 0.05},
+        'AdaBound': {'lr': 0.001, 'beta1': 0.9, 'beta2': 0.999, 'final_lr': 0.1, 'gamma': 1e-3},
+        'RAdam': {'lr': 0.001, 'beta1': 0.9, 'beta2': 0.999},
+        'LAMB': {'lr': 0.001, 'beta1': 0.9, 'beta2': 0.999, 'weight_decay': 0.01}
     }
     return defaults.get(optimizer_name, {'lr': 0.001})
 
@@ -1297,9 +1414,12 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[1,2,3], quick=False
             
             results = []
 
+            # Import new optimizers
+            from src.core.pytorch_optimizers import AdaBoundWrapper, RAdamWrapper, LAMBWrapper
+            
             # Build optimizers with tuned or default parameters
             optimizers_config = []
-            for opt_name in ['SGD', 'SGD_Momentum', 'Adam', 'AdamW', 'AMSGrad', 'SAM_SGD', 'SAM_Adam']:
+            for opt_name in ['SGD', 'SGD_Momentum', 'Adam', 'AdamW', 'AMSGrad', 'SAM_SGD', 'SAM_Adam', 'AdaBound', 'RAdam', 'LAMB']:
                 params = tuned_params.get(opt_name, get_default_hyperparameters(opt_name))
                 
                 if opt_name == 'SGD':
@@ -1322,6 +1442,15 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[1,2,3], quick=False
                 elif opt_name == 'SAM_Adam':
                     optimizers_config.append((opt_name, lambda p, lr=params['lr'], rho=params.get('rho', 0.05): 
                                             SAM(p, optim.Adam, lr=lr, rho=rho)))
+                elif opt_name == 'AdaBound':
+                    optimizers_config.append((opt_name, lambda p, lr=params['lr'], b1=params['beta1'], b2=params['beta2'], flr=params['final_lr'], g=params['gamma']: 
+                                            AdaBoundWrapper(p, lr=lr, beta1=b1, beta2=b2, final_lr=flr, gamma=g)))
+                elif opt_name == 'RAdam':
+                    optimizers_config.append((opt_name, lambda p, lr=params['lr'], b1=params['beta1'], b2=params['beta2']: 
+                                            RAdamWrapper(p, lr=lr, beta1=b1, beta2=b2)))
+                elif opt_name == 'LAMB':
+                    optimizers_config.append((opt_name, lambda p, lr=params['lr'], b1=params['beta1'], b2=params['beta2'], wd=params['weight_decay']: 
+                                            LAMBWrapper(p, lr=lr, beta1=b1, beta2=b2, weight_decay=wd)))
 
             logging.info("="*80)
             logging.info("🚀 RUNNING EXPERIMENTS WITH TUNED HYPERPARAMETERS")
@@ -1367,16 +1496,42 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[1,2,3], quick=False
                         if checkpoint_manager:
                             checkpoint = checkpoint_manager.load_checkpoint(ckpt_file, f"MNIST_{opt_name}_seed{seed}")
                             if checkpoint:
-                                model.load_state_dict(checkpoint['model'], strict=False)
-                                if opt_name.startswith('SAM'):
-                                    if isinstance(optimizer, SAM):
-                                        optimizer.base_optimizer.load_state_dict(checkpoint['optimizer'])
+                                # Validate optimizer compatibility
+                                if checkpoint_manager.validate_optimizer_compatibility(checkpoint, opt_name):
+                                    model.load_state_dict(checkpoint['model'], strict=False)
+                                    try:
+                                        if opt_name.startswith('SAM'):
+                                            if isinstance(optimizer, SAM):
+                                                optimizer.base_optimizer.load_state_dict(checkpoint['optimizer'])
+                                        else:
+                                            optimizer.load_state_dict(checkpoint['optimizer'])
+                                        start_epoch = int(checkpoint.get('epoch', 0)) + 1
+                                        history = checkpoint.get('history', [])
+                                        logging.info(f"Resuming {opt_name} from epoch {start_epoch}")
+                                    except Exception as e:
+                                        logging.warning(f"Failed to load optimizer state for {opt_name}: {e}. Starting fresh.")
+                                        start_epoch = 1
+                                        history = []
                                 else:
-                                    optimizer.load_state_dict(checkpoint['optimizer'])
-                                start_epoch = int(checkpoint.get('epoch', 0)) + 1
-                                history = checkpoint.get('history', [])
-                                logging.info(f"Resuming from epoch {start_epoch}")
+                                    logging.warning(f"Optimizer mismatch for {opt_name}, starting from scratch")
+                                    start_epoch = 1
+                                    history = []
 
+                        # Import LR scheduler
+                        from src.core.lr_schedulers import CosineAnnealingLR
+                        
+                        # Get learning rate from optimizer
+                        base_lr = optimizer.param_groups[0]['lr']
+                        
+                        # Create learning rate scheduler (cosine annealing)
+                        scheduler = CosineAnnealingLR(optimizer, T_max=epochs, eta_min=base_lr*0.01)
+                        
+                        # Early stopping setup
+                        best_val_acc = 0.0
+                        best_model_state = None
+                        patience = 10
+                        patience_counter = 0
+                        
                         # Training with enhanced monitoring
                         start_time = time.time()
                         for epoch in range(start_epoch, epochs + 1):
@@ -1401,7 +1556,35 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[1,2,3], quick=False
                                     outputs = model(inputs)
                                     loss = criterion(outputs, targets)
                                     loss.backward()
+                                    
+                                    # Gradient clipping to prevent explosion
+                                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                                    
+                                    # Gradient health monitoring
+                                    try:
+                                        grad_norm = 0.0
+                                        has_bad_grad = False
+                                        for param in model.parameters():
+                                            if param.grad is not None:
+                                                if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
+                                                    logging.warning(f"NaN/Inf gradient detected at epoch {epoch}")
+                                                    has_bad_grad = True
+                                                    break
+                                                grad_norm += param.grad.data.norm(2).item() ** 2
+                                        if not has_bad_grad:
+                                            grad_norm = grad_norm ** 0.5
+                                            if grad_norm > 1e3:
+                                                logging.warning(f"Large gradient norm: {grad_norm:.2e} at epoch {epoch}")
+                                    except Exception as e:
+                                        logging.debug(f"Gradient check failed: {e}")
+                                    
                                     optimizer.step()
+                                    
+                                    # Check for loss divergence
+                                    if torch.isnan(loss) or torch.isinf(loss) or loss.item() > 1e10:
+                                        logging.warning(f"Loss divergence detected at epoch {epoch}: {loss.item()}")
+                                        break
+                                    
                                     train_loss += loss.item()
 
                                 _, predicted = outputs.max(1)
@@ -1410,7 +1593,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[1,2,3], quick=False
                             train_loss /= len(train_loader)
                             train_acc = 100. * train_correct / len(train_dataset)
 
-                            # Test
+                            # Test/Validation
                             model.eval()
                             test_loss, test_correct = 0, 0
                             with torch.no_grad():
@@ -1424,6 +1607,27 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[1,2,3], quick=False
 
                             test_loss /= len(test_loader)
                             test_acc = 100. * test_correct / len(test_dataset)
+                            
+                            # Learning rate scheduling
+                            scheduler.step()
+                            current_lr = optimizer.param_groups[0]['lr']
+                            
+                            # Best model tracking
+                            if test_acc > best_val_acc:
+                                best_val_acc = test_acc
+                                best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+                                patience_counter = 0
+                                logging.info(f"✓ New best model: {test_acc:.2f}%")
+                            else:
+                                patience_counter += 1
+                            
+                            # Early stopping check
+                            if patience_counter >= patience:
+                                logging.info(f"Early stopping triggered at epoch {epoch} (no improvement for {patience} epochs)")
+                                # Restore best model
+                                if best_model_state is not None:
+                                    model.load_state_dict(best_model_state)
+                                break
 
                             history.append({
                                 'epoch': epoch,
@@ -1487,7 +1691,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[1,2,3], quick=False
                 perf_metrics = profiler.end_profiling(experiment_name)
                 profiler.log_performance(experiment_name, {
                     'total_optimizer_seed_combinations': len(results),
-                    'average_training_time_per_run': sum(r['training_time'] for r in results) / len(results)
+                    'average_training_time_per_run': sum(r['training_time'] for r in results) / len(results) if len(results) > 0 else 0.0
                 })
 
             # Log final metrics
@@ -1495,10 +1699,11 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[1,2,3], quick=False
                 avg_metrics = {}
                 for opt in set(r['optimizer'] for r in results):
                     opt_results = [r for r in results if r['optimizer'] == opt]
-                    avg_metrics.update({
-                        f'{opt}_avg_test_acc': sum(r['test_acc'] for r in opt_results) / len(opt_results),
-                        f'{opt}_avg_training_time': sum(r['training_time'] for r in opt_results) / len(opt_results)
-                    })
+                    if len(opt_results) > 0:
+                        avg_metrics.update({
+                            f'{opt}_avg_test_acc': sum(r['test_acc'] for r in opt_results) / len(opt_results),
+                            f'{opt}_avg_training_time': sum(r['training_time'] for r in opt_results) / len(opt_results)
+                        })
                 tracker.log_metrics(avg_metrics)
 
             # Save results
@@ -1599,92 +1804,213 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[1,2,3], quick=F
     test_loader = make_dataloader(test_dataset, batch_size=test_bs, shuffle=False,
                                     seed=seed0, **dl_kwargs)
 
-    model = ResNet18(num_classes=10).to(device)
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
-    criterion = nn.CrossEntropyLoss()
-
+    # Import new optimizers
+    from src.core.pytorch_optimizers import AdaBoundWrapper, RAdamWrapper, LAMBWrapper
+    
     results_dir = Path(results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
 
     epochs = 5 if quick else 20
-    results = []
-
-    for epoch in range(epochs):
-        # Train
-        model.train()
-        train_loss, train_correct = 0, 0
-
-        for inputs, targets in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}"):
-            inputs, targets = inputs.to(device), targets.to(device)
-
-            if isinstance(optimizer, SAM):
-                def closure():
-                    optimizer.zero_grad()
-                    outputs = model(inputs)
-                    loss = criterion(outputs, targets)
-                    loss.backward()
-                    return loss
-                loss = optimizer.step(closure)
-                outputs = model(inputs)  # Recompute after SAM step
+    criterion = nn.CrossEntropyLoss()
+    
+    # Multi-optimizer configuration
+    optimizers_config = [
+        ('Adam', 0.001),
+        ('AdamW', 0.001),
+        ('SGD_Momentum', 0.01),
+        ('AdaBound', 0.001),
+        ('RAdam', 0.001),
+        ('LAMB', 0.001),
+    ]
+    
+    all_results = []
+    
+    for opt_name, lr in optimizers_config:
+        for seed in seeds:
+            # Check if already completed
+            if resume and is_experiment_completed(results_dir, 'CIFAR10', 'ResNet18', opt_name, seed):
+                logging.info(f"⏭️  Skipping CIFAR-10 {opt_name} seed {seed} (already completed)")
+                continue
+            
+            set_seed(seed)
+            
+            # Create fresh model for each run
+            model = ResNet18(num_classes=10).to(device)
+            
+            # Create optimizer
+            if opt_name == 'Adam':
+                optimizer = optim.Adam(model.parameters(), lr=lr)
+            elif opt_name == 'AdamW':
+                optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=0.01)
+            elif opt_name == 'SGD_Momentum':
+                optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9)
+            elif opt_name == 'AdaBound':
+                optimizer = AdaBoundWrapper(model.parameters(), lr=lr, final_lr=0.1)
+            elif opt_name == 'RAdam':
+                optimizer = RAdamWrapper(model.parameters(), lr=lr)
+            elif opt_name == 'LAMB':
+                optimizer = LAMBWrapper(model.parameters(), lr=lr, weight_decay=0.01)
             else:
-                optimizer.zero_grad()
-                outputs = model(inputs)
-                loss = criterion(outputs, targets)
-                loss.backward()
-                optimizer.step()
+                optimizer = optim.Adam(model.parameters(), lr=lr)
+            
+            # Checkpoint loading
+            ckpt_file = f"CIFAR10_ResNet18_{opt_name}_seed{seed}.pt"
+            start_epoch = 1
+            history = []
+            
+            if checkpoint_manager:
+                checkpoint = checkpoint_manager.load_checkpoint(ckpt_file, f"CIFAR10_{opt_name}_seed{seed}")
+                if checkpoint and checkpoint_manager.validate_optimizer_compatibility(checkpoint, opt_name):
+                    try:
+                        model.load_state_dict(checkpoint['model'], strict=False)
+                        optimizer.load_state_dict(checkpoint['optimizer'])
+                        start_epoch = int(checkpoint.get('epoch', 0)) + 1
+                        history = checkpoint.get('history', [])
+                        logging.info(f"Resuming CIFAR-10 {opt_name} seed {seed} from epoch {start_epoch}")
+                    except Exception as e:
+                        logging.warning(f"Failed to load checkpoint: {e}. Starting fresh.")
+            
+            # Import LR scheduler
+            from src.core.lr_schedulers import CosineAnnealingLR
+            
+            # Create learning rate scheduler
+            scheduler = CosineAnnealingLR(optimizer, T_max=epochs, eta_min=lr*0.01)
+            
+            # Early stopping setup
+            best_val_acc = 0.0
+            best_model_state = None
+            patience = 10
+            patience_counter = 0
+            
+            logging.info(f"Training CIFAR-10 with {opt_name} (seed={seed}, lr={lr})")
+            
+            for epoch in range(start_epoch, epochs + 1):
+                # Train
+                model.train()
+                train_loss, train_correct = 0, 0
 
-            train_loss += loss.item()
-            _, predicted = outputs.max(1)
-            train_correct += predicted.eq(targets).sum().item()
+                for inputs, targets in tqdm(train_loader, desc=f"{opt_name} Epoch {epoch}/{epochs}"):
+                    inputs, targets = inputs.to(device), targets.to(device)
 
-        train_loss /= len(train_loader)
-        train_acc = 100. * train_correct / len(train_dataset)
+                    if isinstance(optimizer, SAM):
+                        def closure():
+                            optimizer.zero_grad()
+                            outputs = model(inputs)
+                            loss = criterion(outputs, targets)
+                            loss.backward()
+                            return loss
+                        loss = optimizer.step(closure)
+                        outputs = model(inputs)  # Recompute after SAM step
+                    else:
+                        optimizer.zero_grad()
+                        outputs = model(inputs)
+                        loss = criterion(outputs, targets)
+                        loss.backward()
+                        
+                        # Gradient clipping
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                        
+                        # Gradient health monitoring
+                        check_gradient_health_quick(model, epoch, context=f"CIFAR10_{opt_name}")
+                        
+                        optimizer.step()
 
-        # Test
-        model.eval()
-        test_loss, test_correct = 0, 0
-        with torch.no_grad():
-            for inputs, targets in test_loader:
-                inputs, targets = inputs.to(device), targets.to(device)
-                outputs = model(inputs)
-                loss = criterion(outputs, targets)
-                test_loss += loss.item()
-                _, predicted = outputs.max(1)
-                test_correct += predicted.eq(targets).sum().item()
+                    train_loss += loss.item()
+                    _, predicted = outputs.max(1)
+                    train_correct += predicted.eq(targets).sum().item()
 
-        test_loss /= len(test_loader)
-        test_acc = 100. * test_correct / len(test_dataset)
+                train_loss /= len(train_loader)
+                train_acc = 100. * train_correct / len(train_dataset)
 
-        results.append({
-            'epoch': epoch + 1,
-            'train_loss': train_loss,
-            'train_acc': train_acc,
-            'test_loss': test_loss,
-            'test_acc': test_acc
-        })
+                # Test
+                model.eval()
+                test_loss, test_correct = 0, 0
+                with torch.no_grad():
+                    for inputs, targets in test_loader:
+                        inputs, targets = inputs.to(device), targets.to(device)
+                        outputs = model(inputs)
+                        loss = criterion(outputs, targets)
+                        test_loss += loss.item()
+                        _, predicted = outputs.max(1)
+                        test_correct += predicted.eq(targets).sum().item()
 
-        if tracker:
-            tracker.log_metrics({
-                'cifar10_train_loss': train_loss,
-                'cifar10_train_acc': train_acc,
-                'cifar10_test_loss': test_loss,
-                'cifar10_test_acc': test_acc
-            }, step=epoch)
+                test_loss /= len(test_loader)
+                test_acc = 100. * test_correct / len(test_dataset)
+                
+                # Learning rate scheduling
+                scheduler.step()
+                
+                # Best model tracking
+                if test_acc > best_val_acc:
+                    best_val_acc = test_acc
+                    best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+                    patience_counter = 0
+                else:
+                    patience_counter += 1
+                
+                # Early stopping
+                if patience_counter >= patience:
+                    logging.info(f"Early stopping at epoch {epoch}")
+                    if best_model_state is not None:
+                        model.load_state_dict(best_model_state)
+                    break
 
-        print(f"Epoch {epoch+1}/{epochs} - Train: {train_acc:.1f}% | Test: {test_acc:.1f}%")
-
-        # Save checkpoint
-        if checkpoint_manager:
-            try:
-                checkpoint_data = {
-                    'model': model.state_dict(),
-                    'optimizer': optimizer.state_dict(),
+                history.append({
                     'epoch': epoch,
-                    'results': results,
-                }
-                checkpoint_manager.save_checkpoint(checkpoint_data, "CIFAR10_ResNet18_Adam.pt", "CIFAR10_ResNet18_Adam")
-            except Exception as e:
-                logging.warning(f"Failed to save checkpoint: {e}")
+                    'train_loss': train_loss,
+                    'train_acc': train_acc,
+                    'test_loss': test_loss,
+                    'test_acc': test_acc
+                })
+
+                if tracker:
+                    tracker.log_metrics({
+                        f'cifar10_{opt_name}_train_loss': train_loss,
+                        f'cifar10_{opt_name}_train_acc': train_acc,
+                        f'cifar10_{opt_name}_test_loss': test_loss,
+                        f'cifar10_{opt_name}_test_acc': test_acc
+                    }, step=epoch)
+
+                print(f"{opt_name} Epoch {epoch}/{epochs} - Train: {train_acc:.1f}% | Test: {test_acc:.1f}%")
+
+                # Save checkpoint
+                if checkpoint_manager:
+                    try:
+                        checkpoint_data = {
+                            'model': model.state_dict(),
+                            'optimizer': optimizer.state_dict(),
+                            'epoch': epoch,
+                            'history': history,
+                            'opt_name': opt_name,
+                            'seed': seed,
+                        }
+                        checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"CIFAR10_{opt_name}_seed{seed}")
+                    except Exception as e:
+                        logging.warning(f"Failed to save checkpoint: {e}")
+            
+            # Save per-run CSV
+            df_history = pd.DataFrame(history)
+            csv_path = results_dir / f"CIFAR10_ResNet18_{opt_name}_seed{seed}.csv"
+            df_history.to_csv(csv_path, index=False)
+            
+            all_results.append({
+                'optimizer': opt_name,
+                'seed': seed,
+                'lr': lr,
+                'final_train_acc': train_acc,
+                'final_test_acc': test_acc,
+                'final_train_loss': train_loss,
+                'final_test_loss': test_loss
+            })
+            
+            logging.info(f"✓ CIFAR-10 {opt_name} seed {seed}: Test Acc={test_acc:.2f}%")
+    
+    # Save summary results
+    if all_results:
+        df_summary = pd.DataFrame(all_results)
+        summary_path = results_dir / "CIFAR10_summary.csv"
+        df_summary.to_csv(summary_path, index=False)
+        logging.info(f"✓ CIFAR-10 summary saved to {summary_path}")
 
     # End profiling
     if profiler:
@@ -1693,7 +2019,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[1,2,3], quick=F
 
     # Save results
     os.makedirs(results_dir, exist_ok=True)
-    df = pd.DataFrame(results)
+    df = pd.DataFrame(all_results) if all_results else pd.DataFrame()
     df.to_csv(f"{results_dir}/cifar10_results.csv", index=False)
 
     if tracker:
@@ -1703,7 +2029,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[1,2,3], quick=F
     # Also save a per-run artifact (use first seed as representative if multiple provided)
     seed0 = seeds[0] if seeds else None
     try:
-        save_run_artifacts(results_dir, 'CIFAR10', 'ResNet18', 'Adam', seed0, results, params={
+        save_run_artifacts(results_dir, 'CIFAR10', 'ResNet18', 'Adam', seed0, all_results, params={
             'epochs': epochs,
             'batch_size': 128
         }, device=device, tracker=tracker)
@@ -1796,12 +2122,16 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
     import transformers
     transformers.logging.set_verbosity_error()
 
+    # Import new optimizers
+    from src.core.pytorch_optimizers import AdaBoundWrapper, RAdamWrapper, LAMBWrapper
+    
     # Configuration
     model_name = 'distilbert-base-uncased'
     train_bs, test_bs = get_batch_size('nlp', default_train=16, default_test=32)
     batch_size = train_bs  # For compatibility with existing code
     lr_adamw = 5e-5
     lr_sgd = 1e-3
+    lr_default = 1e-4  # For new optimizers
     train_size = 1000 if quick else (5000 if not torch.cuda.is_available() else 10000)  # Smaller for CPU
     test_size = 500 if quick else 2000
     epochs = 3 if quick else 10  # Increased from 2/3 to 3/10 for proper transformer fine-tuning
@@ -1809,10 +2139,14 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
     results_dir = Path(results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    # Optimizers to test
+    # Optimizers to test - expanded to include all new optimizers
     configs = [
         ('AdamW', lr_adamw),
+        ('Adam', lr_adamw),
         ('SGD_Momentum', lr_sgd),
+        ('AdaBound', lr_default),
+        ('RAdam', lr_default),
+        ('LAMB', lr_default),
     ]
 
     results = []
@@ -1887,13 +2221,31 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
             test_loader = make_dataloader(test_ds, batch_size=batch_size, shuffle=False,
                                           seed=seed, num_workers=0, collate_fn=collate_fn)
 
-            # Setup optimizer
+            # Setup optimizer with checkpoint validation
             if opt_name == 'AdamW':
                 optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+            elif opt_name == 'Adam':
+                optimizer = torch.optim.Adam(model.parameters(), lr=lr)
             elif opt_name == 'SGD_Momentum':
                 optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9)
+            elif opt_name == 'AdaBound':
+                optimizer = AdaBoundWrapper(model.parameters(), lr=lr, final_lr=0.1)
+            elif opt_name == 'RAdam':
+                optimizer = RAdamWrapper(model.parameters(), lr=lr)
+            elif opt_name == 'LAMB':
+                optimizer = LAMBWrapper(model.parameters(), lr=lr)
+            
+            # Create learning rate scheduler
+            from src.core.lr_schedulers import CosineAnnealingLR
+            scheduler = CosineAnnealingLR(optimizer, T_max=epochs, eta_min=lr*0.01)
+            
+            # Early stopping setup
+            best_val_acc = 0.0
+            best_model_state = None
+            patience = 5  # Shorter patience for transformers
+            patience_counter = 0
 
-            # Resume logic
+            # Resume logic with compatibility validation
             ckpt_file = f"IMDB_{model_name.replace('/', '_')}_{opt_name}_lr{lr}_seed{seed}.pt"
             start_epoch = 1
             history = []
@@ -1901,14 +2253,20 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
             if checkpoint_manager:
                 checkpoint = checkpoint_manager.load_checkpoint(ckpt_file, f"IMDB_{model_name.replace('/', '_')}_{opt_name}_lr{lr}_seed{seed}")
                 if checkpoint:
-                    model.load_state_dict(checkpoint['model'], strict=False)
-                    if opt_name == 'AdamW' and isinstance(optimizer, torch.optim.AdamW):
-                        optimizer.load_state_dict(checkpoint['optimizer'])
-                    elif opt_name == 'SGD_Momentum' and isinstance(optimizer, torch.optim.SGD):
-                        optimizer.load_state_dict(checkpoint['optimizer'])
-                    start_epoch = int(checkpoint.get('epoch', 0)) + 1
-                    history = checkpoint.get('history', [])
-                    logging.info(f"Resuming from epoch {start_epoch}")
+                    # Validate optimizer compatibility before loading
+                    if checkpoint_manager.validate_optimizer_compatibility(checkpoint, opt_name):
+                        model.load_state_dict(checkpoint['model'], strict=False)
+                        try:
+                            optimizer.load_state_dict(checkpoint['optimizer'])
+                            saved_opt = checkpoint.get('opt_name', 'unknown')
+                            logging.info(f"✓ Loaded checkpoint with compatible optimizer: {saved_opt} -> {opt_name}")
+                        except Exception as e:
+                            logging.warning(f"Could not load optimizer state: {e}")
+                        start_epoch = int(checkpoint.get('epoch', 0)) + 1
+                        history = checkpoint.get('history', [])
+                        logging.info(f"Resuming from epoch {start_epoch}")
+                    else:
+                        logging.warning(f"Incompatible optimizer in checkpoint, starting fresh")
 
             # Training loop
             start_time = time.time()
@@ -1930,6 +2288,16 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
 
                     optimizer.zero_grad()
                     loss.backward()
+                    
+                    # Gradient clipping for transformers
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                    
+                    # Check for gradient health (NaN/Inf/explosion)
+                    check_gradient_health_quick(model, epoch, context=f"NLP_{opt_name}")
+                    if torch.isnan(loss) or torch.isinf(loss):
+                        logging.error(f"Loss divergence detected: {loss}")
+                        break
+                    
                     optimizer.step()
 
                     train_loss += float(loss.item()) * input_ids.size(0)
@@ -1962,6 +2330,24 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
 
                 test_loss /= max(1, test_total)
                 test_acc = 100.0 * test_correct / max(1, test_total)
+                
+                # LR scheduling
+                scheduler.step()
+                
+                # Best model tracking
+                if test_acc > best_val_acc:
+                    best_val_acc = test_acc
+                    best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+                    patience_counter = 0
+                else:
+                    patience_counter += 1
+                
+                # Early stopping
+                if patience_counter >= patience:
+                    logging.info(f"Early stopping at epoch {epoch}")
+                    if best_model_state is not None:
+                        model.load_state_dict(best_model_state)
+                    break
 
                 history.append({
                     'epoch': epoch,
@@ -2364,22 +2750,30 @@ def run_medical_experiment(results_dir="results_medical", seeds=[1,2,3], quick=F
             'skip_tuning': skip_tuning
         })
 
+    # Import new optimizers
+    from src.core.pytorch_optimizers import AdaBoundWrapper, RAdamWrapper, LAMBWrapper
+    
     # Configuration
     train_bs, test_bs = get_batch_size('medical', default_train=4, default_test=4)
     batch_size = train_bs  # For compatibility with existing code
     dl_kwargs = get_dataloader_kwargs()
     lr_adam = 1e-4
     lr_sgd = 1e-3
+    lr_default = 1e-4  # For new optimizers
     img_size = 128  # Smaller for speed
     epochs = 3 if quick else 10
 
     results_dir = Path(results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    # Optimizers to test
+    # Optimizers to test - expanded to include all new optimizers
     configs = [
         ('Adam', lr_adam),
+        ('AdamW', lr_adam),
         ('SGD_Momentum', lr_sgd),
+        ('AdaBound', lr_default),
+        ('RAdam', lr_default),
+        ('LAMB', lr_default),
     ]
 
     results = []
@@ -2409,16 +2803,34 @@ def run_medical_experiment(results_dir="results_medical", seeds=[1,2,3], quick=F
             # Initialize U-Net model
             model = UNet2D(in_channels=1, out_channels=1, features=[32, 64, 128]).to(device)
 
-            # Setup optimizer
+            # Setup optimizer with all variants
             if opt_name == 'Adam':
                 optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+            elif opt_name == 'AdamW':
+                optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.01)
             elif opt_name == 'SGD_Momentum':
                 optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9)
+            elif opt_name == 'AdaBound':
+                optimizer = AdaBoundWrapper(model.parameters(), lr=lr, final_lr=0.1)
+            elif opt_name == 'RAdam':
+                optimizer = RAdamWrapper(model.parameters(), lr=lr)
+            elif opt_name == 'LAMB':
+                optimizer = LAMBWrapper(model.parameters(), lr=lr)
 
             # Loss function
             criterion = nn.BCEWithLogitsLoss()
+            
+            # Create learning rate scheduler
+            from src.core.lr_schedulers import CosineAnnealingLR
+            scheduler = CosineAnnealingLR(optimizer, T_max=epochs, eta_min=lr*0.01)
+            
+            # Early stopping setup
+            best_dice = 0.0
+            best_model_state = None
+            patience = 10
+            patience_counter = 0
 
-            # Resume logic
+            # Resume logic with compatibility validation
             ckpt_file = f"Medical_UNet_{opt_name}_lr{lr}_seed{seed}.pt"
             start_epoch = 1
             history = []
@@ -2426,14 +2838,20 @@ def run_medical_experiment(results_dir="results_medical", seeds=[1,2,3], quick=F
             if checkpoint_manager:
                 checkpoint = checkpoint_manager.load_checkpoint(ckpt_file, f"Medical_UNet_{opt_name}_lr{lr}_seed{seed}")
                 if checkpoint:
-                    model.load_state_dict(checkpoint['model'], strict=False)
-                    if opt_name == 'Adam' and isinstance(optimizer, torch.optim.Adam):
-                        optimizer.load_state_dict(checkpoint['optimizer'])
-                    elif opt_name == 'SGD_Momentum' and isinstance(optimizer, torch.optim.SGD):
-                        optimizer.load_state_dict(checkpoint['optimizer'])
-                    start_epoch = int(checkpoint.get('epoch', 0)) + 1
-                    history = checkpoint.get('history', [])
-                    logging.info(f"Resuming from epoch {start_epoch}")
+                    # Validate optimizer compatibility
+                    if checkpoint_manager.validate_optimizer_compatibility(checkpoint, opt_name):
+                        model.load_state_dict(checkpoint['model'], strict=False)
+                        try:
+                            optimizer.load_state_dict(checkpoint['optimizer'])
+                            saved_opt = checkpoint.get('opt_name', 'unknown')
+                            logging.info(f"✓ Loaded checkpoint with compatible optimizer: {saved_opt} -> {opt_name}")
+                        except Exception as e:
+                            logging.warning(f"Could not load optimizer state: {e}")
+                        start_epoch = int(checkpoint.get('epoch', 0)) + 1
+                        history = checkpoint.get('history', [])
+                        logging.info(f"Resuming from epoch {start_epoch}")
+                    else:
+                        logging.warning(f"Incompatible optimizer in checkpoint, starting fresh")
 
             # Training loop
             start_time = time.time()
@@ -2462,6 +2880,13 @@ def run_medical_experiment(results_dir="results_medical", seeds=[1,2,3], quick=F
                         loss = criterion(outputs, masks)
                         optimizer.zero_grad()
                         loss.backward()
+                        
+                        # Gradient clipping
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                        
+                        # Check gradient health
+                        check_gradient_health_quick(model, epoch, context=f"Medical_{opt_name}")
+                        
                         optimizer.step()
 
                     train_loss += float(loss.item()) * images.size(0)
@@ -2491,6 +2916,24 @@ def run_medical_experiment(results_dir="results_medical", seeds=[1,2,3], quick=F
 
                 test_loss /= max(1, test_total)
                 test_dice /= max(1, test_total)
+                
+                # LR scheduling
+                scheduler.step()
+                
+                # Best model tracking (based on dice score)
+                if test_dice > best_dice:
+                    best_dice = test_dice
+                    best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+                    patience_counter = 0
+                else:
+                    patience_counter += 1
+                
+                # Early stopping
+                if patience_counter >= patience:
+                    logging.info(f"Early stopping at epoch {epoch}")
+                    if best_model_state is not None:
+                        model.load_state_dict(best_model_state)
+                    break
 
                 history.append({
                     'epoch': epoch,
@@ -4160,11 +4603,12 @@ def distributed_training_worker(rank, world_size, backend, results_dir):
         # Save results only from master process
         if rank == 0:
             os.makedirs(results_dir, exist_ok=True)
+            # FIXED: Use new zipfile serialization for large models
             torch.save({
                 'model_state_dict': model.module.state_dict(),
                 'world_size': world_size,
                 'epochs': epochs
-            }, f"{results_dir}/distributed_model.pt")
+            }, f"{results_dir}/distributed_model.pt", _use_new_zipfile_serialization=True)
 
         dist.destroy_process_group()
 

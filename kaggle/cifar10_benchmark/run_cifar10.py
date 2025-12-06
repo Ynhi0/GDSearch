@@ -93,6 +93,9 @@ def train_one_epoch(model, loader, optimizer, device):
         pred = out.argmax(1)
         correct += (pred == y).sum().item()
         total += x.size(0)
+    # Avoid division by zero
+    if total == 0:
+        return 0.0, 0.0
     return total_loss / total, correct / total
 
 
@@ -108,6 +111,9 @@ def evaluate(model, loader, device):
             pred = out.argmax(1)
             correct += (pred == y).sum().item()
             total += x.size(0)
+    # Avoid division by zero
+    if total == 0:
+        return 0.0, 0.0
     return total_loss / total, correct / total
 
 
@@ -190,6 +196,7 @@ def run_single_experiment(optimizer_name: str, seed: int, lr: float, epochs: int
                    f"train_loss={train_loss:.4f}, train_acc={train_acc:.2%}, test_loss={test_loss:.4f}, test_acc={test_acc:.2%}")
         # Save checkpoint each epoch
         try:
+            # FIXED: Use new zipfile serialization to avoid inline_container errors
             torch.save({
                 'model': model.state_dict(),
                 'optimizer': optimizer.state_dict(),

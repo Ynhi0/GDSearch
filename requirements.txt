@@ -4,8 +4,8 @@ numpy>=1.26.0,<2.0  # Compatible with most packages
 matplotlib
 pandas
 scipy
-fsspec<=2025.10.0,>=2023.1.0  # Compatible with datasets
-pyarrow>=21.0.0  # Compatible with datasets
+fsspec==2025.3.0  # FIXED: Exact version required by gcsfs on Kaggle
+pyarrow>=14.0.0,<20.0.0  # FIXED: Compatible with cudf-cu12 and datasets
 huggingface-hub<1.0,>=0.30.0  # Compatible with transformers
 tqdm
 torch>=2.0.0  # Kaggle has torch 2.6.0+cu124 pre-installed
@@ -14,9 +14,12 @@ pytest
 optuna
 datasets>=4.4.0  # Compatible with fsspec and pyarrow
 plotly
-protobuf>=3.19.0,<3.21.0  # CRITICAL: 4.x breaks MLflow/transformers
+protobuf>=3.20.3,<4.0.0  # FIXED: TensorFlow requires >=3.20.3, but <6.0 causes issues
 torchtext>=0.14.0
 portalocker>=2.0.0
 medpy>=0.4.0
 pydantic>=2.0,<2.12  # Compatible with gradio
-rich>=12.4.4,<14  # Compatible with bigframes
+rich>=12.4.4,<14  # FIXED: Compatible with bigframes
+click>=7.0,!=8.3.0  # FIXED: Compatible with ray 2.51.1
+cryptography>=19.0,<44  # FIXED: Compatible with pydrive2
+pyOpenSSL>=19.1.0,<=24.2.1  # FIXED: Compatible with pydrive2

@@ -26,6 +26,14 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
+# Import gradient monitoring utility
+try:
+    from gradient_monitoring import check_gradient_health
+except ImportError:
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from gradient_monitoring import check_gradient_health
+
 
 def set_seed(seed: int):
     import random
@@ -256,6 +264,10 @@ def train_one_epoch(model, loader, optimizer, device):
             output = model(data)
             loss = F.cross_entropy(output, target)
             loss.backward()
+            
+            # Check gradient health
+            check_gradient_health(model, context="MNIST")
+            
             optimizer.step()
 
         total_loss += loss.item() * data.size(0)
@@ -263,6 +275,9 @@ def train_one_epoch(model, loader, optimizer, device):
         correct += (pred == target).sum().item()
         total += data.size(0)
 
+    # Avoid division by zero
+    if total == 0:
+        return 0.0, 0.0
     return total_loss / total, correct / total
 
 
@@ -282,6 +297,9 @@ def evaluate(model, loader, device):
             correct += (pred == target).sum().item()
             total += data.size(0)
 
+    # Avoid division by zero
+    if total == 0:
+        return 0.0, 0.0
     return total_loss / total, correct / total
 
 
@@ -371,6 +389,7 @@ def run_single_experiment(optimizer_name: str, seed: int, lr: float, epochs: int
                    f"train_loss={train_loss:.4f}, train_acc={train_acc:.2%}, test_loss={test_loss:.4f}, test_acc={test_acc:.2%}")
         # Save checkpoint each epoch
         try:
+            # FIXED: Use new zipfile serialization to avoid errors
             torch.save({
                 'model': model.state_dict(),
                 'optimizer': optimizer.state_dict(),
@@ -381,7 +400,7 @@ def run_single_experiment(optimizer_name: str, seed: int, lr: float, epochs: int
                 ),
                 'seed': seed,
                 'lr': lr,
-            }, ckpt_file)
+            }, ckpt_file, _use_new_zipfile_serialization=True)
         except Exception as e:
             tqdm.write(f"Warning: failed to save checkpoint: {e}")
     elapsed = time.time() - start

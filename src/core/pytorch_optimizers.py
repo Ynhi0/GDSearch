@@ -19,6 +19,9 @@ try:
         RMSProp as CustomRMSProp,
         SAM as CustomSAM,
         Lookahead as CustomLookahead,
+        AdaBound as CustomAdaBound,
+        RAdam as CustomRAdam,
+        LAMB as CustomLAMB,
     )
 except ModuleNotFoundError:
     # If running as script, add parent to path
@@ -34,6 +37,9 @@ except ModuleNotFoundError:
         RMSProp as CustomRMSProp,
         SAM as CustomSAM,
         Lookahead as CustomLookahead,
+        AdaBound as CustomAdaBound,
+        RAdam as CustomRAdam,
+        LAMB as CustomLAMB,
     )
 
 
@@ -443,6 +449,153 @@ def test_sam_and_lookahead():
     print("\n✓ SAM and Lookahead optimizer wrappers tested!")
 
 
+class AdaBoundWrapper(Optimizer):
+    """PyTorch wrapper for custom AdaBound optimizer."""
+    
+    def __init__(self, params, lr=0.001, beta1=0.9, beta2=0.999, final_lr=0.1, epsilon=1e-8, gamma=1e-3):
+        defaults = dict(lr=lr, beta1=beta1, beta2=beta2, final_lr=final_lr, epsilon=epsilon, gamma=gamma)
+        super().__init__(params, defaults)
+        
+        # Create separate optimizer for each parameter group
+        self.custom_opts = {}
+        for group_id, group in enumerate(self.param_groups):
+            self.custom_opts[group_id] = CustomAdaBound(
+                lr=group['lr'],
+                beta1=group['beta1'],
+                beta2=group['beta2'],
+                final_lr=group['final_lr'],
+                epsilon=group['epsilon'],
+                gamma=group['gamma']
+            )
+    
+    def step(self, closure=None):
+        loss = None
+        if closure is not None:
+            loss = closure()
+        
+        for group_id, group in enumerate(self.param_groups):
+            opt = self.custom_opts[group_id]
+            
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+                
+                # Get gradient as numpy
+                grad = p.grad.data.cpu().numpy()
+                param_np = p.data.cpu().numpy().copy()
+                
+                # Flatten for optimizer
+                original_shape = param_np.shape
+                param_flat = param_np.flatten()
+                grad_flat = grad.flatten()
+                
+                # Update using custom optimizer
+                new_param_flat = opt.step(param_flat, grad_flat)
+                
+                # Reshape and copy back
+                new_param = new_param_flat.reshape(original_shape)
+                p.data.copy_(torch.from_numpy(new_param).to(p.device))
+        
+        return loss
+
+
+class RAdamWrapper(Optimizer):
+    """PyTorch wrapper for custom RAdam optimizer."""
+    
+    def __init__(self, params, lr=0.001, beta1=0.9, beta2=0.999, epsilon=1e-8):
+        defaults = dict(lr=lr, beta1=beta1, beta2=beta2, epsilon=epsilon)
+        super().__init__(params, defaults)
+        
+        # Create separate optimizer for each parameter group
+        self.custom_opts = {}
+        for group_id, group in enumerate(self.param_groups):
+            self.custom_opts[group_id] = CustomRAdam(
+                lr=group['lr'],
+                beta1=group['beta1'],
+                beta2=group['beta2'],
+                epsilon=group['epsilon']
+            )
+    
+    def step(self, closure=None):
+        loss = None
+        if closure is not None:
+            loss = closure()
+        
+        for group_id, group in enumerate(self.param_groups):
+            opt = self.custom_opts[group_id]
+            
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+                
+                # Get gradient as numpy
+                grad = p.grad.data.cpu().numpy()
+                param_np = p.data.cpu().numpy().copy()
+                
+                # Flatten for optimizer
+                original_shape = param_np.shape
+                param_flat = param_np.flatten()
+                grad_flat = grad.flatten()
+                
+                # Update using custom optimizer
+                new_param_flat = opt.step(param_flat, grad_flat)
+                
+                # Reshape and copy back
+                new_param = new_param_flat.reshape(original_shape)
+                p.data.copy_(torch.from_numpy(new_param).to(p.device))
+        
+        return loss
+
+
+class LAMBWrapper(Optimizer):
+    """PyTorch wrapper for custom LAMB optimizer."""
+    
+    def __init__(self, params, lr=0.001, beta1=0.9, beta2=0.999, epsilon=1e-8, weight_decay=0.01):
+        defaults = dict(lr=lr, beta1=beta1, beta2=beta2, epsilon=epsilon, weight_decay=weight_decay)
+        super().__init__(params, defaults)
+        
+        # Create separate optimizer for each parameter group
+        self.custom_opts = {}
+        for group_id, group in enumerate(self.param_groups):
+            self.custom_opts[group_id] = CustomLAMB(
+                lr=group['lr'],
+                beta1=group['beta1'],
+                beta2=group['beta2'],
+                epsilon=group['epsilon'],
+                weight_decay=group['weight_decay']
+            )
+    
+    def step(self, closure=None):
+        loss = None
+        if closure is not None:
+            loss = closure()
+        
+        for group_id, group in enumerate(self.param_groups):
+            opt = self.custom_opts[group_id]
+            
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+                
+                # Get gradient as numpy
+                grad = p.grad.data.cpu().numpy()
+                param_np = p.data.cpu().numpy().copy()
+                
+                # Flatten for optimizer
+                original_shape = param_np.shape
+                param_flat = param_np.flatten()
+                grad_flat = grad.flatten()
+                
+                # Update using custom optimizer
+                new_param_flat = opt.step(param_flat, grad_flat)
+                
+                # Reshape and copy back
+                new_param = new_param_flat.reshape(original_shape)
+                p.data.copy_(torch.from_numpy(new_param).to(p.device))
+        
+        return loss
+
+
 if __name__ == '__main__':
     # Test the wrappers
     print("Testing PyTorch optimizer wrappers...")
@@ -477,8 +630,38 @@ if __name__ == '__main__':
         # Optimizer step
         optimizer.step()
         
-        print(f"  ✓ Step completed successfully")
-        print(f"  Loss: {loss.item():.4f}")
+    print("\n✓ All optimizer wrappers work correctly!")
     
+    # Test new optimizers
+    print("\n" + "="*60)
+    print("Testing new optimizer wrappers (AdaBound, RAdam, LAMB)...")
+    print("="*60)
+    
+    model = torch.nn.Linear(10, 2)
+    x = torch.randn(5, 10)
+    y = torch.randint(0, 2, (5,))
+    
+    new_optimizers = {
+        'AdaBound': AdaBoundWrapper(model.parameters(), lr=0.001, final_lr=0.1),
+        'RAdam': RAdamWrapper(model.parameters(), lr=0.001),
+        'LAMB': LAMBWrapper(model.parameters(), lr=0.001, weight_decay=0.01)
+    }
+    
+    for name, optimizer in new_optimizers.items():
+        print(f"\n  Testing {name}...")
+        model_test = torch.nn.Linear(10, 2)
+        opt_test = new_optimizers[name].__class__(model_test.parameters(), lr=0.001)
+        
+        try:
+            opt_test.zero_grad()
+            output = model_test(x)
+            loss = torch.nn.functional.cross_entropy(output, y)
+            loss.backward()
+            opt_test.step()
+            print(f"    ✓ {name} step completed successfully, loss: {loss.item():.4f}")
+        except Exception as e:
+            print(f"    ✗ {name} failed: {e}")
+    
+    print("\n✓ New optimizer wrappers tested!")
     print("\n✓ All optimizer wrappers working!")
     test_sam_and_lookahead()
