@@ -527,18 +527,6 @@ If you use this codebase in your research, please cite:
 }
 ```
 
-##  License
-
-MIT License - see LICENSE file for details.
-
-##  Contributing
-
-Contributions welcome! Areas for improvement:
-- Basin-of-attraction maps
-- Noisy gradient experiments
-- Additional test functions (Beale, Himmelblau, etc.)
-- More NN architectures (ResNet, Transformer)
-
 ##  Contact
 
 For questions or issues, please open a GitHub issue or contact mphuc666@gmail.com

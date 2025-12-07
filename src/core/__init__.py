@@ -1,5 +1,5 @@
 """
-Core implementations: optimizers, test functions, models, data utilities, LR schedulers, Optuna tuning.
+Core implementations: optimizers, test functions, models, data utilities, LR schedulers, Optuna tuning, advanced training utilities.
 """
 
 from .optimizers import SGD, SGDMomentum, RMSProp, Adam
@@ -15,6 +15,10 @@ from .lr_schedulers import (
 from .optuna_tuner import (
     OptunaHyperparameterTuner, suggest_optimizer_params,
     suggest_lr_scheduler_params, suggest_model_params, suggest_training_params
+)
+from .training_utils import (
+    LabelSmoothingCrossEntropy, ModelEMA, AMPWrapper,
+    get_loss_function, create_amp_wrapper, create_model_ema
 )
 
 __all__ = [
@@ -57,4 +61,11 @@ __all__ = [
     'suggest_lr_scheduler_params',
     'suggest_model_params',
     'suggest_training_params',
+    # Advanced Training Utilities
+    'LabelSmoothingCrossEntropy',
+    'ModelEMA',
+    'AMPWrapper',
+    'get_loss_function',
+    'create_amp_wrapper',
+    'create_model_ema',
 ]

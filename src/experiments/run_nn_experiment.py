@@ -16,23 +16,10 @@ import torch.optim as optim
 from src.core.models import SimpleMLP, SimpleCNN, ConvNet
 from src.core.data_utils import get_mnist_loaders, get_cifar10_loaders
 from src.core.optimizer_wrappers import DelayedOptimizer
+from src.core.training_utils import set_seed
 
 
-def set_seed(seed: int):
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    # Enforce deterministic behavior where possible
-    try:
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
-    except Exception:
-        pass
-    try:
-        torch.use_deterministic_algorithms(True)
-    except Exception:
-        # Older PyTorch may not support this; ignore
-        pass
+# Removed duplicate set_seed - using from src.core.training_utils
 
 
 def count_parameters(model: torch.nn.Module) -> int:

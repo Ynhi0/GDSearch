@@ -499,3 +499,119 @@ class Schwefel(HighDimensionalFunction):
     def get_optimum(self):
         """Return known global optimum."""
         return np.full(self.dim, 420.9687), 0.0
+
+
+class BealeFunction(TestFunction):
+    """
+    Beale function - ill-conditioned with narrow curved valley.
+    
+    f(x,y) = (1.5 - x + xy)^2 + (2.25 - x + xy^2)^2 + (2.625 - x + xy^3)^2
+    
+    Global minimum: f(3, 0.5) = 0
+    Search domain: x, y in [-4.5, 4.5]
+    
+    This function tests optimizer's ability to navigate tight curvatures
+    and avoid getting stuck in the narrow valley.
+    
+    Reference:
+        "Test functions for optimization" - Beale (1958)
+    """
+    
+    def compute(self, x, y):
+        """Compute Beale function value at (x, y)."""
+        term1 = (1.5 - x + x*y)**2
+        term2 = (2.25 - x + x*y**2)**2
+        term3 = (2.625 - x + x*y**3)**2
+        return term1 + term2 + term3
+    
+    def gradient(self, x, y):
+        """
+        Compute gradient of Beale function.
+        
+        df/dx = 2*(1.5 - x + xy) * (-1 + y) + 2*(2.25 - x + xy^2) * (-1 + y^2) 
+                + 2*(2.625 - x + xy^3) * (-1 + y^3)
+        df/dy = 2*(1.5 - x + xy) * x + 2*(2.25 - x + xy^2) * 2xy 
+                + 2*(2.625 - x + xy^3) * 3xy^2
+        """
+        term1 = 1.5 - x + x*y
+        term2 = 2.25 - x + x*y**2
+        term3 = 2.625 - x + x*y**3
+        
+        grad_x = (2*term1*(-1 + y) + 
+                  2*term2*(-1 + y**2) + 
+                  2*term3*(-1 + y**3))
+        
+        grad_y = (2*term1*x + 
+                  2*term2*2*x*y + 
+                  2*term3*3*x*y**2)
+        
+        return grad_x, grad_y
+    
+    def hessian(self, x, y):
+        """Compute Hessian matrix at (x, y)."""
+        # For exact Hessian computation
+        term1 = 1.5 - x + x*y
+        term2 = 2.25 - x + x*y**2
+        term3 = 2.625 - x + x*y**3
+        
+        # Second derivatives
+        d2f_dx2 = 2*(-1 + y)**2 + 2*(-1 + y**2)**2 + 2*(-1 + y**3)**2
+        
+        d2f_dy2 = (2*x**2 + 
+                   2*term2*2*x + 2*(2*x*y)**2 + 
+                   2*term3*6*x*y + 2*(3*x*y**2)**2)
+        
+        d2f_dxdy = (2*(-1 + y) + 2*term1 + 
+                    2*(-1 + y**2)*2*x*y + 2*term2*2*y + 
+                    2*(-1 + y**3)*3*x*y**2 + 2*term3*3*y**2)
+        
+        return np.array([[d2f_dx2, d2f_dxdy],
+                         [d2f_dxdy, d2f_dy2]])
+    
+    def get_bounds(self):
+        """Return search bounds for Beale function."""
+        return ((-4.5, 4.5), (-4.5, 4.5))
+
+
+class StyblinskiTang(TestFunction):
+    """
+    Styblinski-Tang function - highly multi-modal with many weak local minima.
+    
+    f(x) = 0.5 * sum(x_i^4 - 16*x_i^2 + 5*x_i)
+    
+    For 2D: Global minimum: f(-2.903534, -2.903534) ≈ -78.332
+    Search domain: x, y in [-5, 5]
+    
+    This function tests optimizer's global exploration vs local exploitation.
+    Contains many local minima that can trap gradient-based optimizers.
+    
+    Reference:
+        Styblinski, M. A., & Tang, T.-S. (1990). Experiments in nonconvex optimization.
+    """
+    
+    def compute(self, x, y):
+        """Compute Styblinski-Tang function value at (x, y)."""
+        return 0.5 * ((x**4 - 16*x**2 + 5*x) + (y**4 - 16*y**2 + 5*y))
+    
+    def gradient(self, x, y):
+        """
+        Compute gradient of Styblinski-Tang function.
+        
+        df/dx_i = 0.5 * (4*x_i^3 - 32*x_i + 5)
+        """
+        grad_x = 0.5 * (4*x**3 - 32*x + 5)
+        grad_y = 0.5 * (4*y**3 - 32*y + 5)
+        return grad_x, grad_y
+    
+    def hessian(self, x, y):
+        """Compute Hessian matrix at (x, y)."""
+        d2f_dx2 = 0.5 * (12*x**2 - 32)
+        d2f_dy2 = 0.5 * (12*y**2 - 32)
+        d2f_dxdy = 0.0  # No cross terms
+        
+        return np.array([[d2f_dx2, d2f_dxdy],
+                         [d2f_dxdy, d2f_dy2]])
+    
+    def get_bounds(self):
+        """Return search bounds for Styblinski-Tang function."""
+        return ((-5, 5), (-5, 5))

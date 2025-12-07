@@ -21,6 +21,10 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 import torchvision
 import torchvision.transforms as T
+import matplotlib
+matplotlib.use('Agg')  # Non-interactive backend
+import matplotlib.pyplot as plt
+from src.core.training_utils import set_seed
 
 
 class SimpleCIFARNet(nn.Module):
@@ -42,12 +46,7 @@ class SimpleCIFARNet(nn.Module):
         return x
 
 
-def set_seed(seed: int):
-    import random
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+# Removed duplicate set_seed - using from src.core.training_utils
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
@@ -157,6 +156,165 @@ def run_single(optimizer_name: str, seed: int, lr: float, epochs: int, batch_siz
     return out
 
 
+def create_cifar10_summary_plots(results_dir: Path, output_file: str = 'cifar10_summary.png'):
+    """
+    Create publication-quality summary plots from CIFAR-10 results.
+    Generates learning curves comparing all optimizers across seeds.
+    """
+    import matplotlib.pyplot as plt
+    import glob
+    
+    # Find all result CSVs
+    csv_files = glob.glob(str(results_dir / "NN_SimpleCIFAR10_*.csv"))
+    
+    if not csv_files:
+        print("⚠️  No CIFAR-10 results found for visualization")
+        return
+    
+    # Parse results
+    results = {}
+    for csv_file in csv_files:
+        df = pd.read_csv(csv_file)
+        # Extract optimizer and seed from filename
+        basename = os.path.basename(csv_file)
+        # Format: NN_SimpleCIFAR10_{optimizer}_lr{lr}_seed{seed}.csv
+        parts = basename.replace('.csv', '').split('_')
+        
+        # Find optimizer name (between SimpleCIFAR10 and lr)
+        opt_start = parts.index('SimpleCIFAR10') + 1
+        opt_parts = []
+        for i in range(opt_start, len(parts)):
+            if parts[i].startswith('lr'):
+                break
+            opt_parts.append(parts[i])
+        optimizer = '_'.join(opt_parts)
+        
+        # Find seed
+        seed_part = [p for p in parts if p.startswith('seed')]
+        seed = int(seed_part[0].replace('seed', '')) if seed_part else 0
+        
+        if optimizer not in results:
+            results[optimizer] = []
+        results[optimizer].append((seed, df))
+    
+    # Create 2x2 plot
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig.suptitle('CIFAR-10 Training Results', fontsize=16, fontweight='bold')
+    
+    colors = {'SGD': '#FF6B6B', 'SGD_Momentum': '#4ECDC4', 'Adam': '#45B7D1', 
+              'AdamW': '#FFA07A', 'RMSProp': '#98D8C8'}
+    
+    # Plot 1: Train Loss
+    ax = axes[0, 0]
+    for optimizer, runs in results.items():
+        for seed, df in runs:
+            color = colors.get(optimizer, '#999999')
+            alpha = 0.3 if len(runs) > 1 else 1.0
+            ax.plot(df['epoch'], df['train_loss'], color=color, alpha=alpha, linewidth=1)
+        # Plot mean
+        if len(runs) > 1:
+            epochs = runs[0][1]['epoch'].values
+            losses = np.array([df['train_loss'].values for _, df in runs])
+            mean_loss = losses.mean(axis=0)
+            ax.plot(epochs, mean_loss, color=colors.get(optimizer, '#999999'), 
+                   linewidth=2.5, label=optimizer)
+    
+    ax.set_xlabel('Epoch', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Train Loss', fontsize=12, fontweight='bold')
+    ax.set_title('Training Loss', fontsize=13, fontweight='bold')
+    ax.legend(fontsize=10)
+    ax.grid(True, alpha=0.3)
+    
+    # Plot 2: Test Accuracy
+    ax = axes[0, 1]
+    for optimizer, runs in results.items():
+        for seed, df in runs:
+            color = colors.get(optimizer, '#999999')
+            alpha = 0.3 if len(runs) > 1 else 1.0
+            ax.plot(df['epoch'], df['test_acc'] * 100, color=color, alpha=alpha, linewidth=1)
+        # Plot mean
+        if len(runs) > 1:
+            epochs = runs[0][1]['epoch'].values
+            accs = np.array([df['test_acc'].values for _, df in runs])
+            mean_acc = accs.mean(axis=0)
+            ax.plot(epochs, mean_acc * 100, color=colors.get(optimizer, '#999999'), 
+                   linewidth=2.5, label=optimizer)
+    
+    ax.set_xlabel('Epoch', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Test Accuracy (%)', fontsize=12, fontweight='bold')
+    ax.set_title('Test Accuracy', fontsize=13, fontweight='bold')
+    ax.legend(fontsize=10)
+    ax.grid(True, alpha=0.3)
+    
+    # Plot 3: Final Test Accuracy (Bar plot)
+    ax = axes[1, 0]
+    final_accs = {}
+    final_stds = {}
+    for optimizer, runs in results.items():
+        accs = [df['test_acc'].iloc[-1] * 100 for _, df in runs]
+        final_accs[optimizer] = np.mean(accs)
+        final_stds[optimizer] = np.std(accs) if len(accs) > 1 else 0
+    
+    optimizers_sorted = sorted(final_accs.keys(), key=lambda x: final_accs[x], reverse=True)
+    x_pos = np.arange(len(optimizers_sorted))
+    bars = ax.bar(x_pos, [final_accs[opt] for opt in optimizers_sorted],
+                  yerr=[final_stds[opt] for opt in optimizers_sorted],
+                  color=[colors.get(opt, '#999999') for opt in optimizers_sorted],
+                  alpha=0.7, capsize=5, edgecolor='black', linewidth=1.5)
+    
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(optimizers_sorted, rotation=45, ha='right', fontsize=10)
+    ax.set_ylabel('Final Test Accuracy (%)', fontsize=12, fontweight='bold')
+    ax.set_title('Final Performance Comparison', fontsize=13, fontweight='bold')
+    ax.grid(axis='y', alpha=0.3)
+    
+    # Add value labels on bars
+    for i, (opt, bar) in enumerate(zip(optimizers_sorted, bars)):
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2., height,
+                f'{final_accs[opt]:.2f}%\n±{final_stds[opt]:.2f}',
+                ha='center', va='bottom', fontsize=9, fontweight='bold')
+    
+    # Plot 4: Training Speed (samples/sec)
+    ax = axes[1, 1]
+    speeds = {}
+    for optimizer, runs in results.items():
+        # Estimate samples/sec from elapsed time and epochs
+        run_speeds = []
+        for seed, df in runs:
+            if 'elapsed_seconds' in df.columns and df['elapsed_seconds'].iloc[0] > 0:
+                total_epochs = df['epoch'].max()
+                elapsed = df['elapsed_seconds'].iloc[0]
+                # Assuming 50k training samples
+                samples_per_sec = (50000 * total_epochs) / elapsed
+                run_speeds.append(samples_per_sec)
+        if run_speeds:
+            speeds[optimizer] = np.mean(run_speeds)
+    
+    if speeds:
+        optimizers_sorted = sorted(speeds.keys(), key=lambda x: speeds[x], reverse=True)
+        x_pos = np.arange(len(optimizers_sorted))
+        ax.bar(x_pos, [speeds[opt] for opt in optimizers_sorted],
+               color=[colors.get(opt, '#999999') for opt in optimizers_sorted],
+               alpha=0.7, edgecolor='black', linewidth=1.5)
+        ax.set_xticks(x_pos)
+        ax.set_xticklabels(optimizers_sorted, rotation=45, ha='right', fontsize=10)
+        ax.set_ylabel('Training Speed (samples/sec)', fontsize=12, fontweight='bold')
+        ax.set_title('Training Efficiency', fontsize=13, fontweight='bold')
+        ax.grid(axis='y', alpha=0.3)
+    else:
+        ax.text(0.5, 0.5, 'No timing data available', 
+                ha='center', va='center', fontsize=12, transform=ax.transAxes)
+    
+    plt.tight_layout()
+    output_path = results_dir / output_file
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    print(f"✅ CIFAR-10 summary plot saved: {output_path}")
+    plt.close()
+    
+    return output_path
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='CIFAR-10 Multi-Seed Runner')
@@ -186,6 +344,13 @@ def main():
                 print('Error:', e)
 
     print(f"Completed {completed} runs")
+    
+    # Generate summary visualization
+    if completed > 0:
+        try:
+            create_cifar10_summary_plots(results_dir)
+        except Exception as e:
+            print(f"⚠️  Failed to create summary plots: {e}")
 
 
 if __name__ == '__main__':
