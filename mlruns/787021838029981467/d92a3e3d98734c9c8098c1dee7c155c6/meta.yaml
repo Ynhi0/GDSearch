@@ -1,0 +1,14 @@
+artifact_uri: file:///workspaces/GDSearch/mlruns/787021838029981467/d92a3e3d98734c9c8098c1dee7c155c6/artifacts
+end_time: 1765136625539
+entry_point_name: ''
+experiment_id: '787021838029981467'
+lifecycle_stage: active
+run_id: d92a3e3d98734c9c8098c1dee7c155c6
+run_name: MNIST_Benchmark_Run
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1765136444930
+status: 3
+tags: []
+user_id: codespace

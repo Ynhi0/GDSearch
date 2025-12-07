@@ -83,7 +83,21 @@ from datetime import datetime
 warnings.filterwarnings('ignore')
 
 # Add src to path for integrated analysis modules
-sys.path.insert(0, str(Path(__file__).parent))
+# Enhanced for Kaggle compatibility
+project_root = Path(__file__).parent
+sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(project_root / 'src'))
+
+# Verify critical imports work (fail fast if dependencies missing)
+try:
+    from src.core.optimizers import SGD, Adam, AdamW
+    from src.core.pytorch_optimizers import SGDWrapper, AdamWrapper
+    print(f"✅ Successfully imported core modules from {project_root / 'src'}")
+except ImportError as e:
+    print(f"⚠️ CRITICAL: Failed to import core modules from {project_root / 'src'}")
+    print(f"Error: {e}")
+    print(f"sys.path = {sys.path[:5]}")
+    raise
 
 
 def check_gradient_health_quick(model, epoch=None, threshold=1e3, context=""):
@@ -481,7 +495,7 @@ class RobustCheckpointManager:
         # Try primary checkpoint first
         if ckpt_path.exists():
             try:
-                checkpoint = torch.load(ckpt_path, map_location='cpu')
+                checkpoint = torch.load(ckpt_path, map_location='cpu', weights_only=False)
                 logging.info(f"Loaded checkpoint: {ckpt_path}")
                 return checkpoint
             except Exception as e:
@@ -492,7 +506,7 @@ class RobustCheckpointManager:
             backup_path = self.base_dir / f"{filename}.backup_{i}"
             if backup_path.exists():
                 try:
-                    checkpoint = torch.load(backup_path, map_location='cpu')
+                    checkpoint = torch.load(backup_path, map_location='cpu', weights_only=False)
                     logging.info(f"Loaded backup checkpoint: {backup_path}")
                     return checkpoint
                 except Exception as e:
@@ -554,7 +568,7 @@ class RobustCheckpointManager:
     def _validate_checkpoint(self, ckpt_path: Path, expected_data: Dict) -> bool:
         """Validate checkpoint integrity"""
         try:
-            loaded = torch.load(ckpt_path, map_location='cpu')
+            loaded = torch.load(ckpt_path, map_location='cpu', weights_only=False)
             # Check for essential keys
             essential_keys = ['epoch', 'model']
             return all(key in loaded for key in essential_keys)
@@ -660,6 +674,14 @@ def error_context(context: str, continue_on_error: bool = False):
             'error': str(e)[:500],
             'traceback': traceback_str
         })
+
+        # Print full traceback to aid debugging in local validation runs
+        try:
+            print('\n--- TRACEBACK (debug) ---')
+            print(traceback_str)
+            print('--- END TRACEBACK ---\n')
+        except Exception:
+            pass
 
         if not continue_on_error:
             raise
@@ -1321,7 +1343,7 @@ def get_adaptive_batch_size(model, sample_input, device, base_batch_size=128):
 # Global flags for auto-tuning features (set from CLI args)
 AUTO_LR_ENABLED = False
 ADAPTIVE_BATCH_ENABLED = False
-ULTRA_QUICK_MODE = False  # Ultra-quick mode for CI/testing: 1-2 epochs, reduced optimizers
+ULTRA_QUICK_MODE = False  # Ultra-quick mode for comprehensive fast testing: 2 epochs, all optimizers, all experiments
 
 
 # Global instances for enhanced functionality
@@ -2088,6 +2110,11 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, test_loade
                 correct += predicted.eq(targets).sum().item()
                 total += targets.size(0)
         
+        # Protect against division by zero
+        if total == 0:
+            logging.warning("No test samples found in Optuna objective!")
+            return 0.0
+        
         accuracy = 100.0 * correct / total
         return accuracy
     
@@ -2238,41 +2265,42 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
             optimizers_config = []
             for opt_name in ['SGD', 'SGD_Momentum', 'Adam', 'AdamW', 'AMSGrad', 'SAM_SGD', 'SAM_Adam', 'Lookahead_SGD', 'Lookahead_Adam', 'AdaBound', 'RAdam', 'LAMB']:
                 params = tuned_params.get(opt_name, get_default_hyperparameters(opt_name))
-                
+
+                # Use safe .get() with sensible defaults to avoid KeyError when tuned params are missing keys
                 if opt_name == 'SGD':
-                    optimizers_config.append((opt_name, lambda p, lr=params['lr']: optim.SGD(p, lr=lr)))
+                    optimizers_config.append((opt_name, lambda p, lr=params.get('lr', 0.01): optim.SGD(p, lr=lr)))
                 elif opt_name == 'SGD_Momentum':
-                    optimizers_config.append((opt_name, lambda p, lr=params['lr'], m=params['momentum']: 
+                    optimizers_config.append((opt_name, lambda p, lr=params.get('lr', 0.01), m=params.get('momentum', 0.0): 
                                             optim.SGD(p, lr=lr, momentum=m)))
                 elif opt_name == 'Adam':
-                    optimizers_config.append((opt_name, lambda p, lr=params['lr'], b1=params['beta1'], b2=params['beta2']: 
+                    optimizers_config.append((opt_name, lambda p, lr=params.get('lr', 0.001), b1=params.get('beta1', 0.9), b2=params.get('beta2', 0.999): 
                                             optim.Adam(p, lr=lr, betas=(b1, b2))))
                 elif opt_name == 'AdamW':
-                    optimizers_config.append((opt_name, lambda p, lr=params['lr'], b1=params['beta1'], b2=params['beta2'], wd=params['weight_decay']: 
+                    optimizers_config.append((opt_name, lambda p, lr=params.get('lr', 0.001), b1=params.get('beta1', 0.9), b2=params.get('beta2', 0.999), wd=params.get('weight_decay', 0.0): 
                                             optim.AdamW(p, lr=lr, betas=(b1, b2), weight_decay=wd)))
                 elif opt_name == 'AMSGrad':
-                    optimizers_config.append((opt_name, lambda p, lr=params['lr'], b1=params['beta1'], b2=params['beta2']: 
+                    optimizers_config.append((opt_name, lambda p, lr=params.get('lr', 0.001), b1=params.get('beta1', 0.9), b2=params.get('beta2', 0.999): 
                                             optim.Adam(p, lr=lr, betas=(b1, b2), amsgrad=True)))
                 elif opt_name == 'SAM_SGD':
-                    optimizers_config.append((opt_name, lambda p, lr=params['lr'], rho=params.get('rho', 0.05): 
+                    optimizers_config.append((opt_name, lambda p, lr=params.get('lr', 0.01), rho=params.get('rho', 0.05): 
                                             SAM(p, optim.SGD, lr=lr, rho=rho)))
                 elif opt_name == 'SAM_Adam':
-                    optimizers_config.append((opt_name, lambda p, lr=params['lr'], rho=params.get('rho', 0.05): 
+                    optimizers_config.append((opt_name, lambda p, lr=params.get('lr', 0.001), rho=params.get('rho', 0.05): 
                                             SAM(p, optim.Adam, lr=lr, rho=rho)))
                 elif opt_name == 'Lookahead_SGD':
-                    optimizers_config.append((opt_name, lambda p, lr=params['lr'], k=params.get('k', 5), alpha=params.get('alpha', 0.5):
+                    optimizers_config.append((opt_name, lambda p, lr=params.get('lr', 0.01), k=params.get('k', 5), alpha=params.get('alpha', 0.5):
                                             LookaheadWrapper(optim.SGD(p, lr=lr), k=k, alpha=alpha)))
                 elif opt_name == 'Lookahead_Adam':
-                    optimizers_config.append((opt_name, lambda p, lr=params['lr'], k=params.get('k', 5), alpha=params.get('alpha', 0.5):
+                    optimizers_config.append((opt_name, lambda p, lr=params.get('lr', 0.001), k=params.get('k', 5), alpha=params.get('alpha', 0.5):
                                             LookaheadWrapper(optim.Adam(p, lr=lr), k=k, alpha=alpha)))
                 elif opt_name == 'AdaBound':
-                    optimizers_config.append((opt_name, lambda p, lr=params['lr'], b1=params['beta1'], b2=params['beta2'], flr=params['final_lr'], g=params['gamma']: 
+                    optimizers_config.append((opt_name, lambda p, lr=params.get('lr', 0.001), b1=params.get('beta1', 0.9), b2=params.get('beta2', 0.999), flr=params.get('final_lr', 0.1), g=params.get('gamma', 1e-3): 
                                             AdaBoundWrapper(p, lr=lr, beta1=b1, beta2=b2, final_lr=flr, gamma=g)))
                 elif opt_name == 'RAdam':
-                    optimizers_config.append((opt_name, lambda p, lr=params['lr'], b1=params['beta1'], b2=params['beta2']: 
+                    optimizers_config.append((opt_name, lambda p, lr=params.get('lr', 0.001), b1=params.get('beta1', 0.9), b2=params.get('beta2', 0.999): 
                                             RAdamWrapper(p, lr=lr, beta1=b1, beta2=b2)))
                 elif opt_name == 'LAMB':
-                    optimizers_config.append((opt_name, lambda p, lr=params['lr'], b1=params['beta1'], b2=params['beta2'], wd=params['weight_decay']: 
+                    optimizers_config.append((opt_name, lambda p, lr=params.get('lr', 0.001), b1=params.get('beta1', 0.9), b2=params.get('beta2', 0.999), wd=params.get('weight_decay', 0.0): 
                                             LAMBWrapper(p, lr=lr, beta1=b1, beta2=b2, weight_decay=wd)))
 
             logging.info("="*80)
@@ -2290,9 +2318,9 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
             else:
                 epochs = 20 if quick else 50
             
-            # In ultra-quick mode, only test a subset of optimizers
-            if ULTRA_QUICK_MODE:
-                optimizers_config = [cfg for cfg in optimizers_config if cfg[0] in ['SGD', 'Adam', 'SAM_SGD']][:3]
+            # NOTE: In ultra-quick mode, we run ALL optimizers (not subset)
+            # This allows comprehensive testing across all 25+ experiments
+            # The speed comes from reduced epochs (2 instead of 50), not fewer optimizers
 
             for opt_name, opt_func in optimizers_config:
                 logging.info(f"Testing Optimizer: {opt_name}")
@@ -2395,8 +2423,21 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
                         # Import LR scheduler
                         from src.core.lr_schedulers import CosineAnnealingLR
                         
-                        # Get learning rate from optimizer
-                        base_lr = optimizer.param_groups[0]['lr']
+                        # Get learning rate from optimizer (robust fallback for wrapped optimizers)
+                        try:
+                            base_lr = optimizer.param_groups[0].get('lr', None)
+                        except Exception:
+                            # Some optimizer wrappers may not expose 'lr' directly; fall back to tuned params or default
+                            base_lr = None
+                        if base_lr is None:
+                            base_lr = tuned_params.get(opt_name, {}).get('lr', 0.0)
+                        # Some optimizer wrappers (e.g., Lookahead) may not expose 'lr' in their param_groups.
+                        # Ensure the param_groups dict has an 'lr' entry so schedulers can read it.
+                        try:
+                            if 'lr' not in optimizer.param_groups[0]:
+                                optimizer.param_groups[0]['lr'] = base_lr
+                        except Exception:
+                            pass
                         
                         # Create learning rate scheduler (cosine annealing)
                         scheduler = CosineAnnealingLR(optimizer, T_max=epochs, eta_min=base_lr*0.01)
@@ -2407,6 +2448,13 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
                         patience = 10
                         patience_counter = 0
                         
+                        # Ensure run-level metrics are initialized so they exist
+                        # even if the training loop is skipped or fails early.
+                        train_loss = float('nan')
+                        train_acc = 0.0
+                        test_loss = float('nan')
+                        test_acc = 0.0
+
                         # Training with enhanced monitoring and OOM recovery
                         start_time = time.time()
                         try:
@@ -2417,126 +2465,139 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
                                 for inputs, targets in train_loader:
                                     inputs, targets = inputs.to(device), targets.to(device)
 
-                                if isinstance(optimizer, SAM) or 'SAM' in opt_name:
-                                    def closure():
+                                    if isinstance(optimizer, SAM) or 'SAM' in opt_name:
+                                        def closure():
+                                            optimizer.zero_grad()
+                                            outputs = model(inputs)
+                                            loss_local = criterion(outputs, targets)
+                                            loss_local.backward()
+                                            return loss_local
+                                        # Ensure we obtain a loss object even if optimizer.step doesn't return it
+                                        loss = closure()
+                                        optimizer.step(closure)
+                                        outputs = model(inputs)  # Recompute after SAM step
+                                        # Prefer original loss if available, else recompute safely
+                                        try:
+                                            train_loss += loss.item()
+                                        except Exception:
+                                            with torch.no_grad():
+                                                loss_after = criterion(outputs, targets)
+                                            train_loss += float(loss_after)
+                                    else:
                                         optimizer.zero_grad()
                                         outputs = model(inputs)
                                         loss = criterion(outputs, targets)
                                         loss.backward()
-                                        return loss
-                                    loss = optimizer.step(closure)
-                                    outputs = model(inputs)  # Recompute after SAM step
-                                    train_loss += loss.item()
-                                else:
-                                    optimizer.zero_grad()
-                                    outputs = model(inputs)
-                                    loss = criterion(outputs, targets)
-                                    loss.backward()
-                                    
-                                    # Gradient clipping to prevent explosion
-                                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-                                    
-                                    # Gradient health monitoring
-                                    try:
-                                        grad_norm = 0.0
-                                        has_bad_grad = False
-                                        for param in model.parameters():
-                                            if param.grad is not None:
-                                                if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
-                                                    logging.warning(f"NaN/Inf gradient detected at epoch {epoch}")
-                                                    has_bad_grad = True
-                                                    break
-                                                grad_norm += param.grad.data.norm(2).item() ** 2
-                                        if not has_bad_grad:
-                                            grad_norm = grad_norm ** 0.5
-                                            if grad_norm > 1e3:
-                                                logging.warning(f"Large gradient norm: {grad_norm:.2e} at epoch {epoch}")
-                                    except Exception as e:
-                                        logging.debug(f"Gradient check failed: {e}")
-                                    
-                                    optimizer.step()
-                                    
-                                    # Check for loss divergence
-                                    if torch.isnan(loss) or torch.isinf(loss) or loss.item() > 1e10:
-                                        logging.warning(f"Loss divergence detected at epoch {epoch}: {loss.item()}")
-                                        break
-                                    
-                                    train_loss += loss.item()
+                                        
+                                        # Gradient clipping to prevent explosion
+                                        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                                        
+                                        # Gradient health monitoring
+                                        try:
+                                            grad_norm = 0.0
+                                            has_bad_grad = False
+                                            for param in model.parameters():
+                                                if param.grad is not None:
+                                                    if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
+                                                        logging.warning(f"NaN/Inf gradient detected at epoch {epoch}")
+                                                        has_bad_grad = True
+                                                        break
+                                                    grad_norm += param.grad.data.norm(2).item() ** 2
+                                            if not has_bad_grad:
+                                                grad_norm = grad_norm ** 0.5
+                                                if grad_norm > 1e3:
+                                                    logging.warning(f"Large gradient norm: {grad_norm:.2e} at epoch {epoch}")
+                                        except Exception as e:
+                                            logging.debug(f"Gradient check failed: {e}")
+                                        
+                                        optimizer.step()
+                                        
+                                        # Check for loss divergence
+                                        if torch.isnan(loss) or torch.isinf(loss) or loss.item() > 1e10:
+                                            logging.warning(f"Loss divergence detected at epoch {epoch}: {loss.item()}")
+                                            break
+                                        
+                                        train_loss += loss.item()
 
-                                _, predicted = outputs.max(1)
-                                train_correct += predicted.eq(targets).sum().item()
-
-                            train_loss /= len(train_loader)
-                            train_acc = 100. * train_correct / len(train_dataset)
-
-                            # Test/Validation
-                            model.eval()
-                            test_loss, test_correct = 0, 0
-                            with torch.no_grad():
-                                for inputs, targets in test_loader:
-                                    inputs, targets = inputs.to(device), targets.to(device)
-                                    outputs = model(inputs)
-                                    loss = criterion(outputs, targets)
-                                    test_loss += loss.item()
                                     _, predicted = outputs.max(1)
-                                    test_correct += predicted.eq(targets).sum().item()
+                                    train_correct += predicted.eq(targets).sum().item()
 
-                            test_loss /= len(test_loader)
-                            test_acc = 100. * test_correct / len(test_dataset)
-                            
-                            # Learning rate scheduling
-                            scheduler.step()
-                            current_lr = optimizer.param_groups[0]['lr']
-                            
-                            # Best model tracking
-                            if test_acc > best_val_acc:
-                                best_val_acc = test_acc
-                                best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
-                                patience_counter = 0
-                                logging.info(f"✓ New best model: {test_acc:.2f}%")
-                            else:
-                                patience_counter += 1
-                            
-                            # Early stopping check
-                            if patience_counter >= patience:
-                                logging.info(f"Early stopping triggered at epoch {epoch} (no improvement for {patience} epochs)")
-                                # Restore best model
-                                if best_model_state is not None:
-                                    model.load_state_dict(best_model_state)
-                                break
+                                train_loss /= len(train_loader)
+                                train_acc = 100. * train_correct / len(train_dataset)
 
-                            history.append({
-                                'epoch': epoch,
-                                'train_loss': train_loss,
-                                'train_acc': train_acc,
-                                'test_loss': test_loss,
-                                'test_acc': test_acc
-                            })
+                                # Sanity check: MNIST train accuracy should be > 10% (basic validation)
+                                if epoch > 1 and train_acc < 10.0:
+                                    logging.error(f"⚠️ SANITY CHECK FAILED: Train accuracy {train_acc:.1f}% is suspiciously low for MNIST epoch {epoch}")
+                                    logging.error("This may indicate a bug in the training loop (e.g., only processing last batch)")
 
-                            # Log metrics to tracker
-                            if tracker:
-                                tracker.log_metrics({
-                                    f'{opt_name}_seed_{seed}_train_loss': train_loss,
-                                    f'{opt_name}_seed_{seed}_train_acc': train_acc,
-                                    f'{opt_name}_seed_{seed}_test_loss': test_loss,
-                                    f'{opt_name}_seed_{seed}_test_acc': test_acc
-                                }, step=epoch)
+                                # Test/Validation
+                                model.eval()
+                                test_loss, test_correct = 0, 0
+                                with torch.no_grad():
+                                    for inputs, targets in test_loader:
+                                        inputs, targets = inputs.to(device), targets.to(device)
+                                        outputs = model(inputs)
+                                        loss = criterion(outputs, targets)
+                                        test_loss += loss.item()
+                                        _, predicted = outputs.max(1)
+                                        test_correct += predicted.eq(targets).sum().item()
 
-                            print(f"Epoch {epoch}/{epochs}: Train Loss={train_loss:.4f}, "
-                                  f"Train Acc={train_acc:.1f}%, Test Loss={test_loss:.4f}, "
-                                  f"Test Acc={test_acc:.1f}%")
+                                test_loss /= len(test_loader)
+                                test_acc = 100. * test_correct / len(test_dataset)
+                                
+                                # Learning rate scheduling
+                                scheduler.step()
+                                current_lr = optimizer.param_groups[0]['lr']
+                                
+                                # Best model tracking
+                                if test_acc > best_val_acc:
+                                    best_val_acc = test_acc
+                                    best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+                                    patience_counter = 0
+                                    logging.info(f"✓ New best model: {test_acc:.2f}%")
+                                else:
+                                    patience_counter += 1
+                                
+                                # Early stopping check
+                                if patience_counter >= patience:
+                                    logging.info(f"Early stopping triggered at epoch {epoch} (no improvement for {patience} epochs)")
+                                    # Restore best model
+                                    if best_model_state is not None:
+                                        model.load_state_dict(best_model_state)
+                                    break
 
-                            # Enhanced checkpointing
-                            if checkpoint_manager:
-                                checkpoint_data = {
-                                    'model': model.state_dict(),
-                                    'optimizer': optimizer.state_dict() if not opt_name.startswith('SAM') else optimizer.base_optimizer.state_dict(),
+                                history.append({
                                     'epoch': epoch,
-                                    'history': history,
-                                    'opt_name': opt_name,
-                                    'seed': seed,
-                                }
-                                checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"MNIST_{opt_name}_seed{seed}")
+                                    'train_loss': train_loss,
+                                    'train_acc': train_acc,
+                                    'test_loss': test_loss,
+                                    'test_acc': test_acc
+                                })
+
+                                # Log metrics to tracker
+                                if tracker:
+                                    tracker.log_metrics({
+                                        f'{opt_name}_seed_{seed}_train_loss': train_loss,
+                                        f'{opt_name}_seed_{seed}_train_acc': train_acc,
+                                        f'{opt_name}_seed_{seed}_test_loss': test_loss,
+                                        f'{opt_name}_seed_{seed}_test_acc': test_acc
+                                    }, step=epoch)
+
+                                print(f"Epoch {epoch}/{epochs}: Train Loss={train_loss:.4f}, "
+                                      f"Train Acc={train_acc:.1f}%, Test Loss={test_loss:.4f}, "
+                                      f"Test Acc={test_acc:.1f}%")
+
+                                # Enhanced checkpointing
+                                if checkpoint_manager:
+                                    checkpoint_data = {
+                                        'model': model.state_dict(),
+                                        'optimizer': optimizer.state_dict() if not opt_name.startswith('SAM') else optimizer.base_optimizer.state_dict(),
+                                        'epoch': epoch,
+                                        'history': history,
+                                        'opt_name': opt_name,
+                                        'seed': seed,
+                                    }
+                                    checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"MNIST_{opt_name}_seed{seed}")
                         
                         except RuntimeError as e:
                             if "out of memory" in str(e).lower():
@@ -2811,101 +2872,106 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[42,123,456,789,
                     for inputs, targets in tqdm(train_loader, desc=f"{opt_name} Epoch {epoch}/{epochs}"):
                         inputs, targets = inputs.to(device), targets.to(device)
 
-                    if isinstance(optimizer, SAM):
-                        def closure():
+                        if isinstance(optimizer, SAM):
+                            def closure():
+                                optimizer.zero_grad()
+                                outputs = model(inputs)
+                                loss = criterion(outputs, targets)
+                                loss.backward()
+                                return loss
+                            loss = optimizer.step(closure)
+                            outputs = model(inputs)  # Recompute after SAM step
+                        else:
                             optimizer.zero_grad()
                             outputs = model(inputs)
                             loss = criterion(outputs, targets)
                             loss.backward()
-                            return loss
-                        loss = optimizer.step(closure)
-                        outputs = model(inputs)  # Recompute after SAM step
-                    else:
-                        optimizer.zero_grad()
-                        outputs = model(inputs)
-                        loss = criterion(outputs, targets)
-                        loss.backward()
-                        
-                        # Gradient clipping
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-                        
-                        # Gradient health monitoring
-                        check_gradient_health_quick(model, epoch, context=f"CIFAR10_{opt_name}")
-                        
-                        optimizer.step()
+                            
+                            # Gradient clipping
+                            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                            
+                            # Gradient health monitoring
+                            check_gradient_health_quick(model, epoch, context=f"CIFAR10_{opt_name}")
+                            
+                            optimizer.step()
 
-                    train_loss += loss.item()
-                    _, predicted = outputs.max(1)
-                    train_correct += predicted.eq(targets).sum().item()
-
-                train_loss /= len(train_loader)
-                train_acc = 100. * train_correct / len(train_dataset)
-
-                # Test
-                model.eval()
-                test_loss, test_correct = 0, 0
-                with torch.no_grad():
-                    for inputs, targets in test_loader:
-                        inputs, targets = inputs.to(device), targets.to(device)
-                        outputs = model(inputs)
-                        loss = criterion(outputs, targets)
-                        test_loss += loss.item()
+                        train_loss += loss.item()
                         _, predicted = outputs.max(1)
-                        test_correct += predicted.eq(targets).sum().item()
+                        train_correct += predicted.eq(targets).sum().item()
 
-                test_loss /= len(test_loader)
-                test_acc = 100. * test_correct / len(test_dataset)
-                
-                # Learning rate scheduling
-                scheduler.step()
-                
-                # Best model tracking
-                if test_acc > best_val_acc:
-                    best_val_acc = test_acc
-                    best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
-                    patience_counter = 0
-                else:
-                    patience_counter += 1
-                
-                # Early stopping
-                if patience_counter >= patience:
-                    logging.info(f"Early stopping at epoch {epoch}")
-                    if best_model_state is not None:
-                        model.load_state_dict(best_model_state)
-                    break
+                    train_loss /= len(train_loader)
+                    train_acc = 100. * train_correct / len(train_dataset)
 
-                history.append({
-                    'epoch': epoch,
-                    'train_loss': train_loss,
-                    'train_acc': train_acc,
-                    'test_loss': test_loss,
-                    'test_acc': test_acc
-                })
+                    # Sanity check: CIFAR-10 train accuracy should be > 10% after first few epochs
+                    if epoch > 2 and train_acc < 10.0:
+                        logging.error(f"⚠️ SANITY CHECK FAILED: Train accuracy {train_acc:.1f}% is suspiciously low for CIFAR-10 epoch {epoch}")
+                        logging.error("This may indicate a bug in the training loop")
 
-                if tracker:
-                    tracker.log_metrics({
-                        f'cifar10_{opt_name}_train_loss': train_loss,
-                        f'cifar10_{opt_name}_train_acc': train_acc,
-                        f'cifar10_{opt_name}_test_loss': test_loss,
-                        f'cifar10_{opt_name}_test_acc': test_acc
-                    }, step=epoch)
+                    # Test
+                    model.eval()
+                    test_loss, test_correct = 0, 0
+                    with torch.no_grad():
+                        for inputs, targets in test_loader:
+                            inputs, targets = inputs.to(device), targets.to(device)
+                            outputs = model(inputs)
+                            loss = criterion(outputs, targets)
+                            test_loss += loss.item()
+                            _, predicted = outputs.max(1)
+                            test_correct += predicted.eq(targets).sum().item()
 
-                print(f"{opt_name} Epoch {epoch}/{epochs} - Train: {train_acc:.1f}% | Test: {test_acc:.1f}%")
+                    test_loss /= len(test_loader)
+                    test_acc = 100. * test_correct / len(test_dataset)
+                    
+                    # Learning rate scheduling
+                    scheduler.step()
+                    
+                    # Best model tracking
+                    if test_acc > best_val_acc:
+                        best_val_acc = test_acc
+                        best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+                        patience_counter = 0
+                    else:
+                        patience_counter += 1
+                    
+                    # Early stopping
+                    if patience_counter >= patience:
+                        logging.info(f"Early stopping at epoch {epoch}")
+                        if best_model_state is not None:
+                            model.load_state_dict(best_model_state)
+                        break
 
-                # Save checkpoint
-                if checkpoint_manager:
-                    try:
-                        checkpoint_data = {
-                            'model': model.state_dict(),
-                            'optimizer': optimizer.state_dict(),
-                            'epoch': epoch,
-                            'history': history,
-                            'opt_name': opt_name,
-                            'seed': seed,
-                        }
-                        checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"CIFAR10_{opt_name}_seed{seed}")
-                    except Exception as e:
-                        logging.warning(f"Failed to save checkpoint: {e}")
+                    history.append({
+                        'epoch': epoch,
+                        'train_loss': train_loss,
+                        'train_acc': train_acc,
+                        'test_loss': test_loss,
+                        'test_acc': test_acc
+                    })
+
+                    if tracker:
+                        tracker.log_metrics({
+                            f'cifar10_{opt_name}_train_loss': train_loss,
+                            f'cifar10_{opt_name}_train_acc': train_acc,
+                            f'cifar10_{opt_name}_test_loss': test_loss,
+                            f'cifar10_{opt_name}_test_acc': test_acc
+                        }, step=epoch)
+
+                    print(f"{opt_name} Epoch {epoch}/{epochs} - Train: {train_acc:.1f}% | Test: {test_acc:.1f}%")
+
+                    # Save checkpoint
+                    if checkpoint_manager:
+                        try:
+                            checkpoint_data = {
+                                'model': model.state_dict(),
+                                'optimizer': optimizer.state_dict(),
+                                'epoch': epoch,
+                                'history': history,
+                                'opt_name': opt_name,
+                                'seed': seed,
+                            }
+                            checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"CIFAR10_{opt_name}_seed{seed}")
+                        except Exception as e:
+                            logging.warning(f"Failed to save checkpoint: {e}")
             
             except RuntimeError as e:
                 if "out of memory" in str(e).lower():
@@ -3254,42 +3320,6 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
 
                     for batch in tqdm(train_loader, desc=f"Epoch {epoch}/{epochs}"):
                         input_ids = batch['input_ids'].to(device)
-                    attention_mask = batch.get('attention_mask')
-                    if attention_mask is not None:
-                        attention_mask = attention_mask.to(device)
-                    labels = batch['labels'].to(device)
-
-                    outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
-                    loss = outputs.loss
-
-                    optimizer.zero_grad()
-                    loss.backward()
-                    
-                    # Gradient clipping for transformers
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-                    
-                    # Check for gradient health (NaN/Inf/explosion)
-                    check_gradient_health_quick(model, epoch, context=f"NLP_{opt_name}")
-                    if torch.isnan(loss) or torch.isinf(loss):
-                        logging.error(f"Loss divergence detected: {loss}")
-                        break
-                    
-                    optimizer.step()
-
-                    train_loss += float(loss.item()) * input_ids.size(0)
-                    train_total += input_ids.size(0)
-
-                train_loss /= max(1, train_total)
-
-                # Evaluation
-                model.eval()
-                test_loss = 0.0
-                test_correct = 0
-                test_total = 0
-
-                with torch.no_grad():
-                    for batch in test_loader:
-                        input_ids = batch['input_ids'].to(device)
                         attention_mask = batch.get('attention_mask')
                         if attention_mask is not None:
                             attention_mask = attention_mask.to(device)
@@ -3297,67 +3327,108 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
 
                         outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
                         loss = outputs.loss
-                        logits = outputs.logits
 
-                        test_loss += float(loss.item()) * input_ids.size(0)
-                        preds = torch.argmax(logits, dim=1)
-                        test_correct += (preds == labels).sum().item()
-                        test_total += input_ids.size(0)
+                        optimizer.zero_grad()
+                        loss.backward()
+                        
+                        # Gradient clipping for transformers
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                        
+                        # Check for gradient health (NaN/Inf/explosion)
+                        check_gradient_health_quick(model, epoch, context=f"NLP_{opt_name}")
+                        if torch.isnan(loss) or torch.isinf(loss):
+                            logging.error(f"Loss divergence detected: {loss}")
+                            break
+                        
+                        optimizer.step()
 
-                test_loss /= max(1, test_total)
-                test_acc = 100.0 * test_correct / max(1, test_total)
-                
-                # LR scheduling
-                scheduler.step()
-                
-                # Best model tracking
-                if test_acc > best_val_acc:
-                    best_val_acc = test_acc
-                    best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
-                    patience_counter = 0
-                else:
-                    patience_counter += 1
-                
-                # Early stopping
-                if patience_counter >= patience:
-                    logging.info(f"Early stopping at epoch {epoch}")
-                    if best_model_state is not None:
-                        model.load_state_dict(best_model_state)
-                    break
+                        train_loss += float(loss.item()) * input_ids.size(0)
+                        train_total += input_ids.size(0)
 
-                history.append({
-                    'epoch': epoch,
-                    'train_loss': train_loss,
-                    'test_loss': test_loss,
-                    'test_acc': test_acc
-                })
+                    train_loss /= max(1, train_total)
 
-                if tracker:
-                    tracker.log_metrics({
-                        f'nlp_{opt_name}_seed_{seed}_train_loss': train_loss,
-                        f'nlp_{opt_name}_seed_{seed}_test_loss': test_loss,
-                        f'nlp_{opt_name}_seed_{seed}_test_acc': test_acc
-                    }, step=epoch)
+                    # Sanity check: Verify train_total matches expected batch count
+                    expected_samples = len(train_loader.dataset)
+                    if train_total < expected_samples * 0.9:
+                        logging.warning(f"⚠️ SANITY CHECK: Only processed {train_total}/{expected_samples} training samples")
 
-                print(f"Epoch {epoch}/{epochs}: Train Loss={train_loss:.4f}, "
-                      f"Test Loss={test_loss:.4f}, Test Acc={test_acc:.1f}%")
+                    # Evaluation
+                    model.eval()
+                    test_loss = 0.0
+                    test_correct = 0
+                    test_total = 0
 
-                # Save checkpoint
-                if checkpoint_manager:
-                    try:
-                        checkpoint_data = {
-                            'model': model.state_dict(),
-                            'optimizer': optimizer.state_dict(),
-                            'epoch': epoch,
-                            'history': history,
-                            'opt_name': opt_name,
-                            'seed': seed,
-                            'lr': lr,
-                            'model_name': model_name,
-                        }
-                        checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"IMDB_{model_name.replace('/', '_')}_{opt_name}_lr{lr}_seed{seed}")
-                    except Exception as e:
-                        logging.warning(f"Failed to save checkpoint: {e}")
+                    with torch.no_grad():
+                        for batch in test_loader:
+                            input_ids = batch['input_ids'].to(device)
+                            attention_mask = batch.get('attention_mask')
+                            if attention_mask is not None:
+                                attention_mask = attention_mask.to(device)
+                            labels = batch['labels'].to(device)
+
+                            outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
+                            loss = outputs.loss
+                            logits = outputs.logits
+
+                            test_loss += float(loss.item()) * input_ids.size(0)
+                            preds = torch.argmax(logits, dim=1)
+                            test_correct += (preds == labels).sum().item()
+                            test_total += input_ids.size(0)
+
+                    test_loss /= max(1, test_total)
+                    test_acc = 100.0 * test_correct / max(1, test_total)
+                    
+                    # LR scheduling
+                    scheduler.step()
+                    
+                    # Best model tracking
+                    if test_acc > best_val_acc:
+                        best_val_acc = test_acc
+                        best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+                        patience_counter = 0
+                    else:
+                        patience_counter += 1
+                    
+                    # Early stopping
+                    if patience_counter >= patience:
+                        logging.info(f"Early stopping at epoch {epoch}")
+                        if best_model_state is not None:
+                            model.load_state_dict(best_model_state)
+                        break
+
+                    history.append({
+                        'epoch': epoch,
+                        'train_loss': train_loss,
+                        'test_loss': test_loss,
+                        'test_acc': test_acc
+                    })
+
+                    if tracker:
+                        tracker.log_metrics({
+                            f'nlp_{opt_name}_seed_{seed}_train_loss': train_loss,
+                            f'nlp_{opt_name}_seed_{seed}_test_loss': test_loss,
+                            f'nlp_{opt_name}_seed_{seed}_test_acc': test_acc
+                        }, step=epoch)
+
+                    print(f"Epoch {epoch}/{epochs}: Train Loss={train_loss:.4f}, "
+                          f"Test Loss={test_loss:.4f}, Test Acc={test_acc:.1f}%")
+
+                    # Save checkpoint
+                    if checkpoint_manager:
+                        try:
+                            checkpoint_data = {
+                                'model': model.state_dict(),
+                                'optimizer': optimizer.state_dict(),
+                                'epoch': epoch,
+                                'history': history,
+                                'opt_name': opt_name,
+                                'seed': seed,
+                                'lr': lr,
+                                'model_name': model_name,
+                            }
+                            checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"IMDB_{model_name.replace('/', '_')}_{opt_name}_lr{lr}_seed{seed}")
+                        except Exception as e:
+                            logging.warning(f"Failed to save checkpoint: {e}")
             
             except RuntimeError as e:
                 if "out of memory" in str(e).lower():
@@ -3626,7 +3697,7 @@ def run_nlp_experiment_simple(results_dir="results_nlp", seeds=[42,123,456,789,1
                         train_correct += predicted.eq(labels).sum().item()
                     
                     train_loss /= len(train_loader)
-                    train_acc = 100.0 * train_correct / train_total
+                    train_acc = 100.0 * train_correct / max(1, train_total)  # Protect division by zero
                     
                     # Evaluation
                     model.eval()
@@ -3646,7 +3717,7 @@ def run_nlp_experiment_simple(results_dir="results_nlp", seeds=[42,123,456,789,1
                             test_correct += predicted.eq(labels).sum().item()
                     
                     test_loss /= len(test_loader)
-                    test_acc = 100.0 * test_correct / test_total
+                    test_acc = 100.0 * test_correct / max(1, test_total)  # Protect division by zero
                     
                     history.append({
                         'epoch': epoch + 1,
@@ -5718,7 +5789,17 @@ def run_advanced_architecture_experiment(results_dir="results_advanced_arch", ep
             total += targets.size(0)
 
         epoch_loss /= len(train_loader)
-        accuracy = 100. * correct / total
+        
+        # Protect against division by zero
+        if total == 0:
+            logging.warning("No training samples processed in ViT experiment!")
+            accuracy = 0.0
+        else:
+            accuracy = 100. * correct / total
+        
+        # Sanity check: accuracy should be reasonable after first epoch
+        if epoch >= 1 and accuracy < 5.0:
+            logging.warning(f"⚠️  ViT accuracy suspiciously low: {accuracy:.2f}% at epoch {epoch+1}")
 
         results.append({
             'epoch': epoch + 1,
@@ -5726,7 +5807,7 @@ def run_advanced_architecture_experiment(results_dir="results_advanced_arch", ep
             'accuracy': accuracy
         })
 
-        print(".1f")
+        print(f"Epoch {epoch+1}/{epochs}: Loss={epoch_loss:.4f}, Accuracy={accuracy:.1f}%")
 
     # Save results
     os.makedirs(results_dir, exist_ok=True)
@@ -6234,6 +6315,10 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=[42,123,456,789,10
         train_loss /= len(train_loader)
         train_acc = 100. * train_correct / len(train_dataset)
 
+        # Sanity check: Verify all batches were processed
+        if epoch > 1 and train_acc < 10.0:
+            logging.error(f"⚠️ SANITY CHECK FAILED: ResNet train accuracy {train_acc:.1f}% is suspiciously low")
+
         # Test
         model.eval()
         test_loss, test_correct = 0, 0
@@ -6548,7 +6633,7 @@ Examples:
     parser.add_argument('--quick', action='store_true',
                         help='Quick mode: fewer epochs, smaller datasets')
     parser.add_argument('--ultra-quick', action='store_true',
-                        help='Ultra-quick mode for testing: minimal epochs (1-2), reduced optimizers')
+                        help='Ultra-quick mode: 2 epochs, all optimizers, all experiments (fast comprehensive testing)')
     parser.add_argument('--skip-tuning', action='store_true', default=False,
                         help='Skip Optuna hyperparameter tuning (default: False - tuning enabled)')
     parser.add_argument('--seeds', type=str, default='42,123,456,789,1011,1213,1415,1617,1819,2021',
@@ -6630,7 +6715,7 @@ Examples:
     if ULTRA_QUICK_MODE:
         args.quick = True
         args.skip_tuning = True
-        print("⚡ Ultra-quick mode: 2 epochs, reduced optimizers, skip tuning")
+        print("⚡ Ultra-quick mode: 2 epochs, ALL optimizers, ALL experiments, skip tuning")
     
     if AUTO_LR_ENABLED:
         print("🔍 Auto-LR enabled: will use LR Finder before training")
@@ -6803,7 +6888,7 @@ Examples:
             }, checkpoint_path)
             
             # Simulate restart: load checkpoint
-            checkpoint = torch.load(checkpoint_path)
+            checkpoint = torch.load(checkpoint_path, weights_only=False)
             model_resumed = TinyTestModel()
             model_resumed.load_state_dict(checkpoint['model_state_dict'])
             opt_resumed = torch.optim.SGD(model_resumed.parameters(), lr=0.01)

@@ -1,0 +1,14 @@
+artifact_uri: file:///workspaces/GDSearch/kaggle/mlruns/237836906523570421/f3a774f6d92543969ce302ebcac1d4fc/artifacts
+end_time: 1765137704155
+entry_point_name: ''
+experiment_id: '237836906523570421'
+lifecycle_stage: active
+run_id: f3a774f6d92543969ce302ebcac1d4fc
+run_name: MNIST_Benchmark_Run
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1765137527055
+status: 3
+tags: []
+user_id: codespace

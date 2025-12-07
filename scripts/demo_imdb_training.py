@@ -74,8 +74,8 @@ def evaluate(model, test_loader, criterion, device):
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
     
-    avg_loss = total_loss / len(test_loader)
-    accuracy = 100.0 * correct / total
+    avg_loss = total_loss / max(1, len(test_loader))
+    accuracy = 100.0 * correct / max(1, total)
     
     return avg_loss, accuracy
 

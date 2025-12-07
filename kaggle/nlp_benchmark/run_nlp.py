@@ -176,7 +176,7 @@ def run_single(opt_name: str, seed: int, lr: float, epochs: int, batch_size: int
     # Resume logic
     if resume and ckpt_file.exists():
         try:
-            state = torch.load(ckpt_file, map_location=device)
+            state = torch.load(ckpt_file, map_location=device, weights_only=False)
             model.load_state_dict(state['model'], strict=False)
             if state.get('opt_name', '').upper().startswith('ADAMW') and isinstance(optimizer, torch.optim.AdamW):
                 optimizer.load_state_dict(state['optimizer'])

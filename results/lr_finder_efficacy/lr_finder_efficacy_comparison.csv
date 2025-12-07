@@ -1,3 +1,0 @@
-seed,default_lr,optimal_lr,default_final_test_acc,optimal_final_test_acc,improvement
-1,0.001,0.001,97.92,97.92,0.0
-2,0.001,0.001,97.91,97.91,0.0

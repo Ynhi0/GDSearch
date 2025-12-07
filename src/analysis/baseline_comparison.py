@@ -135,8 +135,8 @@ def run_pytorch_baseline(config: Dict) -> pd.DataFrame:
                 correct += pred.eq(target.view_as(pred)).sum().item()
                 total += target.size(0)
         
-        test_loss /= len(test_loader)
-        test_accuracy = 100.0 * correct / total
+        test_loss /= max(1, len(test_loader))
+        test_accuracy = 100.0 * correct / max(1, total)
         
         history.append({
             'phase': 'eval',

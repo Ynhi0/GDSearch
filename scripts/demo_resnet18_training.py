@@ -74,8 +74,8 @@ def evaluate(model, test_loader, criterion, device):
             correct += pred.eq(target.view_as(pred)).sum().item()
             total += target.size(0)
     
-    test_loss /= len(test_loader)
-    accuracy = 100. * correct / total
+    test_loss /= max(1, len(test_loader))
+    accuracy = 100. * correct / max(1, total)
     
     return test_loss, accuracy
 

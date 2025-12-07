@@ -85,7 +85,7 @@ def main():
     print(f"Loading model from {args.ckpt}...")
     model = SimpleMLP().to(device)
     try:
-        checkpoint = torch.load(args.ckpt, map_location=device)
+        checkpoint = torch.load(args.ckpt, map_location=device, weights_only=False)
         model.load_state_dict(checkpoint['model'])
         opt_name = checkpoint.get('opt', 'Unknown')
         print(f"Model loaded. Optimizer used: {opt_name}")

@@ -110,7 +110,7 @@ def train_and_evaluate(model, optimizer, train_loader, test_loader,
                 correct += predicted.eq(targets).sum().item()
                 total += targets.size(0)
         
-        test_acc = 100.0 * correct / total
+        test_acc = 100.0 * correct / max(1, total)  # Protect division by zero
         test_accuracies.append(test_acc)
     
     # Compute convergence speed (epochs to reach 95% of final accuracy)

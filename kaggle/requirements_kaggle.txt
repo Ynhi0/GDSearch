@@ -1,12 +1,35 @@
-# Kaggle Requirements
-# Most packages already available in Kaggle environment
+# Complete dependencies for Kaggle environment
+# Updated: December 7, 2025 - Deployment Readiness Audit
+# Addresses 7 critical missing dependencies identified in audit
 
-# Core packages (usually pre-installed)
+# Core ML Framework
 torch>=2.0.0
 torchvision>=0.15.0
-numpy>=1.24.0
+
+# Data & Utilities
+pandas>=2.0.0
+numpy>=1.21.0,<2.0  # Kaggle-compatible version
 tqdm>=4.65.0
 
-# Additional (if needed)
-# matplotlib>=3.7.0
-# pandas>=2.0.0
+# System Monitoring (CRITICAL: used in run_all_kaggle.py line 42)
+psutil>=5.9.0
+
+# Scientific Computing (CRITICAL: required for statistical analysis)
+scipy>=1.10.0
+
+# Experiment Tracking & Hyperparameter Tuning
+mlflow>=2.0.0
+optuna>=3.0.0
+
+# NLP Dependencies (CRITICAL: required for IMDB/NLP experiments)
+transformers>=4.30.0
+datasets>=2.14.0,<3.0.0
+
+# Visualization (CRITICAL: required for plots and reports)
+plotly>=5.14.0
+kaleido>=0.2.0
+
+# Optional: Explicitly list if not pre-installed on Kaggle
+matplotlib>=3.7.0
+seaborn>=0.12.0
+scikit-learn>=1.3.0

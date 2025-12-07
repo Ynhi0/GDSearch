@@ -134,7 +134,7 @@ def train_with_optional_tracking(
             correct += predicted.eq(targets).sum().item()
             total += targets.size(0)
     
-    final_accuracy = 100.0 * correct / total
+    final_accuracy = 100.0 * correct / max(1, total)
     
     # Compute metrics
     elapsed_time = time.time() - start_time

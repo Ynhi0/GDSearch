@@ -161,10 +161,10 @@ def evaluate(model, loader, criterion, device):
             total_loss += loss.item()
             _, predicted = torch.max(output.data, 1)
             total += target.size(0)
-            correct += (predicted == target).sum().item()
+            correct += predicted.eq(target).sum().item()
     
-    accuracy = 100.0 * correct / total
-    avg_loss = total_loss / len(loader)
+    accuracy = 100.0 * correct / max(1, total)
+    avg_loss = total_loss / max(1, len(loader))
     return accuracy, avg_loss
 
 

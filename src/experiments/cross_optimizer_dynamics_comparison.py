@@ -131,8 +131,8 @@ def run_single_optimizer_with_dynamics(
             correct += predicted.eq(target).sum().item()
         
         # Epoch statistics
-        avg_loss = epoch_loss / len(train_loader)
-        train_acc = 100.0 * correct / total
+        avg_loss = epoch_loss / max(1, len(train_loader))
+        train_acc = 100.0 * correct / max(1, total)
         
         # Test accuracy
         model.eval()

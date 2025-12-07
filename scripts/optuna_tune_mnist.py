@@ -107,7 +107,7 @@ def create_objective_function(optimizer_name='Adam', epochs=10, device='cpu'):
                 total += target.size(0)
                 correct += (predicted == target).sum().item()
         
-        accuracy = 100.0 * correct / total
+        accuracy = 100.0 * correct / max(1, total)
         
         return accuracy
     

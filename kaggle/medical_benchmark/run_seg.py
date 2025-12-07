@@ -219,7 +219,7 @@ def run_single(opt_name: str, seed: int, epochs: int, batch_size: int, data_root
     start_epoch = 1
     if resume and ckpt_file.exists():
         try:
-            state = torch.load(ckpt_file, map_location=device)
+            state = torch.load(ckpt_file, map_location=device, weights_only=False)
             model.load_state_dict(state['model'], strict=False)
             if isinstance(optimizer, torch.optim.SGD) and state.get('opt', {}).get('type') == 'SGD':
                 optimizer.load_state_dict(state['optimizer'])

@@ -152,7 +152,7 @@ def run_single_experiment(optimizer_name: str, seed: int, lr: float, epochs: int
     start_epoch = 1
     if resume and ckpt_file.exists():
         try:
-            state = torch.load(ckpt_file, map_location=device)
+            state = torch.load(ckpt_file, map_location=device, weights_only=False)
             if 'model' in state:
                 model.load_state_dict(state['model'], strict=False)
             # Only resume optimizer if types match

@@ -187,7 +187,7 @@ def train_epoch(model, loader, optimizer, criterion, device):
         total += targets.size(0)
         correct += predicted.eq(targets).sum().item()
     
-    return total_loss / len(loader), 100.0 * correct / total
+    return total_loss / max(1, len(loader)), 100.0 * correct / max(1, total)
 
 
 def evaluate(model, loader, criterion, device):
@@ -208,7 +208,7 @@ def evaluate(model, loader, criterion, device):
             total += targets.size(0)
             correct += predicted.eq(targets).sum().item()
     
-    return total_loss / len(loader), 100.0 * correct / total
+    return total_loss / max(1, len(loader)), 100.0 * correct / max(1, total)
 
 
 def run_single_experiment(

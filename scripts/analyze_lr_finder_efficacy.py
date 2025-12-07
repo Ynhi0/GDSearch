@@ -70,7 +70,7 @@ def train_epoch(model, train_loader, optimizer, criterion, device):
         total += labels.size(0)
         correct += predicted.eq(labels).sum().item()
     
-    return total_loss / len(train_loader), 100. * correct / total
+    return total_loss / max(1, len(train_loader)), 100. * correct / max(1, total)
 
 
 def evaluate(model, test_loader, criterion, device):
@@ -93,7 +93,7 @@ def evaluate(model, test_loader, criterion, device):
             total += labels.size(0)
             correct += predicted.eq(labels).sum().item()
     
-    return total_loss / len(test_loader), 100. * correct / total
+    return total_loss / max(1, len(test_loader)), 100. * correct / max(1, total)
 
 
 def run_training(lr, epochs, device, seed=42):
