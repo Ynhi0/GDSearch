@@ -50,7 +50,6 @@ warnings.filterwarnings('ignore', message='.*register factory.*')
 from typing import Dict, List, Optional, Any
 import traceback
 from datetime import datetime
-import warnings
 warnings.filterwarnings('ignore')
 
 # Add src to path for integrated analysis modules
@@ -122,6 +121,23 @@ try:
 except ImportError as e:
     HAS_TRAINING_UTILS = False
     logging.debug(f"Training utilities not available: {e}")
+
+# Training Enhancements: LR Finder, Memory-Aware Batch Sizing, OOM Recovery, Time Budget, Hessian Analysis
+HAS_TRAINING_ENHANCEMENTS = False
+try:
+    from src.core.training_enhancements import (
+        LRFinder,
+        MemoryAwareBatchSizer,
+        SelfHealingTrainer,
+        DiskSpaceGuardian,
+        TimeBudgetManager,
+        HessianAnalyzer,
+        auto_tune_training_config
+    )
+    HAS_TRAINING_ENHANCEMENTS = True
+    logging.info("✓ Training enhancements loaded (LR Finder, Memory-Aware Sizing, Time Budget, Hessian)")
+except ImportError as e:
+    logging.debug(f"Training enhancements not available: {e}")
 
 try:
     from src.visualization.interactive_plots import (
@@ -333,17 +349,38 @@ class ExperimentTracker:
             mlflow.log_artifact(local_path, artifact_path)
 
 class RobustCheckpointManager:
-    """Robust checkpointing with backup and validation"""
+    """Robust checkpointing with backup, validation, and disk space awareness"""
 
-    def __init__(self, base_dir: str, max_backups: int = 3):
+    def __init__(self, base_dir: str, max_backups: int = 3, min_free_gb: float = 1.0):
         self.base_dir = Path(base_dir)
         self.max_backups = max_backups
+        self.min_free_gb = min_free_gb
         self.base_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Initialize disk space guardian if available
+        self._disk_guardian = None
+        if HAS_TRAINING_ENHANCEMENTS:
+            try:
+                from src.core.training_enhancements import DiskSpaceGuardian
+                self._disk_guardian = DiskSpaceGuardian(
+                    self.base_dir, 
+                    min_free_gb=min_free_gb, 
+                    max_checkpoints=max_backups * 3
+                )
+            except Exception as e:
+                logging.debug(f"DiskSpaceGuardian not available: {e}")
 
     def save_checkpoint(self, checkpoint_data: Dict, filename: str,
                         experiment_name: str) -> bool:
-        """Save checkpoint with backup and validation"""
+        """Save checkpoint with backup, validation, and disk space check"""
         ckpt_path = self.base_dir / filename
+        
+        # Check disk space before saving
+        if self._disk_guardian:
+            if not self._disk_guardian.can_save_checkpoint(estimated_size_mb=500):
+                logging.error(f"Insufficient disk space to save checkpoint {filename}")
+                return False
+        
         try:
             # Create backup if file exists
             if ckpt_path.exists():
@@ -589,6 +626,119 @@ def error_context(context: str, continue_on_error: bool = False):
             print(f"   ⚠️  Continuing with remaining experiments...")
 
 
+def oom_safe_train_step(model, optimizer, criterion, inputs, targets, device, 
+                        opt_name="", max_retries=3, min_batch_size=1):
+    """
+    OOM-safe training step with automatic batch size reduction.
+    
+    This wrapper catches CUDA OOM errors and automatically reduces batch size,
+    preventing experiment crashes and enabling graceful degradation on memory-
+    constrained systems (common on Kaggle T4 GPUs).
+    
+    Args:
+        model: PyTorch model
+        optimizer: Optimizer instance  
+        criterion: Loss function
+        inputs: Input tensor batch
+        targets: Target tensor batch
+        device: torch.device
+        opt_name: Optimizer name for SAM handling
+        max_retries: Maximum OOM recovery attempts
+        min_batch_size: Minimum batch size before giving up
+        
+    Returns:
+        Tuple of (loss_value, actual_batch_size, outputs)
+    """
+    current_inputs = inputs
+    current_targets = targets
+    retries = 0
+    
+    while retries < max_retries:
+        try:
+            current_inputs = current_inputs.to(device)
+            current_targets = current_targets.to(device)
+            
+            # Handle SAM optimizer (requires closure)
+            if 'SAM' in opt_name:
+                def closure():
+                    optimizer.zero_grad()
+                    outputs = model(current_inputs)
+                    loss = criterion(outputs, current_targets)
+                    loss.backward()
+                    return loss
+                loss = optimizer.step(closure)
+                outputs = model(current_inputs)
+                return loss.item(), current_inputs.size(0), outputs
+            else:
+                # Standard optimizer step
+                optimizer.zero_grad()
+                outputs = model(current_inputs)
+                loss = criterion(outputs, current_targets)
+                loss.backward()
+                
+                # Gradient clipping to prevent explosion
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                
+                optimizer.step()
+                
+                # Check for loss divergence
+                if torch.isnan(loss) or torch.isinf(loss):
+                    logging.warning(f"Loss divergence detected: {loss.item()}")
+                    return float('inf'), current_inputs.size(0), outputs
+                
+                return loss.item(), current_inputs.size(0), outputs
+                
+        except RuntimeError as e:
+            if 'out of memory' in str(e).lower():
+                retries += 1
+                torch.cuda.empty_cache()
+                
+                old_size = current_inputs.size(0)
+                new_size = max(min_batch_size, old_size // 2)
+                
+                if new_size < min_batch_size:
+                    logging.error(f"OOM: Cannot reduce batch below {min_batch_size}")
+                    raise
+                
+                logging.warning(f"⚠️  CUDA OOM! Reducing batch: {old_size}→{new_size} (retry {retries}/{max_retries})")
+                
+                # Slice the batch
+                current_inputs = inputs[:new_size]
+                current_targets = targets[:new_size]
+                
+                # Clear optimizer gradients
+                optimizer.zero_grad(set_to_none=True)
+            else:
+                raise
+    
+    logging.error(f"OOM recovery failed after {max_retries} retries")
+    raise RuntimeError(f"CUDA OOM after {max_retries} recovery attempts")
+
+
+def clear_gpu_memory():
+    """
+    Clear GPU memory between experiments to prevent fragmentation.
+    
+    This is important for long-running benchmark suites to prevent
+    cumulative memory issues and ensure consistent performance.
+    """
+    if torch.cuda.is_available():
+        # Synchronize all CUDA streams
+        torch.cuda.synchronize()
+        
+        # Empty the cache
+        torch.cuda.empty_cache()
+        
+        # Force garbage collection
+        import gc
+        gc.collect()
+        
+        # Log memory state (debug)
+        allocated = torch.cuda.memory_allocated() / 1024**2
+        reserved = torch.cuda.memory_reserved() / 1024**2
+        logging.debug(f"GPU memory: {allocated:.1f}MB allocated, {reserved:.1f}MB reserved")
+
+
 def check_system_requirements():
     """Perform comprehensive system requirements check"""
     print("🔍 Performing system requirements check...")
@@ -806,6 +956,74 @@ def load_experiment_config(config_path: str = None) -> Dict[str, Any]:
         return default_config
 
 
+def get_provenance_info() -> Dict[str, Any]:
+    """Get provenance information for reproducibility.
+    
+    Returns:
+        Dictionary with git commit, command line args, GPU info, and driver version.
+    """
+    import subprocess
+    
+    provenance = {
+        'timestamp': datetime.now().isoformat(),
+        'python_version': sys.version,
+        'pytorch_version': torch.__version__,
+        'command_line': ' '.join(sys.argv),
+        'working_dir': os.getcwd(),
+    }
+    
+    # Git commit hash
+    try:
+        git_hash = subprocess.run(
+            ['git', 'rev-parse', 'HEAD'],
+            capture_output=True, text=True, timeout=5
+        )
+        if git_hash.returncode == 0:
+            provenance['git_commit'] = git_hash.stdout.strip()
+        else:
+            provenance['git_commit'] = 'unknown'
+    except Exception:
+        provenance['git_commit'] = 'unknown'
+    
+    # Git dirty status
+    try:
+        git_status = subprocess.run(
+            ['git', 'status', '--porcelain'],
+            capture_output=True, text=True, timeout=5
+        )
+        if git_status.returncode == 0:
+            provenance['git_dirty'] = len(git_status.stdout.strip()) > 0
+    except Exception:
+        provenance['git_dirty'] = None
+    
+    # GPU information
+    if torch.cuda.is_available():
+        try:
+            provenance['gpu_name'] = torch.cuda.get_device_name(0)
+            provenance['gpu_count'] = torch.cuda.device_count()
+            props = torch.cuda.get_device_properties(0)
+            provenance['gpu_memory_gb'] = props.total_memory / (1024 ** 3)
+            provenance['cuda_version'] = torch.version.cuda
+        except Exception as e:
+            provenance['gpu_error'] = str(e)
+    else:
+        provenance['gpu_name'] = 'CPU'
+        provenance['gpu_count'] = 0
+    
+    # NVIDIA driver version
+    try:
+        nvidia_smi = subprocess.run(
+            ['nvidia-smi', '--query-gpu=driver_version', '--format=csv,noheader'],
+            capture_output=True, text=True, timeout=5
+        )
+        if nvidia_smi.returncode == 0:
+            provenance['nvidia_driver'] = nvidia_smi.stdout.strip()
+    except Exception:
+        provenance['nvidia_driver'] = 'unknown'
+    
+    return provenance
+
+
 def save_run_artifacts(base_results_dir: str, dataset: str, model_name: str, optimizer_name: str,
                        seed: int, history: List[Dict[str, Any]], params: Dict[str, Any],
                        device: Optional[torch.device] = None, tracker: Optional[ExperimentTracker] = None):
@@ -832,7 +1050,7 @@ def save_run_artifacts(base_results_dir: str, dataset: str, model_name: str, opt
 
         df_hist.to_csv(csv_path, index=False)
 
-        # Metadata
+        # Metadata with provenance
         meta = {
             'timestamp': datetime.now().isoformat(),
             'dataset': dataset,
@@ -841,7 +1059,8 @@ def save_run_artifacts(base_results_dir: str, dataset: str, model_name: str, opt
             'seed': seed,
             'rows': len(df_hist),
             'params': params,
-            'system': get_system_info()
+            'system': get_system_info(),
+            'provenance': get_provenance_info()
         }
 
         with open(meta_path, 'w') as f:
@@ -1400,6 +1619,9 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[1,2,3], quick=False
         resume: If True, skip experiments that already have result files
     """
     experiment_name = "MNIST_Benchmark"
+    
+    # Clear GPU memory before starting new experiment
+    clear_gpu_memory()
 
     # Enhanced error handling
     try:
@@ -1588,6 +1810,10 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[1,2,3], quick=False
                                             optimizer.load_state_dict(checkpoint['optimizer'])
                                         start_epoch = int(checkpoint.get('epoch', 0)) + 1
                                         history = checkpoint.get('history', [])
+                                        
+                                        # Restore RNG states for reproducibility
+                                        checkpoint_manager.restore_rng_states(checkpoint)
+                                        
                                         logging.info(f"Resuming {opt_name} from epoch {start_epoch}")
                                     except Exception as e:
                                         logging.warning(f"Failed to load optimizer state for {opt_name}: {e}. Starting fresh.")
@@ -1819,6 +2045,9 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[1,2,3], quick=F
     Args:
         resume: If True, skip experiments that already have result files
     """
+    # Clear GPU memory before starting new experiment
+    clear_gpu_memory()
+    
     logging.info("="*80)
     logging.info("🖼️  CIFAR-10 RESNET-18 EXPERIMENT")
     logging.info("="*80)
@@ -1947,6 +2176,10 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[1,2,3], quick=F
                         optimizer.load_state_dict(checkpoint['optimizer'])
                         start_epoch = int(checkpoint.get('epoch', 0)) + 1
                         history = checkpoint.get('history', [])
+                        
+                        # Restore RNG states for reproducibility
+                        checkpoint_manager.restore_rng_states(checkpoint)
+                        
                         logging.info(f"Resuming CIFAR-10 {opt_name} seed {seed} from epoch {start_epoch}")
                     except Exception as e:
                         logging.warning(f"Failed to load checkpoint: {e}. Starting fresh.")
@@ -2140,6 +2373,9 @@ def run_nlp_experiment(results_dir="results_nlp", seeds=[1,2,3], quick=False, sk
     Args:
         resume: If True, skip experiments that already have result files
     """
+    # Clear GPU memory before starting new experiment
+    clear_gpu_memory()
+    
     print("\n" + "="*80)
     print("📝 NLP SENTIMENT ANALYSIS EXPERIMENT")
     print("="*80)
@@ -2345,6 +2581,10 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
                             logging.warning(f"Could not load optimizer state: {e}")
                         start_epoch = int(checkpoint.get('epoch', 0)) + 1
                         history = checkpoint.get('history', [])
+                        
+                        # Restore RNG states for reproducibility
+                        checkpoint_manager.restore_rng_states(checkpoint)
+                        
                         logging.info(f"Resuming from epoch {start_epoch}")
                     else:
                         logging.warning(f"Incompatible optimizer in checkpoint, starting fresh")
@@ -2812,6 +3052,9 @@ def run_medical_experiment(results_dir="results_medical", seeds=[1,2,3], quick=F
     Args:
         resume: If True, skip experiments that already have result files
     """
+    # Clear GPU memory before starting new experiment
+    clear_gpu_memory()
+    
     logging.info("="*80)
     logging.info("🏥 MEDICAL IMAGE SEGMENTATION EXPERIMENT (U-Net)")
     logging.info("="*80)
@@ -2930,6 +3173,10 @@ def run_medical_experiment(results_dir="results_medical", seeds=[1,2,3], quick=F
                             logging.warning(f"Could not load optimizer state: {e}")
                         start_epoch = int(checkpoint.get('epoch', 0)) + 1
                         history = checkpoint.get('history', [])
+                        
+                        # Restore RNG states for reproducibility
+                        checkpoint_manager.restore_rng_states(checkpoint)
+                        
                         logging.info(f"Resuming from epoch {start_epoch}")
                     else:
                         logging.warning(f"Incompatible optimizer in checkpoint, starting fresh")
@@ -3943,112 +4190,9 @@ def generate_final_summary_report(results_dir, experiment_results):
     return str(report_path)
 
 
-def run_statistical_analysis_OLD(results_dir="results", plots_dir="plots"):
-    """Run statistical analysis combining all experiment results from per-run CSVs"""
-    print("\n" + "="*80)
-    print("📊 STATISTICAL ANALYSIS & COMPARISONS")
-    print("="*80)
+# NOTE: run_statistical_analysis_OLD was deleted as it was deprecated and never called.
+# Use run_statistical_analysis() for all statistical analysis needs.
 
-    try:
-        from scipy import stats
-        import numpy as np
-    except ImportError:
-        print("⚠️  scipy not available, skipping statistical tests")
-        return pd.DataFrame()
-
-    # Aggregate per-run MNIST CSV files
-    mnist_dir = Path(results_dir) / "mnist"
-    mnist_df = None
-    if mnist_dir.exists():
-        csv_files = list(mnist_dir.glob("MNIST_*.csv"))
-        if csv_files:
-            all_dfs = []
-            for csv_file in csv_files:
-                df = pd.read_csv(csv_file)
-                # Extract optimizer and seed from filename
-                # Pattern: MNIST_SimpleMLP_<optimizer>_seed<seed>.csv
-                parts = csv_file.stem.split('_')
-                if len(parts) >= 4 and parts[-1].startswith('seed'):
-                    seed = int(parts[-1].replace('seed', ''))
-                    optimizer = '_'.join(parts[2:-1])
-                    df['optimizer'] = optimizer
-                    df['seed'] = seed
-                    all_dfs.append(df)
-            if all_dfs:
-                mnist_df = pd.concat(all_dfs, ignore_index=True)
-    
-    if mnist_df is not None and len(mnist_df) > 0:
-        print(f"📥 Aggregated MNIST results: {len(mnist_df)} rows from {len(csv_files)} files")
-
-        # Get final epoch results per seed/optimizer for comparison
-        final_results = mnist_df.groupby(['optimizer', 'seed']).last().reset_index()
-        
-        # Perform statistical comparisons for MNIST
-        optimizers = final_results['optimizer'].unique()
-        comparisons = []
-
-        for i, opt1 in enumerate(optimizers):
-            for opt2 in optimizers[i+1:]:
-                opt1_data = final_results[final_results['optimizer'] == opt1]['test_acc']
-                opt2_data = final_results[final_results['optimizer'] == opt2]['test_acc']
-
-                if len(opt1_data) > 1 and len(opt2_data) > 1:
-                    # Use paired t-test if seeds match, otherwise independent
-                    opt1_seeds = set(final_results[final_results['optimizer'] == opt1]['seed'])
-                    opt2_seeds = set(final_results[final_results['optimizer'] == opt2]['seed'])
-                    
-                    if opt1_seeds == opt2_seeds and len(opt1_seeds) > 1:
-                        # Paired test - same seeds used
-                        opt1_sorted = final_results[final_results['optimizer'] == opt1].sort_values('seed')['test_acc']
-                        opt2_sorted = final_results[final_results['optimizer'] == opt2].sort_values('seed')['test_acc']
-                        t_stat, p_value = stats.ttest_rel(opt1_sorted, opt2_sorted)
-                        test_type = 'paired'
-                    else:
-                        # Independent test - different seeds
-                        t_stat, p_value = stats.ttest_ind(opt1_data, opt2_data)
-                        test_type = 'independent'
-
-                    # Effect size (Cohen's d)
-                    mean_diff = opt1_data.mean() - opt2_data.mean()
-                    pooled_std = np.sqrt((opt1_data.var() + opt2_data.var()) / 2)
-                    cohens_d = mean_diff / pooled_std if pooled_std > 0 else 0
-
-                    comparisons.append({
-                        'experiment': 'MNIST',
-                        'optimizer_1': opt1,
-                        'optimizer_2': opt2,
-                        'mean_1': opt1_data.mean(),
-                        'mean_2': opt2_data.mean(),
-                        'mean_diff': mean_diff,
-                        't_statistic': t_stat,
-                        'p_value': p_value,
-                        'cohens_d': cohens_d,
-                        'test_type': test_type,
-                        'n_samples': len(opt1_data),
-                        'significant': p_value < 0.05
-                    })
-
-        if comparisons:
-            stats_df = pd.DataFrame(comparisons)
-            os.makedirs(results_dir, exist_ok=True)
-            stats_df.to_csv(f"{results_dir}/statistical_comparisons.csv", index=False)
-            print(f"💾 Statistical comparisons saved to {results_dir}/statistical_comparisons.csv")
-
-            # Summary of significant differences
-            sig_comparisons = stats_df[stats_df['significant']]
-            if len(sig_comparisons) > 0:
-                print(f"\n🎯 Significant differences found: {len(sig_comparisons)}")
-                for _, row in sig_comparisons.iterrows():
-                    better = row['optimizer_1'] if row['mean_diff'] > 0 else row['optimizer_2']
-                    print(f"   {better} wins (d={row['cohens_d']:.2f}, p={row['p_value']:.4f})")
-            else:
-                print("\n📈 No significant differences detected (may need more samples)")
-
-            return stats_df
-
-    # If no MNIST data, create placeholder
-    print("⚠️  No experiment data found for statistical analysis")
-    return pd.DataFrame()
 
 # ==============================================================================
 # 2D TEST FUNCTIONS AND OPTIMIZATION
@@ -5757,6 +5901,18 @@ Examples:
                         help='Optimize for Kaggle T4 GPU (larger batches, mixed precision, optimized workers)')
     parser.add_argument('--resume', action='store_true',
                         help='Resume from partial results - skip already completed experiments (checks for existing CSV files)')
+    parser.add_argument('--auto-tune', action='store_true',
+                        help='Automatically find optimal learning rate and batch size before training')
+    parser.add_argument('--auto-lr', action='store_true',
+                        help='Use LR Finder to automatically determine optimal learning rate')
+    parser.add_argument('--adaptive-batch', action='store_true',
+                        help='Use Memory-Aware Batch Sizing to automatically determine batch size')
+    parser.add_argument('--verify-resume', action='store_true',
+                        help='Golden test: verify that Train(10) == Train(5)->Save->Load->Train(5)')
+    parser.add_argument('--time-budget', type=float, default=11.0,
+                        help='Maximum runtime in hours before graceful exit (default: 11.0 for Kaggle)')
+    parser.add_argument('--run-all-ablations', action='store_true',
+                        help='Run all ablation studies including batch_size, lr, wd, scheduler ablations')
     
     args = parser.parse_args()
     
@@ -5783,7 +5939,8 @@ Examples:
         ("Statistical Analysis", HAS_STATS, "scipy"),
         ("Interactive Plots", HAS_INTERACTIVE, "plotly, kaleido"),
         ("Loss Landscape", HAS_LANDSCAPE, "scipy"),
-        ("Convergence Analysis", HAS_CONVERGENCE, "scipy")
+        ("Convergence Analysis", HAS_CONVERGENCE, "scipy"),
+        ("Training Enhancements", HAS_TRAINING_ENHANCEMENTS, "src.core.training_enhancements")
     ]
     
     for name, available, deps in modules_status:
@@ -5831,6 +5988,48 @@ Examples:
         max_backups=3
     )
     
+    # Initialize TimeBudgetManager for Kaggle 12h timeout protection
+    # Uses 11h max with 10.5h warning to leave buffer for cleanup
+    time_budget = TimeBudgetManager(max_hours=11.0, warning_hours=10.5)
+    
+    def graceful_save():
+        """Save partial results on time budget exceeded."""
+        try:
+            partial_results_file = results_dir / "PARTIAL_RESULTS_TIME_EXCEEDED.json"
+            import json
+            with open(partial_results_file, 'w') as f:
+                summary = {
+                    'status': 'partial',
+                    'reason': 'time_budget_exceeded',
+                    'elapsed_hours': time_budget.elapsed_hours(),
+                    'completed_experiments': [k for k, v in experiment_results.items() if v is not None],
+                    'pending_experiments': [k for k in selected_experiments if k not in experiment_results]
+                }
+                json.dump(summary, f, indent=2)
+            print(f"   ✓ Partial results saved to {partial_results_file}")
+        except Exception as e:
+            print(f"   ✗ Could not save partial results: {e}")
+    
+    def graceful_report():
+        """Generate partial report on time budget exceeded."""
+        try:
+            report_file = results_dir / "reports" / "PARTIAL_REPORT.md"
+            report_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(report_file, 'w') as f:
+                f.write("# GDSearch Partial Run Report\n\n")
+                f.write(f"**Status**: Time budget exceeded after {time_budget.elapsed_hours():.2f} hours\n\n")
+                f.write("## Completed Experiments\n")
+                for exp, result in experiment_results.items():
+                    if result is not None:
+                        f.write(f"- ✅ {exp}\n")
+                f.write("\n## Pending Experiments (run with --resume)\n")
+                for exp in selected_experiments:
+                    if exp not in experiment_results or experiment_results.get(exp) is None:
+                        f.write(f"- ⏸️ {exp}\n")
+            print(f"   ✓ Partial report saved to {report_file}")
+        except Exception as e:
+            print(f"   ✗ Could not generate partial report: {e}")
+    
     print("="*80)
     print("🚀 GDSEARCH KAGGLE BENCHMARK SUITE")
     print("="*80)
@@ -5850,6 +6049,118 @@ Examples:
         print(f"\n🔄 Resume mode enabled - will skip completed experiments")
     print("="*80 + "\n")
     
+    # --verify-resume golden test: Train(10) == Train(5) → Save → Stop → Load → Train(5)
+    if args.verify_resume:
+        print("\n" + "="*80)
+        print("🔬 VERIFY-RESUME GOLDEN TEST")
+        print("="*80)
+        print("Testing: Train(10 steps) yields exact same weights as Train(5) → Save → Load → Train(5)")
+        
+        import copy
+        import tempfile
+        
+        # Create a simple test model
+        class TinyTestModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = torch.nn.Linear(10, 2)
+            def forward(self, x):
+                return self.fc(x)
+        
+        try:
+            # Fixed seed for reproducibility
+            torch.manual_seed(42)
+            np.random.seed(42)
+            
+            # Create model and optimizer for 10-step run
+            model_10 = TinyTestModel()
+            opt_10 = torch.optim.SGD(model_10.parameters(), lr=0.01)
+            
+            # Same initial weights for split run
+            torch.manual_seed(42)
+            np.random.seed(42)
+            model_split = TinyTestModel()
+            opt_split = torch.optim.SGD(model_split.parameters(), lr=0.01)
+            
+            # Fixed input data
+            torch.manual_seed(123)
+            x = torch.randn(4, 10)
+            y = torch.tensor([0, 1, 0, 1])
+            
+            # Run 10 steps continuously
+            for step in range(10):
+                opt_10.zero_grad()
+                out = model_10(x)
+                loss = torch.nn.functional.cross_entropy(out, y)
+                loss.backward()
+                opt_10.step()
+            
+            # Run 5 steps, save, reload, run 5 more
+            for step in range(5):
+                opt_split.zero_grad()
+                out = model_split(x)
+                loss = torch.nn.functional.cross_entropy(out, y)
+                loss.backward()
+                opt_split.step()
+            
+            # Save checkpoint
+            with tempfile.NamedTemporaryFile(suffix='.pt', delete=False) as f:
+                checkpoint_path = f.name
+            
+            torch.save({
+                'model_state_dict': model_split.state_dict(),
+                'optimizer_state_dict': opt_split.state_dict(),
+                'step': 5,
+                'rng_state': torch.get_rng_state(),
+            }, checkpoint_path)
+            
+            # Simulate restart: load checkpoint
+            checkpoint = torch.load(checkpoint_path)
+            model_resumed = TinyTestModel()
+            model_resumed.load_state_dict(checkpoint['model_state_dict'])
+            opt_resumed = torch.optim.SGD(model_resumed.parameters(), lr=0.01)
+            opt_resumed.load_state_dict(checkpoint['optimizer_state_dict'])
+            torch.set_rng_state(checkpoint['rng_state'])
+            
+            # Run remaining 5 steps
+            for step in range(5, 10):
+                opt_resumed.zero_grad()
+                out = model_resumed(x)
+                loss = torch.nn.functional.cross_entropy(out, y)
+                loss.backward()
+                opt_resumed.step()
+            
+            # Compare weights
+            weights_10 = {k: v.clone() for k, v in model_10.state_dict().items()}
+            weights_resumed = {k: v.clone() for k, v in model_resumed.state_dict().items()}
+            
+            all_match = True
+            for key in weights_10:
+                if not torch.allclose(weights_10[key], weights_resumed[key], atol=1e-6):
+                    print(f"   ❌ Mismatch in {key}:")
+                    print(f"      10-step: {weights_10[key]}")
+                    print(f"      resumed: {weights_resumed[key]}")
+                    all_match = False
+            
+            # Cleanup
+            os.unlink(checkpoint_path)
+            
+            if all_match:
+                print("   ✅ GOLDEN TEST PASSED: Resume produces identical weights!")
+                print("   Train(10) == Train(5) → Save → Load → Train(5)")
+            else:
+                print("   ❌ GOLDEN TEST FAILED: Resume produces different weights!")
+                print("   This indicates a bug in checkpoint save/restore logic.")
+                return None
+                
+        except Exception as e:
+            print(f"   ❌ GOLDEN TEST ERROR: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+        
+        print("="*80 + "\n")
+    
     # Execute selected experiments
     experiment_results = {}
     
@@ -5857,7 +6168,22 @@ Examples:
     experiments_dir = results_dir / "experiments"
     experiments_dir.mkdir(parents=True, exist_ok=True)
     
+    # Helper to check time budget before each experiment
+    def check_time_budget(experiment_name: str) -> bool:
+        """Check if we have time budget remaining. Returns False if we should stop."""
+        if time_budget.should_stop():
+            print(f"\n⏰ TIME BUDGET EXCEEDED before {experiment_name}")
+            print(f"   Elapsed: {time_budget.elapsed_hours():.2f}h / Max: {time_budget.max_hours}h")
+            time_budget.graceful_exit(graceful_save, graceful_report, 
+                                       f"Stopped before {experiment_name}")
+            return False
+        remaining = time_budget.remaining_hours()
+        print(f"   ⏱️  Time remaining: {remaining:.1f}h")
+        return True
+    
     if 'mnist' in selected_experiments:
+        if not check_time_budget('MNIST'):
+            return experiment_results
         with error_context("MNIST Experiment", continue_on_error=True):
             experiment_results['mnist'] = run_mnist_experiment(
                 results_dir=str(experiments_dir / "mnist"),
@@ -5871,6 +6197,8 @@ Examples:
             )
     
     if 'cifar10' in selected_experiments:
+        if not check_time_budget('CIFAR-10'):
+            return experiment_results
         with error_context("CIFAR-10 Experiment", continue_on_error=True):
             experiment_results['cifar10'] = run_cifar10_experiment(
                 results_dir=str(experiments_dir / "cifar10"),
@@ -5884,6 +6212,8 @@ Examples:
             )
     
     if 'nlp' in selected_experiments:
+        if not check_time_budget('NLP'):
+            return experiment_results
         with error_context("NLP Experiment", continue_on_error=True):
             if not HAS_HF:
                 print("⚠️  Hugging Face transformers not available - skipping NLP")
@@ -5900,6 +6230,8 @@ Examples:
                 )
     
     if 'medical' in selected_experiments:
+        if not check_time_budget('Medical'):
+            return experiment_results
         with error_context("Medical Experiment", continue_on_error=True):
             experiment_results['medical'] = run_medical_experiment(
                 results_dir=str(experiments_dir / "medical"),
@@ -5912,6 +6244,8 @@ Examples:
             )
     
     if '2d' in selected_experiments:
+        if not check_time_budget('2D Optimization'):
+            return experiment_results
         with error_context("2D Optimization Experiment", continue_on_error=True):
             experiment_results['2d'] = run_2d_experiments(
                 results_dir=str(experiments_dir / "2d_optimization"),
@@ -5920,6 +6254,8 @@ Examples:
             )
     
     if 'robustness' in selected_experiments:
+        if not check_time_budget('Robustness'):
+            return experiment_results
         with error_context("Robustness Experiment", continue_on_error=True):
             experiment_results['robustness'] = run_robustness_analysis(
                 results_dir=str(experiments_dir / "robustness"),

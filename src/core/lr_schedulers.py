@@ -29,7 +29,13 @@ class LRScheduler:
             last_epoch: The index of last epoch (-1 means just started)
         """
         self.optimizer = optimizer
-        self.base_lr = optimizer.lr
+        # Support both custom optimizers with .lr attribute and PyTorch optimizers
+        if hasattr(optimizer, 'lr'):
+            self.base_lr = optimizer.lr
+        elif hasattr(optimizer, 'param_groups'):
+            self.base_lr = optimizer.param_groups[0]['lr']
+        else:
+            raise ValueError("Optimizer must have either 'lr' attribute or 'param_groups'")
         self.last_epoch = last_epoch
         self.current_lr = self.base_lr
         
@@ -51,8 +57,12 @@ class LRScheduler:
         # Get new learning rate
         self.current_lr = self.get_lr()
         
-        # Update optimizer
-        self.optimizer.lr = self.current_lr
+        # Update optimizer - support both custom and PyTorch optimizers
+        if hasattr(self.optimizer, 'lr'):
+            self.optimizer.lr = self.current_lr
+        elif hasattr(self.optimizer, 'param_groups'):
+            for param_group in self.optimizer.param_groups:
+                param_group['lr'] = self.current_lr
         
     def state_dict(self) -> dict:
         """Return scheduler state as dictionary."""
@@ -272,8 +282,12 @@ class CosineAnnealingWarmRestarts(LRScheduler):
         # Get new learning rate
         self.current_lr = self.get_lr()
         
-        # Update optimizer
-        self.optimizer.lr = self.current_lr
+        # Update optimizer - support both custom and PyTorch optimizers
+        if hasattr(self.optimizer, 'lr'):
+            self.optimizer.lr = self.current_lr
+        elif hasattr(self.optimizer, 'param_groups'):
+            for param_group in self.optimizer.param_groups:
+                param_group['lr'] = self.current_lr
 
 
 class LinearWarmupScheduler(LRScheduler):
@@ -332,8 +346,12 @@ class LinearWarmupScheduler(LRScheduler):
         # Get new learning rate
         self.current_lr = self.get_lr()
         
-        # Update optimizer
-        self.optimizer.lr = self.current_lr
+        # Update optimizer - support both custom and PyTorch optimizers
+        if hasattr(self.optimizer, 'lr'):
+            self.optimizer.lr = self.current_lr
+        elif hasattr(self.optimizer, 'param_groups'):
+            for param_group in self.optimizer.param_groups:
+                param_group['lr'] = self.current_lr
 
 
 class PolynomialLR(LRScheduler):
