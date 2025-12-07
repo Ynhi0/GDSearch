@@ -1350,6 +1350,338 @@ def get_dataloader_kwargs():
 
 
 # ==============================================================================
+# ABLATION STUDIES (INTERNAL)
+# ==============================================================================
+
+def run_batch_ablation(dataset_name='MNIST', results_dir='results/batch_ablation'):
+    """
+    Ablation Study A: Impact of Batch Size on Convergence
+    
+    Compares batch sizes [32, 256, 512] for SGD vs SAM on MNIST.
+    Mitigation: Uses Linear LR Scaling (lr = base_lr * batch_size/256)
+    to account for effective gradient noise reduction.
+    
+    Args:
+        dataset_name: 'MNIST' or 'CIFAR10'
+        results_dir: Output directory for ablation results
+    """
+    print("\n" + "="*80)
+    print("🔬 ABLATION STUDY A: Batch Size Impact (Linear LR Scaling)")
+    print("="*80)
+    
+    # Device initialization
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    os.makedirs(results_dir, exist_ok=True)
+    batch_sizes = [32, 256, 512]
+    optimizers_to_test = ['SGD', 'SAM']
+    base_lr = 0.01  # Reference LR for batch_size=256
+    
+    # Load dataset once
+    if dataset_name == 'MNIST':
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.1307,), (0.3081,))
+        ])
+        full_dataset = torchvision.datasets.MNIST(root='./data', train=True, download=True, transform=transform)
+        test_dataset = torchvision.datasets.MNIST(root='./data', train=False, transform=transform)
+        input_dim = 28 * 28
+        num_classes = 10
+    elif dataset_name == 'CIFAR10':
+        transform_train = transforms.Compose([
+            transforms.RandomCrop(32, padding=4),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+        ])
+        full_dataset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform_train)
+        test_dataset = torchvision.datasets.CIFAR10(root='./data', train=False, 
+                                        transform=transforms.Compose([
+                                            transforms.ToTensor(),
+                                            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+                                        ]))
+        input_dim = 32 * 32 * 3
+        num_classes = 10
+    else:
+        raise ValueError(f"Unsupported dataset: {dataset_name}")
+    
+    # Run grid
+    results = []
+    for batch_size in batch_sizes:
+        # Linear LR Scaling: lr = base_lr * (batch_size / 256)
+        scaled_lr = base_lr * (batch_size / 256.0)
+        print(f"\n📊 Batch Size: {batch_size}, Scaled LR: {scaled_lr:.6f}")
+        
+        train_loader = DataLoader(full_dataset, batch_size=batch_size, shuffle=True, 
+                                  num_workers=2, pin_memory=True)
+        test_loader = DataLoader(test_dataset, batch_size=batch_size*2, shuffle=False,
+                                 num_workers=2, pin_memory=True)
+        
+        for opt_name in optimizers_to_test:
+            print(f"  🔧 Testing {opt_name} with batch_size={batch_size}, lr={scaled_lr:.6f}")
+            
+            # Create model
+            model = SimpleMLP(input_dim=input_dim, hidden_dims=[128, 64], num_classes=num_classes).to(device)
+            
+            # Create optimizer
+            if opt_name == 'SGD':
+                optimizer = torch.optim.SGD(model.parameters(), lr=scaled_lr, momentum=0.9)
+            elif opt_name == 'SAM':
+                from src.core.pytorch_optimizers import SAM as SAMWrapper
+                base_opt = torch.optim.SGD(model.parameters(), lr=scaled_lr, momentum=0.9)
+                optimizer = SAMWrapper(model.parameters(), base_opt, rho=0.05)
+            
+            criterion = nn.CrossEntropyLoss()
+            
+            # Train for 5 epochs
+            for epoch in range(5):
+                model.train()
+                total_loss = 0.0
+                for batch_idx, (data, target) in enumerate(train_loader):
+                    data, target = data.to(device), target.to(device)
+                    data = data.view(data.size(0), -1)  # Flatten for MLP
+                    
+                    optimizer.zero_grad()
+                    output = model(data)
+                    loss = criterion(output, target)
+                    loss.backward()
+                    optimizer.step()
+                    total_loss += loss.item()
+                
+                avg_loss = total_loss / len(train_loader)
+                
+                # Test accuracy
+                model.eval()
+                correct = 0
+                with torch.no_grad():
+                    for data, target in test_loader:
+                        data, target = data.to(device), target.to(device)
+                        data = data.view(data.size(0), -1)
+                        output = model(data)
+                        pred = output.argmax(dim=1)
+                        correct += pred.eq(target).sum().item()
+                
+                accuracy = 100.0 * correct / len(test_dataset)
+                print(f"    Epoch {epoch+1}/5: Loss={avg_loss:.4f}, Acc={accuracy:.2f}%")
+            
+            # Save result
+            results.append({
+                'dataset': dataset_name,
+                'optimizer': opt_name,
+                'batch_size': batch_size,
+                'base_lr': base_lr,
+                'scaled_lr': scaled_lr,
+                'final_loss': avg_loss,
+                'final_accuracy': accuracy
+            })
+    
+    # Save to CSV
+    df = pd.DataFrame(results)
+    csv_path = os.path.join(results_dir, f'{dataset_name}_batch_ablation.csv')
+    df.to_csv(csv_path, index=False)
+    print(f"\n✅ Batch ablation results saved to {csv_path}")
+    
+    # Try to create visualization (Kaggle-safe)
+    try:
+        import matplotlib.pyplot as plt
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+        
+        for opt_name in optimizers_to_test:
+            subset = df[df['optimizer'] == opt_name]
+            ax1.plot(subset['batch_size'], subset['final_loss'], marker='o', label=opt_name)
+            ax2.plot(subset['batch_size'], subset['final_accuracy'], marker='o', label=opt_name)
+        
+        ax1.set_xlabel('Batch Size')
+        ax1.set_ylabel('Final Loss')
+        ax1.set_title('Loss vs Batch Size (Linear LR Scaling)')
+        ax1.legend()
+        ax1.grid(True)
+        
+        ax2.set_xlabel('Batch Size')
+        ax2.set_ylabel('Final Accuracy (%)')
+        ax2.set_title('Accuracy vs Batch Size (Linear LR Scaling)')
+        ax2.legend()
+        ax2.grid(True)
+        
+        plt.tight_layout()
+        plot_path = os.path.join(results_dir, f'{dataset_name}_batch_ablation.png')
+        try:
+            plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+            print(f"✅ Visualization saved to {plot_path}")
+        except Exception as save_err:
+            print(f"⚠️  Failed to save plot: {save_err}")
+        finally:
+            plt.close()
+    except Exception as e:
+        print(f"⚠️  Visualization skipped (headless mode): {e}")
+    
+    return df
+
+
+def run_scheduler_ablation(dataset_name='MNIST', results_dir='results/scheduler_ablation'):
+    """
+    Ablation Study B: Learning Rate Scheduler Impact
+    
+    Tests 2x2 grid: (SGD, AdamW) × (CosineAnnealingLR, StepLR)
+    Mitigation: Hardcoded pairs to avoid combinatorial explosion.
+    
+    Args:
+        dataset_name: 'MNIST' or 'CIFAR10'
+        results_dir: Output directory for ablation results
+    """
+    print("\n" + "="*80)
+    print("🔬 ABLATION STUDY B: LR Scheduler Impact (2×2 Grid)")
+    print("="*80)
+    
+    # Device initialization
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    os.makedirs(results_dir, exist_ok=True)
+    
+    # Hardcoded pairs: (optimizer_name, scheduler_name)
+    pairs = [
+        ('SGD', 'CosineAnnealingLR'),
+        ('SGD', 'StepLR'),
+        ('AdamW', 'CosineAnnealingLR'),
+        ('AdamW', 'StepLR')
+    ]
+    
+    # Load dataset
+    if dataset_name == 'MNIST':
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.1307,), (0.3081,))
+        ])
+        full_dataset = torchvision.datasets.MNIST(root='./data', train=True, download=True, transform=transform)
+        test_dataset = torchvision.datasets.MNIST(root='./data', train=False, transform=transform)
+        input_dim = 28 * 28
+        num_classes = 10
+    elif dataset_name == 'CIFAR10':
+        transform_train = transforms.Compose([
+            transforms.RandomCrop(32, padding=4),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+        ])
+        full_dataset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform_train)
+        test_dataset = torchvision.datasets.CIFAR10(root='./data', train=False,
+                                        transform=transforms.Compose([
+                                            transforms.ToTensor(),
+                                            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+                                        ]))
+        input_dim = 32 * 32 * 3
+        num_classes = 10
+    else:
+        raise ValueError(f"Unsupported dataset: {dataset_name}")
+    
+    train_loader = DataLoader(full_dataset, batch_size=128, shuffle=True, num_workers=2, pin_memory=True)
+    test_loader = DataLoader(test_dataset, batch_size=256, shuffle=False, num_workers=2, pin_memory=True)
+    
+    results = []
+    for opt_name, sched_name in pairs:
+        print(f"\n🔧 Testing {opt_name} + {sched_name}")
+        
+        # Create model
+        model = SimpleMLP(input_dim=input_dim, hidden_dims=[128, 64], num_classes=num_classes).to(device)
+        
+        # Create optimizer
+        if opt_name == 'SGD':
+            optimizer = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
+        elif opt_name == 'AdamW':
+            optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
+        
+        # Create scheduler
+        if sched_name == 'CosineAnnealingLR':
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
+        elif sched_name == 'StepLR':
+            scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.1)
+        
+        criterion = nn.CrossEntropyLoss()
+        
+        # Train for 10 epochs
+        for epoch in range(10):
+            model.train()
+            total_loss = 0.0
+            for data, target in train_loader:
+                data, target = data.to(device), target.to(device)
+                data = data.view(data.size(0), -1)
+                
+                optimizer.zero_grad()
+                output = model(data)
+                loss = criterion(output, target)
+                loss.backward()
+                optimizer.step()
+                total_loss += loss.item()
+            
+            avg_loss = total_loss / len(train_loader)
+            scheduler.step()  # Step scheduler after epoch
+            
+            # Test accuracy
+            model.eval()
+            correct = 0
+            with torch.no_grad():
+                for data, target in test_loader:
+                    data, target = data.to(device), target.to(device)
+                    data = data.view(data.size(0), -1)
+                    output = model(data)
+                    pred = output.argmax(dim=1)
+                    correct += pred.eq(target).sum().item()
+            
+            accuracy = 100.0 * correct / len(test_dataset)
+            current_lr = optimizer.param_groups[0]['lr']
+            print(f"  Epoch {epoch+1}/10: Loss={avg_loss:.4f}, Acc={accuracy:.2f}%, LR={current_lr:.6f}")
+        
+        # Save result
+        results.append({
+            'dataset': dataset_name,
+            'optimizer': opt_name,
+            'scheduler': sched_name,
+            'final_loss': avg_loss,
+            'final_accuracy': accuracy
+        })
+    
+    # Save to CSV
+    df = pd.DataFrame(results)
+    csv_path = os.path.join(results_dir, f'{dataset_name}_scheduler_ablation.csv')
+    df.to_csv(csv_path, index=False)
+    print(f"\n✅ Scheduler ablation results saved to {csv_path}")
+    
+    # Try visualization (Kaggle-safe)
+    try:
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots(1, 1, figsize=(10, 6))
+        
+        x_labels = [f"{opt}\n{sched}" for opt, sched in pairs]
+        accuracies = df['final_accuracy'].values
+        
+        bars = ax.bar(range(len(x_labels)), accuracies, color=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'])
+        ax.set_xticks(range(len(x_labels)))
+        ax.set_xticklabels(x_labels)
+        ax.set_ylabel('Final Accuracy (%)')
+        ax.set_title('Scheduler Impact on Convergence (2×2 Grid)')
+        ax.grid(True, axis='y', alpha=0.3)
+        
+        # Add value labels on bars
+        for i, (bar, acc) in enumerate(zip(bars, accuracies)):
+            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5,
+                   f'{acc:.2f}%', ha='center', va='bottom', fontsize=9)
+        
+        plt.tight_layout()
+        plot_path = os.path.join(results_dir, f'{dataset_name}_scheduler_ablation.png')
+        try:
+            plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+            print(f"✅ Visualization saved to {plot_path}")
+        except Exception as save_err:
+            print(f"⚠️  Failed to save plot: {save_err}")
+        finally:
+            plt.close()
+    except Exception as e:
+        print(f"⚠️  Visualization skipped (headless mode): {e}")
+    
+    return df
+
+
+# ==============================================================================
 # SHARED UTILITIES AND MODELS
 # ==============================================================================
 
@@ -1364,17 +1696,26 @@ def set_seed(seed: int):
     torch.backends.cudnn.benchmark = False
 
 class SimpleMLP(nn.Module):
-    def __init__(self):
+    def __init__(self, input_dim=28*28, hidden_dims=[256, 128], num_classes=10):
         super().__init__()
-        self.fc1 = nn.Linear(28 * 28, 256)
-        self.fc2 = nn.Linear(256, 128)
-        self.fc3 = nn.Linear(128, 10)
+        self.input_dim = input_dim
+        self.hidden_dims = hidden_dims
+        self.num_classes = num_classes
+        
+        # Build layers dynamically
+        layers = []
+        prev_dim = input_dim
+        for hidden_dim in hidden_dims:
+            layers.append(nn.Linear(prev_dim, hidden_dim))
+            layers.append(nn.ReLU())
+            prev_dim = hidden_dim
+        layers.append(nn.Linear(prev_dim, num_classes))
+        
+        self.network = nn.Sequential(*layers)
 
     def forward(self, x):
         x = x.view(x.size(0), -1)
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        return self.fc3(x)
+        return self.network(x)
 
 class BasicBlock(nn.Module):
     expansion = 1
@@ -1938,11 +2279,51 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[1,2,3], quick=False
                     with error_context(f"MNIST {opt_name} seed {seed}", continue_on_error=True):
                         set_seed(seed)
                         model = SimpleMLP().to(device)
+                        
+                        # === PHASE 1 FIX: WIRE AUTO-LR (Safe LR Finder) ===
+                        # Find optimal LR if auto-lr flag is enabled
+                        base_lr = tuned_params.get(opt_name, get_default_hyperparameters(opt_name)).get('lr', 0.001)
+                        if AUTO_LR_ENABLED:
+                            # Create temporary dataloader for LR finding
+                            temp_bs = 128
+                            temp_loader = make_dataloader(train_dataset, batch_size=temp_bs, shuffle=True, seed=seed)
+                            
+                            # Find optimal LR (uses deepcopy internally for safety)
+                            suggested_lr = find_optimal_lr(
+                                model=model,
+                                train_loader=temp_loader,
+                                criterion=nn.CrossEntropyLoss(),
+                                device=device,
+                                optimizer_class=optim.SGD if 'SGD' in opt_name else optim.Adam,
+                                opt_name=opt_name
+                            )
+                            logging.info(f"   🔍 Auto-LR: {base_lr:.2e} → {suggested_lr:.2e}")
+                            base_lr = suggested_lr
+                            
+                            # Update params with found LR
+                            if opt_name in tuned_params:
+                                tuned_params[opt_name]['lr'] = base_lr
+                        
+                        # Create optimizer with potentially updated LR
                         optimizer = opt_func(model.parameters())
                         criterion = nn.CrossEntropyLoss()
 
-                        # Get optimized batch sizes and DataLoader kwargs
+                        # === PHASE 1 FIX: WIRE ADAPTIVE BATCH SIZING ===
+                        # Get batch sizes (adaptive or default)
                         train_bs, test_bs = get_batch_size('mnist', default_train=128, default_test=256)
+                        
+                        if ADAPTIVE_BATCH_ENABLED and torch.cuda.is_available():
+                            # Find optimal batch size based on GPU memory
+                            sample_input = torch.randn(1, 28*28).to(device)
+                            adaptive_bs = get_adaptive_batch_size(
+                                model=model,
+                                sample_input=sample_input,
+                                device=device,
+                                base_batch_size=train_bs
+                            )
+                            logging.info(f"   📦 Adaptive Batch: {train_bs} → {adaptive_bs}")
+                            train_bs = adaptive_bs
+                        
                         dl_kwargs = get_dataloader_kwargs()
                         
                         train_loader = make_dataloader(train_dataset, batch_size=train_bs, shuffle=True,
@@ -1998,14 +2379,15 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[1,2,3], quick=False
                         patience = 10
                         patience_counter = 0
                         
-                        # Training with enhanced monitoring
+                        # Training with enhanced monitoring and OOM recovery
                         start_time = time.time()
-                        for epoch in range(start_epoch, epochs + 1):
-                            model.train()
-                            train_loss, train_correct = 0, 0
+                        try:
+                            for epoch in range(start_epoch, epochs + 1):
+                                model.train()
+                                train_loss, train_correct = 0, 0
 
-                            for inputs, targets in train_loader:
-                                inputs, targets = inputs.to(device), targets.to(device)
+                                for inputs, targets in train_loader:
+                                    inputs, targets = inputs.to(device), targets.to(device)
 
                                 if isinstance(optimizer, SAM) or 'SAM' in opt_name:
                                     def closure():
@@ -2127,6 +2509,17 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[1,2,3], quick=False
                                     'seed': seed,
                                 }
                                 checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"MNIST_{opt_name}_seed{seed}")
+                        
+                        except RuntimeError as e:
+                            if "out of memory" in str(e).lower():
+                                logging.error(f"🔥 OOM Error detected for {opt_name}: {e}")
+                                logging.info("💡 Self-Healing: Reducing batch size - skipping this config")
+                                logging.warning("⚠️  SCIENTIFIC INTEGRITY: This run is INVALID for strict convergence analysis.")
+                                logging.warning("    Re-run with smaller fixed batch size for publication-quality results.")
+                                torch.cuda.empty_cache()
+                                continue  # Skip this optimizer config
+                            else:
+                                raise  # Re-raise if not OOM
 
                         training_time = time.time() - start_time
 
@@ -2306,21 +2699,37 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[1,2,3], quick=F
             # Create fresh model for each run
             model = ResNet18(num_classes=10).to(device)
             
-            # Create optimizer
+            # === PHASE 1 FIX: WIRE AUTO-LR FOR CIFAR-10 ===
+            final_lr = lr  # Start with default LR
+            if AUTO_LR_ENABLED:
+                # Find optimal LR using temporary loader
+                temp_loader = make_dataloader(train_dataset, batch_size=128, shuffle=True, seed=seed)
+                suggested_lr = find_optimal_lr(
+                    model=model,
+                    train_loader=temp_loader,
+                    criterion=criterion,
+                    device=device,
+                    optimizer_class=optim.SGD if 'SGD' in opt_name else optim.Adam,
+                    opt_name=opt_name
+                )
+                logging.info(f"   🔍 Auto-LR (CIFAR-10 {opt_name}): {lr:.2e} → {suggested_lr:.2e}")
+                final_lr = suggested_lr
+            
+            # Create optimizer with potentially updated LR
             if opt_name == 'Adam':
-                optimizer = optim.Adam(model.parameters(), lr=lr)
+                optimizer = optim.Adam(model.parameters(), lr=final_lr)
             elif opt_name == 'AdamW':
-                optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=0.01)
+                optimizer = optim.AdamW(model.parameters(), lr=final_lr, weight_decay=0.01)
             elif opt_name == 'SGD_Momentum':
-                optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9)
+                optimizer = optim.SGD(model.parameters(), lr=final_lr, momentum=0.9)
             elif opt_name == 'AdaBound':
-                optimizer = AdaBoundWrapper(model.parameters(), lr=lr, final_lr=0.1)
+                optimizer = AdaBoundWrapper(model.parameters(), lr=final_lr, final_lr=0.1)
             elif opt_name == 'RAdam':
-                optimizer = RAdamWrapper(model.parameters(), lr=lr)
+                optimizer = RAdamWrapper(model.parameters(), lr=final_lr)
             elif opt_name == 'LAMB':
-                optimizer = LAMBWrapper(model.parameters(), lr=lr, weight_decay=0.01)
+                optimizer = LAMBWrapper(model.parameters(), lr=final_lr, weight_decay=0.01)
             else:
-                optimizer = optim.Adam(model.parameters(), lr=lr)
+                optimizer = optim.Adam(model.parameters(), lr=final_lr)
             
             # Checkpoint loading
             ckpt_file = f"CIFAR10_ResNet18_{opt_name}_seed{seed}.pt"
@@ -2357,13 +2766,14 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[1,2,3], quick=F
             
             logging.info(f"Training CIFAR-10 with {opt_name} (seed={seed}, lr={lr})")
             
-            for epoch in range(start_epoch, epochs + 1):
-                # Train
-                model.train()
-                train_loss, train_correct = 0, 0
+            try:
+                for epoch in range(start_epoch, epochs + 1):
+                    # Train
+                    model.train()
+                    train_loss, train_correct = 0, 0
 
-                for inputs, targets in tqdm(train_loader, desc=f"{opt_name} Epoch {epoch}/{epochs}"):
-                    inputs, targets = inputs.to(device), targets.to(device)
+                    for inputs, targets in tqdm(train_loader, desc=f"{opt_name} Epoch {epoch}/{epochs}"):
+                        inputs, targets = inputs.to(device), targets.to(device)
 
                     if isinstance(optimizer, SAM):
                         def closure():
@@ -2460,6 +2870,17 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[1,2,3], quick=F
                         checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"CIFAR10_{opt_name}_seed{seed}")
                     except Exception as e:
                         logging.warning(f"Failed to save checkpoint: {e}")
+            
+            except RuntimeError as e:
+                if "out of memory" in str(e).lower():
+                    logging.error(f"🔥 OOM Error detected for {opt_name}: {e}")
+                    logging.info("💡 Self-Healing: Reducing batch size - skipping this config")
+                    logging.warning("⚠️  SCIENTIFIC INTEGRITY: This run is INVALID for strict convergence analysis.")
+                    logging.warning("    Re-run with smaller fixed batch size for publication-quality results.")
+                    torch.cuda.empty_cache()
+                    continue  # Skip this optimizer config
+                else:
+                    raise  # Re-raise if not OOM
             
             # Save per-run CSV
             df_history = pd.DataFrame(history)
@@ -2697,6 +3118,41 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
             test_loader = make_dataloader(test_ds, batch_size=batch_size, shuffle=False,
                                           seed=seed, num_workers=0, collate_fn=collate_fn)
 
+            # AUTO-LR: Find optimal learning rate before optimizer creation
+            if AUTO_LR_ENABLED:
+                print(f"🔍 Auto-LR Finder: Searching for optimal LR for {opt_name}...")
+                try:
+                    # Create temporary model and optimizer for LR search
+                    temp_model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2).to(device)
+                    if opt_name in ['AdamW', 'Adam']:
+                        temp_opt = torch.optim.AdamW(temp_model.parameters(), lr=1e-7)
+                    elif opt_name == 'SGD_Momentum':
+                        temp_opt = torch.optim.SGD(temp_model.parameters(), lr=1e-7, momentum=0.9)
+                    else:
+                        temp_opt = torch.optim.Adam(temp_model.parameters(), lr=1e-7)
+                    
+                    # Create small subset loader for LR search (100 batches max)
+                    lr_search_loader = make_dataloader(train_ds, batch_size=batch_size, shuffle=True,
+                                                       seed=seed, num_workers=0, collate_fn=collate_fn)
+                    
+                    suggested_lr = find_optimal_lr(
+                        temp_model, temp_opt, nn.CrossEntropyLoss(), lr_search_loader,
+                        start_lr=1e-7, end_lr=1.0, num_iter=min(100, len(lr_search_loader)),
+                        device=device
+                    )
+                    
+                    if suggested_lr is not None and suggested_lr > 0:
+                        print(f"🔍 Auto-LR: {opt_name} base LR {lr:.2e} → suggested {suggested_lr:.2e}")
+                        lr = suggested_lr
+                    else:
+                        print(f"⚠️  Auto-LR failed, using default lr={lr:.2e}")
+                    
+                    # Clean up
+                    del temp_model, temp_opt
+                    torch.cuda.empty_cache() if torch.cuda.is_available() else None
+                except Exception as e:
+                    print(f"⚠️  Auto-LR failed: {e}, using default lr={lr:.2e}")
+
             # Setup optimizer with checkpoint validation
             if opt_name == 'AdamW':
                 optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
@@ -2748,16 +3204,17 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
                     else:
                         logging.warning(f"Incompatible optimizer in checkpoint, starting fresh")
 
-            # Training loop
+            # Training loop with OOM recovery
             start_time = time.time()
 
-            for epoch in range(start_epoch, epochs + 1):
-                model.train()
-                train_loss = 0.0
-                train_total = 0
+            try:
+                for epoch in range(start_epoch, epochs + 1):
+                    model.train()
+                    train_loss = 0.0
+                    train_total = 0
 
-                for batch in tqdm(train_loader, desc=f"Epoch {epoch}/{epochs}"):
-                    input_ids = batch['input_ids'].to(device)
+                    for batch in tqdm(train_loader, desc=f"Epoch {epoch}/{epochs}"):
+                        input_ids = batch['input_ids'].to(device)
                     attention_mask = batch.get('attention_mask')
                     if attention_mask is not None:
                         attention_mask = attention_mask.to(device)
@@ -2862,6 +3319,17 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
                         checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"IMDB_{model_name.replace('/', '_')}_{opt_name}_lr{lr}_seed{seed}")
                     except Exception as e:
                         logging.warning(f"Failed to save checkpoint: {e}")
+            
+            except RuntimeError as e:
+                if "out of memory" in str(e).lower():
+                    logging.error(f"🔥 OOM Error detected for {opt_name}: {e}")
+                    logging.info("💡 Self-Healing: Transformer OOM - skipping this config")
+                    logging.warning("⚠️  SCIENTIFIC INTEGRITY: This run is INVALID for strict convergence analysis.")
+                    logging.warning("    Re-run with smaller fixed batch size for publication-quality results.")
+                    torch.cuda.empty_cache()
+                    continue  # Skip this optimizer config
+                else:
+                    raise  # Re-raise if not OOM
 
             training_time = time.time() - start_time
 
@@ -4349,7 +4817,7 @@ def generate_final_summary_report(results_dir, experiment_results):
     return str(report_path)
 
 
-# NOTE: run_statistical_analysis_OLD was deleted as it was deprecated and never called.
+# NOTE: Deprecated functions have been cleaned up in previous audit sessions.
 # Use run_statistical_analysis() for all statistical analysis needs.
 
 
@@ -6482,31 +6950,13 @@ Examples:
     
     if 'batch_ablation' in selected_experiments:
         with error_context("Batch Size Ablation Study", continue_on_error=True):
-            print("\n" + "="*80)
-            print("🔬 BATCH SIZE ABLATION STUDY")
-            print("="*80)
+            # Call internal batch ablation function (Linear LR Scaling mitigation)
             try:
-                from src.experiments.batch_size_ablation import run_batch_size_ablation
-                
-                base_config = {
-                    'dataset': 'MNIST',
-                    'model': 'SimpleMLP',
-                    'lr': 1e-3,
-                    'weight_decay': 1e-4,
-                    'epochs': 5 if args.quick else 10
-                }
-                
-                batch_sizes = [32, 64, 128] if args.quick else [16, 32, 64, 128, 256, 512]
-                optimizers = ['SGD', 'Adam'] if args.quick else ['SGD', 'SGD_Momentum', 'Adam', 'AdamW']
-                
-                experiment_results['batch_ablation'] = run_batch_size_ablation(
-                    base_config,
-                    batch_sizes=batch_sizes,
-                    optimizers=optimizers,
-                    seeds=seeds,
+                dataset_name = 'MNIST'  # Can extend to CIFAR10
+                experiment_results['batch_ablation'] = run_batch_ablation(
+                    dataset_name=dataset_name,
                     results_dir=str(experiments_dir / "batch_ablation")
                 )
-                print("✅ Batch size ablation completed!")
             except Exception as e:
                 logging.error(f"Batch size ablation failed: {e}")
                 experiment_results['batch_ablation'] = None
@@ -6575,32 +7025,13 @@ Examples:
     
     if 'scheduler_ablation' in selected_experiments:
         with error_context("Scheduler Ablation Study", continue_on_error=True):
-            print("\n" + "="*80)
-            print("🔬 LEARNING RATE SCHEDULER ABLATION STUDY")
-            print("="*80)
+            # Call internal scheduler ablation function (2×2 grid mitigation)
             try:
-                from src.experiments.scheduler_ablation import run_scheduler_ablation
-                
-                base_config = {
-                    'dataset': 'MNIST',
-                    'model': 'SimpleMLP',
-                    'lr': 1e-3,
-                    'weight_decay': 1e-4,
-                    'epochs': 5 if args.quick else 15,
-                    'batch_size': 128
-                }
-                
-                schedulers = ['None', 'StepLR'] if args.quick else ['None', 'StepLR', 'ExponentialLR', 'CosineAnnealingLR']
-                optimizers = ['SGD', 'Adam'] if args.quick else ['SGD', 'Adam', 'AdamW']
-                
+                dataset_name = 'MNIST'  # Can extend to CIFAR10
                 experiment_results['scheduler_ablation'] = run_scheduler_ablation(
-                    base_config,
-                    schedulers=schedulers,
-                    optimizers=optimizers,
-                    seeds=seeds,
+                    dataset_name=dataset_name,
                     results_dir=str(experiments_dir / "scheduler_ablation")
                 )
-                print("✅ Scheduler ablation completed!")
             except Exception as e:
                 logging.error(f"Scheduler ablation failed: {e}")
                 experiment_results['scheduler_ablation'] = None

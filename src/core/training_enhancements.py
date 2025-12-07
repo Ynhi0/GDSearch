@@ -530,6 +530,18 @@ class SelfHealingTrainer:
     - Clears GPU cache and retries
     - Logs recovery actions
     
+    ⚠️  SCIENTIFIC INTEGRITY WARNING:
+    When OOM recovery is triggered, this trainer DROPS data from the batch tail:
+        inputs[:new_size] is kept, inputs[new_size:] is DISCARDED
+    
+    This causes two integrity concerns:
+    1. DATA LOSS: The model sees less data than intended for that step
+    2. NOISE SPIKE: Sudden batch size halving (e.g., 128→64) doubles gradient variance
+    
+    RECOMMENDATION: Treat runs that triggered OOM recovery as INVALID for strict
+    convergence analysis. Use for exploratory runs only. For publication-quality
+    results, re-run with a smaller fixed batch size.
+    
     Usage:
         healer = SelfHealingTrainer(model, optimizer, criterion)
         for batch in loader:
