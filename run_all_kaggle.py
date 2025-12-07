@@ -42,6 +42,36 @@ import json
 import psutil
 from contextlib import contextmanager
 
+# =============================================================================
+# PUBLICATION-QUALITY PLOT SETTINGS
+# =============================================================================
+# Enforce DPI=300, Font Size=12, Seaborn Style for all plots
+plt.rcParams.update({
+    'figure.dpi': 300,
+    'savefig.dpi': 300,
+    'font.size': 12,
+    'axes.titlesize': 14,
+    'axes.labelsize': 12,
+    'xtick.labelsize': 10,
+    'ytick.labelsize': 10,
+    'legend.fontsize': 10,
+    'figure.titlesize': 16,
+    'figure.figsize': (10, 6),
+    'axes.grid': True,
+    'grid.alpha': 0.3,
+    'axes.spines.top': False,
+    'axes.spines.right': False,
+})
+
+# Try to use seaborn style if available
+try:
+    import seaborn as sns
+    sns.set_style("whitegrid")
+    sns.set_palette("husl")
+except ImportError:
+    # Fallback to matplotlib's built-in style
+    plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'ggplot')
+
 # Filter CUDA and XLA warnings
 warnings.filterwarnings('ignore', message='.*cuFFT.*')
 warnings.filterwarnings('ignore', message='.*cuDNN.*')
@@ -1144,6 +1174,126 @@ def make_dataloader(dataset, batch_size=64, shuffle=False, seed: Optional[int] =
             pass  # Skip if version parsing fails
 
     return DataLoader(dataset, **dl_kwargs)
+
+
+# =============================================================================
+# AUTO-LR AND ADAPTIVE-BATCH WIRING
+# =============================================================================
+
+def find_optimal_lr(model, train_loader, criterion, device, 
+                    optimizer_class=torch.optim.SGD, 
+                    start_lr=1e-7, end_lr=10, num_iter=100,
+                    opt_name="SGD"):
+    """
+    Find optimal learning rate using LRFinder.
+    
+    Uses the fast.ai style LR finder with safety wrappers:
+    - copy.deepcopy to preserve original model/optimizer state
+    - try/except for NaN/OOM recovery
+    - Falls back to default LR on failure
+    
+    Args:
+        model: PyTorch model (will NOT be modified)
+        train_loader: Training data loader
+        criterion: Loss function
+        device: torch.device
+        optimizer_class: Optimizer class to use
+        start_lr: Starting learning rate
+        end_lr: Ending learning rate  
+        num_iter: Number of iterations
+        opt_name: Optimizer name for logging
+        
+    Returns:
+        float: Suggested optimal learning rate
+    """
+    import copy
+    
+    # Default fallback LRs by optimizer type
+    default_lrs = {
+        'SGD': 0.01, 'SGD_Momentum': 0.01, 'Nesterov': 0.01,
+        'Adam': 0.001, 'AdamW': 0.001, 'AMSGrad': 0.001,
+        'RMSprop': 0.001, 'RAdam': 0.001, 'AdaBound': 0.001,
+        'LAMB': 0.001, 'SAM_SGD': 0.01, 'SAM_Adam': 0.001,
+        'Lookahead_SGD': 0.01, 'Lookahead_Adam': 0.001
+    }
+    default_lr = default_lrs.get(opt_name, 0.001)
+    
+    try:
+        # Snapshot model state with copy.deepcopy
+        model_copy = copy.deepcopy(model)
+        model_copy = model_copy.to(device)
+        
+        # Create temporary optimizer
+        temp_optimizer = optimizer_class(model_copy.parameters(), lr=start_lr)
+        
+        # Initialize LRFinder
+        lr_finder = LRFinder(model_copy, temp_optimizer, criterion, device)
+        
+        # Run LR range test
+        print(f"   🔍 Running LR Finder for {opt_name}...")
+        lr_finder.range_test(train_loader, start_lr=start_lr, end_lr=end_lr, 
+                            num_iter=num_iter, step_mode='exp')
+        
+        # Get suggested LR
+        suggested_lr = lr_finder.suggest_lr()
+        
+        if suggested_lr is None or np.isnan(suggested_lr) or suggested_lr <= 0:
+            print(f"   ⚠️  LR Finder returned invalid LR, using default: {default_lr}")
+            return default_lr
+            
+        print(f"   ✓ LR Finder suggests: {suggested_lr:.2e}")
+        
+        # Clean up
+        del model_copy, temp_optimizer, lr_finder
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            
+        return suggested_lr
+        
+    except Exception as e:
+        print(f"   ⚠️  LR Finder failed: {e}. Using default: {default_lr}")
+        return default_lr
+
+
+def get_adaptive_batch_size(model, sample_input, device, base_batch_size=128):
+    """
+    Get memory-aware batch size using MemoryAwareBatchSizer.
+    
+    Automatically detects GPU memory and returns optimal batch size.
+    Falls back to base_batch_size if detection fails.
+    
+    Args:
+        model: PyTorch model
+        sample_input: Sample input tensor for size estimation
+        device: torch.device
+        base_batch_size: Fallback batch size
+        
+    Returns:
+        int: Optimal batch size
+    """
+    if not torch.cuda.is_available():
+        return base_batch_size
+        
+    try:
+        sizer = MemoryAwareBatchSizer()
+        optimal_bs = sizer.suggest_batch_size(model, sample_input)
+        
+        if optimal_bs is None or optimal_bs < 4:
+            print(f"   ⚠️  Memory sizer returned invalid batch size, using: {base_batch_size}")
+            return base_batch_size
+            
+        print(f"   ✓ Adaptive batch size: {optimal_bs}")
+        return optimal_bs
+        
+    except Exception as e:
+        print(f"   ⚠️  Adaptive batch sizing failed: {e}. Using: {base_batch_size}")
+        return base_batch_size
+
+
+# Global flags for auto-tuning features (set from CLI args)
+AUTO_LR_ENABLED = False
+ADAPTIVE_BATCH_ENABLED = False
+
 
 # Global instances for enhanced functionality
 profiler = PerformanceProfiler()
@@ -5952,6 +6102,16 @@ Examples:
         print("\n💡 Note: Missing modules are optional. Core experiments will run successfully.")
         print("   For full functionality: pip install scipy plotly kaleido\n")
     
+    # Wire auto-tuning features to global flags
+    global AUTO_LR_ENABLED, ADAPTIVE_BATCH_ENABLED
+    AUTO_LR_ENABLED = args.auto_lr or args.auto_tune
+    ADAPTIVE_BATCH_ENABLED = args.adaptive_batch or args.auto_tune
+    
+    if AUTO_LR_ENABLED:
+        print("🔍 Auto-LR enabled: will use LR Finder before training")
+    if ADAPTIVE_BATCH_ENABLED:
+        print("📦 Adaptive batch sizing enabled: will auto-detect optimal batch size")
+    
     # Deterministic mode setup
     if args.deterministic:
         print("🔒 Forcing deterministic mode...")
@@ -6040,6 +6200,8 @@ Examples:
     print(f"  Resume mode: {args.resume}")
     print(f"  Deterministic: {args.deterministic}")
     print(f"  Kaggle T4 optimizations: {args.kaggle_t4}")
+    print(f"  Auto-LR (LR Finder): {'enabled' if AUTO_LR_ENABLED else 'disabled'}")
+    print(f"  Adaptive Batch Sizing: {'enabled' if ADAPTIVE_BATCH_ENABLED else 'disabled'}")
     print(f"  Experiments: {', '.join(selected_experiments)}")
     print(f"  Results dir: {results_dir}")
     print(f"  MLflow: {'disabled' if args.no_mlflow else 'enabled' if HAS_MLFLOW else 'unavailable'}")

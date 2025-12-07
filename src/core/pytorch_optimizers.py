@@ -665,3 +665,23 @@ if __name__ == '__main__':
     print("\n✓ New optimizer wrappers tested!")
     print("\n✓ All optimizer wrappers working!")
     test_sam_and_lookahead()
+
+
+# =============================================================================
+# PUBLIC API ALIASES
+# =============================================================================
+# Provide clean names for external imports
+SAM = SAMWrapper
+Lookahead = LookaheadWrapper
+AdaBound = AdaBoundWrapper
+RAdam = RAdamWrapper
+LAMB = LAMBWrapper
+
+# All available optimizer wrappers
+__all__ = [
+    'SGDWrapper', 'SGDMomentumWrapper', 'AdamWrapper', 'SGDNesterovWrapper',
+    'RMSPropWrapper', 'AdamWWrapper', 'SAMWrapper', 'LookaheadWrapper',
+    'AdaBoundWrapper', 'RAdamWrapper', 'LAMBWrapper',
+    # Aliases for convenience
+    'SAM', 'Lookahead', 'AdaBound', 'RAdam', 'LAMB'
+]
