@@ -1293,6 +1293,7 @@ def get_adaptive_batch_size(model, sample_input, device, base_batch_size=128):
 # Global flags for auto-tuning features (set from CLI args)
 AUTO_LR_ENABLED = False
 ADAPTIVE_BATCH_ENABLED = False
+ULTRA_QUICK_MODE = False  # Ultra-quick mode for CI/testing: 1-2 epochs, reduced optimizers
 
 
 # Global instances for enhanced functionality
@@ -1914,7 +1915,15 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[1,2,3], quick=False
             results_dir = Path(results_dir)
             results_dir.mkdir(parents=True, exist_ok=True)
 
-            epochs = 10 if quick else 20
+            # Ultra-quick mode: 2 epochs for CI testing
+            if ULTRA_QUICK_MODE:
+                epochs = 2
+            else:
+                epochs = 10 if quick else 20
+            
+            # In ultra-quick mode, only test a subset of optimizers
+            if ULTRA_QUICK_MODE:
+                optimizers_config = [cfg for cfg in optimizers_config if cfg[0] in ['SGD', 'Adam', 'SAM_SGD']][:3]
 
             for opt_name, opt_func in optimizers_config:
                 logging.info(f"Testing Optimizer: {opt_name}")
@@ -6031,6 +6040,8 @@ Examples:
     
     parser.add_argument('--quick', action='store_true',
                         help='Quick mode: fewer epochs, smaller datasets')
+    parser.add_argument('--ultra-quick', action='store_true',
+                        help='Ultra-quick mode for testing: minimal epochs (1-2), reduced optimizers')
     parser.add_argument('--skip-tuning', action='store_true', default=False,
                         help='Skip Optuna hyperparameter tuning (default: False - tuning enabled)')
     parser.add_argument('--seeds', type=str, default='42,123,456',
@@ -6103,9 +6114,16 @@ Examples:
         print("   For full functionality: pip install scipy plotly kaleido\n")
     
     # Wire auto-tuning features to global flags
-    global AUTO_LR_ENABLED, ADAPTIVE_BATCH_ENABLED
+    global AUTO_LR_ENABLED, ADAPTIVE_BATCH_ENABLED, ULTRA_QUICK_MODE
     AUTO_LR_ENABLED = args.auto_lr or args.auto_tune
     ADAPTIVE_BATCH_ENABLED = args.adaptive_batch or args.auto_tune
+    ULTRA_QUICK_MODE = args.ultra_quick
+    
+    # In ultra-quick mode, force quick=True and skip tuning
+    if ULTRA_QUICK_MODE:
+        args.quick = True
+        args.skip_tuning = True
+        print("⚡ Ultra-quick mode: 2 epochs, reduced optimizers, skip tuning")
     
     if AUTO_LR_ENABLED:
         print("🔍 Auto-LR enabled: will use LR Finder before training")
@@ -6196,6 +6214,7 @@ Examples:
     print(f"Configuration:")
     print(f"  Seeds: {seeds}")
     print(f"  Quick mode: {args.quick}")
+    print(f"  Ultra-quick mode: {args.ultra_quick}")
     print(f"  Skip tuning: {args.skip_tuning}")
     print(f"  Resume mode: {args.resume}")
     print(f"  Deterministic: {args.deterministic}")

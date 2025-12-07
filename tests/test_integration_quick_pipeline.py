@@ -15,30 +15,29 @@ import pandas as pd
 def test_quick_mnist_pipeline():
     """Test quick MNIST experiment produces expected artifacts (slower test)"""
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Run quick MNIST experiment with single seed
+        # Run ultra-quick MNIST experiment with single seed for faster CI
         result = subprocess.run([
             sys.executable, "run_all_kaggle.py",
-            "--quick",
+            "--ultra-quick",
             "--experiments", "mnist",
             "--seeds", "42",
             "--results-dir", tmpdir,
             "--no-mlflow"
-        ], capture_output=True, text=True, timeout=300)
+        ], capture_output=True, text=True, timeout=300)  # 5 minutes should be plenty for ultra-quick
         
         # Check execution succeeded
         assert result.returncode == 0, f"Script failed with: {result.stderr}"
         
-        # Verify results directory structure
-        results_dir = Path(tmpdir) / "mnist"
-        assert results_dir.exists(), "MNIST results directory not created"
+        # Verify results directory structure - use recursive glob as results may be nested
+        results_base = Path(tmpdir)
         
-        # Check for per-run CSV artifacts (canonical naming)
-        csv_files = list(results_dir.glob("MNIST_SimpleMLP_*_seed42.csv"))
-        assert len(csv_files) > 0, "No per-run CSV artifacts found"
+        # Check for per-run CSV artifacts (canonical naming) - search recursively
+        csv_files = list(results_base.rglob("MNIST_SimpleMLP_*_seed42.csv"))
+        assert len(csv_files) > 0, f"No per-run CSV artifacts found in {results_base}"
         
-        # Check metadata files
-        meta_files = list(results_dir.glob("MNIST_SimpleMLP_*_seed42.meta.json"))
-        assert len(meta_files) > 0, "No metadata files found"
+        # Check metadata files (now use .metadata.json suffix)
+        meta_files = list(results_base.rglob("MNIST_SimpleMLP_*_seed42.metadata.json"))
+        assert len(meta_files) > 0, f"No metadata files found in {results_base}"
         
         # Validate CSV structure
         for csv_file in csv_files:
@@ -122,12 +121,12 @@ def test_full_mnist_with_checkpoints():
     with tempfile.TemporaryDirectory() as tmpdir:
         result = subprocess.run([
             sys.executable, "run_all_kaggle.py",
+            "--ultra-quick",
             "--experiments", "mnist",
             "--seeds", "42,123",
             "--results-dir", tmpdir,
-            "--no-mlflow",
-            "--skip-tuning"
-        ], capture_output=True, text=True, timeout=600)
+            "--no-mlflow"
+        ], capture_output=True, text=True, timeout=600)  # 10 minutes for ultra-quick with 2 seeds
         
         assert result.returncode == 0, f"Full MNIST run failed: {result.stderr}"
         

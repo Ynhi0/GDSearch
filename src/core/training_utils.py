@@ -247,10 +247,10 @@ class AMPWrapper:
             Autocast context manager
         """
         if self.enabled:
-            return torch.cuda.amp.autocast(dtype=self.dtype)
+            return torch.amp.autocast('cuda', dtype=self.dtype)
         else:
             # Return no-op context manager
-            return torch.cuda.amp.autocast(enabled=False)
+            return torch.amp.autocast('cuda', enabled=False)
     
     def backward(self, loss: torch.Tensor, optimizer: torch.optim.Optimizer):
         """
