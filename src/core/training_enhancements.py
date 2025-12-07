@@ -404,7 +404,15 @@ class MemoryAwareBatchSizer:
         """
         tier = self._gpu_info.get('tier', 'low')
         hints = self.BATCH_SIZE_HINTS.get(tier, self.BATCH_SIZE_HINTS['low'])
-        return hints.get(experiment_type.lower(), 64)
+        batch_size = hints.get(experiment_type.lower(), 64)
+        
+        # PHASE 2.2 FIX: Log hardware-specific metadata
+        gpu_name = self._gpu_info.get('name', 'CPU')
+        memory_gb = self._gpu_info.get('memory_total_gb', 0)
+        logging.info(f"🔧 Adaptive Batch Size: {batch_size} "
+                    f"(GPU: {gpu_name}, VRAM: {memory_gb:.1f}GB, Tier: {tier})")
+        
+        return batch_size
     
     def find_optimal_batch_size(
         self,

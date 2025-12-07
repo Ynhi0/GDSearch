@@ -18,8 +18,8 @@
     }
   ],
   "final": {
-    "epochs": 20,
-    "capture_layer_grad_epochs": [1, 10, 20]
+    "epochs": 50,
+    "capture_layer_grad_epochs": [1, 10, 25, 50]
   },
   "convergence": {
     "grad_norm_threshold": 1e-6,

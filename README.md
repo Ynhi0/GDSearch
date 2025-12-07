@@ -14,7 +14,7 @@ A comprehensive Python framework for comparing gradient descent algorithms on 2D
 -  **Systematic Hyperparameter Tuning:** Two-stage pipeline (LR sweep → parameter sweep) + Optuna integration
 -  **Learning Rate Schedulers:** Constant, Step, MultiStep, Exponential, Cosine, Warmup, Polynomial, OneCycle (9 schedulers)
 -  **Convergence Detection:** Dual conditions (grad norm threshold OR loss delta)
--  **🎨 Automatic Visualization:** Every experiment generates both static (PNG) and interactive (HTML) plots immediately after completion
+-  **Automatic Visualization:** Every experiment generates both static (PNG) and interactive (HTML) plots immediately after completion
 -  **Advanced Analysis:**
   - Hessian eigenvalue tracking (λ_min, λ_max, condition number)
   - Loss landscape 1D/2D visualization

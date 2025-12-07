@@ -257,16 +257,22 @@ class PerformanceProfiler:
 
         gpu_memory_peak = None
         gpu_memory_end = None
+        gpu_memory_free = None
         if torch.cuda.is_available():
             gpu_memory_peak = torch.cuda.max_memory_allocated() / 1024 / 1024  # MB
             gpu_memory_end = torch.cuda.memory_allocated() / 1024 / 1024  # MB
+            # Get free VRAM (total - allocated)
+            gpu_props = torch.cuda.get_device_properties(0)
+            total_memory = gpu_props.total_memory / 1024 / 1024  # MB
+            gpu_memory_free = total_memory - gpu_memory_end
 
         metrics = {
             'duration_seconds': duration,
             'memory_delta_mb': memory_delta,
             'final_memory_mb': end_memory,
             'gpu_memory_peak_mb': gpu_memory_peak,
-            'gpu_memory_end_mb': gpu_memory_end
+            'gpu_memory_end_mb': gpu_memory_end,
+            'gpu_memory_free_mb': gpu_memory_free
         }
 
         self.metrics[experiment_name].update(metrics)
@@ -281,6 +287,8 @@ class PerformanceProfiler:
             logging.info(f"  Memory delta: {m.get('memory_delta_mb', 0):.1f}MB")
             if m.get('gpu_memory_peak_mb'):
                 logging.info(f"  GPU memory peak: {m.get('gpu_memory_peak_mb', 0):.1f}MB")
+            if m.get('gpu_memory_free_mb'):
+                logging.info(f"  GPU memory free: {m.get('gpu_memory_free_mb', 0):.1f}MB")
             if additional_metrics:
                 for k, v in additional_metrics.items():
                     logging.info(f"  {k}: {v}")
@@ -295,7 +303,8 @@ class PerformanceProfiler:
             summary[exp_name] = {
                 'duration_seconds': metrics.get('duration_seconds', 0),
                 'memory_delta_mb': metrics.get('memory_delta_mb', 0),
-                'gpu_memory_peak_mb': metrics.get('gpu_memory_peak_mb', 0)
+                'gpu_memory_peak_mb': metrics.get('gpu_memory_peak_mb', 0),
+                'gpu_memory_free_mb': metrics.get('gpu_memory_free_mb', 0)
             }
         return summary
 
@@ -313,6 +322,8 @@ class PerformanceProfiler:
             print(f"  Memory Delta: {metrics.get('memory_delta_mb', 0):.2f}MB")
             if 'gpu_memory_peak_mb' in metrics:
                 print(f"  GPU Memory Peak: {metrics.get('gpu_memory_peak_mb', 0):.2f}MB")
+            if 'gpu_memory_free_mb' in metrics:
+                print(f"  GPU Memory Free: {metrics.get('gpu_memory_free_mb', 0):.2f}MB")
             if additional_metrics := metrics.get('additional_metrics'):
                 for k, v in additional_metrics.items():
                     print(f"  {k}: {v}")
@@ -745,12 +756,18 @@ def oom_safe_train_step(model, optimizer, criterion, inputs, targets, device,
     raise RuntimeError(f"CUDA OOM after {max_retries} recovery attempts")
 
 
-def clear_gpu_memory():
+def clear_gpu_memory(force=False):
     """
-    Clear GPU memory between experiments to prevent fragmentation.
+    Clear GPU memory between experiments to prevent fragmentation and OOM.
     
-    This is important for long-running benchmark suites to prevent
-    cumulative memory issues and ensure consistent performance.
+    This is critical for long-running benchmark suites to:
+    - Prevent cumulative memory leaks
+    - Avoid fragmentation
+    - Ensure consistent performance
+    - Prevent OOM crashes
+    
+    Args:
+        force: If True, perform aggressive cleanup
     """
     if torch.cuda.is_available():
         # Synchronize all CUDA streams
@@ -763,10 +780,21 @@ def clear_gpu_memory():
         import gc
         gc.collect()
         
-        # Log memory state (debug)
+        if force:
+            # Aggressive cleanup: clear all caches
+            torch.cuda.empty_cache()
+            gc.collect()
+            torch.cuda.empty_cache()
+        
+        # Log memory state
         allocated = torch.cuda.memory_allocated() / 1024**2
         reserved = torch.cuda.memory_reserved() / 1024**2
-        logging.debug(f"GPU memory: {allocated:.1f}MB allocated, {reserved:.1f}MB reserved")
+        free = (torch.cuda.get_device_properties(0).total_memory / 1024**2) - allocated
+        logging.info(f"🧹 GPU memory cleaned: {allocated:.1f}MB used, {free:.1f}MB free")
+        
+        # Warn if memory is still high
+        if allocated > 1000:  # >1GB still allocated
+            logging.warning(f"⚠️  High GPU memory usage: {allocated:.1f}MB still allocated after cleanup")
 
 
 def check_system_requirements():
@@ -2104,7 +2132,7 @@ def get_default_hyperparameters(optimizer_name: str) -> Dict:
 # EXPERIMENT FUNCTIONS
 # ==============================================================================
 
-def run_mnist_experiment(results_dir="results_mnist", seeds=[1,2,3], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
+def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011,1213,1415,1617,1819,2021], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
     """Run MNIST benchmark with multiple optimizers - Enhanced with profiling and tracking
     
     Args:
@@ -2260,7 +2288,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[1,2,3], quick=False
             if ULTRA_QUICK_MODE:
                 epochs = 2
             else:
-                epochs = 10 if quick else 20
+                epochs = 20 if quick else 50
             
             # In ultra-quick mode, only test a subset of optimizers
             if ULTRA_QUICK_MODE:
@@ -2544,6 +2572,10 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[1,2,3], quick=False
                             'training_time': training_time,
                             'epochs_completed': len(history)
                         })
+                        
+                # Clean GPU memory between seeds to prevent accumulation and OOM
+                if torch.cuda.is_available():
+                    clear_gpu_memory()
 
             # End profiling and log performance
             if profiler:
@@ -2570,6 +2602,10 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[1,2,3], quick=False
             df = pd.DataFrame(results)
             results_file = f"{results_dir}/mnist_results.csv"
             df.to_csv(results_file, index=False)
+            
+            # Clean up GPU memory after experiment
+            logging.info("Cleaning up GPU memory after MNIST experiment...")
+            clear_gpu_memory(force=True)
 
             # Log results artifact
             if tracker:
@@ -2591,7 +2627,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[1,2,3], quick=False
         logging.error(f"Critical error during MNIST experiment: {e}")
         raise
 
-def run_cifar10_experiment(results_dir="results_cifar10", seeds=[1,2,3], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
+def run_cifar10_experiment(results_dir="results_cifar10", seeds=[42,123,456,789,1011,1213,1415,1617,1819,2021], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
     """Run CIFAR-10 ResNet-18 experiment
     
     Args:
@@ -2672,7 +2708,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[1,2,3], quick=F
     results_dir = Path(results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    epochs = 5 if quick else 20
+    epochs = 20 if quick else 50
     criterion = nn.CrossEntropyLoss()
     
     # Multi-optimizer configuration
@@ -2943,7 +2979,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[1,2,3], quick=F
     return df
 
 
-def run_nlp_experiment(results_dir="results_nlp", seeds=[1,2,3], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
+def run_nlp_experiment(results_dir="results_nlp", seeds=[42,123,456,789,1011,1213,1415,1617,1819,2021], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
     """Run full IMDB sentiment analysis with DistilBERT
     
     This function attempts to use HuggingFace DistilBERT for NLP experiments.
@@ -2953,6 +2989,9 @@ def run_nlp_experiment(results_dir="results_nlp", seeds=[1,2,3], quick=False, sk
     Args:
         resume: If True, skip experiments that already have result files
     """
+    # Clear GPU memory before starting new experiment
+    logging.info("🧹 Clearing GPU memory before NLP experiment...")
+    clear_gpu_memory(force=True)
     # Clear GPU memory before starting new experiment
     clear_gpu_memory()
     
@@ -3031,7 +3070,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
     lr_default = 1e-4  # For new optimizers
     train_size = 1000 if quick else (5000 if not torch.cuda.is_available() else 10000)  # Smaller for CPU
     test_size = 500 if quick else 2000
-    epochs = 3 if quick else 10  # Increased from 2/3 to 3/10 for proper transformer fine-tuning
+    epochs = 5 if quick else 15  # Increased for proper transformer fine-tuning
 
     results_dir = Path(results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -3375,7 +3414,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
     
     return df
 
-def run_nlp_experiment_simple(results_dir="results_nlp", seeds=[1,2,3], epochs=3):
+def run_nlp_experiment_simple(results_dir="results_nlp", seeds=[42,123,456,789,1011,1213,1415,1617,1819,2021], epochs=10):
     """Robust NLP experiment using local LSTM/RNN models with synthetic or IMDB data
     
     This function provides a complete NLP benchmark that works even when HuggingFace
@@ -3673,7 +3712,7 @@ class BiLSTMLayer(nn.Module):
         return torch.cat([h_n[0], h_n[1]], dim=1)  # [batch, hidden*2]
 
 
-def run_medical_experiment(results_dir="results_medical", seeds=[1,2,3], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
+def run_medical_experiment(results_dir="results_medical", seeds=[42,123,456,789,1011,1213,1415,1617,1819,2021], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
     """Run full medical image segmentation with U-Net
     
     Args:
@@ -6079,7 +6118,7 @@ def print_system_info():
         print(f"  {k}: {v}")
     print()
 
-def run_resnet_experiment(results_dir="results_resnet", seeds=[1,2,3], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
+def run_resnet_experiment(results_dir="results_resnet", seeds=[42,123,456,789,1011,1213,1415,1617,1819,2021], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
     """Run ResNet18 experiment with enhanced monitoring
     
     Args:
@@ -6161,7 +6200,7 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=[1,2,3], quick=Fal
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     criterion = nn.CrossEntropyLoss()
 
-    epochs = 10 if quick else 20
+    epochs = 20 if quick else 50
     results = []
 
     for epoch in range(epochs):
@@ -6264,7 +6303,7 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=[1,2,3], quick=Fal
     return df
 
 
-def run_highdim_experiment(results_dir="results_highdim", seeds=[1,2,3], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
+def run_highdim_experiment(results_dir="results_highdim", seeds=[42,123,456,789,1011,1213,1415,1617,1819,2021], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
     """Run high-dimensional optimization experiment
     
     Args:
@@ -6512,8 +6551,8 @@ Examples:
                         help='Ultra-quick mode for testing: minimal epochs (1-2), reduced optimizers')
     parser.add_argument('--skip-tuning', action='store_true', default=False,
                         help='Skip Optuna hyperparameter tuning (default: False - tuning enabled)')
-    parser.add_argument('--seeds', type=str, default='42,123,456',
-                        help='Comma-separated random seeds (default: 42,123,456)')
+    parser.add_argument('--seeds', type=str, default='42,123,456,789,1011,1213,1415,1617,1819,2021',
+                        help='Comma-separated random seeds (default: 10 seeds for statistical rigor)')
     parser.add_argument('--experiments', type=str, default='all',
                         help='Comma-separated experiment names (mnist,cifar10,nlp,medical,2d,robustness,sam,ablation,advanced_ablation,init_ablation,batch_ablation,lr_ablation,wd_ablation,scheduler_ablation,optimizer_comparison,resnet,highdim,hyperparam_sensitivity,convergence_validation,ablation_comprehensive,2d_visualization,dynamics_overhead,theory_practice,cross_optimizer_dynamics) or "all"')
     parser.add_argument('--results-dir', type=str, default='results',
