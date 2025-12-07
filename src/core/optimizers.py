@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Module định nghĩa các thuật toán tối ưu hóa (optimizers).
 """

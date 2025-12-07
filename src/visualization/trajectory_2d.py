@@ -1,13 +1,13 @@
+# -*- coding: utf-8 -*-
 """
 2D Trajectory Visualization for Optimizer Dynamics
 
 Creates publication-quality visualizations of optimizer trajectories on 2D test functions.
-Addresses research proposal requirement: "trực quan hóa chi tiết dữ liệu động học 
+Addresses research proposal requirement: "trực quan hóa chi tiết dữ liệu động học
 (ví dụ: quỹ đạo 2D, đồ thị loss/gradient norm theo iteration)"
 
 Focus: Visual comparison of dynamics differences between optimizers.
 """
-
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches

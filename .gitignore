@@ -36,8 +36,8 @@ data/
 checkpoints/
 
 # Results and outputs
-results/*.csv
-plots/*.png
+results/
+plots/
 !plots/lr_schedulers*.png
 
 # OS
@@ -55,6 +55,16 @@ htmlcov/
 # Other
 .env
 *.bak
+*.tmp
 
 # Ignore local AI assistant guidance file
 .github/copilot-instructions.md
+
+# MLflow
+mlruns/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
