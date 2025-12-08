@@ -1,18 +1,16 @@
 # -*- coding: utf-8 -*-
-"""
-2D Trajectory Visualization for Optimizer Dynamics
+""" 2D Trajectory Visualization for Optimizer Dynamics
 
 Creates publication-quality visualizations of optimizer trajectories on 2D test functions.
-Addresses research proposal requirement: "trực quan hóa chi tiết dữ liệu động học
-(ví dụ: quỹ đạo 2D, đồ thị loss/gradient norm theo iteration)"
+Addresses research proposal requirement: "detailed visualization of kinetic data
+(example: 2D trajectory, loss/gradient norm plots over iterations)"
 
 Focus: Visual comparison of dynamics differences between optimizers.
 """
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 from pathlib import Path
-from typing import Dict, List, Tuple, Callable
+from typing import List, Tuple, Callable
 import logging
 
 try:
@@ -102,14 +100,14 @@ def plot_contour_with_trajectories(
             Z[i, j] = func(X[i, j], Y[i, j])
     
     # Create figure
-    fig, ax = plt.subplots(figsize=(10, 8))
+    _, ax = plt.subplots(figsize=(10, 8))
     
     # Plot contours
     contour = ax.contour(X, Y, Z, levels=num_contours, cmap='gray', alpha=0.4, linewidths=0.5)
     ax.clabel(contour, inline=True, fontsize=8, fmt='%.1f')
     
     # Plot filled contours for better visualization
-    contourf = ax.contourf(X, Y, Z, levels=num_contours, cmap='viridis', alpha=0.3)
+    _ = ax.contourf(X, Y, Z, levels=num_contours, cmap='viridis', alpha=0.3)
     
     # Colors for different optimizers
     colors = ['red', 'blue', 'green', 'orange', 'purple', 'brown']
@@ -152,14 +150,16 @@ def plot_contour_with_trajectories(
     plt.savefig(output_path, dpi=150, bbox_inches='tight')
     plt.close()
     
-    logging.info(f"Saved trajectory plot: {output_path}")
+    logging.info("Saved trajectory plot: %s", output_path)
 
 
 def compare_momentum_beta_trajectories(
     test_function: str = 'rosenbrock',
-    beta_values: List[float] = [0.0, 0.5, 0.9, 0.99],
+    beta_values: List[float] = None,
     output_dir: str = 'results/trajectory_visualization'
 ):
+    if beta_values is None:
+        beta_values = [0.0, 0.5, 0.9, 0.99]
     """
     Visualize effect of momentum β on trajectories.
     
@@ -210,9 +210,11 @@ def compare_momentum_beta_trajectories(
 
 def compare_adam_beta_trajectories(
     test_function: str = 'rosenbrock',
-    beta_configs: List[Tuple[float, float]] = [(0.9, 0.999), (0.5, 0.99), (0.95, 0.9999)],
+    beta_configs: List[Tuple[float, float]] = None,
     output_dir: str = 'results/trajectory_visualization'
 ):
+    if beta_configs is None:
+        beta_configs = [(0.9, 0.999), (0.5, 0.99), (0.95, 0.9999)]
     """
     Visualize effect of Adam β1, β2 on trajectories.
     
@@ -324,7 +326,7 @@ if __name__ == '__main__':
     compare_optimizer_families('saddle', output_dir=output_dir)
     compare_optimizer_families('ill_conditioned', output_dir=output_dir)
     
-    print(f"\n✅ All visualizations saved to {output_dir}/")
+    print(f"\nAll visualizations saved to {output_dir}/")
     print("\nGenerated plots show:")
     print("  - Trajectory smoothness differences")
     print("  - Effect of hyperparameters (β, β1, β2)")

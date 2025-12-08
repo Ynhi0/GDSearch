@@ -1,48 +1,48 @@
 """
-Module định nghĩa các hàm kiểm tra (test functions) để đánh giá thuật toán tối ưu hóa.
+Module defining test functions for evaluating optimization algorithms.
 """
 
 import numpy as np
 
 
 class TestFunction:
-    """Lớp cơ sở cho các hàm kiểm tra 2D."""
+    """Base class for 2D test functions."""
 
     def __init__(self):
         pass
 
     def compute(self, x, y):
-        """Tính giá trị hàm tại điểm (x, y)."""
-        raise NotImplementedError("Phương thức compute phải được triển khai trong lớp con")
+        """Compute function value at point (x, y)."""
+        raise NotImplementedError("The compute method must be implemented in subclass")
 
     def gradient(self, x, y):
-        """Tính gradient của hàm tại điểm (x, y). Trả về (grad_x, grad_y)."""
-        raise NotImplementedError("Phương thức gradient phải được triển khai trong lớp con")
+        """Compute gradient of function at point (x, y). Returns (grad_x, grad_y)."""
+        raise NotImplementedError("The gradient method must be implemented in subclass")
 
     def hessian(self, x, y):
-        """Tính ma trận Hessian 2x2 tại điểm (x, y)."""
-        raise NotImplementedError("Phương thức hessian phải được triển khai trong lớp con")
+        """Compute 2x2 Hessian matrix at point (x, y)."""
+        raise NotImplementedError("The hessian method must be implemented in subclass")
 
     def get_bounds(self):
-        """Trả về giới hạn vẽ đồ thị dạng ((x_min, x_max), (y_min, y_max))."""
-        raise NotImplementedError("Phương thức get_bounds phải được triển khai trong lớp con")
+        """Return plotting bounds as ((x_min, x_max), (y_min, y_max))."""
+        raise NotImplementedError("The get_bounds method must be implemented in subclass")
 
 
 class Rosenbrock(TestFunction):
     """
-    Hàm Rosenbrock: f(x,y) = (a - x)^2 + b(y - x^2)^2
+    Rosenbrock function: f(x,y) = (a - x)^2 + b(y - x^2)^2
     
-    Đây là một hàm kiểm tra cổ điển với một thung lũng hẹp.
-    Điểm cực tiểu toàn cục tại (a, a^2) với giá trị 0.
+    This is a classic test function with a narrow valley.
+    Global minimum at (a, a^2) with value 0.
     """
     
     def __init__(self, a=1, b=100):
         """
-        Khởi tạo hàm Rosenbrock.
+        Initialize Rosenbrock function.
         
         Args:
-            a: Tham số a (mặc định: 1)
-            b: Tham số b (mặc định: 100)
+            a: Parameter a (default: 1)
+            b: Parameter b (default: 100)
         """
         super().__init__()
         self.a = a
@@ -50,12 +50,12 @@ class Rosenbrock(TestFunction):
         self.name = f"Rosenbrock(a={a}, b={b})"
     
     def compute(self, x, y):
-        """Tính giá trị hàm Rosenbrock."""
+        """Compute value of Rosenbrock function."""
         return (self.a - x)**2 + self.b * (y - x**2)**2
     
     def gradient(self, x, y):
         """
-        Tính gradient giải tích của hàm Rosenbrock.
+        Compute analytical gradient of Rosenbrock function.
         
         df/dx = -2(a - x) - 4bx(y - x^2)
         df/dy = 2b(y - x^2)
@@ -66,7 +66,7 @@ class Rosenbrock(TestFunction):
     
     def hessian(self, x, y):
         """
-        Tính ma trận Hessian của hàm Rosenbrock.
+        Compute Hessian matrix of Rosenbrock function.
         
         d²f/dx² = 2 - 4b(y - 3x^2)
         d²f/dxdy = -4bx
@@ -78,36 +78,36 @@ class Rosenbrock(TestFunction):
         return np.array([[h_xx, h_xy], [h_xy, h_yy]])
     
     def get_bounds(self):
-        """Trả về giới hạn vẽ đồ thị cho hàm Rosenbrock."""
+        """Return plotting bounds for Rosenbrock function."""
         return (-2, 2), (-1, 3)
 
 
 class IllConditionedQuadratic(TestFunction):
     """
-    Hàm Quadratic có điều kiện xấu: f(x,y) = 0.5 * (kappa * x^2 + y^2)
+    Ill-conditioned Quadratic function: f(x,y) = 0.5 * (kappa * x^2 + y^2)
     
-    Đây là một hàm bậc hai đơn giản với số điều kiện (condition number) được kiểm soát.
-    Điểm cực tiểu toàn cục tại (0, 0) với giá trị 0.
+    This is a simple quadratic function with controlled condition number.
+    Global minimum at (0, 0) with value 0.
     """
     
     def __init__(self, kappa=100):
         """
-        Khởi tạo hàm Quadratic có điều kiện xấu.
+        Initialize Ill-conditioned Quadratic function.
         
         Args:
-            kappa: Số điều kiện (condition number) - tỷ lệ giữa các trục (mặc định: 100)
+            kappa: Condition number - ratio between axes (default: 100)
         """
         super().__init__()
         self.kappa = kappa
         self.name = f"IllConditionedQuadratic(kappa={kappa})"
     
     def compute(self, x, y):
-        """Tính giá trị hàm Quadratic có điều kiện xấu."""
+        """Compute value of ill-conditioned quadratic function."""
         return 0.5 * (self.kappa * x**2 + y**2)
     
     def gradient(self, x, y):
         """
-        Tính gradient của hàm Quadratic có điều kiện xấu.
+        Compute gradient of ill-conditioned quadratic function.
         
         df/dx = kappa * x
         df/dy = y
@@ -118,38 +118,38 @@ class IllConditionedQuadratic(TestFunction):
     
     def hessian(self, x, y):
         """
-        Tính ma trận Hessian của hàm Quadratic có điều kiện xấu.
+        Compute Hessian matrix of ill-conditioned quadratic function.
         
-        Hessian là ma trận đường chéo với các phần tử [kappa, 1].
+        Hessian is diagonal matrix with elements [kappa, 1].
         """
         return np.array([[self.kappa, 0], [0, 1]])
     
     def get_bounds(self):
-        """Trả về giới hạn vẽ đồ thị cho hàm Quadratic có điều kiện xấu."""
+        """Return plotting bounds for ill-conditioned quadratic function."""
         scale = max(1, np.sqrt(self.kappa) / 10)
         return (-scale, scale), (-scale * np.sqrt(self.kappa), scale * np.sqrt(self.kappa))
 
 
 class SaddlePoint(TestFunction):
     """
-    Hàm Saddle Point: f(x,y) = 0.5 * (x^2 - y^2)
+    Saddle Point function: f(x,y) = 0.5 * (x^2 - y^2)
     
-    Đây là một hàm có điểm yên ngựa (saddle point) tại gốc tọa độ.
-    Không có cực tiểu toàn cục (hàm không bị chặn dưới).
+    This function has a saddle point at the origin.
+    No global minimum (function is unbounded below).
     """
     
     def __init__(self):
-        """Khởi tạo hàm Saddle Point."""
+        """Initialize Saddle Point function."""
         super().__init__()
         self.name = "SaddlePoint"
     
     def compute(self, x, y):
-        """Tính giá trị hàm Saddle Point."""
+        """Compute value of Saddle Point function."""
         return 0.5 * (x**2 - y**2)
     
     def gradient(self, x, y):
         """
-        Tính gradient của hàm Saddle Point.
+        Compute gradient of Saddle Point function.
         
         df/dx = x
         df/dy = -y
@@ -160,24 +160,24 @@ class SaddlePoint(TestFunction):
     
     def hessian(self, x, y):
         """
-        Tính ma trận Hessian của hàm Saddle Point.
+        Compute Hessian matrix of Saddle Point function.
         
-        Hessian là ma trận đường chéo với các phần tử [1, -1].
+        Hessian is diagonal matrix with elements [1, -1].
         """
         return np.array([[1, 0], [0, -1]])
     
     def get_bounds(self):
-        """Trả về giới hạn vẽ đồ thị cho hàm Saddle Point."""
+        """Return plotting bounds for Saddle Point function."""
         return (-2, 2), (-2, 2)
 
 
 class Ackley2D(TestFunction):
     """
-    Hàm Ackley (2D):
+    Ackley function (2D):
         f(x, y) = -a * exp(-b * sqrt(0.5 * (x^2 + y^2)))
                   - exp(0.5 * (cos(c x) + cos(c y))) + a + e
 
-    Mặc định: a=20, b=0.2, c=2π. Cực tiểu toàn cục tại (0,0) với f=0.
+    Default: a=20, b=0.2, c=2π. Global minimum at (0,0) with f=0.
     """
 
     def __init__(self, a=20.0, b=0.2, c=2 * np.pi):

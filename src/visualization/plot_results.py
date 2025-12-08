@@ -1,5 +1,5 @@
 """
-Script để vẽ và trực quan hóa kết quả thí nghiệm.
+Script to plot and visualize experiment results.
 """
 
 import os
@@ -153,56 +153,56 @@ def plot_layer_grad_norms(nn_df: pd.DataFrame, epochs: Optional[list] = None, ti
 
 def plot_trajectory(df, test_function, title, save_path=None):
     """
-    Vẽ quỹ đạo tối ưu hóa trên đường đồng mức 2D của hàm kiểm tra.
+    Plot optimization trajectory on 2D contour of test function.
     
     Args:
-        df: DataFrame chứa lịch sử tối ưu hóa (với cột 'x', 'y')
-        test_function: Đối tượng hàm kiểm tra (để tính giá trị hàm)
-        title: Tiêu đề cho biểu đồ
-        save_path: Đường dẫn để lưu hình (nếu None thì chỉ hiển thị)
+        df: DataFrame containing optimization history (with columns 'x', 'y')
+        test_function: Test function object (to compute function values)
+        title: Title for the plot
+        save_path: Path to save figure (if None then only display)
     """
-    # Lấy giới hạn vẽ đồ thị từ hàm kiểm tra
+    # Get plot limits from test function
     (x_min, x_max), (y_min, y_max) = test_function.get_bounds()
     
-    # Tạo lưới điểm
+    # Create grid of points
     x_grid = np.linspace(x_min, x_max, 200)
     y_grid = np.linspace(y_min, y_max, 200)
     X, Y = np.meshgrid(x_grid, y_grid)
     
-    # Tính giá trị hàm trên lưới
+    # Compute function values on grid
     Z = np.zeros_like(X)
     for i in range(X.shape[0]):
         for j in range(X.shape[1]):
             Z[i, j] = test_function.compute(X[i, j], Y[i, j])
     
-    # Tạo figure
+    # Create figure
     fig, ax = plt.subplots(figsize=(10, 8))
     
-    # Vẽ đường đồng mức với thang log
+    # Draw contour lines with log scale
     levels = np.logspace(np.log10(Z.min() + 1e-10), np.log10(Z.max() + 1), 30)
     contour = ax.contour(X, Y, Z, levels=levels, cmap='viridis', alpha=0.6, linewidths=0.5)
     contourf = ax.contourf(X, Y, Z, levels=levels, cmap='viridis', alpha=0.3)
     
-    # Thêm colorbar
+    # Add colorbar
     cbar = plt.colorbar(contourf, ax=ax)
-    cbar.set_label('Giá trị hàm', rotation=270, labelpad=20)
+    cbar.set_label('Function value', rotation=270, labelpad=20)
     
-    # Vẽ quỹ đạo
+    # Draw trajectory
     x_traj = df['x'].values
     y_traj = df['y'].values
     
-    # Vẽ đường quỹ đạo
-    ax.plot(x_traj, y_traj, 'r-', linewidth=2, alpha=0.7, label='Quỹ đạo')
+    # Draw trajectory line
+    ax.plot(x_traj, y_traj, 'r-', linewidth=2, alpha=0.7, label='Trajectory')
     
-    # Đánh dấu điểm bắt đầu và kết thúc
-    ax.plot(x_traj[0], y_traj[0], 'go', markersize=12, label='Điểm bắt đầu', zorder=5)
-    ax.plot(x_traj[-1], y_traj[-1], 'r*', markersize=15, label='Điểm kết thúc', zorder=5)
+    # Mark start and end points
+    ax.plot(x_traj[0], y_traj[0], 'go', markersize=12, label='Start point', zorder=5)
+    ax.plot(x_traj[-1], y_traj[-1], 'r*', markersize=15, label='End point', zorder=5)
     
-    # Vẽ một số điểm trung gian
+    # Draw some intermediate points
     step = max(1, len(x_traj) // 10)
     ax.plot(x_traj[::step], y_traj[::step], 'ko', markersize=4, alpha=0.5, zorder=4)
     
-    # Thiết lập nhãn và tiêu đề
+    # Set up labels and titles
     ax.set_xlabel('x', fontsize=12)
     ax.set_ylabel('y', fontsize=12)
     ax.set_title(title, fontsize=14, fontweight='bold')
@@ -211,7 +211,7 @@ def plot_trajectory(df, test_function, title, save_path=None):
     
     plt.tight_layout()
     
-    # Lưu hoặc hiển thị
+    # Save or display
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
         plt.close()
@@ -498,11 +498,11 @@ def trajectory_series_adamw(weight_decays, lr=0.01, a=1, b=100, initial=(-1.5, 2
 
 def plot_metrics(df, title, save_path=None):
     """
-    Vẽ các chỉ số tối ưu hóa theo thời gian.
+    Plot optimization metrics over time.
 
-    Hỗ trợ cả hai loại dữ liệu:
-      - Kết quả hàm kiểm tra (GD) với cột 'iteration', 'loss', 'grad_norm', 'update_norm'
-      - Kết quả mạng nơ-ron (NN) với cột 'phase'='train' và 'global_step', 'train_loss', 'grad_norm', 'update_norm'
+    Supports both data types:
+      - Test function results (GD) with columns 'iteration', 'loss', 'grad_norm', 'update_norm'
+      - Neural network results (NN) with columns 'phase'='train' and 'global_step', 'train_loss', 'grad_norm', 'update_norm'
     """
     fig, axes = plt.subplots(3, 1, figsize=(12, 10))
 
@@ -520,30 +520,30 @@ def plot_metrics(df, title, save_path=None):
         loss_vals = df['loss'].values
         grad_vals = df['grad_norm'].values
         upd_vals = df['update_norm'].values
-        x_label = 'Vòng lặp'
+        x_label = 'Iteration'
 
     # Subplot 1: Loss
     ax1 = axes[0]
     ax1.semilogy(xvals, loss_vals, 'b-', linewidth=2)
     ax1.set_xlabel(x_label, fontsize=11)
-    ax1.set_ylabel('Mất mát (Loss)', fontsize=11)
-    ax1.set_title('Mất mát theo thời gian', fontsize=12, fontweight='bold')
+    ax1.set_ylabel('Loss', fontsize=11)
+    ax1.set_title('Loss over time', fontsize=12, fontweight='bold')
     ax1.grid(True, alpha=0.3, which='both')
 
     # Subplot 2: Gradient Norm
     ax2 = axes[1]
     ax2.semilogy(xvals, grad_vals, 'g-', linewidth=2)
     ax2.set_xlabel(x_label, fontsize=11)
-    ax2.set_ylabel('Chuẩn Gradient', fontsize=11)
-    ax2.set_title('Chuẩn Gradient theo thời gian', fontsize=12, fontweight='bold')
+    ax2.set_ylabel('Gradient Norm', fontsize=11)
+    ax2.set_title('Gradient Norm over time', fontsize=12, fontweight='bold')
     ax2.grid(True, alpha=0.3, which='both')
 
     # Subplot 3: Update Norm
     ax3 = axes[2]
     ax3.semilogy(xvals, upd_vals, 'r-', linewidth=2)
     ax3.set_xlabel(x_label, fontsize=11)
-    ax3.set_ylabel('Chuẩn Bước cập nhật', fontsize=11)
-    ax3.set_title('Chuẩn Bước cập nhật theo thời gian', fontsize=12, fontweight='bold')
+    ax3.set_ylabel('Update Step Norm', fontsize=11)
+    ax3.set_title('Update Step Norm over time', fontsize=12, fontweight='bold')
     ax3.grid(True, alpha=0.3, which='both')
 
     fig.suptitle(title, fontsize=14, fontweight='bold', y=0.995)
@@ -558,34 +558,34 @@ def plot_metrics(df, title, save_path=None):
 
 def plot_comparison(list_of_dfs, labels, metric, title, save_path=None):
     """
-    Vẽ so sánh một chỉ số cụ thể giữa nhiều thí nghiệm.
+    Plot comparison of a specific metric across multiple experiments.
     
     Args:
-        list_of_dfs: Danh sách các DataFrame chứa lịch sử tối ưu hóa
-        labels: Danh sách nhãn tương ứng với mỗi DataFrame
-        metric: Tên cột chỉ số cần so sánh ('loss', 'grad_norm', 'update_norm')
-        title: Tiêu đề cho biểu đồ
-        save_path: Đường dẫn để lưu hình (nếu None thì chỉ hiển thị)
+        list_of_dfs: List of DataFrames containing optimization history
+        labels: List of labels corresponding to each DataFrame
+        metric: Column name of metric to compare ('loss', 'grad_norm', 'update_norm')
+        title: Title for the plot
+        save_path: Path to save figure (if None then only display)
     """
-    # Tạo figure
+    # Create figure
     fig, ax = plt.subplots(figsize=(12, 8))
     
-    # Định nghĩa màu sắc
+    # Define colors
     colors = plt.cm.tab10(np.linspace(0, 1, len(list_of_dfs)))
 
     # Determine x-axis based on metric type (NN vs GD)
     is_eval_metric = metric in ('test_accuracy', 'test_loss')
     x_label = 'Epoch' if is_eval_metric else 'Global Step'
     y_label_map = {
-        'loss': 'Mất mát (Loss)',
-        'train_loss': 'Mất mát Huấn luyện',
-        'test_loss': 'Mất mát Kiểm tra',
-        'grad_norm': 'Chuẩn Gradient',
-        'update_norm': 'Chuẩn Bước cập nhật',
-        'test_accuracy': 'Độ chính xác Kiểm tra',
+        'loss': 'Loss',
+        'train_loss': 'Training Loss',
+        'test_loss': 'Test Loss',
+        'grad_norm': 'Gradient Norm',
+        'update_norm': 'Update Step Norm',
+        'test_accuracy': 'Test Accuracy',
     }
 
-    # Vẽ từng đường
+    # Draw each line
     for i, (df, label) in enumerate(zip(list_of_dfs, labels)):
         if is_eval_metric and 'phase' in df.columns:
             eval_df = df[df['phase'] == 'eval']
@@ -603,11 +603,11 @@ def plot_comparison(list_of_dfs, labels, metric, title, save_path=None):
                 y = df[metric].values
             ax.semilogy(x, y, linewidth=2, label=label, color=colors[i], alpha=0.8)
 
-    # Thiết lập nhãn
+    # Set up labels
     ax.set_xlabel(x_label, fontsize=12)
     ax.set_ylabel(y_label_map.get(metric, metric), fontsize=12)
     
-    # Tiêu đề
+    # Title
     ax.set_title(title, fontsize=14, fontweight='bold')
     
     # Legend
@@ -618,7 +618,7 @@ def plot_comparison(list_of_dfs, labels, metric, title, save_path=None):
     
     plt.tight_layout()
     
-    # Lưu hoặc hiển thị
+    # Save or display
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
         plt.close()
@@ -628,18 +628,18 @@ def plot_comparison(list_of_dfs, labels, metric, title, save_path=None):
 
 def load_results(results_dir='results'):
     """
-    Tải tất cả các file kết quả từ thư mục.
+    Load all result files from directory.
     
     Args:
-        results_dir: Đường dẫn đến thư mục chứa kết quả
+        results_dir: Path to directory containing results
         
     Returns:
-        Dictionary với key là tên file và value là DataFrame
+        Dictionary with filename as key and DataFrame as value
     """
     results = {}
     
     if not os.path.exists(results_dir):
-        print(f"Thư mục {results_dir} không tồn tại!")
+        print(f"Directory {results_dir} does not exist!")
         return results
     
     for filename in os.listdir(results_dir):
@@ -652,30 +652,30 @@ def load_results(results_dir='results'):
 
 
 def main():
-    """Hàm chính để tạo các biểu đồ từ kết quả thí nghiệm."""
-    # Tạo thư mục để lưu hình
+    """Main function to create plots from experiment results."""
+    # Create directory to save plots
     os.makedirs('plots', exist_ok=True)
     
-    # Tải tất cả kết quả
-    print("Đang tải kết quả thí nghiệm...")
+    # Load all results
+    print("Loading experiment results...")
     results = load_results('results')
     
     if not results:
-        print("Không tìm thấy kết quả thí nghiệm!")
-        print("Hãy chạy 'python run_experiment.py' trước.")
+        print("No experiment results found!")
+        print("Please run 'python run_experiment.py' first.")
         return
     
-    print(f"Đã tải {len(results)} file kết quả.")
+    print(f"Loaded {len(results)} result files.")
     
-    # Ví dụ 1: Vẽ quỹ đạo cho một số thí nghiệm cụ thể
-    print("\nĐang tạo biểu đồ quỹ đạo...")
+    # Example 1: Plot trajectories for specific experiments
+    print("\nCreating trajectory plots...")
     
-    # Tìm các file có cùng seed để so sánh
+    # Find files with same seed for comparison
     seed = 42
     
     for filename, df in results.items():
         if f'seed{seed}' in filename:
-            # Xác định hàm kiểm tra
+            # Identify test function
             if 'Rosenbrock' in filename:
                 test_func = Rosenbrock()
             elif 'IllConditionedQuadratic' in filename:
@@ -685,37 +685,37 @@ def main():
             else:
                 continue
             
-            # Tạo tiêu đề
+            # Create title
             title = filename.replace('.csv', '').replace('_', ' ')
             
-            # Tạo đường dẫn lưu
+            # Create save path
             save_path = os.path.join('plots', filename.replace('.csv', '_trajectory.png'))
             
-            # Vẽ quỹ đạo
+            # Plot trajectory
             plot_trajectory(df, test_func, title, save_path)
     
-    # Ví dụ 2: Vẽ metrics cho từng thí nghiệm
-    print("Đang tạo biểu đồ metrics...")
+    # Example 2: Plot metrics for each experiment
+    print("Creating metrics plots...")
     
     for filename, df in results.items():
         if f'seed{seed}' in filename:
-            # Tạo tiêu đề
+            # Create title
             title = filename.replace('.csv', '').replace('_', ' ')
             
-            # Tạo đường dẫn lưu
+            # Create save path
             save_path = os.path.join('plots', filename.replace('.csv', '_metrics.png'))
             
-            # Vẽ metrics
+            # Plot metrics
             plot_metrics(df, title, save_path)
     
-    # Ví dụ 3: So sánh các optimizer trên cùng một hàm
-    print("Đang tạo biểu đồ so sánh...")
+    # Example 3: Compare optimizers on same function
+    print("Creating comparison plots...")
     
-    # So sánh trên hàm Rosenbrock
+    # Compare on Rosenbrock function
     rosenbrock_results = {}
     for filename, df in results.items():
         if 'Rosenbrock' in filename and f'seed{seed}' in filename and 'lr0.001' in filename:
-            # Lấy tên optimizer
+            # Get optimizer name
             opt_name = filename.split('_')[0]
             rosenbrock_results[opt_name] = df
     
@@ -723,21 +723,21 @@ def main():
         dfs = list(rosenbrock_results.values())
         labels = list(rosenbrock_results.keys())
         
-        # So sánh loss
+        # Compare loss
         plot_comparison(
             dfs, labels, 'loss',
-            f'So sánh Loss trên Rosenbrock (lr=0.001, seed={seed})',
+            f'Loss Comparison on Rosenbrock (lr=0.001, seed={seed})',
             os.path.join('plots', f'comparison_Rosenbrock_loss_seed{seed}.png')
         )
         
-        # So sánh gradient norm
+        # Compare gradient norm
         plot_comparison(
             dfs, labels, 'grad_norm',
-            f'So sánh Chuẩn Gradient trên Rosenbrock (lr=0.001, seed={seed})',
+            f'Gradient Norm Comparison on Rosenbrock (lr=0.001, seed={seed})',
             os.path.join('plots', f'comparison_Rosenbrock_gradnorm_seed{seed}.png')
         )
     
-    # So sánh trên hàm IllConditionedQuadratic
+    # Compare on IllConditionedQuadratic function
     quad_results = {}
     for filename, df in results.items():
         if 'IllConditionedQuadratic' in filename and f'seed{seed}' in filename and 'lr0.001' in filename:
@@ -750,11 +750,11 @@ def main():
         
         plot_comparison(
             dfs, labels, 'loss',
-            f'So sánh Loss trên IllConditionedQuadratic (lr=0.001, seed={seed})',
+            f'Loss Comparison on IllConditionedQuadratic (lr=0.001, seed={seed})',
             os.path.join('plots', f'comparison_IllCondQuad_loss_seed{seed}.png')
         )
     
-    print("\nHoàn thành! Tất cả các biểu đồ được lưu trong thư mục 'plots/'")
+    print("\nComplete! All plots saved in 'plots/' directory")
 
 
 def plot_generalization_gap(nn_df: pd.DataFrame, title: str = "Generalization Gap & Test Accuracy", save_path: Optional[str] = None):

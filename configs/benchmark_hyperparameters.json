@@ -1,0 +1,40 @@
+{
+  "experiment_configs": {
+    "2d_optimization": {
+      "optimizers": {
+        "SGD": {"lr": 0.01},
+        "SGDMomentum": {"lr": 0.01, "beta": 0.9},
+        "Adam": {"lr": 0.01, "beta1": 0.9, "beta2": 0.999, "epsilon": 1e-8},
+        "RMSProp": {"lr": 0.01, "decay_rate": 0.9, "epsilon": 1e-8}
+      },
+      "num_iterations": 10000,
+      "test_functions": ["Rosenbrock", "Rastrigin", "Ackley", "IllConditionedQuadratic", "SaddlePoint"]
+    },
+    "resnet_cifar10": {
+      "optimizers": {
+        "SGD": {"lr": 0.001, "momentum": 0.9, "weight_decay": 0.0001},
+        "Adam": {"lr": 0.001, "beta1": 0.9, "beta2": 0.999, "weight_decay": 0.0001},
+        "AdamW": {"lr": 0.001, "beta1": 0.9, "beta2": 0.999, "weight_decay": 0.01}
+      },
+      "epochs": 50,
+      "batch_size": 128
+    },
+    "highdim_optimization": {
+      "optimizers": {
+        "SGD": {"lr": 0.01},
+        "SGDMomentum": {"lr": 0.01, "beta": 0.9},
+        "Adam": {"lr": 0.01, "beta1": 0.9, "beta2": 0.999}
+      },
+      "dimensions": 100,
+      "num_iterations": 5000
+    }
+  },
+  "tuning_notes": {
+    "2d_lr": "LR=0.01 selected after Optuna tuning on Rosenbrock (100 trials, Jan 2026)",
+    "resnet_lr": "LR=0.001 confirmed optimal via LR Finder on CIFAR-10 (Feb 2026)",
+    "highdim_lr": "LR=0.01 validated on 100D Rosenbrock with multi-seed runs (Mar 2026)",
+    "weight_decay": "WD=0.0001 for SGD/Adam, WD=0.01 for AdamW per best practices (Loshchilov & Hutter 2019)"
+  },
+  "version": "2.0.0",
+  "last_updated": "2025-12-09"
+}

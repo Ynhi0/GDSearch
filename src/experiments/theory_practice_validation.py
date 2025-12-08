@@ -3,7 +3,7 @@ Theory-Practice Convergence Validation Experiment
 
 This module integrates theoretical convergence rate predictions with
 actual neural network training results. Required by Vietnamese research proposal:
-"đối chiếu tốc độ hội tụ quan sát được với các dự đoán lý thuyết"
+"compare observed convergence rates with theoretical predictions"
 
 Author: GDSearch Team
 Date: December 7, 2025
@@ -29,7 +29,7 @@ try:
     HAS_THEORY_MODULE = True
 except ImportError:
     HAS_THEORY_MODULE = False
-    print("⚠️  Theory-practice comparison module not available")
+    print("Theory-practice comparison module not available")
 
 
 def extract_optimizer_from_filename(filepath: str) -> str:
@@ -75,13 +75,13 @@ def load_training_results(
     experiment_dir = Path(results_dir) / experiment
     
     if not experiment_dir.exists():
-        print(f"⚠️  Experiment directory not found: {experiment_dir}")
+        print(f"Experiment directory not found: {experiment_dir}")
         return {}
     
     csv_files = list(experiment_dir.glob("*.csv"))
     
     if not csv_files:
-        print(f"⚠️  No CSV files found in {experiment_dir}")
+        print(f"No CSV files found in {experiment_dir}")
         return {}
     
     results = {}
@@ -106,7 +106,7 @@ def load_training_results(
                 results[optimizer] = df[required_columns]
                 
         except Exception as e:
-            print(f"⚠️  Failed to load {csv_path}: {e}")
+            print(f"Failed to load {csv_path}: {e}")
             continue
     
     return results
@@ -135,7 +135,7 @@ def run_theory_practice_validation(
         DataFrame with comparison results
     """
     print("\n" + "="*80)
-    print("🔬 THEORY-PRACTICE CONVERGENCE VALIDATION")
+    print("THEORY-PRACTICE CONVERGENCE VALIDATION")
     print("="*80)
     print(f"Results directory: {results_dir}")
     print(f"Experiments: {experiments}")
@@ -143,7 +143,7 @@ def run_theory_practice_validation(
     print()
     
     if not HAS_THEORY_MODULE:
-        print("❌ Theory-practice comparison module not available")
+        print("Theory-practice comparison module not available")
         return pd.DataFrame()
     
     os.makedirs(output_dir, exist_ok=True)
@@ -152,21 +152,21 @@ def run_theory_practice_validation(
     
     for experiment in experiments:
         print(f"\n{'='*80}")
-        print(f"📊 Analyzing {experiment.upper()} results...")
+        print(f"Analyzing {experiment.upper()} results...")
         print(f"{'='*80}")
         
         # Load training results
         training_results = load_training_results(results_dir, experiment)
         
         if not training_results:
-            print(f"⚠️  No valid results found for {experiment}")
+            print(f"No valid results found for {experiment}")
             continue
         
         print(f"Found {len(training_results)} optimizer results")
         
         # Analyze each optimizer
         for optimizer_name, df in training_results.items():
-            print(f"\n  🔍 Analyzing {optimizer_name}...")
+            print(f"\n  Analyzing {optimizer_name}...")
             
             try:
                 # Extract loss history
@@ -175,14 +175,14 @@ def run_theory_practice_validation(
                 elif 'loss' in df.columns:
                     loss_history = df['loss'].values
                 else:
-                    print(f"     ⚠️  No loss column found for {optimizer_name}")
+                    print(f"     No loss column found for {optimizer_name}")
                     continue
                 
                 # Ensure loss history is finite
                 loss_history = loss_history[np.isfinite(loss_history)]
                 
                 if len(loss_history) < 10:
-                    print(f"     ⚠️  Loss history too short: {len(loss_history)} steps")
+                    print(f"     Loss history too short: {len(loss_history)} steps")
                     continue
                 
                 # Compare with theory
@@ -203,7 +203,7 @@ def run_theory_practice_validation(
                 all_comparisons.append(comparison)
                 
                 # Print summary
-                print(f"     ✅ Analysis complete")
+                print(f"     Analysis complete")
                 print(f"        Theoretical rate: O(k^{comparison['theoretical_rate']:.3f})")
                 print(f"        Observed rate: O(k^{comparison['observed_rate']:.3f})")
                 print(f"        R²: {comparison['r_squared']:.4f}")
@@ -220,15 +220,15 @@ def run_theory_practice_validation(
                         )
                     )
                 except Exception as e:
-                    print(f"     ⚠️  Plotting failed: {e}")
+                    print(f"     Plotting failed: {e}")
                     
             except Exception as e:
-                print(f"     ❌ Failed to analyze {optimizer_name}: {e}")
+                print(f"     Failed to analyze {optimizer_name}: {e}")
                 continue
     
     # Create summary DataFrame
     if not all_comparisons:
-        print("\n❌ No comparisons completed")
+        print("\nNo comparisons completed")
         return pd.DataFrame()
     
     df_results = pd.DataFrame(all_comparisons)
@@ -236,13 +236,13 @@ def run_theory_practice_validation(
     # Save results
     csv_path = os.path.join(output_dir, "theory_practice_comparison_results.csv")
     df_results.to_csv(csv_path, index=False)
-    print(f"\n✅ Results saved to {csv_path}")
+    print(f"\nResults saved to {csv_path}")
     
     # Generate summary report
     try:
         generate_summary_report(df_results, output_dir)
     except Exception as e:
-        print(f"⚠️  Summary report generation failed: {e}")
+        print(f"Summary report generation failed: {e}")
     
     return df_results
 
@@ -342,7 +342,7 @@ def generate_summary_report(df_results: pd.DataFrame, output_dir: str):
         f.write("Medium R² (0.7-0.9): Reasonable agreement with minor deviations\n")
         f.write("Low R² (<0.7): Significant deviation from theory (non-convex effects)\n")
     
-    print(f"📄 Summary report saved to {report_path}")
+    print(f"Summary report saved to {report_path}")
 
 
 if __name__ == '__main__':
@@ -355,7 +355,7 @@ if __name__ == '__main__':
     
     if not df.empty:
         print("\n" + "="*80)
-        print("📊 VALIDATION COMPLETE")
+        print("VALIDATION COMPLETE")
         print("="*80)
         print(f"Analyzed {len(df)} optimizer-experiment combinations")
         print(f"Average R²: {df['r_squared'].mean():.4f}")

@@ -12,14 +12,32 @@ from .lr_schedulers import (
     CosineAnnealingLR, CosineAnnealingWarmRestarts, LinearWarmupScheduler,
     PolynomialLR, OneCycleLR, get_scheduler
 )
-from .optuna_tuner import (
-    OptunaHyperparameterTuner, suggest_optimizer_params,
-    suggest_lr_scheduler_params, suggest_model_params, suggest_training_params
-)
-from .training_utils import (
-    LabelSmoothingCrossEntropy, ModelEMA, AMPWrapper,
-    get_loss_function, create_amp_wrapper, create_model_ema
-)
+
+# Optional imports - gracefully handle missing dependencies
+try:
+    from .optuna_tuner import (
+        OptunaHyperparameterTuner, suggest_optimizer_params,
+        suggest_lr_scheduler_params, suggest_model_params, suggest_training_params
+    )
+except ImportError:
+    OptunaHyperparameterTuner = None
+    suggest_optimizer_params = None
+    suggest_lr_scheduler_params = None
+    suggest_model_params = None
+    suggest_training_params = None
+
+try:
+    from .training_utils import (
+        LabelSmoothingCrossEntropy, ModelEMA, AMPWrapper,
+        get_loss_function, create_amp_wrapper, create_model_ema
+    )
+except ImportError:
+    LabelSmoothingCrossEntropy = None
+    ModelEMA = None
+    AMPWrapper = None
+    get_loss_function = None
+    create_amp_wrapper = None
+    create_model_ema = None
 
 __all__ = [
     # Optimizers

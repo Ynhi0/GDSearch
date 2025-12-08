@@ -297,7 +297,7 @@ def generate_all_ablation_plots(
     viz_dir = Path(results_dir) / "visualizations"
     viz_dir.mkdir(parents=True, exist_ok=True)
     
-    print(f"\n📊 Generating visualizations for {study_name} study...")
+    print(f"\nGenerating visualizations for {study_name} study...")
     
     # 1. Bar plot
     create_ablation_bar_plot(
@@ -309,7 +309,7 @@ def generate_all_ablation_plots(
         output_path=viz_dir / 'accuracy_comparison',
         baseline_name=baseline_name
     )
-    print("  ✓ accuracy_comparison.png/.pdf")
+    print("  accuracy_comparison.png/.pdf")
     
     # 2. Box plot
     create_box_plot(
@@ -320,7 +320,7 @@ def generate_all_ablation_plots(
         ylabel=value_col.replace('_', ' ').title() + ' (%)',
         output_path=viz_dir / 'accuracy_distribution'
     )
-    print("  ✓ accuracy_distribution.png/.pdf")
+    print("  accuracy_distribution.png/.pdf")
     
     # 3. Heatmap (if features provided)
     if features:
@@ -333,7 +333,7 @@ def generate_all_ablation_plots(
             title=f'Feature Activation & Performance Impact',
             output_path=viz_dir / 'feature_heatmap'
         )
-        print("  ✓ feature_heatmap.png/.pdf")
+        print("  feature_heatmap.png/.pdf")
     
     # 4. Summary table
     create_summary_table(
@@ -344,8 +344,8 @@ def generate_all_ablation_plots(
         title=f'{study_name.replace("_", " ").title()}: Summary Table',
         output_path=viz_dir / 'summary_table'
     )
-    print("  ✓ summary_table.png/.pdf")
+    print("  summary_table.png/.pdf")
     
-    print(f"✅ All visualizations saved to {viz_dir}/\n")
+    print(f"All visualizations saved to {viz_dir}/\n")
     
     return viz_dir

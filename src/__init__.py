@@ -7,8 +7,4 @@ A comprehensive framework for comparing gradient descent algorithms on
 
 __version__ = '2.0.0'
 __author__ = 'GDSearch Team'
-
-# Make core modules easily accessible
-from src import core, experiments, analysis, visualization
-
 __all__ = ['core', 'experiments', 'analysis', 'visualization']

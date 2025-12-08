@@ -222,7 +222,7 @@ if __name__ == '__main__':
         
         # Check if eigenvalue columns exist
         if 'lambda_min' not in df.columns:
-            print(f"⚠️  {csv_path} does not have eigenvalue data (old format)")
+            print(f"{csv_path} does not have eigenvalue data (old format)")
             continue
         
         basename = csv_path.replace('results/', '').replace('.csv', '')

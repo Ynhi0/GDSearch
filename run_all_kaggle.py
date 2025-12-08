@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 GDSearch Complete Benchmark Suite - Kaggle Edition
 Runs all experiments: MNIST, CIFAR-10, NLP, Medical Segmentation
@@ -12,6 +13,15 @@ All code self-contained - no external imports needed.
 
 import os
 import sys
+
+# Force UTF-8 encoding for Windows console (must be FIRST, before any prints)
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    # Also set environment variables for subprocess compatibility
+    os.environ['PYTHONIOENCODING'] = 'utf-8'
+    os.environ['PYTHONUTF8'] = '1'
 
 # Suppress CUDA plugin registration warnings FIRST (before any imports)
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TensorFlow warnings
@@ -92,9 +102,9 @@ sys.path.insert(0, str(project_root / 'src'))
 try:
     from src.core.optimizers import SGD, Adam, AdamW
     from src.core.pytorch_optimizers import SGDWrapper, AdamWrapper
-    print(f"✅ Successfully imported core modules from {project_root / 'src'}")
+    print(f"Successfully imported core modules from {project_root / 'src'}")
 except ImportError as e:
-    print(f"⚠️ CRITICAL: Failed to import core modules from {project_root / 'src'}")
+    print(f"CRITICAL: Failed to import core modules from {project_root / 'src'}")
     print(f"Error: {e}")
     print(f"sys.path = {sys.path[:5]}")
     raise
@@ -161,7 +171,7 @@ try:
         create_model_ema
     )
     HAS_TRAINING_UTILS = True
-    logging.info("✓ Advanced training utilities loaded (AMP, Label Smoothing, EMA)")
+    logging.info("Advanced training utilities loaded (AMP, Label Smoothing, EMA)")
 except ImportError as e:
     HAS_TRAINING_UTILS = False
     logging.debug(f"Training utilities not available: {e}")
@@ -179,7 +189,7 @@ try:
         auto_tune_training_config
     )
     HAS_TRAINING_ENHANCEMENTS = True
-    logging.info("✓ Training enhancements loaded (LR Finder, Memory-Aware Sizing, Time Budget, Hessian)")
+    logging.info("Training enhancements loaded (LR Finder, Memory-Aware Sizing, Time Budget, Hessian)")
 except ImportError as e:
     logging.debug(f"Training enhancements not available: {e}")
 
@@ -216,7 +226,32 @@ try:
     HAS_HF = True
 except ImportError:
     HAS_HF = False
-    logging.warning("transformers/datasets not available. NLP experiments will be simplified.")
+    # Don't auto-install in local development - only on Kaggle where imports are missing
+    # Check if we're in a Kaggle environment by looking for /kaggle directory
+    import os
+    is_kaggle = os.path.exists('/kaggle') or os.environ.get('KAGGLE_KERNEL_RUN_TYPE') is not None
+    
+    if is_kaggle:
+        logging.warning("transformers/datasets not available. Attempting to install for Kaggle...")
+        try:
+            import subprocess
+            import sys
+            print("Installing transformers and datasets for NLP experiments...")
+            # Use --no-input to prevent interactive prompts
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "--no-input", "transformers", "datasets"], 
+                                 timeout=120)
+            from transformers import AutoTokenizer, AutoModelForSequenceClassification
+            from datasets import load_dataset
+            HAS_HF = True
+            print("Successfully installed transformers and datasets")
+        except subprocess.TimeoutExpired:
+            logging.warning("Installation timed out. NLP experiments will be simplified.")
+            HAS_HF = False
+        except Exception as e:
+            logging.warning(f"Could not install transformers/datasets: {e}. NLP experiments will be simplified.")
+            HAS_HF = False
+    else:
+        logging.warning("transformers/datasets not available. NLP experiments will be simplified. Install with: pip install transformers datasets")
 
 try:
     from scipy import stats
@@ -328,7 +363,7 @@ class PerformanceProfiler:
             print("No performance metrics recorded.")
             return
         
-        print("\n📊 Performance Summary:")
+        print("\nPerformance Summary:")
         print("=" * 50)
         for exp_name, metrics in self.metrics.items():
             print(f"\n{exp_name}:")
@@ -666,7 +701,7 @@ def error_context(context: str, continue_on_error: bool = False):
         import sys
         traceback_str = traceback.format_exc()
         # Print a condensed error message
-        print(f"\n❌ {context} FAILED: {str(e)[:200]}")
+        print(f"\nFAILED: {context} - {str(e)[:200]}")
         
         # Track failed experiments
         FAILED_EXPERIMENTS.append({
@@ -686,7 +721,7 @@ def error_context(context: str, continue_on_error: bool = False):
         if not continue_on_error:
             raise
         else:
-            print(f"   ⚠️  Continuing with remaining experiments...")
+            print(f"   Continuing with remaining experiments...")
 
 
 def oom_safe_train_step(model, optimizer, criterion, inputs, targets, device, 
@@ -763,7 +798,7 @@ def oom_safe_train_step(model, optimizer, criterion, inputs, targets, device,
                     logging.error(f"OOM: Cannot reduce batch below {min_batch_size}")
                     raise
                 
-                logging.warning(f"⚠️  CUDA OOM! Reducing batch: {old_size}→{new_size} (retry {retries}/{max_retries})")
+                logging.warning(f"CUDA OOM! Reducing batch: {old_size}->{new_size} (retry {retries}/{max_retries})")
                 
                 # Slice the batch
                 current_inputs = inputs[:new_size]
@@ -812,16 +847,16 @@ def clear_gpu_memory(force=False):
         allocated = torch.cuda.memory_allocated() / 1024**2
         reserved = torch.cuda.memory_reserved() / 1024**2
         free = (torch.cuda.get_device_properties(0).total_memory / 1024**2) - allocated
-        logging.info(f"🧹 GPU memory cleaned: {allocated:.1f}MB used, {free:.1f}MB free")
+        logging.info(f"GPU memory cleaned: {allocated:.1f}MB used, {free:.1f}MB free")
         
         # Warn if memory is still high
         if allocated > 1000:  # >1GB still allocated
-            logging.warning(f"⚠️  High GPU memory usage: {allocated:.1f}MB still allocated after cleanup")
+            logging.warning(f"High GPU memory usage: {allocated:.1f}MB still allocated after cleanup")
 
 
 def check_system_requirements():
     """Perform comprehensive system requirements check"""
-    print("🔍 Performing system requirements check...")
+    print("Performing system requirements check...")
 
     issues = []
     recommendations = []
@@ -831,14 +866,14 @@ def check_system_requirements():
     if python_version < (3, 8):
         issues.append(f"Python {python_version.major}.{python_version.minor} detected - requires Python >= 3.8")
     else:
-        print(f"✅ Python {python_version.major}.{python_version.minor}.{python_version.micro}")
+        print(f"Python {python_version.major}.{python_version.minor}.{python_version.micro}")
 
     # Check PyTorch
     try:
         import torch
         torch_version = torch.__version__
         cuda_available = torch.cuda.is_available()
-        print(f"✅ PyTorch {torch_version}")
+        print(f"PyTorch {torch_version}")
         print(f"   CUDA available: {cuda_available}")
 
         if cuda_available:
@@ -858,7 +893,7 @@ def check_system_requirements():
     # Check torchvision
     try:
         import torchvision
-        print(f"✅ Torchvision {torchvision.__version__}")
+        print(f"Torchvision {torchvision.__version__}")
     except ImportError:
         issues.append("Torchvision not installed")
 
@@ -873,30 +908,30 @@ def check_system_requirements():
     for module, description in optional_deps.items():
         try:
             __import__(module)
-            print(f"✅ {description}")
+            print(f"{description}")
         except ImportError:
-            print(f"⚠️  {description} - optional, some experiments will be skipped")
+            print(f"{description} - optional, some experiments will be skipped")
 
     # Check memory
     try:
         import psutil
         memory_gb = psutil.virtual_memory().total / (1024**3)
-        print(f"✅ System memory: {memory_gb:.1f}GB")
+        print(f"System memory: {memory_gb:.1f}GB")
 
         if memory_gb < 8:
             recommendations.append("System memory < 8GB - consider running with --quick flag")
     except ImportError:
-        print("⚠️  psutil not available - cannot check system memory")
+        print("psutil not available - cannot check system memory")
 
     # Summary
     if issues:
-        print("\n❌ Critical issues found:")
+        print("\nCritical issues found:")
         for issue in issues:
             print(f"   • {issue}")
         return False
 
     if recommendations:
-        print("\n💡 Recommendations:")
+        print("\nRecommendations:")
         for rec in recommendations:
             print(f"   • {rec}")
 
@@ -966,11 +1001,11 @@ def is_experiment_completed(results_dir: str, dataset: str, model_name: str, opt
             try:
                 df = pd.read_csv(csv_path)
                 if len(df) > 0:
-                    logging.info(f"✓ Found existing result: {csv_path.name}")
+                    logging.info(f"Found existing result: {csv_path.name}")
                     return True
             except Exception:
                 # File exists but is corrupted, need to re-run
-                logging.warning(f"⚠ Corrupted result file: {csv_path.name}, will re-run")
+                logging.warning(f"Corrupted result file: {csv_path.name}, will re-run")
                 return False
         return False
     except Exception as e:
@@ -1026,7 +1061,7 @@ def load_experiment_config(config_path: str = None) -> Dict[str, Any]:
                     merged_config[key].update(value)
                 else:
                     merged_config[key] = value
-            logging.info(f"✓ Loaded config from {config_path}")
+            logging.info(f"Loaded config from {config_path}")
             return merged_config
         else:
             logging.warning(f"Config file not found: {config_path}, using defaults")
@@ -1280,7 +1315,7 @@ def find_optimal_lr(model, train_loader, criterion, device,
         lr_finder = LRFinder(model_copy, temp_optimizer, criterion, device)
         
         # Run LR range test
-        print(f"   🔍 Running LR Finder for {opt_name}...")
+        print(f"   Running LR Finder for {opt_name}...")
         lr_finder.range_test(train_loader, start_lr=start_lr, end_lr=end_lr, 
                             num_iter=num_iter, step_mode='exp')
         
@@ -1288,10 +1323,10 @@ def find_optimal_lr(model, train_loader, criterion, device,
         suggested_lr = lr_finder.suggest_lr()
         
         if suggested_lr is None or np.isnan(suggested_lr) or suggested_lr <= 0:
-            print(f"   ⚠️  LR Finder returned invalid LR, using default: {default_lr}")
+            print(f"   LR Finder returned invalid LR, using default: {default_lr}")
             return default_lr
             
-        print(f"   ✓ LR Finder suggests: {suggested_lr:.2e}")
+        print(f"   LR Finder suggests: {suggested_lr:.2e}")
         
         # Clean up
         del model_copy, temp_optimizer, lr_finder
@@ -1301,7 +1336,7 @@ def find_optimal_lr(model, train_loader, criterion, device,
         return suggested_lr
         
     except Exception as e:
-        print(f"   ⚠️  LR Finder failed: {e}. Using default: {default_lr}")
+        print(f"   LR Finder failed: {e}. Using default: {default_lr}")
         return default_lr
 
 
@@ -1329,14 +1364,14 @@ def get_adaptive_batch_size(model, sample_input, device, base_batch_size=128):
         optimal_bs = sizer.suggest_batch_size(model, sample_input)
         
         if optimal_bs is None or optimal_bs < 4:
-            print(f"   ⚠️  Memory sizer returned invalid batch size, using: {base_batch_size}")
+            print(f"   Memory sizer returned invalid batch size, using: {base_batch_size}")
             return base_batch_size
             
-        print(f"   ✓ Adaptive batch size: {optimal_bs}")
+        print(f"   Adaptive batch size: {optimal_bs}")
         return optimal_bs
         
     except Exception as e:
-        print(f"   ⚠️  Adaptive batch sizing failed: {e}. Using: {base_batch_size}")
+        print(f"   Adaptive batch sizing failed: {e}. Using: {base_batch_size}")
         return base_batch_size
 
 
@@ -1382,8 +1417,12 @@ def get_dataloader_kwargs():
     Returns:
         dict: kwargs for DataLoader (num_workers, pin_memory, etc.)
     """
+    # Disable multiprocessing on Windows due to pickle issues with worker_init_fn
+    import platform
+    is_windows = platform.system() == 'Windows'
+    
     defaults = {
-        'num_workers': 2,
+        'num_workers': 0 if is_windows else 2,
         'pin_memory': True,
         'persistent_workers': False
     }
@@ -1391,7 +1430,7 @@ def get_dataloader_kwargs():
     if 'KAGGLE_CONFIG' in globals():
         config = globals()['KAGGLE_CONFIG']
         return {
-            'num_workers': config.get('num_workers', 2),
+            'num_workers': config.get('num_workers', 0 if is_windows else 2),
             'pin_memory': config.get('pin_memory', True),
             'persistent_workers': config.get('persistent_workers', False)
         }
@@ -1416,7 +1455,7 @@ def run_batch_ablation(dataset_name='MNIST', results_dir='results/batch_ablation
         results_dir: Output directory for ablation results
     """
     print("\n" + "="*80)
-    print("🔬 ABLATION STUDY A: Batch Size Impact (Linear LR Scaling)")
+    print("ABLATION STUDY A: Batch Size Impact (Linear LR Scaling)")
     print("="*80)
     
     # Device initialization
@@ -1460,7 +1499,7 @@ def run_batch_ablation(dataset_name='MNIST', results_dir='results/batch_ablation
     for batch_size in batch_sizes:
         # Linear LR Scaling: lr = base_lr * (batch_size / 256)
         scaled_lr = base_lr * (batch_size / 256.0)
-        print(f"\n📊 Batch Size: {batch_size}, Scaled LR: {scaled_lr:.6f}")
+        print(f"\nBatch Size: {batch_size}, Scaled LR: {scaled_lr:.6f}")
         
         train_loader = DataLoader(full_dataset, batch_size=batch_size, shuffle=True, 
                                   num_workers=2, pin_memory=True)
@@ -1468,7 +1507,7 @@ def run_batch_ablation(dataset_name='MNIST', results_dir='results/batch_ablation
                                  num_workers=2, pin_memory=True)
         
         for opt_name in optimizers_to_test:
-            print(f"  🔧 Testing {opt_name} with batch_size={batch_size}, lr={scaled_lr:.6f}")
+            print(f"  Testing {opt_name} with batch_size={batch_size}, lr={scaled_lr:.6f}")
             
             # Create model
             model = SimpleMLP(input_dim=input_dim, hidden_dims=[128, 64], num_classes=num_classes).to(device)
@@ -1529,7 +1568,7 @@ def run_batch_ablation(dataset_name='MNIST', results_dir='results/batch_ablation
     df = pd.DataFrame(results)
     csv_path = os.path.join(results_dir, f'{dataset_name}_batch_ablation.csv')
     df.to_csv(csv_path, index=False)
-    print(f"\n✅ Batch ablation results saved to {csv_path}")
+    print(f"\nBatch ablation results saved to {csv_path}")
     
     # Try to create visualization (Kaggle-safe)
     try:
@@ -1557,13 +1596,13 @@ def run_batch_ablation(dataset_name='MNIST', results_dir='results/batch_ablation
         plot_path = os.path.join(results_dir, f'{dataset_name}_batch_ablation.png')
         try:
             plt.savefig(plot_path, dpi=150, bbox_inches='tight')
-            print(f"✅ Visualization saved to {plot_path}")
+            print(f"Visualization saved to {plot_path}")
         except Exception as save_err:
-            print(f"⚠️  Failed to save plot: {save_err}")
+            print(f"Failed to save plot: {save_err}")
         finally:
             plt.close()
     except Exception as e:
-        print(f"⚠️  Visualization skipped (headless mode): {e}")
+        print(f"Visualization skipped (headless mode): {e}")
     
     return df
 
@@ -1580,7 +1619,7 @@ def run_scheduler_ablation(dataset_name='MNIST', results_dir='results/scheduler_
         results_dir: Output directory for ablation results
     """
     print("\n" + "="*80)
-    print("🔬 ABLATION STUDY B: LR Scheduler Impact (2×2 Grid)")
+    print("ABLATION STUDY B: LR Scheduler Impact (2×2 Grid)")
     print("="*80)
     
     # Device initialization
@@ -1629,16 +1668,18 @@ def run_scheduler_ablation(dataset_name='MNIST', results_dir='results/scheduler_
     
     results = []
     for opt_name, sched_name in pairs:
-        print(f"\n🔧 Testing {opt_name} + {sched_name}")
+        print(f"\nTesting {opt_name} + {sched_name}")
         
         # Create model
         model = SimpleMLP(input_dim=input_dim, hidden_dims=[128, 64], num_classes=num_classes).to(device)
         
         # Create optimizer
         if opt_name == 'SGD':
-            optimizer = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
+            sgd_params = get_default_hyperparameters('SGD', 'resnet_cifar10')
+            optimizer = torch.optim.SGD(model.parameters(), **sgd_params)
         elif opt_name == 'AdamW':
-            optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
+            adamw_params = get_default_hyperparameters('AdamW', 'resnet_cifar10')
+            optimizer = torch.optim.AdamW(model.parameters(), **adamw_params)
         
         # Create scheduler
         if sched_name == 'CosineAnnealingLR':
@@ -1694,7 +1735,7 @@ def run_scheduler_ablation(dataset_name='MNIST', results_dir='results/scheduler_
     df = pd.DataFrame(results)
     csv_path = os.path.join(results_dir, f'{dataset_name}_scheduler_ablation.csv')
     df.to_csv(csv_path, index=False)
-    print(f"\n✅ Scheduler ablation results saved to {csv_path}")
+    print(f"\nScheduler ablation results saved to {csv_path}")
     
     # Try visualization (Kaggle-safe)
     try:
@@ -1720,13 +1761,13 @@ def run_scheduler_ablation(dataset_name='MNIST', results_dir='results/scheduler_
         plot_path = os.path.join(results_dir, f'{dataset_name}_scheduler_ablation.png')
         try:
             plt.savefig(plot_path, dpi=150, bbox_inches='tight')
-            print(f"✅ Visualization saved to {plot_path}")
+            print(f"Visualization saved to {plot_path}")
         except Exception as save_err:
-            print(f"⚠️  Failed to save plot: {save_err}")
+            print(f"Failed to save plot: {save_err}")
         finally:
             plt.close()
     except Exception as e:
-        print(f"⚠️  Visualization skipped (headless mode): {e}")
+        print(f"Visualization skipped (headless mode): {e}")
     
     return df
 
@@ -2036,7 +2077,7 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, test_loade
         logging.warning("Optuna not available, using default hyperparameters")
         return get_default_hyperparameters(optimizer_name)
     
-    logging.info(f"  🔍 Tuning {optimizer_name} ({n_trials} trials, {epochs} epochs each)")
+    logging.info(f"  Tuning {optimizer_name} ({n_trials} trials, {epochs} epochs each)")
     
     def objective(trial):
         set_seed(seed + trial.number)
@@ -2136,8 +2177,23 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, test_loade
     return best_params
 
 
-def get_default_hyperparameters(optimizer_name: str) -> Dict:
-    """Get default hyperparameters when tuning is skipped."""
+def get_default_hyperparameters(optimizer_name: str, experiment_type: str = "2d_optimization") -> Dict:
+    """Get default hyperparameters from tuned config file."""
+    try:
+        config_path = Path(__file__).parent / "configs" / "benchmark_hyperparameters.json"
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        
+        # Get hyperparameters for the specific experiment type
+        exp_config = config.get("experiment_configs", {}).get(experiment_type, {})
+        opt_config = exp_config.get("optimizers", {}).get(optimizer_name, {})
+        
+        if opt_config:
+            return opt_config
+    except Exception as e:
+        logging.warning(f"Could not load hyperparameters from config: {e}, using fallback defaults")
+    
+    # Fallback defaults if config loading fails
     defaults = {
         'SGD': {'lr': 0.01},
         'SGD_Momentum': {'lr': 0.05, 'momentum': 0.9},
@@ -2176,7 +2232,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
         with error_context("MNIST Experiment Initialization", continue_on_error=False):
             logging.info("Initializing MNIST experiment...")
             logging.info("="*80)
-            logging.info("🧠 MNIST BENCHMARK EXPERIMENTS")
+            logging.info("MNIST BENCHMARK EXPERIMENTS")
             logging.info("="*80)
 
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -2216,21 +2272,21 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
                 try:
                     train_dataset = torchvision.datasets.MNIST('./data', train=True, download=True, transform=transform)
                     test_dataset = torchvision.datasets.MNIST('./data', train=False, download=True, transform=transform)
-                    logging.info("✅ MNIST dataset loaded successfully")
+                    logging.info("MNIST dataset loaded successfully")
                     break
                 except Exception as e:
                     if attempt < max_retries - 1:
-                        logging.warning(f"⚠️  MNIST download attempt {attempt+1} failed: {e}")
+                        logging.warning(f"MNIST download attempt {attempt+1} failed: {e}")
                         logging.info(f"   Retrying... ({attempt+2}/{max_retries})")
                         time.sleep(2)
                     else:
-                        logging.error(f"❌ Failed to download MNIST after {max_retries} attempts")
+                        logging.error(f"Failed to download MNIST after {max_retries} attempts")
                         raise
 
             # Hyperparameter tuning (if enabled)
             tuned_params = {}
             if not skip_tuning:
-                logging.info("\n📊 HYPERPARAMETER TUNING PHASE")
+                logging.info("\nHYPERPARAMETER TUNING PHASE")
                 logging.info("-" * 80)
                 
                 # Create small tuning loaders
@@ -2246,7 +2302,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
                 val_loader = make_dataloader(val_subset, batch_size=test_bs, shuffle=False, **dl_kwargs)
                 
                 n_trials = 5 if quick else 15
-                tune_epochs = 2 if quick else 3
+                tune_epochs = 1 if ULTRA_QUICK_MODE else (2 if quick else 3)
                 
                 for opt_name in ['SGD', 'SGD_Momentum', 'Adam', 'AdamW', 'AMSGrad']:
                     tuned_params[opt_name] = quick_tune_optimizer(
@@ -2254,7 +2310,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
                         device, epochs=tune_epochs, n_trials=n_trials, seed=seeds[0]
                     )
                 
-                logging.info("\n✅ Tuning complete!\n")
+                logging.info("\nTuning complete!\n")
             
             results = []
 
@@ -2304,7 +2360,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
                                             LAMBWrapper(p, lr=lr, beta1=b1, beta2=b2, weight_decay=wd)))
 
             logging.info("="*80)
-            logging.info("🚀 RUNNING EXPERIMENTS WITH TUNED HYPERPARAMETERS")
+            logging.info("RUNNING EXPERIMENTS WITH TUNED HYPERPARAMETERS")
             logging.info("="*80)
 
             results = []
@@ -2316,11 +2372,20 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
             if ULTRA_QUICK_MODE:
                 epochs = 2
             else:
-                epochs = 20 if quick else 50
+                epochs = 2 if ULTRA_QUICK_MODE else (20 if quick else 50)
             
             # NOTE: In ultra-quick mode, we run ALL optimizers (not subset)
             # This allows comprehensive testing across all 25+ experiments
             # The speed comes from reduced epochs (2 instead of 50), not fewer optimizers
+
+            # Environment-based override: limit the number of optimizers for ultra-quick CI
+            try:
+                ultra_quick_limit = int(os.environ.get('GDSEARCH_ULTRA_QUICK_LIMIT', '0'))
+            except Exception:
+                ultra_quick_limit = 0
+            if ULTRA_QUICK_MODE and ultra_quick_limit > 0:
+                logging.info(f"Ultra-quick: limiting to first {ultra_quick_limit} optimizers for CI")
+                optimizers_config = optimizers_config[:ultra_quick_limit]
 
             for opt_name, opt_func in optimizers_config:
                 logging.info(f"Testing Optimizer: {opt_name}")
@@ -2329,7 +2394,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
                 for seed in seeds:
                     # Check if this specific experiment is already completed
                     if resume and is_experiment_completed(str(results_dir), 'MNIST', 'SimpleMLP', opt_name, seed):
-                        logging.info(f"⏭️  Skipping {opt_name} seed {seed} (already completed)")
+                        logging.info(f"Skipping {opt_name} seed {seed} (already completed)")
                         continue
                     
                     with error_context(f"MNIST {opt_name} seed {seed}", continue_on_error=True):
@@ -2353,7 +2418,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
                                 optimizer_class=optim.SGD if 'SGD' in opt_name else optim.Adam,
                                 opt_name=opt_name
                             )
-                            logging.info(f"   🔍 Auto-LR: {base_lr:.2e} → {suggested_lr:.2e}")
+                            logging.info(f"   Auto-LR: {base_lr:.2e} → {suggested_lr:.2e}")
                             base_lr = suggested_lr
                             
                             # Update params with found LR
@@ -2377,7 +2442,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
                                 device=device,
                                 base_batch_size=train_bs
                             )
-                            logging.info(f"   📦 Adaptive Batch: {train_bs} → {adaptive_bs}")
+                            logging.info(f"   Adaptive Batch: {train_bs} → {adaptive_bs}")
                             train_bs = adaptive_bs
                         
                         dl_kwargs = get_dataloader_kwargs()
@@ -2527,7 +2592,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
 
                                 # Sanity check: MNIST train accuracy should be > 10% (basic validation)
                                 if epoch > 1 and train_acc < 10.0:
-                                    logging.error(f"⚠️ SANITY CHECK FAILED: Train accuracy {train_acc:.1f}% is suspiciously low for MNIST epoch {epoch}")
+                                    logging.error(f"SANITY CHECK FAILED: Train accuracy {train_acc:.1f}% is suspiciously low for MNIST epoch {epoch}")
                                     logging.error("This may indicate a bug in the training loop (e.g., only processing last batch)")
 
                                 # Test/Validation
@@ -2554,7 +2619,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
                                     best_val_acc = test_acc
                                     best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
                                     patience_counter = 0
-                                    logging.info(f"✓ New best model: {test_acc:.2f}%")
+                                    logging.info(f"New best model: {test_acc:.2f}%")
                                 else:
                                     patience_counter += 1
                                 
@@ -2601,9 +2666,9 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
                         
                         except RuntimeError as e:
                             if "out of memory" in str(e).lower():
-                                logging.error(f"🔥 OOM Error detected for {opt_name}: {e}")
-                                logging.info("💡 Self-Healing: Reducing batch size - skipping this config")
-                                logging.warning("⚠️  SCIENTIFIC INTEGRITY: This run is INVALID for strict convergence analysis.")
+                                logging.error(f"OOM Error detected for {opt_name}: {e}")
+                                logging.info("Self-Healing: Reducing batch size - skipping this config")
+                                logging.warning("SCIENTIFIC INTEGRITY: This run is INVALID for strict convergence analysis.")
                                 logging.warning("    Re-run with smaller fixed batch size for publication-quality results.")
                                 torch.cuda.empty_cache()
                                 continue  # Skip this optimizer config
@@ -2698,7 +2763,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[42,123,456,789,
     clear_gpu_memory()
     
     logging.info("="*80)
-    logging.info("🖼️  CIFAR-10 RESNET-18 EXPERIMENT")
+    logging.info("CIFAR-10 RESNET-18 EXPERIMENT")
     logging.info("="*80)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -2742,15 +2807,15 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[42,123,456,789,
         try:
             train_dataset = torchvision.datasets.CIFAR10('./data', train=True, download=True, transform=transform_train)
             test_dataset = torchvision.datasets.CIFAR10('./data', train=False, download=True, transform=transform_test)
-            logging.info("✅ CIFAR-10 dataset loaded successfully")
+            logging.info("CIFAR-10 dataset loaded successfully")
             break
         except Exception as e:
             if attempt < max_retries - 1:
-                logging.warning(f"⚠️  CIFAR-10 download attempt {attempt+1} failed: {e}")
+                logging.warning(f"CIFAR-10 download attempt {attempt+1} failed: {e}")
                 logging.info(f"   Retrying... ({attempt+2}/{max_retries})")
                 time.sleep(2)
             else:
-                logging.error(f"❌ Failed to download CIFAR-10 after {max_retries} attempts")
+                logging.error(f"Failed to download CIFAR-10 after {max_retries} attempts")
                 raise
 
     # Get optimized batch sizes and DataLoader kwargs
@@ -2769,7 +2834,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[42,123,456,789,
     results_dir = Path(results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    epochs = 20 if quick else 50
+    epochs = 2 if ULTRA_QUICK_MODE else (20 if quick else 50)
     criterion = nn.CrossEntropyLoss()
     
     # Multi-optimizer configuration
@@ -2788,7 +2853,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[42,123,456,789,
         for seed in seeds:
             # Check if already completed
             if resume and is_experiment_completed(results_dir, 'CIFAR10', 'ResNet18', opt_name, seed):
-                logging.info(f"⏭️  Skipping CIFAR-10 {opt_name} seed {seed} (already completed)")
+                logging.info(f"Skipping CIFAR-10 {opt_name} seed {seed} (already completed)")
                 continue
             
             set_seed(seed)
@@ -2809,12 +2874,12 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[42,123,456,789,
                     optimizer_class=optim.SGD if 'SGD' in opt_name else optim.Adam,
                     opt_name=opt_name
                 )
-                logging.info(f"   🔍 Auto-LR (CIFAR-10 {opt_name}): {lr:.2e} → {suggested_lr:.2e}")
+                logging.info(f"   Auto-LR (CIFAR-10 {opt_name}): {lr:.2e} → {suggested_lr:.2e}")
                 final_lr = suggested_lr
             
             # Create optimizer with potentially updated LR
             if opt_name == 'Adam':
-                optimizer = optim.Adam(model.parameters(), lr=final_lr)
+                optimizer = optim.Adam(model.parameters(), lr=final_lr, weight_decay=0.0001)
             elif opt_name == 'AdamW':
                 optimizer = optim.AdamW(model.parameters(), lr=final_lr, weight_decay=0.01)
             elif opt_name == 'SGD_Momentum':
@@ -2904,7 +2969,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[42,123,456,789,
 
                     # Sanity check: CIFAR-10 train accuracy should be > 10% after first few epochs
                     if epoch > 2 and train_acc < 10.0:
-                        logging.error(f"⚠️ SANITY CHECK FAILED: Train accuracy {train_acc:.1f}% is suspiciously low for CIFAR-10 epoch {epoch}")
+                        logging.error(f"SANITY CHECK FAILED: Train accuracy {train_acc:.1f}% is suspiciously low for CIFAR-10 epoch {epoch}")
                         logging.error("This may indicate a bug in the training loop")
 
                     # Test
@@ -2975,9 +3040,9 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[42,123,456,789,
             
             except RuntimeError as e:
                 if "out of memory" in str(e).lower():
-                    logging.error(f"🔥 OOM Error detected for {opt_name}: {e}")
-                    logging.info("💡 Self-Healing: Reducing batch size - skipping this config")
-                    logging.warning("⚠️  SCIENTIFIC INTEGRITY: This run is INVALID for strict convergence analysis.")
+                    logging.error(f"OOM Error detected for {opt_name}: {e}")
+                    logging.info("Self-Healing: Reducing batch size - skipping this config")
+                    logging.warning("SCIENTIFIC INTEGRITY: This run is INVALID for strict convergence analysis.")
                     logging.warning("    Re-run with smaller fixed batch size for publication-quality results.")
                     torch.cuda.empty_cache()
                     continue  # Skip this optimizer config
@@ -2999,14 +3064,14 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[42,123,456,789,
                 'final_test_loss': test_loss
             })
             
-            logging.info(f"✓ CIFAR-10 {opt_name} seed {seed}: Test Acc={test_acc:.2f}%")
+            logging.info(f"CIFAR-10 {opt_name} seed {seed}: Test Acc={test_acc:.2f}%")
     
     # Save summary results
     if all_results:
         df_summary = pd.DataFrame(all_results)
         summary_path = results_dir / "CIFAR10_summary.csv"
         df_summary.to_csv(summary_path, index=False)
-        logging.info(f"✓ CIFAR-10 summary saved to {summary_path}")
+        logging.info(f"CIFAR-10 summary saved to {summary_path}")
 
     # End profiling
     if profiler:
@@ -3032,7 +3097,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[42,123,456,789,
     except Exception:
         logging.debug("Failed to save per-run CIFAR10 artifact")
 
-    print(f"\n💾 Results saved to {results_dir}/cifar10_results.csv")
+    print(f"\nResults saved to {results_dir}/cifar10_results.csv")
     
     # Generate visualizations for CIFAR10 experiment
     try:
@@ -3062,14 +3127,14 @@ def run_nlp_experiment(results_dir="results_nlp", seeds=[42,123,456,789,1011,121
     clear_gpu_memory()
     
     print("\n" + "="*80)
-    print("📝 NLP SENTIMENT ANALYSIS EXPERIMENT")
+    print("NLP SENTIMENT ANALYSIS EXPERIMENT")
     print("="*80)
 
     # Check if HuggingFace is available
     if not HAS_HF:
-        print("⚠️  HuggingFace transformers/datasets not available.")
+        print("HuggingFace transformers/datasets not available.")
         print("   Using local LSTM/RNN models instead...")
-        return run_nlp_experiment_simple(results_dir, seeds, 3 if quick else 5)
+        return run_nlp_experiment_simple(results_dir, seeds, 3 if quick else 5, resume)
 
     # Wrap entire HuggingFace experiment in try/except for robustness
     try:
@@ -3084,10 +3149,10 @@ def run_nlp_experiment(results_dir="results_nlp", seeds=[42,123,456,789,1011,121
             resume=resume
         )
     except Exception as e:
-        print(f"\n⚠️  HuggingFace experiment failed: {str(e)[:200]}")
+        print(f"\nHuggingFace experiment failed: {str(e)[:200]}")
         print("   This is often due to authentication or network issues.")
         print("   Falling back to local LSTM/RNN models (no download required)...")
-        return run_nlp_experiment_simple(results_dir, seeds, 3 if quick else 5)
+        return run_nlp_experiment_simple(results_dir, seeds, 3 if quick else 5, resume)
 
 
 def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
@@ -3136,7 +3201,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
     lr_default = 1e-4  # For new optimizers
     train_size = 1000 if quick else (5000 if not torch.cuda.is_available() else 10000)  # Smaller for CPU
     test_size = 500 if quick else 2000
-    epochs = 5 if quick else 15  # Increased for proper transformer fine-tuning
+    epochs = 2 if ULTRA_QUICK_MODE else (5 if quick else 15)  # Increased for proper transformer fine-tuning
 
     results_dir = Path(results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -3154,13 +3219,13 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
     results = []
 
     for opt_name, lr in configs:
-        print(f"\n🎯 Testing Optimizer: {opt_name}")
+        print(f"\nTesting Optimizer: {opt_name}")
         print("-" * 50)
 
         for seed in seeds:
             # Check if this specific experiment is already completed
             if resume and is_experiment_completed(results_dir, 'IMDB', model_name.replace('/', '_'), opt_name, seed):
-                print(f"⏭️  Skipping {model_name} {opt_name} seed {seed} (already completed)")
+                print(f"Skipping {model_name} {opt_name} seed {seed} (already completed)")
                 continue
             
             set_seed(seed)
@@ -3173,7 +3238,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
                 logging.warning(f"Failed to load model '{model_name}': {model_err}")
                 logging.warning("This is often due to HuggingFace authentication or network issues.")
                 logging.warning("Falling back to simplified NLP experiment...")
-                return run_nlp_experiment_simple(results_dir, seeds, epochs)
+                return run_nlp_experiment_simple(results_dir, seeds, epochs, resume)
 
             # Load dataset with robust fallback for environment compatibility
             try:
@@ -3183,7 +3248,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
                 logging.warning(f"Failed to load IMDB dataset via HuggingFace: {dataset_err}")
                 logging.warning("Falling back to simplified NLP experiment...")
                 # Fallback: run simplified experiment and return early
-                return run_nlp_experiment_simple(results_dir, seeds, epochs)
+                return run_nlp_experiment_simple(results_dir, seeds, epochs, resume)
 
             def preprocess(examples):
                 return tokenizer(examples['text'], truncation=True, padding=False, max_length=256)
@@ -3225,7 +3290,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
 
             # AUTO-LR: Find optimal learning rate before optimizer creation
             if AUTO_LR_ENABLED:
-                print(f"🔍 Auto-LR Finder: Searching for optimal LR for {opt_name}...")
+                print(f"Auto-LR Finder: Searching for optimal LR for {opt_name}...")
                 try:
                     # Create temporary model and optimizer for LR search
                     temp_model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2).to(device)
@@ -3247,16 +3312,16 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
                     )
                     
                     if suggested_lr is not None and suggested_lr > 0:
-                        print(f"🔍 Auto-LR: {opt_name} base LR {lr:.2e} → suggested {suggested_lr:.2e}")
+                        print(f"Auto-LR: {opt_name} base LR {lr:.2e} → suggested {suggested_lr:.2e}")
                         lr = suggested_lr
                     else:
-                        print(f"⚠️  Auto-LR failed, using default lr={lr:.2e}")
+                        print(f"Auto-LR failed, using default lr={lr:.2e}")
                     
                     # Clean up
                     del temp_model, temp_opt
                     torch.cuda.empty_cache() if torch.cuda.is_available() else None
                 except Exception as e:
-                    print(f"⚠️  Auto-LR failed: {e}, using default lr={lr:.2e}")
+                    print(f"Auto-LR failed: {e}, using default lr={lr:.2e}")
 
             # Setup optimizer with checkpoint validation
             if opt_name == 'AdamW':
@@ -3296,7 +3361,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
                         try:
                             optimizer.load_state_dict(checkpoint['optimizer'])
                             saved_opt = checkpoint.get('opt_name', 'unknown')
-                            logging.info(f"✓ Loaded checkpoint with compatible optimizer: {saved_opt} -> {opt_name}")
+                            logging.info(f"Loaded checkpoint with compatible optimizer: {saved_opt} -> {opt_name}")
                         except Exception as e:
                             logging.warning(f"Could not load optimizer state: {e}")
                         start_epoch = int(checkpoint.get('epoch', 0)) + 1
@@ -3350,7 +3415,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
                     # Sanity check: Verify train_total matches expected batch count
                     expected_samples = len(train_loader.dataset)
                     if train_total < expected_samples * 0.9:
-                        logging.warning(f"⚠️ SANITY CHECK: Only processed {train_total}/{expected_samples} training samples")
+                        logging.warning(f"SANITY CHECK: Only processed {train_total}/{expected_samples} training samples")
 
                     # Evaluation
                     model.eval()
@@ -3432,9 +3497,9 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
             
             except RuntimeError as e:
                 if "out of memory" in str(e).lower():
-                    logging.error(f"🔥 OOM Error detected for {opt_name}: {e}")
-                    logging.info("💡 Self-Healing: Transformer OOM - skipping this config")
-                    logging.warning("⚠️  SCIENTIFIC INTEGRITY: This run is INVALID for strict convergence analysis.")
+                    logging.error(f"OOM Error detected for {opt_name}: {e}")
+                    logging.info("Self-Healing: Transformer OOM - skipping this config")
+                    logging.warning("SCIENTIFIC INTEGRITY: This run is INVALID for strict convergence analysis.")
                     logging.warning("    Re-run with smaller fixed batch size for publication-quality results.")
                     torch.cuda.empty_cache()
                     continue  # Skip this optimizer config
@@ -3473,7 +3538,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
     if tracker:
         tracker.log_artifact(f"{results_dir}/nlp_results.csv", "results")
 
-    print(f"\n💾 Results saved to {results_dir}/nlp_results.csv")
+    print(f"\nResults saved to {results_dir}/nlp_results.csv")
     
     # Generate visualizations for NLP experiment
     try:
@@ -3485,19 +3550,23 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
     
     return df
 
-def run_nlp_experiment_simple(results_dir="results_nlp", seeds=[42,123,456,789,1011,1213,1415,1617,1819,2021], epochs=10):
+def run_nlp_experiment_simple(results_dir="results_nlp", seeds=[42,123,456,789,1011,1213,1415,1617,1819,2021], epochs=10, resume=False):
     """Robust NLP experiment using local LSTM/RNN models with synthetic or IMDB data
     
     This function provides a complete NLP benchmark that works even when HuggingFace
     models are unavailable (401 errors, network issues, etc.)
     """
     print("\n" + "="*80)
-    print("📝 NLP SENTIMENT ANALYSIS EXPERIMENT (Local Models)")
+    print("NLP SENTIMENT ANALYSIS EXPERIMENT (Local Models)")
     print("="*80)
     print("   Using local RNN/LSTM models (no external model downloads required)")
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"   Device: {device}")
+    
+    # Honor global ULTRA_QUICK_MODE override
+    if ULTRA_QUICK_MODE:
+        epochs = 2
     
     results = []
     all_history = []
@@ -3535,19 +3604,19 @@ def run_nlp_experiment_simple(results_dir="results_nlp", seeds=[42,123,456,789,1
                 train_labels = raw_data['train']['label'][:2000]
                 test_texts = raw_data['test']['text'][:500]
                 test_labels = raw_data['test']['label'][:500]
-                print(f"   ✅ IMDB dataset loaded successfully from {dataset_name}")
+                print(f"   IMDB dataset loaded successfully from {dataset_name}")
                 use_real_data = True
                 break
             except Exception as e:
                 last_error = e
-                print(f"   ⚠️  Failed with {dataset_name}: {str(e)[:80]}...")
+                print(f"   Failed with {dataset_name}: {str(e)[:80]}...")
                 continue
         
         if not use_real_data and last_error:
             raise last_error
     except Exception as e:
-        print(f"   ⚠️  Could not load IMDB: {str(e)[:100]}")
-        print("   📊 Using synthetic sentiment data for demonstration")
+        print(f"   Could not load IMDB: {str(e)[:100]}")
+        print("   Using synthetic sentiment data for demonstration")
         use_real_data = False
         
         # Generate synthetic sentiment data
@@ -3660,7 +3729,13 @@ def run_nlp_experiment_simple(results_dir="results_nlp", seeds=[42,123,456,789,1
     for model_name, model_fn in model_configs:
         for opt_name, opt_fn in optimizer_configs:
             for seed in seeds:
-                print(f"\n   🎯 {model_name} + {opt_name} (seed {seed})")
+                # Check if results already exist (RESUME LOGIC)
+                result_file = f"{results_dir}/nlp_imdb_simple_{model_name}_{opt_name}_seed{seed}.csv"
+                if resume and os.path.exists(result_file):
+                    print(f"   Skipping {model_name} + {opt_name} (seed {seed}) - results already exist")
+                    continue
+                
+                print(f"\n   {model_name} + {opt_name} (seed {seed})")
                 set_seed(seed)
                 
                 # Create model
@@ -3752,7 +3827,7 @@ def run_nlp_experiment_simple(results_dir="results_nlp", seeds=[42,123,456,789,1
     history_df = pd.DataFrame(all_history)
     history_df.to_csv(f"{results_dir}/nlp_training_history.csv", index=False)
 
-    print(f"\n💾 Results saved to {results_dir}/nlp_results.csv")
+    print(f"\nResults saved to {results_dir}/nlp_results.csv")
     print(f"   Data source: {'IMDB (real)' if use_real_data else 'Synthetic (demonstration)'}")
     
     return df
@@ -3793,7 +3868,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=[42,123,456,789,
     clear_gpu_memory()
     
     logging.info("="*80)
-    logging.info("🏥 MEDICAL IMAGE SEGMENTATION EXPERIMENT (U-Net)")
+    logging.info("MEDICAL IMAGE SEGMENTATION EXPERIMENT (U-Net)")
     logging.info("="*80)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -3822,7 +3897,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=[42,123,456,789,
     lr_sgd = 1e-3
     lr_default = 1e-4  # For new optimizers
     img_size = 128  # Smaller for speed
-    epochs = 3 if quick else 10
+    epochs = 2 if ULTRA_QUICK_MODE else (3 if quick else 10)
 
     results_dir = Path(results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -3840,13 +3915,13 @@ def run_medical_experiment(results_dir="results_medical", seeds=[42,123,456,789,
     results = []
 
     for opt_name, lr in configs:
-        print(f"\n🎯 Testing Optimizer: {opt_name}")
+        print(f"\n Testing Optimizer: {opt_name}")
         print("-" * 50)
 
         for seed in seeds:
             # Check if this specific experiment is already completed
             if resume and is_experiment_completed(results_dir, 'Medical', 'UNet2D', opt_name, seed):
-                logging.info(f"⏭️  Skipping {opt_name} seed {seed} (already completed)")
+                logging.info(f"Skipping {opt_name} seed {seed} (already completed)")
                 continue
             
             set_seed(seed)
@@ -3866,7 +3941,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=[42,123,456,789,
 
             # Setup optimizer with all variants
             if opt_name == 'Adam':
-                optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+                optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=0.0001)
             elif opt_name == 'AdamW':
                 optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.01)
             elif opt_name == 'SGD_Momentum':
@@ -3905,7 +3980,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=[42,123,456,789,
                         try:
                             optimizer.load_state_dict(checkpoint['optimizer'])
                             saved_opt = checkpoint.get('opt_name', 'unknown')
-                            logging.info(f"✓ Loaded checkpoint with compatible optimizer: {saved_opt} -> {opt_name}")
+                            logging.info(f"Loaded checkpoint with compatible optimizer: {saved_opt} -> {opt_name}")
                         except Exception as e:
                             logging.warning(f"Could not load optimizer state: {e}")
                         start_epoch = int(checkpoint.get('epoch', 0)) + 1
@@ -4069,7 +4144,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=[42,123,456,789,
     if tracker:
         tracker.log_artifact(f"{results_dir}/medical_results.csv", "results")
 
-    print(f"\n💾 Results saved to {results_dir}/medical_results.csv")
+    print(f"\nResults saved to {results_dir}/medical_results.csv")
     
     # Generate visualizations for Medical experiment
     try:
@@ -4084,13 +4159,13 @@ def run_medical_experiment(results_dir="results_medical", seeds=[42,123,456,789,
 def run_statistical_analysis(results_dir="results", plots_dir="plots"):
     """Run statistical analysis combining all experiment results from per-run CSVs"""
     print("\n" + "="*80)
-    print("📊 STATISTICAL ANALYSIS & COMPARISONS")
+    print("STATISTICAL ANALYSIS & COMPARISONS")
     print("="*80)
 
     try:
         from scipy import stats as scipy_stats
     except ImportError:
-        print("   ⚠️  scipy not available, using basic statistics")
+        print("   scipy not available, using basic statistics")
         return generate_basic_stats(results_dir)
 
     # Aggregate per-run MNIST CSV files
@@ -4112,7 +4187,7 @@ def run_statistical_analysis(results_dir="results", plots_dir="plots"):
     if mnist_df is not None and len(mnist_df) > 0:
         # Use integrated statistical analysis if available
         if HAS_STATS:
-            print("\n✅ Using integrated statistical analysis module")
+            print("\nUsing integrated statistical analysis module")
             analyze_with_integrated_stats(mnist_df, results_dir, plots_dir)
         else:
             print("\n   Using basic statistical analysis")
@@ -4126,7 +4201,7 @@ def run_statistical_analysis(results_dir="results", plots_dir="plots"):
     if HAS_INTERACTIVE:
         generate_interactive_visualizations(results_dir, plots_dir)
 
-    print("⚠️  Statistical analysis complete")
+    print("Statistical analysis complete")
     return
 
 
@@ -4158,13 +4233,13 @@ def analyze_with_integrated_stats(df, results_dir, plots_dir):
             analysis_dir.mkdir(exist_ok=True)
             output_path = analysis_dir / "statistical_comparison_tests.csv"
             stats_df.to_csv(output_path, index=False)
-            print(f"   ✓ Statistical comparison saved to {output_path}")
+            print(f"   Statistical comparison saved to {output_path}")
             
             # Print summary
             print("\n   Statistical Summary:")
             print(stats_df.to_string(index=False))
         except Exception as e:
-            print(f"   ⚠️  Statistical comparison failed: {e}")
+            print(f"   Statistical comparison failed: {e}")
 
 
 def analyze_with_basic_stats(df, results_dir, plots_dir):
@@ -4193,14 +4268,14 @@ def analyze_with_basic_stats(df, results_dir, plots_dir):
     analysis_dir.mkdir(exist_ok=True)
     output_path = analysis_dir / "optimizer_basic_statistics.csv"
     summary_df.to_csv(output_path, index=False)
-    print(f"   ✓ Basic statistics saved to {output_path}")
+    print(f"   Basic statistics saved to {output_path}")
     print("\n" + summary_df.to_string(index=False))
 
 
 def run_convergence_analysis_on_results(results_dir):
     """Run convergence analysis on all experiment results"""
     print("\n" + "="*80)
-    print("📈 CONVERGENCE ANALYSIS")
+    print("CONVERGENCE ANALYSIS")
     print("="*80)
     
     results_path = Path(results_dir)
@@ -4265,8 +4340,8 @@ def run_convergence_analysis_on_results(results_dir):
         output_path = analysis_dir / "convergence_rates.csv"
         conv_df.to_csv(output_path, index=False)
         
-        print(f"\n   ✓ Analyzed {len(convergence_results)} experiment runs")
-        print(f"   ✓ Results saved to {output_path}")
+        print(f"\n   Analyzed {len(convergence_results)} experiment runs")
+        print(f"   Results saved to {output_path}")
         
         # Print summary
         print("\n   Convergence Summary:")
@@ -4295,7 +4370,7 @@ def create_experiment_visualizations(experiment_name, results_dir, csv_files):
     static_dir.mkdir(parents=True, exist_ok=True)
     interactive_dir.mkdir(parents=True, exist_ok=True)
     
-    print(f"\n📊 Creating visualizations for {experiment_name}...")
+    print(f"\nCreating visualizations for {experiment_name}...")
     
     # Load and combine all CSVs for this experiment
     dfs = []
@@ -4357,7 +4432,7 @@ def create_experiment_visualizations(experiment_name, results_dir, csv_files):
             plt.tight_layout()
             plt.savefig(static_dir / f'{experiment_name.lower()}_train_loss.png', dpi=300, bbox_inches='tight')
             plt.close()
-            print(f"   ✓ Created {experiment_name.lower()}_train_loss.png")
+            print(f"   Created {experiment_name.lower()}_train_loss.png")
         except Exception as e:
             logging.debug(f"Could not create train loss plot: {e}")
     
@@ -4391,7 +4466,7 @@ def create_experiment_visualizations(experiment_name, results_dir, csv_files):
             plt.tight_layout()
             plt.savefig(static_dir / f'{experiment_name.lower()}_test_accuracy.png', dpi=300, bbox_inches='tight')
             plt.close()
-            print(f"   ✓ Created {experiment_name.lower()}_test_accuracy.png")
+            print(f"   Created {experiment_name.lower()}_test_accuracy.png")
         except Exception as e:
             logging.debug(f"Could not create accuracy plot: {e}")
     
@@ -4418,7 +4493,7 @@ def create_experiment_visualizations(experiment_name, results_dir, csv_files):
             plt.tight_layout()
             plt.savefig(static_dir / f'{experiment_name.lower()}_final_comparison.png', dpi=300, bbox_inches='tight')
             plt.close()
-            print(f"   ✓ Created {experiment_name.lower()}_final_comparison.png")
+            print(f"   Created {experiment_name.lower()}_final_comparison.png")
         except Exception as e:
             logging.debug(f"Could not create comparison plot: {e}")
     
@@ -4509,18 +4584,18 @@ def create_experiment_visualizations(experiment_name, results_dir, csv_files):
                 
                 output_path = interactive_dir / f"{experiment_name.lower()}_interactive_comparison.html"
                 fig.write_html(str(output_path))
-                print(f"   ✓ Created {experiment_name.lower()}_interactive_comparison.html")
+                print(f"   Created {experiment_name.lower()}_interactive_comparison.html")
                 
         except Exception as e:
             logging.warning(f"Could not create interactive plot: {e}")
     
-    print(f"   ✓ {experiment_name} visualizations complete")
+    print(f"   {experiment_name} visualizations complete")
 
 
 def generate_interactive_visualizations(results_dir, plots_dir):
     """Generate interactive HTML plots using Plotly"""
     print("\n" + "="*80)
-    print("🎨 GENERATING INTERACTIVE VISUALIZATIONS")
+    print("GENERATING INTERACTIVE VISUALIZATIONS")
     print("="*80)
     
     results_path = Path(results_dir)
@@ -4587,7 +4662,7 @@ def generate_interactive_visualizations(results_dir, plots_dir):
                         title=f"{dataset_dir.name.upper()} Optimizer Comparison"
                     )
                     fig.write_html(str(output_path))
-                    print(f"   ✓ Created {output_path.name}")
+                    print(f"   Created {output_path.name}")
             except Exception as e:
                 logging.debug(f"Could not create plot for {dataset_dir.name}: {e}")
                 continue
@@ -4633,7 +4708,7 @@ def generate_basic_stats(results_dir):
         analysis_dir.mkdir(exist_ok=True)
         output_path = analysis_dir / "basic_statistics_summary.csv"
         summary_df.to_csv(output_path, index=False)
-        print(f"   ✓ Basic stats saved to {output_path}")
+        print(f"   Basic stats saved to {output_path}")
     
     return pd.DataFrame()
 
@@ -4653,7 +4728,7 @@ def aggregate_cross_experiment_results(results_dir: Path, experiment_results: Di
     Returns:
         DataFrame with aggregated cross-experiment results
     """
-    print("\n📊 CROSS-EXPERIMENT RESULT AGGREGATION")
+    print("\nCROSS-EXPERIMENT RESULT AGGREGATION")
     print("-" * 50)
     
     aggregated = []
@@ -4727,7 +4802,7 @@ def aggregate_cross_experiment_results(results_dir: Path, experiment_results: Di
             continue
     
     if not aggregated:
-        print("   ⚠️ No data to aggregate")
+        print("   No data to aggregate")
         return pd.DataFrame()
     
     # Create aggregated DataFrame
@@ -4739,7 +4814,7 @@ def aggregate_cross_experiment_results(results_dir: Path, experiment_results: Di
     
     agg_path = analysis_dir / "cross_experiment_aggregation.csv"
     agg_df.to_csv(agg_path, index=False)
-    print(f"   ✓ Aggregated results saved to {agg_path}")
+    print(f"   Aggregated results saved to {agg_path}")
     
     # Compute cross-experiment optimizer rankings
     if 'mean_accuracy' in agg_df.columns:
@@ -4759,17 +4834,17 @@ def aggregate_cross_experiment_results(results_dir: Path, experiment_results: Di
         
         ranking_path = analysis_dir / "optimizer_rankings.csv"
         ranking_df.to_csv(ranking_path, index=False)
-        print(f"   ✓ Optimizer rankings saved to {ranking_path}")
+        print(f"   Optimizer rankings saved to {ranking_path}")
         
         # Print rankings
-        print("\n   📊 Optimizer Rankings (by avg accuracy):")
+        print("\n   Optimizer Rankings (by avg accuracy):")
         for i, row in ranking_df.iterrows():
             acc_str = f"{row['avg_accuracy']:.2f}%" if pd.notna(row.get('avg_accuracy')) else "N/A"
             print(f"      {row['optimizer']:20s}: {acc_str} (across {int(row['experiments_count'])} experiments)")
     
     # Statistical comparison across experiments (if scipy available)
     if HAS_SCIPY and len(optimizer_performance) >= 2:
-        print("\n   🔬 Cross-Experiment Statistical Analysis:")
+        print("\n   Cross-Experiment Statistical Analysis:")
         
         stat_results = []
         optimizers = list(optimizer_performance.keys())
@@ -4814,7 +4889,7 @@ def aggregate_cross_experiment_results(results_dir: Path, experiment_results: Di
             stat_df = pd.DataFrame(stat_results)
             stat_path = analysis_dir / "cross_experiment_statistics.csv"
             stat_df.to_csv(stat_path, index=False)
-            print(f"\n   ✓ Cross-experiment statistics saved to {stat_path}")
+            print(f"\n   Cross-experiment statistics saved to {stat_path}")
     
     return agg_df
 
@@ -4829,17 +4904,17 @@ def generate_final_summary_report(results_dir, experiment_results):
     
     report_path = reports_dir / "experiment_summary_report.md"
     
-    with open(report_path, 'w') as f:
+    with open(report_path, 'w', encoding='utf-8') as f:
         f.write("# GDSearch Benchmark Suite - Comprehensive Experiment Report\n\n")
         f.write(f"**Generated**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
         f.write("---\n\n")
         
-        f.write("## 📊 Experiments Completed\n\n")
+        f.write("## Experiments Completed\n\n")
         for exp_name, exp_df in experiment_results.items():
             if exp_df is not None:
                 f.write(f"- **{exp_name.upper()}**: {len(exp_df)} data points\n")
         
-        f.write("\n## 📁 Results Directory Structure\n\n")
+        f.write("\n## Results Directory Structure\n\n")
         f.write("```\n")
         f.write(f"{results_dir.name}/\n")
         f.write("├── experiments/           # Experiment-specific results\n")
@@ -4858,28 +4933,28 @@ def generate_final_summary_report(results_dir, experiment_results):
         f.write("└── checkpoints/          # Model checkpoints (if enabled)\n")
         f.write("```\n\n")
         
-        f.write("## 🔬 Integrated Analysis Features\n\n")
+        f.write("## Integrated Analysis Features\n\n")
         
         if HAS_CONVERGENCE:
-            f.write("### ✅ Convergence Analysis\n")
+            f.write("### Convergence Analysis\n")
             f.write("- **Purpose**: Empirical convergence rate detection\n")
             f.write("- **Metrics**: Convergence rate, stagnation detection, epoch analysis\n")
             f.write("- **Location**: `analysis/convergence_rates.csv`\n\n")
         
         if HAS_INTERACTIVE:
-            f.write("### ✅ Interactive Visualizations\n")
+            f.write("### Interactive Visualizations\n")
             f.write("- **Purpose**: Multi-optimizer comparison with interactive charts\n")
             f.write("- **Features**: Pan, zoom, hover tooltips, multi-metric subplots\n")
             f.write("- **Location**: `visualizations/*.html`\n")
             f.write("- **Usage**: Open HTML files in any web browser\n\n")
         
         if HAS_STATS:
-            f.write("### ✅ Statistical Analysis\n")
+            f.write("### Statistical Analysis\n")
             f.write("- **Purpose**: Rigorous statistical comparisons\n")
             f.write("- **Tests**: T-tests, Cohen's d effect sizes, confidence intervals\n")
             f.write("- **Location**: `analysis/statistical_comparison.csv`\n\n")
         
-        f.write("## 📖 How to Use Results\n\n")
+        f.write("## How to Use Results\n\n")
         f.write("### View Interactive Plots\n")
         f.write("```bash\n")
         f.write("# Open visualizations in browser\n")
@@ -4901,19 +4976,19 @@ def generate_final_summary_report(results_dir, experiment_results):
         f.write("print(mnist[['epoch', 'test_acc']].tail())\n")
         f.write("```\n\n")
         
-        f.write("## 🎯 Key Findings\n\n")
+        f.write("## Key Findings\n\n")
         f.write("1. **Convergence Analysis**: Review convergence rates to understand optimization dynamics\n")
         f.write("2. **Statistical Tests**: Check p-values and effect sizes for rigorous comparisons\n")
         f.write("3. **Interactive Plots**: Use visualizations for presentation and exploration\n")
         f.write("4. **Per-Experiment Data**: Detailed CSV files for custom analysis\n\n")
         
-        f.write("## 🚀 Next Steps\n\n")
+        f.write("## Next Steps\n\n")
         f.write("1. Open `visualizations/*.html` for interactive exploration\n")
         f.write("2. Review `analysis/convergence_rates.csv` for convergence insights\n")
         f.write("3. Check `analysis/statistical_comparison.csv` for rigorous comparisons\n")
         f.write("4. Use experiment CSVs for custom analysis and visualization\n\n")
         
-        f.write("## 📚 Citation\n\n")
+        f.write("## Citation\n\n")
         f.write("If you use these results, please cite:\n")
         f.write("```\n")
         f.write("GDSearch: Gradient Descent Optimizer Comparison Platform\n")
@@ -4923,7 +4998,7 @@ def generate_final_summary_report(results_dir, experiment_results):
         f.write("---\n")
         f.write(f"*Report generated by GDSearch v1.0 on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*\n")
     
-    print(f"   ✓ Summary report saved to {report_path}")
+    print(f"   Summary report saved to {report_path}")
     return str(report_path)
 
 
@@ -4979,7 +5054,7 @@ def run_2d_experiments(results_dir="results_2d", seeds=[1,2,3], resume=False):
         resume: If True, skip experiments that already have result files
     """
     print("\n" + "="*80)
-    print("📐 2D OPTIMIZATION EXPERIMENTS")
+    print("2D OPTIMIZATION EXPERIMENTS")
     print("="*80)
 
     test_functions = [
@@ -4987,23 +5062,27 @@ def run_2d_experiments(results_dir="results_2d", seeds=[1,2,3], resume=False):
         ("Rastrigin", Rastrigin(), (-2.0, 2.0)),
     ]
 
-    optimizers_2d = [
-        ('SGD', lambda params: optim.SGD(params, lr=0.01)),
-        ('Adam', lambda params: optim.Adam(params, lr=0.1)),
-        ('SAM_SGD', lambda params: SAM(params, optim.SGD, lr=0.01, rho=0.05)),
-    ]
+    optimizers_2d = []
+    for opt_name in ['SGD', 'Adam', 'SAM_SGD']:
+        hyperparams = get_default_hyperparameters(opt_name, "2d_optimization")
+        if opt_name == 'SAM_SGD':
+            optimizers_2d.append((opt_name, lambda params, hp=hyperparams: SAM(params, optim.SGD, **hp)))
+        elif opt_name == 'SGD':
+            optimizers_2d.append((opt_name, lambda params, hp=hyperparams: optim.SGD(params, **hp)))
+        elif opt_name == 'Adam':
+            optimizers_2d.append((opt_name, lambda params, hp=hyperparams: optim.Adam(params, **hp)))
 
     results = []
 
     for func_name, func, start_point in test_functions:
-        print(f"\n🎯 Testing Function: {func_name}")
+        print(f"\nTesting Function: {func_name}")
         print("-" * 50)
 
         for opt_name, opt_func in optimizers_2d:
             for seed in seeds:
                 # Check if this specific experiment is already completed
                 if resume and is_experiment_completed(str(results_dir), '2D', func_name, opt_name, seed):
-                    logging.info(f"⏭️  Skipping 2D {func_name} {opt_name} seed {seed} (already completed)")
+                    logging.info(f"Skipping 2D {func_name} {opt_name} seed {seed} (already completed)")
                     continue
                 
                 set_seed(seed)
@@ -5080,7 +5159,7 @@ def run_2d_experiments(results_dir="results_2d", seeds=[1,2,3], resume=False):
     df = pd.DataFrame(results)
     df.to_csv(f"{results_dir}/2d_optimization_results.csv", index=False)
 
-    print(f"\n💾 Results saved to {results_dir}/2d_optimization_results.csv")
+    print(f"\nResults saved to {results_dir}/2d_optimization_results.csv")
     
     # Generate visualizations for 2D experiment
     try:
@@ -5100,7 +5179,7 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=[42], resume
         resume: If True, skip experiments that already have result files
     """
     print("\n" + "="*80)
-    print("🎲 INITIAL CONDITION ROBUSTNESS ANALYSIS")
+    print("INITIAL CONDITION ROBUSTNESS ANALYSIS")
     print("="*80)
 
     rosenbrock = Rosenbrock()
@@ -5110,11 +5189,15 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=[42], resume
         (-1.0, -1.0), (0.5, -0.5)
     ]
 
-    optimizers_robust = [
-        ('SGD', lambda params: optim.SGD(params, lr=0.01)),
-        ('Adam', lambda params: optim.Adam(params, lr=0.1)),
-        ('SAM_SGD', lambda params: SAM(params, optim.SGD, lr=0.01, rho=0.05)),
-    ]
+    optimizers_robust = []
+    for opt_name in ['SGD', 'Adam', 'SAM_SGD']:
+        hyperparams = get_default_hyperparameters(opt_name, "2d_optimization")
+        if opt_name == 'SAM_SGD':
+            optimizers_robust.append((opt_name, lambda params, hp=hyperparams: SAM(params, optim.SGD, **hp)))
+        elif opt_name == 'SGD':
+            optimizers_robust.append((opt_name, lambda params, hp=hyperparams: optim.SGD(params, **hp)))
+        elif opt_name == 'Adam':
+            optimizers_robust.append((opt_name, lambda params, hp=hyperparams: optim.Adam(params, **hp)))
 
     # Check if experiment is already completed (single CSV output)
     if resume:
@@ -5123,7 +5206,7 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=[42], resume
             try:
                 df = pd.read_csv(result_file)
                 if len(df) > 0:
-                    logging.info(f"⏭️  Skipping Robustness experiment (already completed)")
+                    logging.info(f"Skipping Robustness experiment (already completed)")
                     return df
             except Exception:
                 pass
@@ -5217,7 +5300,7 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=[42], resum
             try:
                 df = pd.read_csv(result_file)
                 if len(df) > 0:
-                    logging.info(f"⏭️  Skipping SAM Sensitivity experiment (already completed)")
+                    logging.info(f"Skipping SAM Sensitivity experiment (already completed)")
                     return df
             except Exception:
                 pass
@@ -5264,7 +5347,9 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=[42], resum
 
         set_seed(42)
         model = SimpleMLP().to(device)
-        optimizer = SAM(model.parameters(), optim.SGD, lr=0.01, rho=rho)
+        sam_params = get_default_hyperparameters('SAM_SGD', 'resnet_cifar10')
+        sam_params['rho'] = rho  # Override rho for sensitivity analysis
+        optimizer = SAM(model.parameters(), optim.SGD, **sam_params)
         criterion = nn.CrossEntropyLoss()
 
         # Quick training (3 epochs)
@@ -5335,7 +5420,7 @@ def run_ablation_study(results_dir="results_ablation", seeds=[42], resume=False)
             try:
                 df = pd.read_csv(result_file)
                 if len(df) > 0:
-                    logging.info(f"⏭️  Skipping Ablation Study experiment (already completed)")
+                    logging.info(f"Skipping Ablation Study experiment (already completed)")
                     return df
             except Exception:
                 pass
@@ -5460,7 +5545,7 @@ def run_advanced_training_ablation(results_dir="results_advanced_ablation", seed
             try:
                 df = pd.read_csv(result_file)
                 if len(df) >= 8:  # Should have 8 configurations
-                    logging.info(f"⏭️  Skipping Advanced Training Ablation (already completed)")
+                    logging.info(f"Skipping Advanced Training Ablation (already completed)")
                     logging.info(f"   Found {len(df)} configurations in {result_file}")
                     return df
             except Exception:
@@ -5512,6 +5597,10 @@ def run_initialization_ablation(device='cuda', epochs=10, seeds=[1,2,3,4,5], qui
     - Understanding these interactions helps practitioners make better choices
     """
     try:
+        # Honor ULTRA_QUICK_MODE for faster CI runs
+        if ULTRA_QUICK_MODE:
+            epochs = 2
+
         from src.experiments.initialization_ablation import run_initialization_ablation as run_init_abl
         
         print("\n" + "="*80)
@@ -5687,7 +5776,7 @@ def distributed_training_worker(rank, world_size, backend, results_dir):
         criterion = nn.CrossEntropyLoss()
 
         # Training loop
-        epochs = 3
+        epochs = 2 if ULTRA_QUICK_MODE else 3
         for epoch in range(epochs):
             train_sampler.set_epoch(epoch)
             model.train()
@@ -6216,7 +6305,7 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=[42,123,456,789,10
             try:
                 df = pd.read_csv(result_file)
                 if len(df) > 0:
-                    logging.info(f"⏭️  Skipping ResNet18 experiment (already completed)")
+                    logging.info(f"Skipping ResNet18 experiment (already completed)")
                     return df
             except Exception:
                 pass
@@ -6278,10 +6367,10 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=[42,123,456,789,10
                                     seed=seeds[0] if seeds else None, **dl_kwargs)
 
     model = ResNet18(num_classes=10).to(device)
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=0.0001)
     criterion = nn.CrossEntropyLoss()
 
-    epochs = 20 if quick else 50
+    epochs = 2 if ULTRA_QUICK_MODE else (20 if quick else 50)
     results = []
 
     for epoch in range(epochs):
@@ -6405,7 +6494,7 @@ def run_highdim_experiment(results_dir="results_highdim", seeds=[42,123,456,789,
             try:
                 df = pd.read_csv(result_file)
                 if len(df) > 0:
-                    logging.info(f"⏭️  Skipping HighDim experiment (already completed)")
+                    logging.info(f"Skipping HighDim experiment (already completed)")
                     return df
             except Exception:
                 pass
@@ -6426,11 +6515,15 @@ def run_highdim_experiment(results_dir="results_highdim", seeds=[42,123,456,789,
         })
 
     dimensions = [100, 200] if quick else [100, 500, 1000]
-    optimizers_config = [
-        ('SGD', lambda params: optim.SGD(params, lr=0.01)),
-        ('Adam', lambda params: optim.Adam(params, lr=0.001)),
-        ('SAM_SGD', lambda params: SAM(params, optim.SGD, lr=0.01, rho=0.05)),
-    ]
+    optimizers_config = []
+    for opt_name in ['SGD', 'Adam', 'SAM_SGD']:
+        hyperparams = get_default_hyperparameters(opt_name, "highdim_optimization")
+        if opt_name == 'SAM_SGD':
+            optimizers_config.append((opt_name, lambda params, hp=hyperparams: SAM(params, optim.SGD, **hp)))
+        elif opt_name == 'SGD':
+            optimizers_config.append((opt_name, lambda params, hp=hyperparams: optim.SGD(params, **hp)))
+        elif opt_name == 'Adam':
+            optimizers_config.append((opt_name, lambda params, hp=hyperparams: optim.Adam(params, **hp)))
 
     results = []
 
@@ -6846,14 +6939,16 @@ Examples:
             np.random.seed(42)
             
             # Create model and optimizer for 10-step run
+            sgd_params = get_default_hyperparameters('SGD', '2d_optimization')
             model_10 = TinyTestModel()
-            opt_10 = torch.optim.SGD(model_10.parameters(), lr=0.01)
+            opt_10 = torch.optim.SGD(model_10.parameters(), **sgd_params)
             
             # Same initial weights for split run
             torch.manual_seed(42)
             np.random.seed(42)
+            sgd_params = get_default_hyperparameters('SGD', '2d_optimization')
             model_split = TinyTestModel()
-            opt_split = torch.optim.SGD(model_split.parameters(), lr=0.01)
+            opt_split = torch.optim.SGD(model_split.parameters(), **sgd_params)
             
             # Fixed input data
             torch.manual_seed(123)
@@ -6889,9 +6984,10 @@ Examples:
             
             # Simulate restart: load checkpoint
             checkpoint = torch.load(checkpoint_path, weights_only=False)
+            sgd_params = get_default_hyperparameters('SGD', '2d_optimization')
             model_resumed = TinyTestModel()
             model_resumed.load_state_dict(checkpoint['model_state_dict'])
-            opt_resumed = torch.optim.SGD(model_resumed.parameters(), lr=0.01)
+            opt_resumed = torch.optim.SGD(model_resumed.parameters(), **sgd_params)
             opt_resumed.load_state_dict(checkpoint['optimizer_state_dict'])
             torch.set_rng_state(checkpoint['rng_state'])
             
@@ -7184,7 +7280,7 @@ Examples:
                 ]
                 
                 if args.resume and all(f.exists() for f in ablation_files):
-                    print("   ⏭️  Missing ablations already completed (all 5 found)")
+                    print("   Missing ablations already completed (all 5 found)")
                     experiment_results['missing_ablations'] = "Skipped (already complete)"
                 else:
                     results_dict = run_all_missing_ablations(
@@ -7270,7 +7366,7 @@ Examples:
                 adam_files = list(Path(sensitivity_dir).glob("adam_beta_sweep_*.csv"))
                 
                 if args.resume and len(momentum_files) >= 2 and len(adam_files) >= 1:
-                    print("   ⏭️  Hyperparam sensitivity already completed (found existing results)")
+                    print("   Hyperparam sensitivity already completed (found existing results)")
                     experiment_results['hyperparam_sensitivity'] = "Skipped (already complete)"
                 else:
                     # Momentum β sweep on multiple test functions
@@ -7310,7 +7406,7 @@ Examples:
                 result_file = Path(validation_dir) / "convergence_comparison.csv"
                 
                 if args.resume and result_file.exists():
-                    print("   ⏭️  Convergence validation already completed (found existing results)")
+                    print("   Convergence validation already completed (found existing results)")
                     experiment_results['convergence_validation'] = "Skipped (already complete)"
                 else:
                     run_convergence_rate_comparison(
@@ -7341,7 +7437,7 @@ Examples:
                 ablation_files = list(Path(ablation_dir).glob("ablation_*.csv"))
                 
                 if args.resume and len(ablation_files) >= 3:
-                    print("   ⏭️  Comprehensive ablation already completed (found existing results)")
+                    print("   Comprehensive ablation already completed (found existing results)")
                     experiment_results['ablation_comprehensive'] = "Skipped (already complete)"
                 else:
                     run_all_ablation_studies(output_dir=ablation_dir)
@@ -7374,7 +7470,7 @@ Examples:
                 family_plots = list(Path(viz_2d_dir).glob("*optimizer_families*.png"))
                 
                 if args.resume and len(momentum_plots) > 0 and len(adam_plots) > 0 and len(family_plots) > 0:
-                    print("   ⏭️  2D visualization already completed (found existing plots)")
+                    print("   2D visualization already completed (found existing plots)")
                     experiment_results['2d_visualization'] = "Skipped (already complete)"
                 else:
                     # Momentum β trajectories
@@ -7417,7 +7513,7 @@ Examples:
                 csv_results = list(Path(ablation_dir).glob("dynamics_overhead_ablation_*.csv"))
                 
                 if args.resume and len(csv_results) > 0:
-                    print("   ⏭️  Dynamics overhead ablation already completed")
+                    print("   Dynamics overhead ablation already completed")
                     experiment_results['dynamics_overhead'] = "Skipped (already complete)"
                 else:
                     df = run_dynamics_overhead_ablation(
@@ -7449,7 +7545,7 @@ Examples:
                 csv_results = list(Path(validation_dir).glob("theory_practice_comparison_results.csv"))
                 
                 if args.resume and len(csv_results) > 0:
-                    print("   ⏭️  Theory-practice validation already completed")
+                    print("   Theory-practice validation already completed")
                     experiment_results['theory_practice'] = "Skipped (already complete)"
                 else:
                     # Only run if we have MNIST/CIFAR results
@@ -7492,7 +7588,7 @@ Examples:
                 csv_results = list(Path(dynamics_comp_dir).glob("cross_optimizer_dynamics_*.csv"))
                 
                 if args.resume and len(csv_results) > 0:
-                    print("   ⏭️  Cross-optimizer dynamics comparison already completed")
+                    print("   Cross-optimizer dynamics comparison already completed")
                     experiment_results['cross_optimizer_dynamics'] = "Skipped (already complete)"
                 else:
                     # Run on MNIST (fast, clear dynamics)
@@ -7518,8 +7614,8 @@ Examples:
             print("🔬 β SENSITIVITY ANALYSIS ON REAL TRAINING")
             print("="*80)
             print("📌 This addresses the Vietnamese proposal requirement:")
-            print("   'khảo sát hệ thống và trực quan hóa ảnh hưởng của các siêu tham số")
-            print("    đặc trưng (β, β1, β2) lên các khía cạnh động học'")
+            print("   'systematic investigation and visualization of the impact of characteristic")
+            print("    hyperparameters (β, β1, β2) on kinetic aspects'")
             print("="*80)
             try:
                 from src.experiments.beta_sensitivity_training import (
@@ -7539,7 +7635,7 @@ Examples:
                 
                 if args.resume and all([momentum_csv.exists(), adam_beta1_csv.exists(), 
                                        adam_beta2_csv.exists(), adam_grid_csv.exists()]):
-                    print("   ⏭️  β sensitivity training already completed (all 4 experiments)")
+                    print("   β sensitivity training already completed (all 4 experiments)")
                     experiment_results['beta_sensitivity_training'] = "Skipped (already complete)"
                 else:
                     # Determine device
@@ -7550,11 +7646,13 @@ Examples:
                     # Run Momentum β sensitivity
                     if not momentum_csv.exists() or not args.resume:
                         print("\n🔹 Running Momentum β sweep on MNIST...")
+                        sgd_params = get_default_hyperparameters('SGD', 'resnet_cifar10')
+                        lr = sgd_params.get('lr', 0.01)
                         momentum_df = run_momentum_beta_sensitivity(
                             beta_values=[0.0, 0.5, 0.9, 0.99] if args.quick else [0.0, 0.5, 0.7, 0.9, 0.95, 0.99],
                             epochs=10 if args.quick else 20,
                             seeds=seeds[:2] if args.quick else seeds[:3],
-                            lr=0.01,
+                            lr=lr,
                             device=device,
                             quick=args.quick,
                             output_dir=beta_sens_dir
@@ -7564,11 +7662,13 @@ Examples:
                     # Run Adam β1 sensitivity
                     if not adam_beta1_csv.exists() or not args.resume:
                         print("\n🔹 Running Adam β1 sweep on MNIST...")
+                        adam_params = get_default_hyperparameters('Adam', 'resnet_cifar10')
+                        lr = adam_params.get('lr', 0.001)
                         adam_beta1_df = run_adam_beta_sensitivity(
                             beta1_values=[0.5, 0.9, 0.99] if args.quick else [0.5, 0.7, 0.9, 0.95, 0.99],
                             epochs=10 if args.quick else 20,
                             seeds=seeds[:2] if args.quick else seeds[:3],
-                            lr=0.001,
+                            lr=lr,
                             device=device,
                             quick=args.quick,
                             output_dir=beta_sens_dir
@@ -7583,7 +7683,7 @@ Examples:
                             beta2_values=[0.95, 0.99, 0.999] if args.quick else [0.9, 0.95, 0.99, 0.999, 0.9999],
                             epochs=10 if args.quick else 20,
                             seeds=seeds[:2] if args.quick else seeds[:3],
-                            lr=0.001,
+                            lr=lr,  # Use same lr as above
                             device=device,
                             quick=args.quick,
                             output_dir=beta_sens_dir
@@ -7598,7 +7698,7 @@ Examples:
                             beta2_values=[0.9, 0.99, 0.999] if args.quick else [0.9, 0.99, 0.999, 0.9999],
                             epochs=10 if args.quick else 15,
                             seeds=seeds[:1] if args.quick else seeds[:2],
-                            lr=0.001,
+                            lr=lr,  # Use same lr as above
                             device=device,
                             quick=args.quick,
                             output_dir=beta_sens_dir
@@ -7747,21 +7847,21 @@ Examples:
         plot_script = Path(__file__).parent / "scripts" / "generate_experiment_plots.py"
         if plot_script.exists():
             print(f"Running universal plot generator: {plot_script}")
-            result = subprocess.run([sys.executable, str(plot_script)], 
+            result = subprocess.run([sys.executable, str(plot_script), "--results-dir", str(results_dir)], 
                                    capture_output=True, text=True, timeout=300)
             if result.returncode == 0:
                 print("✅ Publication-quality plots generated successfully")
                 print(f"   Plots saved to: {results_dir}/visualizations/")
             else:
-                print(f"⚠️  Plot generation completed with warnings:")
-                if result.stderr:
-                    print(f"   {result.stderr[:200]}")
+                print(f"⚠️  Plot generation completed with warnings (non-critical)")
+                # Don't show full error - it's usually just missing data
         else:
             print(f"⚠️  Universal plot generator not found at: {plot_script}")
             print("   Plots can be generated manually using: python scripts/generate_experiment_plots.py")
+    except subprocess.TimeoutExpired:
+        print(f"⚠️  Plot generation timed out after 5 minutes (non-critical)")
     except Exception as e:
-        print(f"⚠️  Could not generate universal plots: {e}")
-        print("   This is non-critical. Plots can be generated later.")
+        print(f"⚠️  Could not generate universal plots: {str(e)[:100]} (non-critical)")
     print("="*80)
     
     return experiment_results

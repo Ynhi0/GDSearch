@@ -212,7 +212,11 @@ def generate_all_plots(results_dir: str = 'results'):
     print("="*80)
     
     # Find all CSV files
-    all_csvs = glob.glob(str(results_path / "**/*.csv"), recursive=True)
+    try:
+        all_csvs = glob.glob(str(results_path / "**/*.csv"), recursive=True)
+    except Exception as e:
+        print(f"⚠️  Error finding CSV files: {e}")
+        all_csvs = []
     
     if not all_csvs:
         print("⚠️  No CSV files found")

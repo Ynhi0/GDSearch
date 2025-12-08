@@ -16,6 +16,10 @@ def get_mnist_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optiona
     Normalization uses standard MNIST mean/std.
     If seed is provided, DataLoader workers and RNG are seeded for determinism.
     """
+    # Disable multiprocessing on Windows due to pickle issues
+    import platform
+    if platform.system() == 'Windows':
+        num_workers = 0
     transform_train = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.1307,), (0.3081,)),
@@ -71,6 +75,10 @@ def get_cifar10_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optio
     Normalization uses CIFAR-10 mean/std.
     If seed is provided, DataLoader workers and RNG are seeded for determinism.
     """
+    # Disable multiprocessing on Windows due to pickle issues
+    import platform
+    if platform.system() == 'Windows':
+        num_workers = 0
     mean = (0.4914, 0.4822, 0.4465)
     std = (0.2470, 0.2435, 0.2616)
 

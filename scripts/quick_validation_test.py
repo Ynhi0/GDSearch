@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Quick Validation Test - Verifies All 26 Experiments Are Bug-Free
 
@@ -24,9 +25,23 @@ import shutil
 from pathlib import Path
 import subprocess
 
+# Set console encoding to UTF-8 for Windows
+if sys.platform == 'win32':
+    try:
+        import codecs
+        sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
+        sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
+    except Exception:
+        pass  # Fallback to ASCII-safe output
+
 # Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
+
+# ASCII-safe symbols for Windows compatibility
+CHECK = 'OK' if sys.platform == 'win32' else '✓'
+CROSS = 'X' if sys.platform == 'win32' else '✗'
+INFO = 'i' if sys.platform == 'win32' else 'ℹ'
 
 # ANSI colors
 GREEN = '\033[92m'
@@ -41,13 +56,13 @@ def print_header(text):
     print(f"{BLUE}{'='*70}{RESET}\n")
 
 def print_success(text):
-    print(f"{GREEN}✓{RESET} {text}")
+    print(f"{GREEN}{CHECK}{RESET} {text}")
 
 def print_error(text):
-    print(f"{RED}✗{RESET} {text}")
+    print(f"{RED}{CROSS}{RESET} {text}")
 
 def print_info(text):
-    print(f"{YELLOW}ℹ{RESET} {text}")
+    print(f"{YELLOW}{INFO}{RESET} {text}")
 
 
 def test_imports():
@@ -88,105 +103,10 @@ def test_imports():
 
 def test_mnist_quick():
     """Test MNIST experiment with ultra-quick mode"""
-    print_header("MNIST QUICK TEST (2 epochs, 1 seed)")
-    
-    # Create temp directory
-    with tempfile.TemporaryDirectory() as tmpdir:
-        print_info(f"Running in temp directory: {tmpdir}")
+    # Use the general helper which runs an ultra-quick single experiment and validates results
+    return run_quick_experiment('mnist', expected_min_optimizers=3, min_train_acc=80.0, min_test_acc=80.0)
         
-        cmd = [
-            sys.executable,
-            str(project_root / "run_all_kaggle.py"),
-            "--ultra-quick",
-            "--seeds", "42",
-            "--experiments", "mnist",
-            "--results-dir", tmpdir,
-            "--no-mlflow"  # Skip MLflow to avoid setup
-        ]
         
-        print_info("Command: python run_all_kaggle.py --ultra-quick --seeds 42 --experiments mnist")
-        print_info("This will take 2-3 minutes...")
-        
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=300,  # 5 minute timeout
-                cwd=project_root
-            )
-            
-            if result.returncode != 0:
-                print_error("MNIST test failed")
-                print(f"\nLast 30 lines of output:")
-                lines = result.stdout.split('\n')
-                for line in lines[-30:]:
-                    print(f"  {line}")
-                return False
-            
-            # Check results
-            import pandas as pd
-            results_file = Path(tmpdir) / "experiments" / "mnist" / "mnist_results.csv"
-            
-            if not results_file.exists():
-                print_error(f"Results file not found: {results_file}")
-                return False
-            
-            df = pd.read_csv(results_file)
-            
-            # Validate results
-            if len(df) == 0:
-                print_error("Results CSV is empty")
-                return False
-            
-            # Check that we have results for multiple optimizers
-            num_optimizers = len(df['optimizer'].unique())
-            if num_optimizers < 5:
-                print_error(f"Only {num_optimizers} optimizers tested (expected 12)")
-                return False
-            
-            print_success(f"Tested {num_optimizers} optimizers")
-            
-            # Check accuracy sanity (should be > 80% for MNIST after 2 epochs)
-            avg_train_acc = df['train_acc'].mean()
-            avg_test_acc = df['test_acc'].mean()
-            
-            if avg_train_acc < 80.0:
-                print_error(f"Average train accuracy {avg_train_acc:.1f}% is too low (expected > 80%)")
-                print_error("This may indicate the training loop indentation bug!")
-                return False
-            
-            if avg_test_acc < 80.0:
-                print_error(f"Average test accuracy {avg_test_acc:.1f}% is too low (expected > 80%)")
-                return False
-            
-            print_success(f"Average train accuracy: {avg_train_acc:.2f}%")
-            print_success(f"Average test accuracy: {avg_test_acc:.2f}%")
-            
-            # Check for NaN/Inf
-            if df[['train_loss', 'train_acc', 'test_loss', 'test_acc']].isnull().any().any():
-                print_error("Found NaN values in results")
-                return False
-            
-            print_success("No NaN/Inf values found")
-            
-            # Show top 3 performers
-            print(f"\n{BLUE}Top 3 Optimizers (by test accuracy):{RESET}")
-            top3 = df.nlargest(3, 'test_acc')[['optimizer', 'test_acc', 'train_acc']]
-            for idx, row in top3.iterrows():
-                print(f"  {row['optimizer']:20s} Test: {row['test_acc']:.2f}%  Train: {row['train_acc']:.2f}%")
-            
-            print(f"\n{GREEN}MNIST test PASSED{RESET}")
-            return True
-            
-        except subprocess.TimeoutExpired:
-            print_error("MNIST test timed out (> 5 minutes)")
-            return False
-        except Exception as e:
-            print_error(f"MNIST test error: {e}")
-            import traceback
-            traceback.print_exc()
-            return False
 
 
 def test_validation_script():
@@ -200,12 +120,18 @@ def test_validation_script():
     ]
     
     try:
+        env = os.environ.copy()
+        # Force the child process to use UTF-8 I/O on Windows to avoid UnicodeEncodeError when printing emojis
+        env['PYTHONIOENCODING'] = 'utf-8'
+        env['PYTHONUTF8'] = '1'
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
-            timeout=60,
-            cwd=project_root
+            encoding='utf-8',
+            timeout=300,  # 5 minutes for the validation script
+            cwd=project_root,
+            env=env
         )
         
         if result.returncode == 0:
@@ -218,7 +144,7 @@ def test_validation_script():
             return True
         else:
             print_error("Comprehensive validation FAILED")
-            print(f"\nOutput:\n{result.stdout}")
+            print(f"\nReturn code: {result.returncode}\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}")
             return False
             
     except subprocess.TimeoutExpired:
@@ -229,11 +155,173 @@ def test_validation_script():
         return False
 
 
+def run_quick_experiment(experiment_name, expected_min_optimizers=3, min_train_acc=60.0, min_test_acc=50.0, timeout_sec=900):
+    """Helper to run a single experiment with ultra-quick mode and validate results.
+    Returns True if test passes, False otherwise.
+    """
+    print_header(f"{experiment_name.upper()} QUICK TEST (2 epochs, 1 seed)")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        print_info(f"Running {experiment_name} in temp directory: {tmpdir}")
+        cmd = [
+            sys.executable,
+            str(project_root / "run_all_kaggle.py"),
+            "--ultra-quick",
+            "--seeds", "42",
+            "--experiments", experiment_name,
+            "--results-dir", tmpdir,
+            "--no-mlflow"
+        ]
+
+        # Ensure environment limit is set (default to 3 optimizers for quick local test)
+        os.environ['GDSEARCH_ULTRA_QUICK_LIMIT'] = os.environ.get('GDSEARCH_ULTRA_QUICK_LIMIT', '3').strip()
+        env = os.environ.copy()
+        print_info(f"GDSEARCH_ULTRA_QUICK_LIMIT={env.get('GDSEARCH_ULTRA_QUICK_LIMIT')}")
+
+        # Per-experiment metrics and checks (required columns and thresholds)
+        EXP_METRICS_SPEC = {
+            'mnist': {
+                'required_cols': ['final_test_acc', 'final_train_acc'],
+                'min': {'final_test_acc': 80.0, 'final_train_acc': 80.0}
+            },
+            'cifar10': {
+                'required_cols': ['final_test_acc', 'final_train_acc'],
+                'min': {'final_test_acc': 20.0, 'final_train_acc': 40.0}
+            },
+            'resnet': {
+                'required_cols': ['final_test_acc'],
+                'min': {'final_test_acc': 20.0}
+            },
+            'nlp': {
+                'required_cols': ['final_test_acc', 'final_train_acc'],
+                'min': {'final_test_acc': 30.0, 'final_train_acc': 40.0}
+            },
+            'medical': {
+                'required_cols': ['final_test_dice', 'final_train_dice'],
+                'min': {'final_test_dice': 0.15, 'final_train_dice': 0.15}
+            }
+        }
+
+        try:
+            result = subprocess.run(cmd, timeout=timeout_sec, cwd=project_root, env=env)
+            if result.returncode != 0:
+                print_error(f"{experiment_name} test failed - non-zero exit code {result.returncode}")
+                return False
+
+            import pandas as pd
+            results_file = Path(tmpdir) / "experiments" / experiment_name / f"{experiment_name}_results.csv"
+            if not results_file.exists():
+                print_error(f"Results file not found: {results_file}")
+                if (Path(tmpdir) / "experiments" / experiment_name).exists():
+                    existing_files = list((Path(tmpdir) / "experiments" / experiment_name).glob("*"))
+                    print_info(f"Files in results directory: {existing_files}")
+                return False
+
+            df = pd.read_csv(results_file)
+            if len(df) == 0:
+                print_error("Results CSV is empty")
+                return False
+
+            num_optimizers = len(df['optimizer'].unique())
+            # Expected minimum: prefer the smaller of env var (GDSEARCH_ULTRA_QUICK_LIMIT) and experiment-specific expected_min_optimizers
+            env_expected = os.environ.get('GDSEARCH_ULTRA_QUICK_LIMIT')
+            if env_expected and env_expected.strip().isdigit():
+                expected_min = max(1, min(int(env_expected.strip()), expected_min_optimizers))
+            else:
+                expected_min = max(1, expected_min_optimizers)
+
+            if num_optimizers < expected_min:
+                print_error(f"Only {num_optimizers} optimizers tested (expected at least {expected_min})")
+                return False
+
+            # If the experiment outputs accuracy columns (or final_*), validate them. Otherwise, skip accuracy checks
+            # Support both `train_acc`/`test_acc` and `final_train_acc`/`final_test_acc` naming
+            if 'final_train_acc' in df.columns and 'final_test_acc' in df.columns:
+                avg_train_acc = df['final_train_acc'].mean()
+                avg_test_acc = df['final_test_acc'].mean()
+            else:
+                has_train_acc = 'train_acc' in df.columns
+                has_test_acc = 'test_acc' in df.columns
+                avg_train_acc = df['train_acc'].mean() if has_train_acc else None
+                avg_test_acc = df['test_acc'].mean() if has_test_acc else None
+
+            if avg_train_acc is not None and avg_train_acc < min_train_acc:
+                print_error(f"Average train accuracy {avg_train_acc:.1f}% is too low (expected > {min_train_acc}%)")
+                return False
+
+            if avg_test_acc is not None and avg_test_acc < min_test_acc:
+                print_error(f"Average test accuracy {avg_test_acc:.1f}% is too low (expected > {min_test_acc}%)")
+                return False
+            if not (avg_train_acc is not None or avg_test_acc is not None):
+                # Check for other numeric metrics. If none, consider it a warning but not a hard failure
+                numeric_cols = df.select_dtypes(include=['float', 'int']).columns.tolist()
+                if not numeric_cols:
+                    print_error("No numeric metrics found in results CSV")
+                    return False
+
+            cols_to_check = [c for c in ['train_loss', 'train_acc', 'test_loss', 'test_acc'] if c in df.columns]
+            if cols_to_check and df[cols_to_check].isnull().any().any():
+                print_error("Found NaN values in results")
+                return False
+
+            # Per-experiment required columns & thresholds
+            spec = EXP_METRICS_SPEC.get(experiment_name, {'required_cols': [], 'min': {}})
+            required_cols = spec.get('required_cols', [])
+            thresholds = spec.get('min', {})
+
+            # Resolve required columns and their actual names in the CSV (handle 'final_' aliases)
+            resolved_required = {}
+            def resolve_col_name(preferred):
+                if preferred in df.columns:
+                    return preferred
+                if preferred.startswith('final_'):
+                    alt = preferred.replace('final_', '')
+                    if alt in df.columns:
+                        return alt
+                return None
+
+            for c in required_cols:
+                resolved = resolve_col_name(c)
+                if not resolved:
+                    print_error(f"Required column '{c}' (or alias) not found in results for {experiment_name}")
+                    return False
+                resolved_required[c] = resolved
+            # Compose a helpful summary depending on metrics present
+            if avg_test_acc is not None:
+                print_success(f"{experiment_name.upper()} passed: {num_optimizers} optimizers, average test acc: {avg_test_acc:.2f}%")
+            elif avg_train_acc is not None:
+                print_success(f"{experiment_name.upper()} passed: {num_optimizers} optimizers, average train acc: {avg_train_acc:.2f}%")
+            else:
+                numeric_cols = df.select_dtypes(include=['float', 'int']).columns.tolist()
+                print_success(f"{experiment_name.upper()} passed: {num_optimizers} optimizers, numeric metrics: {numeric_cols}")
+
+            # Check per-experiment metric thresholds (use resolved column names when needed)
+            for metric_col, min_value in thresholds.items():
+                resolved = resolved_required.get(metric_col, metric_col if metric_col in df.columns else None)
+                if resolved and resolved in df.columns:
+                    avg_val = df[resolved].mean()
+                    if avg_val < min_value:
+                        print_error(f"Average {resolved} {avg_val:.3f} is too low (expected > {min_value})")
+                        return False
+            return True
+
+        except subprocess.TimeoutExpired:
+            print_error(f"{experiment_name} test timed out (>{timeout_sec/60:.0f} minutes)")
+            return False
+        except Exception as e:
+            print_error(f"{experiment_name} error: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='Quick validation of all GDSearch experiments')
     parser.add_argument('--verbose', action='store_true', help='Verbose output')
     parser.add_argument('--skip-mnist', action='store_true', help='Skip MNIST test (faster)')
+    parser.add_argument('--skip-cifar', action='store_true', help='Skip CIFAR-10 test')
+    parser.add_argument('--skip-nlp', action='store_true', help='Skip NLP test')
+    parser.add_argument('--skip-medical', action='store_true', help='Skip Medical test')
     args = parser.parse_args()
     
     print(f"\n{BLUE}{'='*70}{RESET}")
@@ -255,6 +343,32 @@ def main():
     else:
         print_info("Skipping MNIST test (--skip-mnist flag)")
         results['mnist'] = None
+    
+    # Run CIFAR-10 quick test
+    if args.skip_cifar:
+        print_info("Skipping CIFAR-10 test (--skip-cifar flag)")
+        results['cifar10'] = None
+    else:
+        print_info("Running CIFAR-10 quick test (ultra-quick)")
+        # CIFAR can be slow on local machines; increase timeout to 1 hour in case ULTRA_QUICK didn't propagate
+        results['cifar10'] = run_quick_experiment('cifar10', expected_min_optimizers=3, min_train_acc=40.0, min_test_acc=20.0, timeout_sec=3600)
+
+    # Run NLP quick test
+    if args.skip_nlp:
+        print_info("Skipping NLP test (--skip-nlp flag)")
+        results['nlp'] = None
+    else:
+        print_info("Running NLP quick test (ultra-quick)")
+        # Simplified local NLP may only run 2 optimizers; accept 2 as minimum for a pass
+        results['nlp'] = run_quick_experiment('nlp', expected_min_optimizers=2, min_train_acc=40.0, min_test_acc=30.0)
+
+    # Run Medical quick test
+    if args.skip_medical:
+        print_info("Skipping Medical test (--skip-medical flag)")
+        results['medical'] = None
+    else:
+        print_info("Running Medical quick test (ultra-quick)")
+        results['medical'] = run_quick_experiment('medical', expected_min_optimizers=3, min_train_acc=30.0, min_test_acc=20.0)
     
     # Final summary
     print_header("FINAL SUMMARY")

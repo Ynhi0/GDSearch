@@ -596,7 +596,7 @@ def main():
     )
     save_interactive_html(fig4, "comparison.html")
     
-    print("\n✓ All interactive visualizations created!")
+    print("\nAll interactive visualizations created!")
     print("  - trajectory_interactive.html")
     print("  - landscape_3d.html")
     print("  - convergence_animation.html")

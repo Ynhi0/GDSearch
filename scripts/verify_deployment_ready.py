@@ -15,7 +15,7 @@ YELLOW = "\033[93m"
 RESET = "\033[0m"
 
 def check_mark(passed: bool) -> str:
-    return f"{GREEN}✓{RESET}" if passed else f"{RED}✗{RESET}"
+    return f"{GREEN}[PASS]{RESET}" if passed else f"{RED}[FAIL]{RESET}"
 
 def test_dependency_available(package: str, min_version: str = None) -> bool:
     """Test if a package is importable and meets minimum version."""
@@ -170,7 +170,7 @@ def main():
     print("=" * 80)
     
     if all_passed:
-        print(f"{GREEN}✓ ALL CHECKS PASSED - Ready for deployment{RESET}")
+        print(f"{GREEN}ALL CHECKS PASSED - Ready for deployment{RESET}")
         print()
         print("Next steps:")
         print("  1. Test locally: python run_all_kaggle.py --quick --seeds 42")
@@ -178,7 +178,7 @@ def main():
         print("  3. Monitor resource usage (VRAM < 15GB, RAM < 30GB)")
         return 0
     else:
-        print(f"{RED}✗ SOME CHECKS FAILED - Fix issues before deployment{RESET}")
+        print(f"{RED}SOME CHECKS FAILED - Fix issues before deployment{RESET}")
         print()
         print("To fix missing dependencies:")
         print("  pip install -r kaggle/requirements_kaggle.txt")

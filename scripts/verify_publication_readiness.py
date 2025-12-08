@@ -32,17 +32,17 @@ class PublicationReadinessChecker:
     def log_pass(self, check_name):
         """Log a passed check."""
         self.checks_passed.append(check_name)
-        logging.info(f"✅ {check_name}")
+        logging.info(f"PASS: {check_name}")
         
     def log_fail(self, check_name, reason):
         """Log a failed check."""
         self.checks_failed.append((check_name, reason))
-        logging.error(f"❌ {check_name}: {reason}")
+        logging.error(f"FAIL: {check_name}: {reason}")
         
     def log_warning(self, check_name, reason):
         """Log a warning."""
         self.warnings.append((check_name, reason))
-        logging.warning(f"⚠️  {check_name}: {reason}")
+        logging.warning(f"WARNING: {check_name}: {reason}")
     
     def check_requirements_file(self):
         """Check requirements.txt exists and is valid."""
@@ -201,7 +201,7 @@ class PublicationReadinessChecker:
         
         all_passed = True
         for exp_name in experiments:
-            logging.info(f"\n🔹 Dry run: {exp_name.upper()}")
+            logging.info(f"\nDry run: {exp_name.upper()}")
             
             try:
                 # Run 1 epoch with minimal config
@@ -241,7 +241,7 @@ class PublicationReadinessChecker:
         dry_run_dir = Path('results/.dry_run_test')
         if dry_run_dir.exists():
             shutil.rmtree(dry_run_dir)
-            logging.info("\n✅ Cleaned up dry run artifacts")
+            logging.info("\nCleaned up dry run artifacts")
         
         return all_passed
     
@@ -310,18 +310,18 @@ class PublicationReadinessChecker:
         total_checks = len(self.checks_passed) + len(self.checks_failed)
         pass_rate = len(self.checks_passed) / total_checks * 100 if total_checks > 0 else 0
         
-        logging.info(f"\n✅ Checks Passed: {len(self.checks_passed)}")
-        logging.info(f"❌ Checks Failed: {len(self.checks_failed)}")
-        logging.info(f"⚠️  Warnings: {len(self.warnings)}")
-        logging.info(f"📊 Pass Rate: {pass_rate:.1f}%")
+        logging.info(f"\nChecks Passed: {len(self.checks_passed)}")
+        logging.info(f"Checks Failed: {len(self.checks_failed)}")
+        logging.info(f"Warnings: {len(self.warnings)}")
+        logging.info(f"Pass Rate: {pass_rate:.1f}%")
         
         if self.checks_failed:
-            logging.info("\n❌ FAILED CHECKS:")
+            logging.info("\nFAILED CHECKS:")
             for check, reason in self.checks_failed:
                 logging.info(f"   - {check}: {reason}")
         
         if self.warnings:
-            logging.info("\n⚠️  WARNINGS:")
+            logging.info("\nWARNINGS:")
             for check, reason in self.warnings:
                 logging.info(f"   - {check}: {reason}")
         
@@ -341,20 +341,20 @@ class PublicationReadinessChecker:
         with open(report_path, 'w') as f:
             json.dump(report, f, indent=2)
         
-        logging.info(f"\n✅ Report saved to {report_path}")
+        logging.info(f"\nReport saved to {report_path}")
         
         # Final verdict
         logging.info("\n" + "="*80)
         if len(self.checks_failed) == 0:
-            logging.info("🎉 VERDICT: PUBLICATION-READY")
+            logging.info("VERDICT: PUBLICATION-READY")
             logging.info("="*80)
             logging.info("Codebase is ready for:")
-            logging.info("  ✅ Academic thesis defense")
-            logging.info("  ✅ Peer-reviewed journal publication")
-            logging.info("  ✅ Reproducible research benchmarks")
-            logging.info("  ✅ Kaggle GPU deployment")
+            logging.info("  Academic thesis defense")
+            logging.info("  Peer-reviewed journal publication")
+            logging.info("  Reproducible research benchmarks")
+            logging.info("  Kaggle GPU deployment")
         else:
-            logging.info("❌ VERDICT: NOT READY")
+            logging.info("VERDICT: NOT READY")
             logging.info("="*80)
             logging.info(f"Fix {len(self.checks_failed)} critical issues before publication")
         logging.info("="*80)

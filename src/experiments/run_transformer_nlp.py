@@ -73,8 +73,20 @@ def evaluate(model, loader, device) -> Tuple[float, float]:
     return total_loss / max(1, total), correct / max(1, total)
 
 
-def run_single_imdb(optimizer_name: str, seed: int, lr: float, epochs: int, batch_size: int, results_dir: Path):
+def run_single_imdb(optimizer_name: str, seed: int, lr: float, epochs: int, batch_size: int, results_dir: Path, resume: bool = False):
     BertTokenizer, BertForSequenceClassification, load_dataset = _try_import_hf()
+
+    # Check if experiment is already completed
+    out_name = f"NN_BERT_IMDB_{optimizer_name}_lr{lr}_seed{seed}_application.csv"
+    out_path = results_dir / out_name
+    if resume and out_path.exists():
+        try:
+            df = pd.read_csv(out_path)
+            if len(df) > 0:
+                print(f"Skipping {optimizer_name} seed {seed} (already completed)")
+                return df
+        except Exception:
+            pass  # File exists but corrupted, re-run
 
     # Set environment variables to avoid warnings
     import os
@@ -195,6 +207,7 @@ def main():
     parser.add_argument('--batch-size', type=int, default=16)
     parser.add_argument('--lr-adamw', type=float, default=5e-5)
     parser.add_argument('--lr-sgd', type=float, default=1e-3)
+    parser.add_argument('--resume', action='store_true', help='Skip experiments that already have result files')
     args, _ = parser.parse_known_args()
 
     seeds = [int(s) for s in args.seeds.split(',') if s]
@@ -203,7 +216,7 @@ def main():
         lr = args.lr_adamw if opt.upper().startswith('ADAMW') else args.lr_sgd
         for seed in seeds:
             try:
-                run_single_imdb(opt, seed, lr, args.epochs, args.batch_size, Path('results'))
+                run_single_imdb(opt, seed, lr, args.epochs, args.batch_size, Path('results'), resume=args.resume)
             except RuntimeError as e:
                 print(str(e))
                 return 1

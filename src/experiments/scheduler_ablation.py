@@ -145,7 +145,7 @@ def run_scheduler_ablation(
             results[config_name] = pd.concat(seed_results, ignore_index=True)
     
     print("\n" + "="*80)
-    print("✅ Scheduler ablation completed!")
+    print("Scheduler ablation completed!")
     print("="*80)
     
     return results
@@ -348,7 +348,7 @@ def main():
     plot_scheduler_comparison(summary_df, save_path='plots/scheduler_comparison.png')
     
     print("\n" + "="*80)
-    print("✅ LEARNING RATE SCHEDULER ABLATION STUDY COMPLETE!")
+    print("LEARNING RATE SCHEDULER ABLATION STUDY COMPLETE!")
     print("="*80)
 
 

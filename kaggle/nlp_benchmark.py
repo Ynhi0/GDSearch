@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 NLP Benchmark: Adam vs AdamW on AG_NEWS
 =======================================
-Mục đích: Chứng minh hiệu quả của Decoupled Weight Decay (AdamW) trên mô hình ngôn ngữ.
-Dataset: AG_NEWS (Phân loại tin tức - nhẹ hơn IMDB, dễ chạy trên Kaggle)
+Purpose: Demonstrate the effectiveness of Decoupled Weight Decay (AdamW) on language models.
+Dataset: AG_NEWS (News classification - lighter than IMDB, easy to run on Kaggle)
 Model: SimpleLSTM (Embedding -> LSTM -> FC)
 """
 
@@ -56,13 +57,23 @@ def yield_tokens(data_iter, tokenizer):
 
 def create_data_loaders(batch_size=64):
     print("📦 Downloading/Loading AG_NEWS dataset...")
-    train_iter = AG_NEWS(split='train')
+    train_iter = list(AG_NEWS(split='train'))
     tokenizer = get_tokenizer('basic_english')
     vocab = build_vocab_from_iterator(yield_tokens(train_iter, tokenizer), specials=["<unk>"])
     vocab.set_default_index(vocab["<unk>"])
 
     text_pipeline = lambda x: vocab(tokenizer(x))
     label_pipeline = lambda x: int(x) - 1
+
+    class AGNewsDataset(torch.utils.data.Dataset):
+        def __init__(self, data):
+            self.data = list(data)
+        def __len__(self):
+            return len(self.data)
+        def __getitem__(self, idx):
+            return self.data[idx]
+
+    train_dataset_full = AGNewsDataset(train_iter)
 
     def collate_batch(batch):
         label_list, text_list, offsets = [], [], [0]
@@ -76,13 +87,11 @@ def create_data_loaders(batch_size=64):
         text_list = torch.cat(text_list)
         return label_list.to(device), text_list.to(device), offsets.to(device)
 
-    train_iter = AG_NEWS(split='train')
-    num_train = len(list(train_iter))
+    num_train = len(train_dataset_full)
     split_train_ = int(num_train * 0.95)
     split_valid_ = num_train - split_train_
 
-    train_iter = AG_NEWS(split='train')
-    train_dataset, valid_dataset = random_split(list(train_iter), [split_train_, split_valid_])
+    train_dataset, valid_dataset = random_split(train_dataset_full, [split_train_, split_valid_])
 
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_batch)
     valid_dataloader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_batch)

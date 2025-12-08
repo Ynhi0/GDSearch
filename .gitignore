@@ -40,6 +40,14 @@ results/
 plots/
 !plots/lr_schedulers*.png
 
+# MLflow
+mlruns/
+
+# Kaggle specific
+kaggle/mlruns/
+kaggle/results/
+kaggle/checkpoints/
+
 # OS
 .DS_Store
 Thumbs.db

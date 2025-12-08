@@ -52,7 +52,7 @@ def create_separate_plots(
     plt.rcParams['font.size'] = 10
     
     # Read data
-    print("📊 Reading experiment data...")
+    print("Reading experiment data...")
     summary_df = pd.read_csv(summary_csv)
     stats_df = pd.read_csv(stats_csv)
     detailed_df = pd.read_csv(detailed_csv)
@@ -66,7 +66,7 @@ def create_separate_plots(
     # Color scheme
     colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A']
     
-    print("\n📊 Creating separate visualizations for better readability...\n")
+    print("\nCreating separate visualizations for better readability...\n")
     
     # ============= PLOT 1: Final Loss Comparison =============
     plt.figure(figsize=(10, 6))
@@ -92,7 +92,7 @@ def create_separate_plots(
     plt.tight_layout()
     output_file = os.path.join(output_dir, '01_final_loss_comparison.png')
     plt.savefig(output_file, bbox_inches='tight', dpi=300)
-    print(f"✅ 1/6: Final Loss Comparison saved to {output_file}")
+    print(f"1/6: Final Loss Comparison saved to {output_file}")
     plt.close()
     
     # ============= PLOT 2: Distance to Optimum =============
@@ -122,7 +122,7 @@ def create_separate_plots(
     plt.tight_layout()
     output_file = os.path.join(output_dir, '02_distance_to_optimum.png')
     plt.savefig(output_file, bbox_inches='tight', dpi=300)
-    print(f"✅ 2/6: Distance to Optimum saved to {output_file}")
+    print(f"2/6: Distance to Optimum saved to {output_file}")
     plt.close()
     
     # ============= PLOT 3: Convergence Success Rate =============
@@ -153,7 +153,7 @@ def create_separate_plots(
     plt.tight_layout()
     output_file = os.path.join(output_dir, '03_convergence_rate.png')
     plt.savefig(output_file, bbox_inches='tight', dpi=300)
-    print(f"✅ 3/6: Convergence Rate saved to {output_file}")
+    print(f"3/6: Convergence Rate saved to {output_file}")
     plt.close()
     
     # ============= PLOT 4: Box Plot Distribution =============
@@ -185,7 +185,7 @@ def create_separate_plots(
     plt.tight_layout()
     output_file = os.path.join(output_dir, '04_loss_distribution_boxplot.png')
     plt.savefig(output_file, bbox_inches='tight', dpi=300)
-    print(f"✅ 4/6: Loss Distribution Box Plot saved to {output_file}")
+    print(f"4/6: Loss Distribution Box Plot saved to {output_file}")
     plt.close()
     
     # ============= PLOT 5: Statistical Significance Heatmap =============
@@ -235,7 +235,7 @@ def create_separate_plots(
     plt.tight_layout()
     output_file = os.path.join(output_dir, '05_statistical_significance_heatmap.png')
     plt.savefig(output_file, bbox_inches='tight', dpi=300)
-    print(f"✅ 5/6: Statistical Significance Heatmap saved to {output_file}")
+    print(f"5/6: Statistical Significance Heatmap saved to {output_file}")
     plt.close()
     
     # ============= PLOT 6: Effect Sizes =============
@@ -286,16 +286,16 @@ def create_separate_plots(
     plt.tight_layout()
     output_file = os.path.join(output_dir, '06_effect_sizes.png')
     plt.savefig(output_file, bbox_inches='tight', dpi=300)
-    print(f"✅ 6/6: Effect Sizes saved to {output_file}")
+    print(f"6/6: Effect Sizes saved to {output_file}")
     plt.close()
     
     print("\n" + "="*60)
-    print("🎉 SUCCESS! All 6 separate visualizations created:")
+    print("SUCCESS! All 6 separate visualizations created:")
     print("="*60)
     for i in range(1, 7):
-        print(f"📊 {output_dir}/0{i}_*.png")
+        print(f"{output_dir}/0{i}_*.png")
     print("="*60)
-    print("\n✅ Each plot is high-resolution (300 DPI) and optimized!")
+    print("\nEach plot is high-resolution (300 DPI) and optimized!")
 
 
 if __name__ == "__main__":

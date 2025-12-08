@@ -12,7 +12,6 @@ This script performs final validation checks to ensure:
 """
 
 import sys
-import os
 from pathlib import Path
 
 # Add parent directory to path
@@ -121,8 +120,14 @@ def check_ablation_studies():
     all_passed = True
     
     for filepath in ablation_files:
-        with open(filepath, 'r') as f:
-            content = f.read()
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                content = f.read()
+        except Exception as e:
+            print(f"\n{Path(filepath).name}:")
+            print(f"  ❌ Could not read file: {e}")
+            all_passed = False
+            continue
         
         filename = Path(filepath).name
         print(f"\n{filename}:")
@@ -157,7 +162,7 @@ def check_experiment_integration():
         'resnet', 'highdim'
     ]
     
-    with open('run_all_kaggle.py', 'r') as f:
+    with open('run_all_kaggle.py', 'r', encoding='utf-8') as f:
         main_content = f.read()
     
     missing_experiments = []
@@ -183,7 +188,7 @@ def check_checkpoint_logic():
     print("5. CHECKPOINT/RESUME LOGIC VALIDATION")
     print("="*80)
     
-    with open('run_all_kaggle.py', 'r') as f:
+    with open('run_all_kaggle.py', 'r', encoding='utf-8') as f:
         content = f.read()
     
     checks = {
@@ -231,7 +236,8 @@ def check_test_coverage():
     result = subprocess.run(
         ['python', '-m', 'pytest', 'tests/', '-v', '-m', 'not slow', '--tb=line'],
         capture_output=True,
-        text=True
+        text=True,
+        check=False
     )
     
     if result.returncode == 0:
@@ -243,7 +249,7 @@ def check_test_coverage():
                 break
         return True
     else:
-        print(f"\n❌ Some tests failed")
+        print("\n❌ Some tests failed")
         print(result.stdout[-500:])  # Last 500 chars
         return False
 

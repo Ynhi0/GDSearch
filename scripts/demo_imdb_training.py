@@ -176,7 +176,7 @@ def main():
         
         if test_acc > best_test_acc:
             best_test_acc = test_acc
-            print(f"✓ New best test accuracy!")
+            print(f"New best test accuracy!")
     
     print("\n" + "="*80)
     print(f"Training Complete!")

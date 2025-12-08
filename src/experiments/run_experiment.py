@@ -1,5 +1,5 @@
 """
-Script chính để chạy các thí nghiệm so sánh thuật toán tối ưu hóa.
+Main script to run optimization algorithm comparison experiments.
 """
 
 import os
@@ -15,24 +15,24 @@ from src.core.optimizers import SGD, SGDMomentum, SGDNesterov, RMSProp, Adam, Ad
 
 def run_single_experiment(optimizer_config, function_config, initial_point, num_iterations, seed):
     """
-    Chạy một thí nghiệm duy nhất với cấu hình được chỉ định.
+    Run a single experiment with specified configuration.
     
     Args:
-        optimizer_config: Dictionary cấu hình optimizer
+        optimizer_config: Dictionary configuring optimizer
             {'type': 'SGD'|'SGDMomentum'|'RMSProp'|'Adam', 'params': {...}}
-        function_config: Dictionary cấu hình hàm kiểm tra
+        function_config: Dictionary configuring test function
             {'type': 'Rosenbrock'|'IllConditionedQuadratic'|'SaddlePoint', 'params': {...}}
-        initial_point: Tuple (x0, y0) - điểm bắt đầu
-        num_iterations: Số vòng lặp
-        seed: Seed cho random number generator
+        initial_point: Tuple (x0, y0) - starting point
+        num_iterations: Number of iterations
+        seed: Seed for random number generator
         
     Returns:
-        DataFrame chứa lịch sử quá trình tối ưu hóa
+        DataFrame containing optimization process history
     """
-    # Thiết lập seed để đảm bảo tính tái tạo
+    # Set seed to ensure reproducibility
     np.random.seed(seed)
     
-    # Khởi tạo hàm kiểm tra
+    # Initialize test function
     func_type = function_config['type']
     func_params = function_config.get('params', {})
     
@@ -45,9 +45,9 @@ def run_single_experiment(optimizer_config, function_config, initial_point, num_
     elif func_type == 'Ackley':
         test_function = Ackley2D(**func_params)
     else:
-        raise ValueError(f"Loại hàm kiểm tra không hợp lệ: {func_type}")
+        raise ValueError(f"Invalid test function type: {func_type}")
     
-    # Khởi tạo optimizer
+    # Initialize optimizer
     opt_type = optimizer_config['type']
     opt_params = optimizer_config.get('params', {})
     
@@ -66,29 +66,29 @@ def run_single_experiment(optimizer_config, function_config, initial_point, num_
     elif opt_type == 'AMSGrad':
         optimizer = AMSGrad(**opt_params)
     else:
-        raise ValueError(f"Loại optimizer không hợp lệ: {opt_type}")
+        raise ValueError(f"Invalid optimizer type: {opt_type}")
     
-    # Reset optimizer về trạng thái ban đầu
+    # Reset optimizer to initial state
     optimizer.reset()
     
-    # Khởi tạo tham số
+    # Initialize parameters
     current_x, current_y = initial_point
     
-    # Danh sách lưu trữ lịch sử
+    # List to store history
     history = []
 
-    # Bắt đầu đo thời gian và theo dõi GPU (nếu có)
+    # Start timing and track GPU (if available)
     start_time = time.time()
     if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
 
-    # Vòng lặp tối ưu hóa
+    # Optimization loop
     for i in range(num_iterations):
-        # Tính toán giá trị hàm và gradient
+        # Calculate function value and gradient
         loss = test_function.compute(current_x, current_y)
         grad_x, grad_y = test_function.gradient(current_x, current_y)
         
-        # Tính chuẩn của gradient
+        # Calculate gradient norm
         grad_norm = np.sqrt(grad_x**2 + grad_y**2)
         
         # Compute Hessian eigenvalues for curvature analysis
@@ -98,13 +98,13 @@ def run_single_experiment(optimizer_config, function_config, initial_point, num_
         lambda_max = eigenvalues[1]
         condition_number = abs(lambda_max / lambda_min) if abs(lambda_min) > 1e-10 else np.inf
         
-        # Thực hiện bước cập nhật
+        # Perform update step
         new_x, new_y = optimizer.step((current_x, current_y), (grad_x, grad_y))
         
-        # Tính chuẩn của bước cập nhật
+        # Calculate update norm
         update_norm = np.sqrt((new_x - current_x)**2 + (new_y - current_y)**2)
         
-        # Lưu thông tin vào lịch sử (including Hessian eigenvalues)
+        # Save information to history (including Hessian eigenvalues)
         history.append({
             'iteration': i,
             'x': current_x,
@@ -119,17 +119,17 @@ def run_single_experiment(optimizer_config, function_config, initial_point, num_
             'condition_number': condition_number
         })
         
-        # Cập nhật tham số
+        # Update parameters
         current_x, current_y = new_x, new_y
     
-    # Chuyển đổi lịch sử thành DataFrame
+    # Convert history to DataFrame
     df = pd.DataFrame(history)
 
-    # Kết thúc đo thời gian và ghi lại thống kê GPU
+    # End timing and record GPU statistics
     elapsed_time = time.time() - start_time
     peak_memory = torch.cuda.max_memory_allocated() / (1024 ** 2) if torch.cuda.is_available() else None
 
-    # Thêm thông tin thời gian và bộ nhớ vào DataFrame (hằng cho mọi hàng)
+    # Add timing and memory info to DataFrame (constant for all rows)
     df['elapsed_time'] = elapsed_time
     df['peak_memory_MB'] = peak_memory
 
@@ -138,19 +138,19 @@ def run_single_experiment(optimizer_config, function_config, initial_point, num_
 
 def create_experiment_configs():
     """
-    Tạo danh sách các cấu hình thí nghiệm theo Ma trận Thiết kế.
+    Create list of experiment configurations according to Design Matrix.
     
     Returns:
-        List các dictionary cấu hình thí nghiệm
+        List of experiment configuration dictionaries
     """
     configs = []
     
-    # Điểm bắt đầu cho các hàm
+    # Starting points for functions
     initial_rosenbrock = (-1.5, 2.0)
     initial_quad = (1.0, 1.0)
     initial_saddle = (0.5, 0.5)
     
-    # ========== SGD Momentum trên Rosenbrock ==========
+    # ========== SGD Momentum on Rosenbrock ==========
     # SGDM-R-1: beta=0.5
     configs.append({
         'experiment_id': 'SGDM-R-1',
@@ -181,7 +181,7 @@ def create_experiment_configs():
         'seed': 42
     })
     
-    # ========== Adam trên Rosenbrock ==========
+    # ========== Adam on Rosenbrock ==========
     # ADAM-R-1: beta1=0.9, beta2=0.999 (default)
     configs.append({
         'experiment_id': 'ADAM-R-1',
@@ -222,7 +222,7 @@ def create_experiment_configs():
         'seed': 42
     })
 
-    # ========== Nesterov trên Rosenbrock ==========
+    # ========== Nesterov on Rosenbrock ==========
     configs.append({
         'experiment_id': 'NAG-R-1',
         'optimizer_config': {'type': 'SGDNesterov', 'params': {'lr': 0.01, 'beta': 0.9}},
@@ -240,7 +240,7 @@ def create_experiment_configs():
         'seed': 42
     })
 
-    # ========== AdamW trên Rosenbrock (so sánh weight decay) ==========
+    # ========== AdamW on Rosenbrock (compare weight decay) ==========
     for wd, exp_id in [(0.0, 'ADAMW-R-0'), (0.01, 'ADAMW-R-1'), (0.05, 'ADAMW-R-5')]:
         configs.append({
             'experiment_id': exp_id,
@@ -251,7 +251,7 @@ def create_experiment_configs():
             'seed': 42
         })
 
-    # ========== AMSGrad trên Rosenbrock ==========
+    # ========== AMSGrad on Rosenbrock ==========
     configs.append({
         'experiment_id': 'AMSG-R-1',
         'optimizer_config': {'type': 'AMSGrad', 'params': {'lr': 0.01, 'beta1': 0.9, 'beta2': 0.999, 'epsilon': 1e-8}},
@@ -261,8 +261,8 @@ def create_experiment_configs():
         'seed': 42
     })
     
-    # ========== SGD trên các hàm khác ==========
-    # SGD trên Rosenbrock
+    # ========== SGD on other functions ==========
+    # SGD on Rosenbrock
     configs.append({
         'experiment_id': 'SGD-R-1',
         'optimizer_config': {'type': 'SGD', 'params': {'lr': 0.001}},
@@ -272,7 +272,7 @@ def create_experiment_configs():
         'seed': 42
     })
     
-    # SGD trên IllConditionedQuadratic
+    # SGD on IllConditionedQuadratic
     configs.append({
         'experiment_id': 'SGD-Q-1',
         'optimizer_config': {'type': 'SGD', 'params': {'lr': 0.001}},
@@ -282,7 +282,7 @@ def create_experiment_configs():
         'seed': 42
     })
     
-    # SGD trên SaddlePoint
+    # SGD on SaddlePoint
     configs.append({
         'experiment_id': 'SGD-S-1',
         'optimizer_config': {'type': 'SGD', 'params': {'lr': 0.01}},
@@ -292,8 +292,8 @@ def create_experiment_configs():
         'seed': 42
     })
     
-    # ========== RMSProp trên các hàm ==========
-    # RMSProp trên Rosenbrock
+    # ========== RMSProp on functions ==========
+    # RMSProp on Rosenbrock
     configs.append({
         'experiment_id': 'RMS-R-1',
         'optimizer_config': {'type': 'RMSProp', 'params': {'lr': 0.01, 'decay_rate': 0.9, 'epsilon': 1e-8}},
@@ -303,7 +303,7 @@ def create_experiment_configs():
         'seed': 42
     })
     
-    # RMSProp trên IllConditionedQuadratic
+    # RMSProp on IllConditionedQuadratic
     configs.append({
         'experiment_id': 'RMS-Q-1',
         'optimizer_config': {'type': 'RMSProp', 'params': {'lr': 0.01, 'decay_rate': 0.9, 'epsilon': 1e-8}},
@@ -313,7 +313,7 @@ def create_experiment_configs():
         'seed': 42
     })
     
-    # RMSProp trên SaddlePoint
+    # RMSProp on SaddlePoint
     configs.append({
         'experiment_id': 'RMS-S-1',
         'optimizer_config': {'type': 'RMSProp', 'params': {'lr': 0.01, 'decay_rate': 0.9, 'epsilon': 1e-8}},
@@ -323,8 +323,8 @@ def create_experiment_configs():
         'seed': 42
     })
     
-    # ========== Thêm thí nghiệm trên các hàm khác ==========
-    # SGDMomentum trên IllConditionedQuadratic
+    # ========== Add experiments on other functions ==========
+    # SGDMomentum on IllConditionedQuadratic
     configs.append({
         'experiment_id': 'SGDM-Q-1',
         'optimizer_config': {'type': 'SGDMomentum', 'params': {'lr': 0.01, 'beta': 0.9}},
@@ -334,7 +334,7 @@ def create_experiment_configs():
         'seed': 42
     })
     
-    # SGDMomentum trên SaddlePoint
+    # SGDMomentum on SaddlePoint
     configs.append({
         'experiment_id': 'SGDM-S-1',
         'optimizer_config': {'type': 'SGDMomentum', 'params': {'lr': 0.01, 'beta': 0.9}},
@@ -344,7 +344,7 @@ def create_experiment_configs():
         'seed': 42
     })
     
-    # Adam trên IllConditionedQuadratic
+    # Adam on IllConditionedQuadratic
     configs.append({
         'experiment_id': 'ADAM-Q-1',
         'optimizer_config': {'type': 'Adam', 'params': {'lr': 0.01, 'beta1': 0.9, 'beta2': 0.999, 'epsilon': 1e-8}},
@@ -354,7 +354,7 @@ def create_experiment_configs():
         'seed': 42
     })
     
-    # Adam trên SaddlePoint
+    # Adam on SaddlePoint
     configs.append({
         'experiment_id': 'ADAM-S-1',
         'optimizer_config': {'type': 'Adam', 'params': {'lr': 0.01, 'beta1': 0.9, 'beta2': 0.999, 'epsilon': 1e-8}},
@@ -369,20 +369,20 @@ def create_experiment_configs():
 
 def generate_filename(config):
     """
-    Tạo tên file duy nhất cho kết quả thí nghiệm.
+    Generate unique filename for experiment results.
     
     Args:
-        config: Dictionary cấu hình thí nghiệm đầy đủ
+        config: Full experiment configuration dictionary
         
     Returns:
-        Tên file (string)
+        Filename (string)
     """
-    # Sử dụng experiment_id nếu có, nếu không tạo từ các tham số
+    # Use experiment_id if available, otherwise create from parameters
     if 'experiment_id' in config:
         exp_id = config['experiment_id']
         filename = f"{exp_id}.csv"
     else:
-        # Fallback cho các thí nghiệm không có ID
+        # Fallback for experiments without ID
         opt_type = config['optimizer_config']['type']
         func_type = config['function_config']['type']
         seed = config['seed']
@@ -392,19 +392,19 @@ def generate_filename(config):
 
 
 def main():
-    """Hàm chính để chạy tất cả các thí nghiệm."""
-    # Tạo thư mục results nếu chưa tồn tại
+    """Main function to run all experiments."""
+    # Create results directory if it doesn't exist
     os.makedirs('results', exist_ok=True)
     
-    # Tạo danh sách cấu hình thí nghiệm
+    # Create list of experiment configurations
     configs = create_experiment_configs()
     
-    print(f"Tổng số thí nghiệm: {len(configs)}")
-    print("Bắt đầu chạy thí nghiệm...\n")
+    print(f"Total experiments: {len(configs)}")
+    print("Starting experiments...\n")
     
-    # Chạy tất cả các thí nghiệm
-    for config in tqdm(configs, desc="Chạy thí nghiệm"):
-        # Chạy thí nghiệm
+    # Run all experiments
+    for config in tqdm(configs, desc="Running experiments"):
+        # Run experiment
         df = run_single_experiment(
             optimizer_config=config['optimizer_config'],
             function_config=config['function_config'],
@@ -413,21 +413,21 @@ def main():
             seed=config['seed']
         )
         
-        # Tạo tên file
+        # Generate filename
         filename = generate_filename(config)
         
-        # Lưu kết quả
+        # Save results
         filepath = os.path.join('results', filename)
         df.to_csv(filepath, index=False)
         
-        # Thêm thông tin experiment_id vào metadata nếu có
+        # Add experiment_id to metadata if available
         if 'experiment_id' in config:
-            # Có thể thêm experiment_id vào DataFrame nếu cần
+            # Can add experiment_id to DataFrame if needed
             pass
     
-    print("\nHoàn thành tất cả các thí nghiệm!")
-    print(f"Kết quả được lưu trong thư mục 'results/'")
-    print(f"Tổng số file: {len(configs)}")
+    print("\nCompleted all experiments!")
+    print(f"Results saved in 'results/' directory")
+    print(f"Total files: {len(configs)}")
 
 
 if __name__ == '__main__':

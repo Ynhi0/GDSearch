@@ -137,7 +137,7 @@ def run_weight_decay_ablation(
             results[config_name] = pd.concat(seed_results, ignore_index=True)
     
     print("\n" + "="*80)
-    print("✅ Weight decay ablation completed!")
+    print("Weight decay ablation completed!")
     print("="*80)
     
     return results
@@ -347,7 +347,7 @@ def main():
     plot_weight_decay_trends(summary_df, save_path='plots/weight_decay_trends.png')
     
     print("\n" + "="*80)
-    print("✅ WEIGHT DECAY ABLATION STUDY COMPLETE!")
+    print("WEIGHT DECAY ABLATION STUDY COMPLETE!")
     print("="*80)
 
 
