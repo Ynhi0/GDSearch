@@ -139,7 +139,7 @@ def run_batch_size_ablation(
             results[config_name] = pd.concat(seed_results, ignore_index=True)
     
     print("\n" + "="*80)
-    print("✅ Batch size ablation completed!")
+    print("Batch size ablation completed!")
     print("="*80)
     
     return results
@@ -419,7 +419,7 @@ def main():
     perform_batch_size_comparisons(results, optimizers, batch_sizes)
     
     print("\n" + "="*80)
-    print("✅ BATCH SIZE ABLATION STUDY COMPLETE!")
+    print("BATCH SIZE ABLATION STUDY COMPLETE!")
     print("="*80)
 
 

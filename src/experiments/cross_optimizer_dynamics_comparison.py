@@ -215,7 +215,7 @@ def run_cross_optimizer_dynamics_comparison(
     """
     
     if not HAS_DYNAMICS:
-        print("⚠️  Dynamics modules not available - cannot run comparison")
+        print("Dynamics modules not available - cannot run comparison")
         return None
     
     # Default configurations
@@ -365,7 +365,7 @@ def run_cross_optimizer_dynamics_comparison(
     # Save results
     csv_path = os.path.join(results_dir, f"cross_optimizer_dynamics_{dataset}.csv")
     df.to_csv(csv_path, index=False)
-    print(f"\n✅ Results saved to {csv_path}")
+    print(f"\nResults saved to {csv_path}")
     
     # Generate visualizations
     print("\n📊 Generating comparative visualizations...")
@@ -438,7 +438,7 @@ def generate_dynamics_comparison_plots(results: List[Dict], output_dir: str, dat
     plt.savefig(os.path.join(output_dir, f'dynamics_metrics_comparison_{dataset}.png'), dpi=300, bbox_inches='tight')
     plt.close()
     
-    print(f"✅ Visualizations saved to {output_dir}")
+    print(f"Visualizations saved to {output_dir}")
 
 
 if __name__ == "__main__":

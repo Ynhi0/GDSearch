@@ -43,7 +43,7 @@ try:
     HAS_DYNAMICS = True
 except ImportError:
     HAS_DYNAMICS = False
-    print("⚠️  Dynamics tracking not available - metrics will be limited")
+    print("Dynamics tracking not available - metrics will be limited")
 
 
 class SimpleMLP(nn.Module):
@@ -351,7 +351,7 @@ def run_momentum_beta_sensitivity(
     # Save results
     csv_path = os.path.join(output_dir, 'momentum_beta_sensitivity_mnist.csv')
     df.to_csv(csv_path, index=False)
-    print(f"\n✅ Results saved to {csv_path}")
+    print(f"\nResults saved to {csv_path}")
     
     # Create visualizations
     create_beta_sensitivity_plots(df, output_dir, optimizer='Momentum')
@@ -432,7 +432,7 @@ def run_adam_beta_sensitivity(
     # Save results
     csv_path = os.path.join(output_dir, 'adam_beta_sensitivity_mnist.csv')
     df.to_csv(csv_path, index=False)
-    print(f"\n✅ Results saved to {csv_path}")
+    print(f"\nResults saved to {csv_path}")
     
     # Create visualizations
     create_beta_sensitivity_plots(df, output_dir, optimizer='Adam')
@@ -561,7 +561,7 @@ def run_adam_beta2_sensitivity(
     # Save results
     csv_path = os.path.join(output_dir, 'adam_beta2_sensitivity_mnist.csv')
     df.to_csv(csv_path, index=False)
-    print(f"\n✅ Results saved to {csv_path}")
+    print(f"\nResults saved to {csv_path}")
     
     # Create visualizations (reuse with Beta2 column)
     create_beta2_sensitivity_plots(df, output_dir)
@@ -699,7 +699,7 @@ def run_adam_beta1_beta2_grid(
     # Save results
     csv_path = os.path.join(output_dir, 'adam_beta1_beta2_grid_mnist.csv')
     df.to_csv(csv_path, index=False)
-    print(f"\n✅ Results saved to {csv_path}")
+    print(f"\nResults saved to {csv_path}")
     
     # Create 2D heatmap visualizations
     create_beta_grid_plots(df, output_dir)
@@ -793,7 +793,7 @@ def create_beta2_sensitivity_plots(df: pd.DataFrame, output_dir: str):
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
     plt.close()
     
-    print(f"✅ β2 visualizations saved to {plot_path}")
+    print(f"β2 visualizations saved to {plot_path}")
 
 
 def create_beta_grid_plots(df: pd.DataFrame, output_dir: str):
@@ -850,7 +850,7 @@ def create_beta_grid_plots(df: pd.DataFrame, output_dir: str):
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
     plt.close()
     
-    print(f"✅ Grid search heatmaps saved to {plot_path}")
+    print(f"Grid search heatmaps saved to {plot_path}")
 
 
 def create_beta_sensitivity_plots(df: pd.DataFrame, output_dir: str, optimizer: str):
@@ -941,7 +941,7 @@ def create_beta_sensitivity_plots(df: pd.DataFrame, output_dir: str, optimizer: 
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
     plt.close()
     
-    print(f"✅ Visualizations saved to {plot_path}")
+    print(f"Visualizations saved to {plot_path}")
 
 
 def main():

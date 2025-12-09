@@ -123,7 +123,7 @@ class DataSplitManager:
         IMPORTANT: This should be the ONLY set used for model selection.
         """
         if self._hyperparams_frozen:
-            logging.warning("⚠️  Accessing validation set after hyperparameters are frozen. "
+            logging.warning("Accessing validation set after hyperparameters are frozen. "
                           "This may indicate improper protocol!")
         
         val_subset = Subset(self.dataset, self.val_indices)
@@ -173,16 +173,16 @@ class DataSplitManager:
             True if protocol was followed correctly, False otherwise
         """
         if self._test_accessed and not self._hyperparams_frozen:
-            logging.error("❌ PROTOCOL VIOLATION DETECTED!")
+            logging.error("PROTOCOL VIOLATION DETECTED!")
             logging.error("   Test set was accessed without freezing hyperparameters first.")
             return False
         
         if not self._test_accessed:
-            logging.warning("⚠️  Test set was never accessed. Results may be incomplete.")
+            logging.warning("Test set was never accessed. Results may be incomplete.")
             return True
         
         if self._hyperparams_frozen and self._test_accessed:
-            logging.info("✅ Proper protocol followed:")
+            logging.info("Proper protocol followed:")
             logging.info("   1. Hyperparameters tuned on train+val")
             logging.info("   2. Hyperparameters frozen")
             logging.info("   3. Final evaluation on test set")
@@ -277,7 +277,7 @@ class HyperparameterTuningGuard:
     
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.best_hyperparams is None:
-            logging.warning("⚠️  No hyperparameters were set during tuning phase!")
+            logging.warning("No hyperparameters were set during tuning phase!")
         else:
             self.split_manager.freeze_hyperparameters(self.best_hyperparams)
         
@@ -319,7 +319,7 @@ def get_train_val_test_loaders(dataset: Dataset,
     val_loader = manager.get_val_loader(batch_size, **loader_kwargs)
     
     # Issue warning since we're bypassing protocol
-    logging.warning("⚠️  Using convenience function bypasses protocol validation.")
+    logging.warning("Using convenience function bypasses protocol validation.")
     logging.warning("   Consider using DataSplitManager for strict enforcement.")
     
     test_loader = manager.get_test_loader(batch_size, **loader_kwargs)

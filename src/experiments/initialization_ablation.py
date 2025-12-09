@@ -423,7 +423,7 @@ def run_initialization_ablation(
             features=features
         )
     except Exception as e:
-        print(f"⚠️  Visualization generation failed: {e}")
+        print(f"Visualization generation failed: {e}")
     
     print(f"\n{'='*80}")
     print("ABLATION STUDY COMPLETE")

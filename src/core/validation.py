@@ -361,7 +361,7 @@ if __name__ == '__main__':
     }
     
     validated = validate_config(config)
-    print("✅ Valid config accepted")
+    print("Valid config accepted")
     print(f"   Validated config: {validated}")
     
     # Invalid learning rate
@@ -369,17 +369,17 @@ if __name__ == '__main__':
         invalid_config = config.copy()
         invalid_config['lr'] = -0.01
         validate_config(invalid_config)
-        print("❌ Should have rejected negative learning rate")
+        print("Should have rejected negative learning rate")
     except ValidationError as e:
-        print(f"✅ Correctly rejected invalid LR: {e}")
+        print(f"Correctly rejected invalid LR: {e}")
     
     # Invalid batch size
     try:
         invalid_config = config.copy()
         invalid_config['batch_size'] = 0
         validate_config(invalid_config)
-        print("❌ Should have rejected zero batch size")
+        print("Should have rejected zero batch size")
     except ValidationError as e:
-        print(f"✅ Correctly rejected invalid batch size: {e}")
+        print(f"Correctly rejected invalid batch size: {e}")
     
-    print("\n✅ All validation tests passed!")
+    print("\nAll validation tests passed!")

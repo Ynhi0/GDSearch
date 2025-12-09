@@ -35,7 +35,7 @@ try:
     HAS_DYNAMICS_TRACKER = True
 except ImportError:
     HAS_DYNAMICS_TRACKER = False
-    print("⚠️  TrainingDynamicsTracker not available - ablation study limited")
+    print("TrainingDynamicsTracker not available - ablation study limited")
 
 
 class SimpleMLP(nn.Module):
@@ -146,7 +146,7 @@ def train_with_optional_tracking(
         try:
             tracker.save_summary(prefix="ablation_study")
         except Exception as e:
-            print(f"   ⚠️  Tracker save failed: {e}")
+            print(f"   Tracker save failed: {e}")
     
     return {
         'time_seconds': elapsed_time,
@@ -194,7 +194,7 @@ def run_dynamics_overhead_ablation(
     print()
     
     if not HAS_DYNAMICS_TRACKER:
-        print("❌ TrainingDynamicsTracker not available - cannot run ablation")
+        print("TrainingDynamicsTracker not available - cannot run ablation")
         return pd.DataFrame()
     
     # Create output directory
@@ -311,7 +311,7 @@ def run_dynamics_overhead_ablation(
     # Save results
     csv_path = os.path.join(results_dir, f"dynamics_overhead_ablation_{dataset}.csv")
     df.to_csv(csv_path, index=False)
-    print(f"\n✅ Results saved to {csv_path}")
+    print(f"\nResults saved to {csv_path}")
     
     # Generate summary statistics
     print("\n" + "="*80)
@@ -345,7 +345,7 @@ def run_dynamics_overhead_ablation(
     try:
         create_ablation_visualization(df, results_dir)
     except Exception as e:
-        print(f"⚠️  Visualization failed: {e}")
+        print(f"Visualization failed: {e}")
     
     return df
 
@@ -396,4 +396,4 @@ if __name__ == '__main__':
         seeds=[42, 123, 456, 789, 1011],
         quick=False
     )
-    print("\n✅ Ablation study complete!")
+    print("\nAblation study complete!")

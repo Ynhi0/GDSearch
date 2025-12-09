@@ -51,7 +51,7 @@ def load_optimizer_results(
         files = list(results_path.glob(pattern))
         
         if not files:
-            print(f"⚠️  No results found for {optimizer}")
+            print(f"No results found for {optimizer}")
             continue
         
         metrics = []
@@ -67,7 +67,7 @@ def load_optimizer_results(
         
         if metrics:
             optimizer_results[optimizer] = np.array(metrics)
-            print(f"✅ {optimizer}: {len(metrics)} runs loaded")
+            print(f"{optimizer}: {len(metrics)} runs loaded")
     
     return optimizer_results
 
@@ -309,7 +309,7 @@ def run_optimizer_comparison_matrix(
     optimizer_results = load_optimizer_results(results_dir, optimizers, metric)
     
     if len(optimizer_results) < 2:
-        print("❌ Need at least 2 optimizers with results!")
+        print("Need at least 2 optimizers with results!")
         return
     
     # Create comparison matrices
@@ -322,7 +322,7 @@ def run_optimizer_comparison_matrix(
     p_value_df.to_csv(f"{output_dir}/p_values.csv")
     effect_size_df.to_csv(f"{output_dir}/effect_sizes.csv")
     win_loss_df.to_csv(f"{output_dir}/win_loss_matrix.csv")
-    print(f"✅ Matrices saved to {output_dir}/")
+    print(f"Matrices saved to {output_dir}/")
     
     # Create visualizations
     print("\n📊 Creating visualizations...")
@@ -342,7 +342,7 @@ def run_optimizer_comparison_matrix(
     )
     
     print("\n" + "="*80)
-    print("✅ OPTIMIZER COMPARISON MATRIX COMPLETE!")
+    print("OPTIMIZER COMPARISON MATRIX COMPLETE!")
     print("="*80)
 
 

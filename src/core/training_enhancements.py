@@ -549,7 +549,7 @@ class SelfHealingTrainer:
     - Clears GPU cache and retries
     - Logs recovery actions
     
-    ⚠️  SCIENTIFIC INTEGRITY WARNING:
+    SCIENTIFIC INTEGRITY WARNING:
     When OOM recovery is triggered, this trainer DROPS data from the batch tail:
         inputs[:new_size] is kept, inputs[new_size:] is DISCARDED
     
@@ -653,7 +653,7 @@ class SelfHealingTrainer:
                         logging.error(f"OOM recovery failed: batch size {new_size} < minimum {self.min_batch_size}")
                         raise
                     
-                    logging.warning(f"⚠️  OOM detected! Reducing batch size: {old_size} → {new_size} (retry {retries}/{self.max_retries})")
+                    logging.warning(f"OOM detected! Reducing batch size: {old_size} → {new_size} (retry {retries}/{self.max_retries})")
                     
                     # Slice batch
                     current_inputs = inputs[:new_size]
@@ -740,7 +740,7 @@ class DiskSpaceGuardian:
             return True
         
         # Try to free space
-        logging.warning(f"⚠️  Low disk space: {free_gb:.2f}GB free, need {required_gb:.2f}GB")
+        logging.warning(f"Low disk space: {free_gb:.2f}GB free, need {required_gb:.2f}GB")
         self._cleanup_old_checkpoints()
         
         # Check again
@@ -1243,4 +1243,4 @@ if __name__ == '__main__':
     print(f"Free disk space: {free_gb:.2f}GB")
     print(f"Can save 500MB checkpoint: {guardian.can_save_checkpoint(500)}")
     
-    print("\n✅ All tests passed!")
+    print("\nAll tests passed!")

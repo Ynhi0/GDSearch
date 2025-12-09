@@ -135,7 +135,7 @@ def run_learning_rate_ablation(
             results[config_name] = pd.concat(seed_results, ignore_index=True)
     
     print("\n" + "="*80)
-    print("✅ Learning rate ablation completed!")
+    print("Learning rate ablation completed!")
     print("="*80)
     
     return results
@@ -351,7 +351,7 @@ def main():
     plot_learning_rate_heatmap(summary_df, save_path='plots/learning_rate_heatmap.png')
     
     print("\n" + "="*80)
-    print("✅ LEARNING RATE ABLATION STUDY COMPLETE!")
+    print("LEARNING RATE ABLATION STUDY COMPLETE!")
     print("="*80)
 
 

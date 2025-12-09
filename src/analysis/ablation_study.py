@@ -168,7 +168,7 @@ def run_ablation_study(
                 print("Done")
     
     print("\n" + "="*70)
-    print("✅ Ablation study completed!")
+    print("Ablation study completed!")
     print("="*70)
     
     return results
@@ -377,7 +377,7 @@ def main():
     perform_statistical_comparisons(results)
     
     print("\n" + "="*70)
-    print("✅ ABLATION STUDY COMPLETE!")
+    print("ABLATION STUDY COMPLETE!")
     print("="*70)
 
 

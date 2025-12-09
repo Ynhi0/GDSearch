@@ -129,7 +129,7 @@ def run_sensitivity_experiment(
                     'status': 'failed_no_eval'
                 })
         except Exception as e:
-            print(f"❌ Failed: {e}")
+            print(f"Failed: {e}")
             results.append({
                 'param_name': param_name,
                 'param_value': value,
@@ -144,7 +144,7 @@ def run_sensitivity_experiment(
     # Save summary
     summary_path = os.path.join(output_dir, f'sensitivity_{param_name}_summary.csv')
     results_df.to_csv(summary_path, index=False)
-    print(f"\n✅ Sensitivity analysis complete: {summary_path}")
+    print(f"\nSensitivity analysis complete: {summary_path}")
     
     return results_df
 
@@ -170,7 +170,7 @@ def plot_sensitivity(
     success_df = results_df[results_df['status'] == 'success'].copy()
     
     if success_df.empty:
-        print("⚠️ No successful runs to plot")
+        print("No successful runs to plot")
         return
     
     # Plot 1: Test Accuracy
@@ -281,9 +281,9 @@ def analyze_robustness(results_df: pd.DataFrame, threshold: float = 0.01) -> Dic
 def _interpret_robustness(classification: str) -> str:
     """Provide interpretation of robustness classification."""
     interpretations = {
-        "HIGHLY ROBUST": "✅ Excellent! This hyperparameter value is stable. Small changes have minimal impact. Safe for production.",
-        "MODERATELY ROBUST": "⚠️ Good but be cautious. Performance degrades noticeably with perturbations. Consider wider hyperparameter search.",
-        "FRAGILE": "❌ Warning! This 'best' value may be lucky. Performance is very sensitive to small changes. High risk of poor transfer to new scenarios."
+        "HIGHLY ROBUST": "Excellent! This hyperparameter value is stable. Small changes have minimal impact. Safe for production.",
+        "MODERATELY ROBUST": "Good but be cautious. Performance degrades noticeably with perturbations. Consider wider hyperparameter search.",
+        "FRAGILE": "Warning! This 'best' value may be lucky. Performance is very sensitive to small changes. High risk of poor transfer to new scenarios."
     }
     return interpretations.get(classification, "Unknown classification")
 
@@ -344,7 +344,7 @@ def main():
         print(f"\n🎯 Classification: {robustness['classification']}")
         print(f"\n💡 Interpretation:\n{robustness['interpretation']}")
     else:
-        print(f"⚠️ {robustness['message']}")
+        print(f"{robustness['message']}")
     
     # Plot results
     plot_sensitivity(
@@ -354,7 +354,7 @@ def main():
         save_path='plots/sensitivity_lr.png'
     )
     
-    print("\n✅ Sensitivity analysis complete!")
+    print("\nSensitivity analysis complete!")
     print("Check: results/sensitivity/ for detailed CSVs")
     print("Check: plots/sensitivity_lr.png for visualization")
 

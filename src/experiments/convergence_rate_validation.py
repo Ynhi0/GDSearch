@@ -325,7 +325,7 @@ def run_convergence_rate_comparison(
     print("="*60)
     print(df_summary.to_string(index=False))
     
-    print(f"\n✅ Results saved to {output_dir}/")
+    print(f"\nResults saved to {output_dir}/")
     
     return all_results
 

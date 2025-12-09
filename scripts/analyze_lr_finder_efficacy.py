@@ -224,7 +224,7 @@ def compare_lr_finder_vs_default(epochs=20, seeds=[1, 2, 3], output_dir='results
     df = pd.DataFrame(results)
     csv_path = os.path.join(output_dir, 'lr_finder_efficacy_comparison.csv')
     df.to_csv(csv_path, index=False)
-    logging.info(f"\n✅ Results saved to {csv_path}")
+    logging.info(f"\nResults saved to {csv_path}")
     
     # Summary statistics
     logging.info(f"\n{'='*80}")

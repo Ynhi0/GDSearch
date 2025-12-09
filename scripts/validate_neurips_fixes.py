@@ -10,7 +10,7 @@ print("NEURIPS AUDIT FIX VALIDATION")
 print("=" * 60)
 
 # Test 1: Adam with epsilon guards (BUG #1, #2 fixes)
-print("\n✅ Test 1: Adam optimizer with epsilon guards")
+print("\nTest 1: Adam optimizer with epsilon guards")
 opt = Adam(lr=0.001)
 params = np.array([1.0, 2.0])
 grads = np.array([0.1, 0.2])

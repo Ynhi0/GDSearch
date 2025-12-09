@@ -556,7 +556,7 @@ if __name__ == '__main__':
     
     plt.tight_layout()
     plt.savefig('plots/lr_schedulers_demo.png', dpi=150, bbox_inches='tight')
-    print("✅ Saved demo plot to plots/lr_schedulers_demo.png")
+    print("Saved demo plot to plots/lr_schedulers_demo.png")
     plt.close()
     
-    print("\n✅ All schedulers working correctly!")
+    print("\nAll schedulers working correctly!")

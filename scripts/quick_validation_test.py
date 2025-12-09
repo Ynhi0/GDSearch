@@ -387,12 +387,12 @@ def main():
     print(f"\n{BLUE}Results: {passed_tests}/{total_tests} tests passed{RESET}\n")
     
     if passed_tests == total_tests:
-        print(f"{GREEN}✅ ALL TESTS PASSED - Codebase is research-grade{RESET}")
+        print(f"{GREEN}ALL TESTS PASSED - Codebase is research-grade{RESET}")
         print(f"\n{BLUE}You can now run the full benchmark suite:{RESET}")
         print(f"  python run_all_kaggle.py --experiments all --seeds 42,123,456")
         return 0
     else:
-        print(f"{RED}❌ SOME TESTS FAILED - Fix issues before proceeding{RESET}")
+        print(f"{RED}SOME TESTS FAILED - Fix issues before proceeding{RESET}")
         return 1
 
 

@@ -139,7 +139,7 @@ class OptunaHyperparameterTuner:
         }
         
         print("\n" + "=" * 80)
-        print(f"✅ Optimization Complete!")
+        print(f"Optimization Complete!")
         print(f"Best value: {results['best_value']:.6f}")
         print(f"Best trial: #{results['best_trial_number']}")
         print(f"Total trials: {results['n_trials']} ({results['n_complete']} complete, {results['n_pruned']} pruned)")
@@ -182,7 +182,7 @@ class OptunaHyperparameterTuner:
         with open(filepath, 'w') as f:
             json.dump(results, f, indent=2)
         
-        print(f"✅ Saved results to {filepath}")
+        print(f"Saved results to {filepath}")
 
 
 def suggest_optimizer_params(trial: optuna.Trial, optimizer_name: str) -> Dict[str, Any]:
@@ -330,7 +330,7 @@ def plot_optimization_history(study: optuna.Study, save_path: Optional[str] = No
         fig = optuna.visualization.plot_optimization_history(study)
         if save_path:
             fig.write_image(save_path)
-            print(f"✅ Saved optimization history to {save_path}")
+            print(f"Saved optimization history to {save_path}")
         else:
             fig.show()
     except Exception as e:
@@ -343,7 +343,7 @@ def plot_param_importances(study: optuna.Study, save_path: Optional[str] = None)
         fig = optuna.visualization.plot_param_importances(study)
         if save_path:
             fig.write_image(save_path)
-            print(f"✅ Saved parameter importances to {save_path}")
+            print(f"Saved parameter importances to {save_path}")
         else:
             fig.show()
     except Exception as e:
@@ -356,7 +356,7 @@ def plot_slice(study: optuna.Study, save_path: Optional[str] = None):
         fig = optuna.visualization.plot_slice(study)
         if save_path:
             fig.write_image(save_path)
-            print(f"✅ Saved slice plot to {save_path}")
+            print(f"Saved slice plot to {save_path}")
         else:
             fig.show()
     except Exception as e:
@@ -369,7 +369,7 @@ def plot_contour(study: optuna.Study, params: Optional[List[str]] = None, save_p
         fig = optuna.visualization.plot_contour(study, params=params)
         if save_path:
             fig.write_image(save_path)
-            print(f"✅ Saved contour plot to {save_path}")
+            print(f"Saved contour plot to {save_path}")
         else:
             fig.show()
     except Exception as e:
@@ -400,6 +400,6 @@ if __name__ == '__main__':
     # Run optimization
     results = tuner.optimize(n_trials=50, show_progress_bar=True)
     
-    print("\n✅ Demo complete!")
+    print("\nDemo complete!")
     print(f"Optimum found: x={results['best_params']['x']:.4f}, y={results['best_params']['y']:.4f}")
     print(f"Expected optimum: x=2.0, y=-3.0")

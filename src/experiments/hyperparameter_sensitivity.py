@@ -327,8 +327,8 @@ if __name__ == '__main__':
     # Adam β1, β2 sweep  
     print("\n2. Running Adam β1, β2 sweep on Rosenbrock...")
     df_adam = adam_beta_sweep(test_function='rosenbrock')
-    print(f"   ✓ Results saved to results/hyperparameter_sensitivity/")
+    print(f"   Results saved to results/hyperparameter_sensitivity/")
     
-    print("\n✅ Hyperparameter sensitivity analysis complete!")
+    print("\nHyperparameter sensitivity analysis complete!")
     print("   - Momentum β: dynamics metrics computed")
     print("   - Adam β1,β2: 2D heatmaps generated")

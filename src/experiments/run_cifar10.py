@@ -351,7 +351,7 @@ def main():
         try:
             create_cifar10_summary_plots(results_dir)
         except Exception as e:
-            print(f"⚠️  Failed to create summary plots: {e}")
+            print(f"Failed to create summary plots: {e}")
 
 
 if __name__ == '__main__':

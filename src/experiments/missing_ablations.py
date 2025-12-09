@@ -234,7 +234,7 @@ def run_gradient_clipping_ablation(
     df = pd.DataFrame(results)
     csv_path = os.path.join(output_dir, 'gradient_clipping_ablation.csv')
     df.to_csv(csv_path, index=False)
-    print(f"\n✅ Results saved to {csv_path}")
+    print(f"\nResults saved to {csv_path}")
     
     # Create visualization
     create_ablation_plots(df, 'Gradient Clipping', output_dir, 'gradient_clipping')
@@ -310,7 +310,7 @@ def run_label_smoothing_ablation(
     df = pd.DataFrame(results)
     csv_path = os.path.join(output_dir, 'label_smoothing_ablation.csv')
     df.to_csv(csv_path, index=False)
-    print(f"\n✅ Results saved to {csv_path}")
+    print(f"\nResults saved to {csv_path}")
     
     # Create visualization
     create_ablation_plots(df, 'Label Smoothing', output_dir, 'label_smoothing')
@@ -384,7 +384,7 @@ def run_data_augmentation_ablation(
     df = pd.DataFrame(results)
     csv_path = os.path.join(output_dir, 'data_augmentation_ablation.csv')
     df.to_csv(csv_path, index=False)
-    print(f"\n✅ Results saved to {csv_path}")
+    print(f"\nResults saved to {csv_path}")
     
     # Create visualization
     create_categorical_ablation_plot(df, 'Data Augmentation', output_dir, 'data_augmentation')
@@ -459,7 +459,7 @@ def run_model_architecture_ablation(
     df = pd.DataFrame(results)
     csv_path = os.path.join(output_dir, 'model_architecture_ablation.csv')
     df.to_csv(csv_path, index=False)
-    print(f"\n✅ Results saved to {csv_path}")
+    print(f"\nResults saved to {csv_path}")
     
     # Create visualization
     create_ablation_plots(df, 'Model Architecture (Hidden Size)', output_dir, 'model_architecture')
@@ -531,7 +531,7 @@ def run_dropout_ablation(
     df = pd.DataFrame(results)
     csv_path = os.path.join(output_dir, 'dropout_ablation.csv')
     df.to_csv(csv_path, index=False)
-    print(f"\n✅ Results saved to {csv_path}")
+    print(f"\nResults saved to {csv_path}")
     
     # Create visualization
     create_ablation_plots(df, 'Dropout Regularization', output_dir, 'dropout')
@@ -610,7 +610,7 @@ def create_ablation_plots(df: pd.DataFrame, title: str, output_dir: str, filenam
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
     plt.close()
     
-    print(f"✅ Plots saved to {plot_path}")
+    print(f"Plots saved to {plot_path}")
 
 
 def create_categorical_ablation_plot(df: pd.DataFrame, title: str, output_dir: str, filename: str):
@@ -644,7 +644,7 @@ def create_categorical_ablation_plot(df: pd.DataFrame, title: str, output_dir: s
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
     plt.close()
     
-    print(f"✅ Plots saved to {plot_path}")
+    print(f"Plots saved to {plot_path}")
 
 
 def run_all_missing_ablations(
@@ -694,7 +694,7 @@ def run_all_missing_ablations(
     )
     
     print("\n" + "=" * 80)
-    print("✅ ALL MISSING ABLATION STUDIES COMPLETED")
+    print("ALL MISSING ABLATION STUDIES COMPLETED")
     print("=" * 80)
     
     return results

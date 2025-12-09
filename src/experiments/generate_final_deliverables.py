@@ -125,7 +125,7 @@ class FinalDeliverablesGenerator:
         summary = self.create_summary_report(deliverables)
         
         print("\n" + "="*80)
-        print("✅ ALL DELIVERABLES GENERATED")
+        print("ALL DELIVERABLES GENERATED")
         print("="*80)
         print(f"\nTotal files created: {len(deliverables)}")
         print(f"Output directory: {self.output_dir}")
@@ -463,7 +463,7 @@ def main():
     
     deliverables = generator.generate_all()
     
-    print(f"\n✅ Done! Check {args.output_dir}/ for all deliverables")
+    print(f"\nDone! Check {args.output_dir}/ for all deliverables")
     
     return deliverables
 

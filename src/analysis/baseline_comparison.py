@@ -253,7 +253,7 @@ def run_baseline_comparison(
                 print("Done")
     
     print("\n" + "="*70)
-    print("✅ Baseline comparison completed!")
+    print("Baseline comparison completed!")
     print("="*70)
     
     return results
@@ -308,11 +308,11 @@ def print_baseline_summary(summary_df: pd.DataFrame):
         diff_pct = (diff / pytorch_row['Mean Accuracy']) * 100
         
         if abs(diff) < 0.001:
-            status = "✅ EQUIVALENT"
+            status = "EQUIVALENT"
         elif diff > 0:
-            status = f"✅ CUSTOM BETTER (+{diff:.4f}, {diff_pct:+.2f}%)"
+            status = f"CUSTOM BETTER (+{diff:.4f}, {diff_pct:+.2f}%)"
         else:
-            status = f"⚠️ PYTORCH BETTER ({diff:.4f}, {diff_pct:+.2f}%)"
+            status = f"PYTORCH BETTER ({diff:.4f}, {diff_pct:+.2f}%)"
         
         print(f"  → {status}")
     
@@ -436,7 +436,7 @@ def main():
     perform_statistical_tests(results)
     
     print("\n" + "="*70)
-    print("✅ BASELINE COMPARISON COMPLETE!")
+    print("BASELINE COMPARISON COMPLETE!")
     print("="*70)
 
 

@@ -7850,7 +7850,7 @@ Examples:
                     )
                     
                     experiment_results['dynamics_overhead'] = df
-                    print("✅ Dynamics overhead ablation completed!")
+                    print("Dynamics overhead ablation completed!")
             except Exception as e:
                 logging.error(f"Dynamics overhead ablation failed: {e}")
                 experiment_results['dynamics_overhead'] = None
@@ -7889,9 +7889,9 @@ Examples:
                         )
                         
                         experiment_results['theory_practice'] = df
-                        print("✅ Theory-practice validation completed!")
+                        print("Theory-practice validation completed!")
                     else:
-                        print("⚠️  No MNIST/CIFAR results found - skipping theory-practice validation")
+                        print("No MNIST/CIFAR results found - skipping theory-practice validation")
                         print("    Run 'mnist' or 'cifar10' experiments first")
                         experiment_results['theory_practice'] = None
             except Exception as e:
@@ -7927,7 +7927,7 @@ Examples:
                     )
                     
                     experiment_results['cross_optimizer_dynamics'] = df
-                    print("✅ Cross-optimizer dynamics comparison completed!")
+                    print("Cross-optimizer dynamics comparison completed!")
             except Exception as e:
                 logging.error(f"Cross-optimizer dynamics comparison failed: {e}")
                 experiment_results['cross_optimizer_dynamics'] = None
@@ -8031,7 +8031,7 @@ Examples:
                         results_dict['adam_grid'] = adam_grid_df
                     
                     experiment_results['beta_sensitivity_training'] = results_dict
-                    print("✅ β sensitivity on real training completed (all 4 experiments)!")
+                    print("β sensitivity on real training completed (all 4 experiments)!")
             except Exception as e:
                 logging.error(f"Beta sensitivity training failed: {e}")
                 experiment_results['beta_sensitivity_training'] = None
@@ -8093,38 +8093,38 @@ Examples:
     # Final summary
     print("\n" + "="*80)
     if FAILED_EXPERIMENTS:
-        print("⚠️  BENCHMARK SUITE COMPLETED WITH ERRORS")
+        print("BENCHMARK SUITE COMPLETED WITH ERRORS")
     else:
-        print("✅ BENCHMARK SUITE COMPLETED SUCCESSFULLY")
+        print("BENCHMARK SUITE COMPLETED SUCCESSFULLY")
     print("="*80)
     print(f"Results saved to: {results_dir}")
     
     # Successful experiments
     successful_count = len([v for v in experiment_results.values() if v is not None])
-    print(f"\n✅ Successful experiments: {successful_count}")
+    print(f"\nSuccessful experiments: {successful_count}")
     for exp_name, exp_df in experiment_results.items():
         if exp_df is not None and hasattr(exp_df, '__len__'):
             print(f"   - {exp_name}: {len(exp_df)} result rows")
     
     # Failed experiments summary
     if FAILED_EXPERIMENTS:
-        print(f"\n❌ Failed experiments: {len(FAILED_EXPERIMENTS)}")
+        print(f"\nFailed experiments: {len(FAILED_EXPERIMENTS)}")
         for failed in FAILED_EXPERIMENTS:
             print(f"   - {failed['experiment']}: {failed['error'][:100]}...")
-        print("\n   💡 Tip: Failed experiments can often be fixed by:")
+        print("\n   Tip: Failed experiments can often be fixed by:")
         print("      - Checking network connectivity")
         print("      - Logging into HuggingFace (huggingface-cli login)")
         print("      - Running with --resume to retry failed experiments")
     
     # Print feature integration status
     print("\n" + "="*80)
-    print("📦 INTEGRATED FEATURES STATUS")
+    print("INTEGRATED FEATURES STATUS")
     print("="*80)
-    print(f"  Convergence Analysis: {'✅ ENABLED' if HAS_CONVERGENCE else '❌ DISABLED'}")
-    print(f"  Interactive Plots: {'✅ ENABLED' if HAS_INTERACTIVE else '❌ DISABLED (install plotly)'}")
-    print(f"  Loss Landscapes: {'✅ ENABLED' if HAS_LANDSCAPE else '❌ DISABLED'}")
-    print(f"  Statistical Analysis: {'✅ ENABLED' if HAS_STATS else '❌ DISABLED'}")
-    print(f"  MLflow Tracking: {'✅ ENABLED' if HAS_MLFLOW and not args.no_mlflow else '❌ DISABLED'}")
+    print(f"  Convergence Analysis: {'ENABLED' if HAS_CONVERGENCE else 'DISABLED'}")
+    print(f"  Interactive Plots: {'ENABLED' if HAS_INTERACTIVE else 'DISABLED (install plotly)'}")
+    print(f"  Loss Landscapes: {'ENABLED' if HAS_LANDSCAPE else 'DISABLED'}")
+    print(f"  Statistical Analysis: {'ENABLED' if HAS_STATS else 'DISABLED'}")
+    print(f"  MLflow Tracking: {'ENABLED' if HAS_MLFLOW and not args.no_mlflow else 'DISABLED'}")
     print("="*80)
     
     if profiler:
@@ -8175,18 +8175,18 @@ Examples:
             result = subprocess.run([sys.executable, str(plot_script), "--results-dir", str(results_dir)], 
                                    capture_output=True, text=True, timeout=300)
             if result.returncode == 0:
-                print("✅ Publication-quality plots generated successfully")
+                print("Publication-quality plots generated successfully")
                 print(f"   Plots saved to: {results_dir}/visualizations/")
             else:
-                print(f"⚠️  Plot generation completed with warnings (non-critical)")
+                print(f"Plot generation completed with warnings (non-critical)")
                 # Don't show full error - it's usually just missing data
         else:
-            print(f"⚠️  Universal plot generator not found at: {plot_script}")
+            print(f"Universal plot generator not found at: {plot_script}")
             print("   Plots can be generated manually using: python scripts/generate_experiment_plots.py")
     except subprocess.TimeoutExpired:
-        print(f"⚠️  Plot generation timed out after 5 minutes (non-critical)")
+        print(f"Plot generation timed out after 5 minutes (non-critical)")
     except Exception as e:
-        print(f"⚠️  Could not generate universal plots: {str(e)[:100]} (non-critical)")
+        print(f"Could not generate universal plots: {str(e)[:100]} (non-critical)")
     print("="*80)
     
     return experiment_results

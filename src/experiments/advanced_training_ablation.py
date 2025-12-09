@@ -678,7 +678,7 @@ def create_visualizations(df: pd.DataFrame, results_dir: str):
     plt.close()
     print("  ✓ Saved summary_table.png/.pdf")
     
-    print(f"\n✅ All visualizations saved to {viz_dir}/")
+    print(f"\nAll visualizations saved to {viz_dir}/")
     
     return viz_dir
 

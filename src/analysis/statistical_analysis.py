@@ -188,7 +188,7 @@ def print_ttest_results(result: Dict):
     print(f"Test Statistics:")
     print(f"  t-statistic: {result['t_statistic']:.4f}")
     print(f"  p-value:     {result['p_value']:.4f}")
-    print(f"  Significant: {'✅ YES' if result['significant'] else '❌ NO'} (α=0.05)")
+    print(f"  Significant: {'YES' if result['significant'] else 'NO'} (α=0.05)")
     print(f"  Effect size (Cohen's d): {result['cohens_d']:.4f}")
     
     # Interpret effect size
@@ -208,10 +208,10 @@ def print_ttest_results(result: Dict):
     diff = result['mean_A'] - result['mean_B']
     if result['significant']:
         winner = result['name_A'] if diff > 0 else result['name_B']
-        print(f"✅ CONCLUSION: {winner} is statistically significantly better")
+        print(f"CONCLUSION: {winner} is statistically significantly better")
         print(f"   (p={result['p_value']:.4f} < 0.05, effect size={effect_str})")
     else:
-        print(f"❌ CONCLUSION: No statistically significant difference")
+        print(f"CONCLUSION: No statistically significant difference")
         print(f"   (p={result['p_value']:.4f} ≥ 0.05)")
     
     print(f"{'='*70}\n")
@@ -453,9 +453,9 @@ def print_power_analysis(report: Dict):
     
     print(f"\nRecommendations:")
     if report['achieved_power'] >= report['target_power']:
-        print(f"  ✅ Study is adequately powered (power ≥ {report['target_power']})")
+        print(f"  Study is adequately powered (power ≥ {report['target_power']})")
     else:
-        print(f"  ⚠️  Study is underpowered (power < {report['target_power']})")
+        print(f"  Study is underpowered (power < {report['target_power']})")
         if report['required_n'] != float('inf'):
             print(f"  Required sample size for {report['target_power']*100:.0f}% power: {report['required_n']} per group")
             additional_needed = report['required_n'] - report['n_samples']
@@ -465,7 +465,7 @@ def print_power_analysis(report: Dict):
     print(f"\nPower to Detect Different Effect Sizes:")
     print(f"  (with n={report['n_samples']}, α={report['alpha']})")
     for effect_name, power_value in report['power_vs_effect_size'].items():
-        status = "✅" if power_value >= 0.8 else "⚠️ "
+        status = "" if power_value >= 0.8 else "WARNING: "
         print(f"  {status} {effect_name}: {power_value:.4f} ({power_value*100:.1f}%)")
     
     print(f"\n{'─'*70}")
@@ -624,9 +624,9 @@ def print_friedman_results(results: Dict):
     print(f"P-value: {results['p_value']:.6f}")
     
     if results['significant']:
-        print(f"✅ SIGNIFICANT: Optimizers differ significantly (p < 0.05)")
+        print(f"SIGNIFICANT: Optimizers differ significantly (p < 0.05)")
     else:
-        print(f"❌ NOT SIGNIFICANT: No significant difference between optimizers")
+        print(f"NOT SIGNIFICANT: No significant difference between optimizers")
     
     print(f"\nAverage Ranks (lower is better):")
     sorted_indices = np.argsort(results['mean_ranks'])
@@ -649,7 +649,7 @@ def print_nemenyi_results(results: Dict):
     
     optimizer_names = results['optimizer_names']
     for i, j, rank_diff, is_sig in results['significant_pairs']:
-        status = "✅ SIGNIFICANT" if is_sig else "  Not significant"
+        status = "SIGNIFICANT" if is_sig else "  Not significant"
         print(f"{status}: {optimizer_names[i]} vs {optimizer_names[j]}")
         print(f"           Rank difference: {rank_diff:.4f} (CD = {results['critical_distance']:.4f})")
     

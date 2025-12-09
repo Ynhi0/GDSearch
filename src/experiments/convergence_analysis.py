@@ -455,4 +455,4 @@ if __name__ == '__main__':
     print(f"   Stagnation detected: {metrics['stagnation_detected']}")
     print(f"   Stagnation iter: {metrics['stagnation_iter']}")
     
-    print("\n✅ Demo complete!")
+    print("\nDemo complete!")
