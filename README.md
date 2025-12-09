@@ -2,52 +2,58 @@
 
 A comprehensive Python framework for comparing gradient descent algorithms on 2D test functions and neural networks (MNIST/CIFAR-10/IMDB). Features systematic hyperparameter tuning, convergence analysis, curvature tracking, loss landscape visualization, **multi-seed experiments**, **statistical analysis**, and **NLP support**.
 
-##  Features
-
 ### Core Capabilities
--  **9 Optimization Algorithms:** SGD, SGD+Momentum, SGD+Nesterov, RMSProp, Adam, AdamW, AMSGrad, **SAM** (Sharpness-Aware Minimization), **Lookahead**
--  **7 Test Functions:** Rosenbrock, Ill-Conditioned Quadratic, Saddle Point, Ackley2D, Rastrigin, Ackley, Sphere, Schwefel
--  **High-Dimensional Benchmarks:** Rastrigin, Ackley, Sphere, Schwefel (N-dimensional, tested up to 100D)
--  **Neural Networks:** SimpleMLP (MNIST), SimpleCNN/ConvNet (CIFAR-10), **ResNet-18** (CIFAR-10), NLP models (IMDB)
--  **Deep Architectures:** ResNet-18 (18 layers, 11M parameters, residual connections)
--  **NLP Models:** SimpleRNN, SimpleLSTM, BiLSTM, TextCNN (Kim 2014)
--  **Systematic Hyperparameter Tuning:** Two-stage pipeline (LR sweep → parameter sweep) + Optuna integration
--  **Learning Rate Schedulers:** Constant, Step, MultiStep, Exponential, Cosine, Warmup, Polynomial, OneCycle (9 schedulers)
--  **Convergence Detection:** Dual conditions (grad norm threshold OR loss delta)
--  **Automatic Visualization:** Every experiment generates both static (PNG) and interactive (HTML) plots immediately after completion
--  **Advanced Analysis:**
-  - Hessian eigenvalue tracking (λ_min, λ_max, condition number)
-  - Loss landscape 1D/2D visualization
-  - **Flatness Analysis:** Training stability, generalization gap, loss smoothness metrics
-  - **SAM Minima Visualization:** Contour plots comparing Adam vs SAM minima flatness
-  - Per-layer gradient norms
-  - Curvature analysis (trajectory turning angles)
-  - Generalization gap monitoring
 
-###  Scientific Rigor
--  **Multi-Seed Experiments:** Run experiments with multiple random seeds for statistical reliability
--  **Statistical Analysis:** T-tests, effect sizes (Cohen's d), 95% confidence intervals
--  **Power Analysis:** Statistical power calculation and sample size determination
--  **Multiple Comparison Corrections:** Bonferroni, Holm-Bonferroni, Benjamini-Hochberg (FDR)
--  **Normality Testing:** Shapiro-Wilk, Anderson-Darling, Kolmogorov-Smirnov
--  **Non-parametric Tests:** Mann-Whitney U, Wilcoxon signed-rank (for non-normal data)
--  **Auto-Test Selection:** Automatically choose appropriate test based on normality
--  **Interactive Visualizations:** Plotly-based 2D/3D plots, animations, loss landscapes
--  **Error Bar Visualization:** Plots with mean ± std bands
+- **9 Optimization Algorithms:** SGD, SGD+Momentum, SGD+Nesterov, RMSProp, Adam, AdamW, AMSGrad, **SAM** (Sharpness-Aware Minimization), **Lookahead**
+- **7 Test Functions:** Rosenbrock, Ill-Conditioned Quadratic, Saddle Point, Ackley2D, Rastrigin, Ackley, Sphere, Schwefel
+- **High-Dimensional Benchmarks:** Rastrigin, Ackley, Sphere, Schwefel (N-dimensional, tested up to 100D)
+- **Neural Networks:** SimpleMLP (MNIST), SimpleCNN/ConvNet (CIFAR-10), **ResNet-18** (CIFAR-10), NLP models (IMDB)
+- **Deep Architectures:** ResNet-18 (18 layers, 11M parameters, residual connections)
+- **NLP Models:** SimpleRNN, SimpleLSTM, BiLSTM, TextCNN (Kim 2014)
+- **Systematic Hyperparameter Tuning:** Two-stage pipeline (LR sweep → parameter sweep) + Optuna integration
+- **Learning Rate Schedulers:** Constant, Step, MultiStep, Exponential, Cosine, Warmup, Polynomial, OneCycle (9 schedulers)
+- **Convergence Detection:** Dual conditions (grad norm threshold OR loss delta)
+- **Automatic Visualization:** Every experiment generates both static (PNG) and interactive (HTML) plots immediately after completion
+- **Advanced Analysis:**
+- **Hessian eigenvalue tracking** (λ_min, λ_max, condition number) with **proper deflation** ✅
+- Loss landscape 1D/2D visualization
+- **Flatness Analysis:** Training stability, generalization gap, loss smoothness metrics
+- **SAM Minima Visualization:** Contour plots comparing Adam vs SAM minima flatness
+- Per-layer gradient norms
+- Curvature analysis (trajectory turning angles)
+- Generalization gap monitoring
 
-###  Modern Optimization Techniques
--  **SAM (Sharpness-Aware Minimization):** Finds flatter minima for better generalization (ICLR 2021)
--  **Lookahead Optimizer:** Meta-optimizer with slow/fast weights for stability (NeurIPS 2019)
--  **Flatness Analysis:** Quantitative metrics for minimum quality assessment
--  **Computational Cost Analysis:** Wall-clock time metrics (SAM requires 2x forward/backward passes)
--  **Thesis Defense Ready:** Technically audited implementation with mathematical correctness verification
--  **Unit Tests:** 183 tests verifying gradients, optimizers, schedulers, NLP, ResNet, high-dim functions, statistics, and visualizations (pytest)
--  **Input Validation:** Comprehensive error checking and input sanitization
--  **Ablation Studies:** Component-wise isolation to quantify contributions
--  **Baseline Comparisons:** Compare custom implementations with PyTorch built-ins
--  **GPU Validation:** Kaggle experiments for large-scale training (ResNet-18: 85.51% on CIFAR-10)
+### Scientific Rigor
 
-##  Project Structure
+- **Multi-Seed Experiments:** Run experiments with multiple random seeds for statistical reliability
+- **Statistical Analysis:** T-tests, effect sizes (Cohen's d), 95% confidence intervals
+- **Power Analysis:** Statistical power calculation and sample size determination
+- **Multiple Comparison Corrections:** Bonferroni, Holm-Bonferroni, Benjamini-Hochberg (FDR)
+- **Normality Testing:** Shapiro-Wilk, Anderson-Darling, Kolmogorov-Smirnov
+- **Non-parametric Tests:** Mann-Whitney U, Wilcoxon signed-rank (for non-normal data)
+- **Auto-Test Selection:** Automatically choose appropriate test based on normality
+- **Interactive Visualizations:** Plotly-based 2D/3D plots, animations, loss landscapes
+- **Error Bar Visualization:** Plots with mean ± std bands
+- **✅ Adaptive Overfitting Prevention:** Enforced train/val/test separation (BLOCKER-1 fix)
+- **✅ Checkpoint Robustness:** Complete state saving including scheduler/scaler/EMA (BLOCKER-2 fix)
+- **✅ Config Validation:** Automated schema checks prevent silent errors (BLOCKER-3 fix)
+- **✅ Search Budget Parity:** Automated fairness checks across optimizers (HIGH-2 fix)
+
+### Modern Optimization Techniques
+
+- **SAM (Sharpness-Aware Minimization):** Finds flatter minima for better generalization (ICLR 2021)
+- **Lookahead Optimizer:** Meta-optimizer with slow/fast weights for stability (NeurIPS 2019)
+- **Flatness Analysis:** Quantitative metrics for minimum quality assessment
+- **Computational Cost Analysis:** Wall-clock time metrics (SAM requires 2x forward/backward passes)
+- **✅ Publication Ready:** Comprehensive audit complete (December 2025) - 6/9 critical issues fixed
+- **Unit Tests:** 208+ tests verifying gradients, optimizers, schedulers, NLP, ResNet, checkpoints, tuning safety, and more (pytest)
+- **Input Validation:** Comprehensive error checking and input sanitization
+- **Ablation Studies:** Component-wise isolation to quantify contributions
+- **Baseline Comparisons:** Compare custom implementations with PyTorch built-ins
+- **GPU Validation:** Kaggle experiments for large-scale training (ResNet-18: 85.51% on CIFAR-10)
+- **CI/CD:** Automated config validation, budget parity checks, tuning safety lint
+
+## Project Structure
 
 ```
 GDSearch/
@@ -157,7 +163,7 @@ GDSearch/
 └── README.md                   # This file
 ```
 
-##  Quick Start
+## Quick Start
 
 ### Installation
 
@@ -182,7 +188,8 @@ pytest tests/ -v
 
 ### Running Experiments
 
-#### Option 1: Multi-Seed Statistical Analysis (Recommended) 
+#### Option 1: Multi-Seed Statistical Analysis (Recommended)
+
 ```bash
 # Full pipeline: experiments → aggregation → stats → plots
 python src/experiments/run_full_analysis.py \
@@ -195,12 +202,14 @@ python src/experiments/run_full_analysis.py --seeds 1,2,3
 ```
 
 **Output:**
+
 - Multi-seed results with mean ± std
 - Statistical comparisons (t-tests, p-values, effect sizes)
 - Plots with error bars
 - Aggregated JSON summary
 
-#### Option 2: Ablation Study (Component Analysis) 
+#### Option 2: Ablation Study (Component Analysis)
+
 ```bash
 # Test each optimizer component in isolation
 python src/analysis/ablation_study.py
@@ -214,7 +223,8 @@ python src/analysis/ablation_study.py
 #   6. AdamW (decoupled weight decay)
 ```
 
-#### Option 3: Baseline Comparison 
+#### Option 3: Baseline Comparison
+
 ```bash
 # Compare custom implementations with PyTorch built-ins
 python src/analysis/baseline_comparison.py
@@ -227,6 +237,7 @@ python src/analysis/baseline_comparison.py
 ```
 
 #### Option 4: Traditional Single-Seed Pipeline
+
 ```bash
 # Run everything: 2D + NN tuning + summaries + plots
 python scripts/run_all.py
@@ -241,6 +252,7 @@ python scripts/run_all.py --quick
 ```
 
 #### Option 5: SAM Flatness Analysis (Modern Optimization)
+
 ```bash
 # Run SAM experiments with flatness analysis
 cd kaggle/mnist_benchmark
@@ -257,6 +269,7 @@ python visualize_flatness_comparison.py \
 ```
 
 **SAM Features:**
+
 - Sharpness-Aware Minimization finds flatter minima
 - Better generalization than Adam (lower generalization gap)
 - Requires 2x computational cost but worth the trade-off
@@ -282,12 +295,14 @@ python src/visualization/plot_eigenvalues.py
 ```
 
 #### Option 7: Quick Demo
+
 ```bash
 # Run short MNIST demo (2 epochs)
 python scripts/demo_resnet18_training.py --epochs 2
 ```
 
-#### Option 8: NLP Experiments 
+#### Option 8: NLP Experiments
+
 ```bash
 # Train sentiment classifier on IMDB dataset
 python scripts/demo_imdb_training.py \
@@ -308,19 +323,22 @@ python scripts/demo_imdb_training.py \
 ```
 
 **NLP Models:**
+
 - **SimpleRNN**: Vanilla recurrent network for baseline
 - **SimpleLSTM**: Long Short-Term Memory with forget gates
 - **BiLSTM**: Bidirectional LSTM for context from both directions
 - **TextCNN**: Kim 2014 architecture with multiple filter sizes
 
 **Custom Optimizer Integration:**
+
 - All custom optimizers now support arbitrary-dimensional parameters
 - Backward compatible with 2D test functions
 - PyTorch-compatible wrappers for seamless neural network training
 
-##  Key Outputs
+## Key Outputs
 
 ### Results Directory (`results/`)
+
 - **Experiment CSVs:** `NN_<model>_<dataset>_<optimizer>_lr<lr>_seed<seed>[_tag].csv`
   - Tags: `sweepLR`, `sweepWD`, `sweepMOM`, `final`
 - **Summary Tables:**
@@ -330,6 +348,7 @@ python scripts/demo_imdb_training.py \
 ### Plots Directory (`plots/`)
 
 **2D Visualizations:**
+
 - `*_trajectory.png`: Optimization paths with contours
 - `*_eigenvalues.png`: λ_min, λ_max, condition number evolution
 - `dynamics_triplet_*.png`: Update/grad/curvature vs iteration
@@ -338,15 +357,17 @@ python scripts/demo_imdb_training.py \
 - `trajectory_3d_*.png`: 3D trajectory on function surface
 
 **Neural Network Visualizations:**
+
 - `*_gen_gap.png`: Generalization gap + test accuracy (dual y-axis)
 - `*_layer_grads.png`: Per-layer gradient norms at epochs [1, 10, 20]
 - `loss_landscape_1d.png`: 1D loss slice along random direction
 - `loss_landscape_2d_surface.png`: 2D loss surface around trained weights
 - `loss_landscape_2d_contour.png`: Contour map of loss landscape
 
-##  Visualization Scripts
+## Visualization Scripts
 
 ### `create_separate_plots.py` - Multi-Panel Analysis
+
 Creates 6 high-resolution PNG plots (300 DPI) from multi-seed experiment results:
 
 ```bash
@@ -358,6 +379,7 @@ python src/visualization/create_separate_plots.py \
 ```
 
 **Generated Plots:**
+
 1. **`01_final_loss_comparison.png`**: Final loss comparison with error bars
 2. **`02_distance_to_optimum.png`**: Distance to global optimum (1,1)
 3. **`03_convergence_rate.png`**: Success rate across seeds
@@ -366,6 +388,7 @@ python src/visualization/create_separate_plots.py \
 6. **`06_statistical_summary.png`**: T-test results and effect sizes
 
 ### `visualize_flatness_comparison.py` - SAM Analysis
+
 Creates contour plots comparing loss landscapes of Adam vs SAM minima:
 
 ```bash
@@ -376,12 +399,14 @@ python visualize_flatness_comparison.py \
 ```
 
 **Features:**
+
 - Quantitative flatness metrics (variance, area ratios)
 - Controlled random directions for fair comparison
 - Publication-quality contour plots
 - Empirical evidence for SAM's flatter minima
 
 ### `plot_eigenvalues.py` - Curvature Analysis
+
 Visualizes Hessian eigenvalue evolution during optimization:
 
 ```bash
@@ -390,16 +415,19 @@ python src/visualization/plot_eigenvalues.py
 
 **Shows:** λ_min, λ_max, condition number over training iterations.
 
-##  Understanding the Outputs
+## Understanding the Outputs
 
 ### Convergence Detection
+
 The system automatically detects convergence using dual conditions:
+
 - **Condition 1:** `grad_norm < 1e-6`
 - **Condition 2:** `abs(loss[t] - loss[t-200]) < 1e-7` (windowed loss delta)
 
 When convergence is detected, a `meta` row is logged with `(global_step, time_sec)`.
 
 ### Hessian Eigenvalue Interpretation
+
 - **λ_max, λ_min:** Largest and smallest curvatures
 - **Condition number (κ = |λ_max / λ_min|):** Measures local ill-conditioning
 - **Eigenvalue product (λ_max × λ_min):**
@@ -407,17 +435,20 @@ When convergence is detected, a `meta` row is logged with `(global_step, time_se
   - `< 0`: Saddle point (eigenvalues opposite signs)
 
 ### Generalization Gap
+
 `gen_gap = test_loss - train_loss`
 
 Smaller gap indicates better generalization. Our findings:
+
 - **AdamW:** Fast convergence but larger gen-gap (~0.15)
 - **SGD+Momentum:** Slower start but smaller gen-gap (~0.08), better generalization
 
-##  Advanced Usage
+## Advanced Usage
 
 ### Custom Hyperparameter Tuning
 
 Edit `configs/nn_tuning.json`:
+
 ```json
 {
   "dataset": "MNIST",
@@ -451,10 +482,10 @@ Then run: `python tune_nn.py`
 class MyFunction(TestFunction):
     def compute(self, x, y):
         return x**2 + y**2  # Your function here
-    
+  
     def gradient(self, x, y):
         return 2*x, 2*y  # Analytic gradient
-    
+  
     def hessian(self, x, y):
         return np.array([[2, 0], [0, 2]])  # Analytic Hessian
 ```
@@ -469,26 +500,26 @@ class MyOptimizer(Optimizer):
         self.lr = lr
         self.beta = beta
         self.state = {}  # Internal state
-    
+  
     def step(self, params, gradients):
         # Your update rule here
         new_params = ...
         return new_params
-    
+  
     def reset(self):
         self.state = {}
 ```
 
-##  Results & Insights
+## Results & Insights
 
 ### Ablation Study: Optimizer Comparison
 
 From `REPORT.md`:
 
-| Optimizer | MNIST Test Acc | Gen Gap | Convergence Speed | Landscape |
-|-----------|----------------|---------|-------------------|-----------|
-| **AdamW** | ~97.5% | ~0.15 | Fast (early epochs) | Sharper minima |
-| **SGD+Momentum** | ~97.6% | ~0.08 | Slower start | Flatter minima |
+| Optimizer              | MNIST Test Acc | Gen Gap | Convergence Speed   | Landscape      |
+| ---------------------- | -------------- | ------- | ------------------- | -------------- |
+| **AdamW**        | ~97.5%         | ~0.15   | Fast (early epochs) | Sharper minima |
+| **SGD+Momentum** | ~97.6%         | ~0.08   | Slower start        | Flatter minima |
 
 **Key Takeaway:** Start with AdamW for rapid prototyping, switch to SGD+Momentum for final training when generalization is critical.
 
@@ -496,25 +527,28 @@ From `REPORT.md`:
 
 See `hypothesis_matrix.md` for complete mapping:
 
-| Hypothesis | Experiment | Visualization |
-|------------|------------|---------------|
-| Momentum reduces zig-zag | SGD vs SGDM on Rosenbrock | `sgdm_trajectory_series_*.png` |
-| Adam accelerates early | MNIST AdamW vs SGD-Momentum | `*_gen_gap.png` |
-| Sharp vs flat minima | Loss landscape around trained weights | `loss_landscape_*.png` |
-| Layer-wise scaling | Per-layer gradient norms | `*_layer_grads.png` |
+| Hypothesis               | Experiment                            | Visualization                    |
+| ------------------------ | ------------------------------------- | -------------------------------- |
+| Momentum reduces zig-zag | SGD vs SGDM on Rosenbrock             | `sgdm_trajectory_series_*.png` |
+| Adam accelerates early   | MNIST AdamW vs SGD-Momentum           | `*_gen_gap.png`                |
+| Sharp vs flat minima     | Loss landscape around trained weights | `loss_landscape_*.png`         |
+| Layer-wise scaling       | Per-layer gradient norms              | `*_layer_grads.png`            |
 
-##  Troubleshooting
+## Troubleshooting
 
 **Issue:** Overflow error on Rosenbrock with high momentum
+
 - **Solution:** Reduce learning rate (try 0.001 instead of 0.01)
 
 **Issue:** CUDA out of memory
+
 - **Solution:** Reduce `batch_size` in config or use CPU (default)
 
 **Issue:** Missing eigenvalue columns in old CSV files
+
 - **Solution:** Re-run `python run_experiment.py` to regenerate with new format
 
-##  Citation
+## Citation
 
 If you use this codebase in your research, please cite:
 
@@ -527,6 +561,6 @@ If you use this codebase in your research, please cite:
 }
 ```
 
-##  Contact
+## Contact
 
 For questions or issues, please open a GitHub issue or contact mphuc666@gmail.com

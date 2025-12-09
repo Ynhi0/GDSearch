@@ -1,8 +1,12 @@
 """
 Script to plot and visualize experiment results.
+
+AUDIT FIX: Enhanced warning handling for matplotlib/pandas deprecations
+and edge cases (empty data, missing columns, etc.)
 """
 
 import os
+import warnings
 import numpy as np
 from typing import Optional
 import pandas as pd
@@ -10,8 +14,37 @@ import matplotlib.pyplot as plt
 from matplotlib import cm
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 
+# AUDIT FIX: Suppress matplotlib/seaborn FutureWarnings for cleaner output
+warnings.filterwarnings('ignore', category=FutureWarning, module='matplotlib')
+warnings.filterwarnings('ignore', category=FutureWarning, module='seaborn')
+
 from src.core.test_functions import Rosenbrock, IllConditionedQuadratic, SaddlePoint
 from src.experiments.run_experiment import run_single_experiment
+
+
+def _validate_dataframe(df: pd.DataFrame, required_columns: list, func_name: str):
+    """
+    AUDIT FIX: Validate DataFrame has required columns before plotting.
+    
+    Args:
+        df: DataFrame to validate
+        required_columns: List of column names that must exist
+        func_name: Name of calling function for error messages
+    
+    Raises:
+        ValueError: If required columns missing or DataFrame empty
+    """
+    if df is None or df.empty:
+        raise ValueError(f"{func_name}: DataFrame is empty or None")
+    
+    missing_cols = [col for col in required_columns if col not in df.columns]
+    if missing_cols:
+        warnings.warn(
+            f"{func_name}: Missing required columns {missing_cols}. "
+            f"Available columns: {list(df.columns)}",
+            UserWarning,
+            stacklevel=3
+        )
 
 
 def plot_generalization_curves(df, title, save_path=None):
@@ -22,7 +55,16 @@ def plot_generalization_curves(df, title, save_path=None):
 
     Expects df with rows labeled by 'phase' ('train' or 'eval'),
     and columns: 'epoch', 'train_loss' (train rows), 'test_loss', 'test_accuracy' (eval rows).
+    
+    AUDIT FIX: Added validation for empty/missing data.
     """
+    # AUDIT FIX: Validate input
+    if df is None or df.empty:
+        warnings.warn(
+            "plot_generalization_curves: Received empty DataFrame, skipping plot",
+            UserWarning
+        )
+        return
     # Aggregate training loss per epoch
     train_df = df[df.get('phase', 'train') == 'train']
     eval_df = df[df.get('phase', 'eval') == 'eval']

@@ -4,6 +4,8 @@ Run neural network experiments on MNIST and CIFAR-10 with detailed logging.
 import os
 from typing import Dict, Any, Tuple
 import time
+import json
+import uuid
 
 import numpy as np
 import pandas as pd
@@ -17,6 +19,12 @@ from src.core.models import SimpleMLP, SimpleCNN, ConvNet
 from src.core.data_utils import get_mnist_loaders, get_cifar10_loaders
 from src.core.optimizer_wrappers import DelayedOptimizer
 from src.core.training_utils import set_seed
+from src.core.pytorch_optimizers import (
+    SGDWrapper,
+    SGDMomentumWrapper,
+    AdamWrapper,
+    AdamWWrapper
+)
 
 
 # Removed duplicate set_seed - using from src.core.training_utils
@@ -76,17 +84,22 @@ def build_model_and_data(dataset: str, model_name: str, batch_size: int, device:
 
 
 def build_optimizer(optimizer_name: str, model: torch.nn.Module, lr: float, weight_decay: float = 0.0, momentum: float = 0.0):
+    """Build optimizer using CUSTOM implementations.
+    
+    Uses custom wrappers from pytorch_optimizers.py to test our implementations.
+    """
     name = optimizer_name.upper()
     if name == 'SGD':
-        return optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay)
+        return SGDWrapper(model.parameters(), lr=lr)
     if name in ('SGD_MOMENTUM', 'SGD-MOMENTUM'):
-        return optim.SGD(model.parameters(), lr=lr, momentum=momentum, weight_decay=weight_decay)
+        return SGDMomentumWrapper(model.parameters(), lr=lr, momentum=momentum)
     if name == 'ADAM':
-        return optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+        return AdamWrapper(model.parameters(), lr=lr)
     if name in ('AMSGRAD', 'ADAM_AMSGRAD', 'ADAM_AMS'):
+        # Fallback to PyTorch for AMSGrad (not in custom impl)
         return optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay, amsgrad=True)
     if name == 'ADAMW':
-        return optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+        return AdamWWrapper(model.parameters(), lr=lr)
     raise ValueError(f"Unsupported optimizer '{optimizer_name}'")
 
 
@@ -278,6 +291,7 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
 
 
 def result_filename(config: Dict[str, Any]) -> str:
+    """Generate unique result filename with UUID to prevent race conditions."""
     model = config['model']
     dataset = config['dataset']
     optimizer = config['optimizer']
@@ -292,21 +306,59 @@ def result_filename(config: Dict[str, Any]) -> str:
         parts.append(f"wd{config.get('weight_decay')}")
     if 'tag' in config:
         parts.append(str(config['tag']))
+    # Add UUID to prevent race conditions
+    run_id = str(uuid.uuid4())[:8]
+    parts.append(run_id)
     return "_".join(parts) + ".csv"
 
 
 def main():
     os.makedirs('results', exist_ok=True)
 
-    experiments = [
-        # MNIST with MLP, Adam vs AdamW
-        {'model': 'SimpleMLP', 'dataset': 'MNIST', 'optimizer': 'Adam',  'lr': 1e-3, 'epochs': 2, 'batch_size': 128, 'seed': 42},
-        {'model': 'SimpleMLP', 'dataset': 'MNIST', 'optimizer': 'AdamW', 'lr': 1e-3, 'epochs': 2, 'batch_size': 128, 'seed': 42},
-        # CIFAR-10 with CNN, SGD Momentum
-        {'model': 'SimpleCNN', 'dataset': 'CIFAR-10', 'optimizer': 'SGD_Momentum', 'lr': 0.01, 'momentum': 0.9, 'epochs': 2, 'batch_size': 128, 'seed': 42},
-        # Optional delayed optimization example
-        {'model': 'SimpleMLP', 'dataset': 'MNIST', 'optimizer': 'Adam',  'lr': 1e-3, 'epochs': 2, 'batch_size': 128, 'seed': 42, 'use_delay_wrapper': True, 'delay_steps': 3},
-    ]
+    # Load experiments from JSON config file
+    config_path = 'configs/nn_tuning.json'
+    if os.path.exists(config_path):
+        print(f"Loading experiments from {config_path}")
+        with open(config_path, 'r') as f:
+            config_data = json.load(f)
+        
+        # Parse config into experiment list
+        experiments = []
+        for sweep in config_data.get('sweeps', []):
+            model = sweep.get('model')
+            dataset = sweep.get('dataset')
+            for opt_config in sweep.get('optimizers', []):
+                optimizer = opt_config.get('name')
+                # AUDIT FIX: Support both lr_values and learning_rates for backward compatibility
+                lr_list = opt_config.get('lr_values', opt_config.get('learning_rates', []))
+                for lr in lr_list:
+                    exp = {
+                        'model': model,
+                        'dataset': dataset,
+                        'optimizer': optimizer,
+                        'lr': lr,
+                        'epochs': sweep.get('epochs', 10),
+                        'batch_size': sweep.get('batch_size', 128),
+                        'seed': sweep.get('seed', 42)
+                    }
+                    # Add optional parameters
+                    if 'momentum' in opt_config:
+                        exp['momentum'] = opt_config['momentum']
+                    if 'weight_decay' in opt_config:
+                        exp['weight_decay'] = opt_config['weight_decay']
+                    experiments.append(exp)
+    else:
+        # Fallback to hardcoded experiments if config doesn't exist
+        print(f"Config file {config_path} not found. Using defaults.")
+        experiments = [
+            # MNIST with MLP, Adam vs AdamW
+            {'model': 'SimpleMLP', 'dataset': 'MNIST', 'optimizer': 'Adam',  'lr': 1e-3, 'epochs': 2, 'batch_size': 128, 'seed': 42},
+            {'model': 'SimpleMLP', 'dataset': 'MNIST', 'optimizer': 'AdamW', 'lr': 1e-3, 'epochs': 2, 'batch_size': 128, 'seed': 42},
+            # CIFAR-10 with CNN, SGD Momentum
+            {'model': 'SimpleCNN', 'dataset': 'CIFAR-10', 'optimizer': 'SGD_Momentum', 'lr': 0.01, 'momentum': 0.9, 'epochs': 2, 'batch_size': 128, 'seed': 42},
+            # Optional delayed optimization example
+            {'model': 'SimpleMLP', 'dataset': 'MNIST', 'optimizer': 'Adam',  'lr': 1e-3, 'epochs': 2, 'batch_size': 128, 'seed': 42, 'use_delay_wrapper': True, 'delay_steps': 3},
+        ]
 
     print(f"Total experiments: {len(experiments)}")
 

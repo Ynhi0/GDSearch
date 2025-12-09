@@ -479,6 +479,259 @@ def print_power_analysis(report: Dict):
 
 
 # ============================================================================
+# Friedman Test and Nemenyi Post-hoc 
+# ============================================================================
+
+
+def friedman_test(data: np.ndarray, optimizer_names: List[str] = None) -> Dict:
+    """
+    Friedman test for comparing multiple optimizers across multiple datasets/seeds.
+    
+    This is the MANDATORY omnibus test for ranking k > 2 algorithms across multiple
+    datasets, as specified by Demšar (JMLR 2006).
+    
+    Args:
+        data: 2D array of shape (n_datasets, n_optimizers)
+              Each row is a dataset/seed, each column is an optimizer
+        optimizer_names: List of optimizer names (optional)
+        
+    Returns:
+        Dictionary with test results:
+        - statistic: Friedman chi-squared statistic
+        - p_value: P-value for the test
+        - significant: Boolean indicating if p < 0.05
+        - mean_ranks: Average rank for each optimizer (lower is better)
+        - optimizer_names: Names of optimizers
+    """
+    if data.ndim != 2:
+        raise ValueError("Data must be 2D array (n_datasets x n_optimizers)")
+    
+    n_datasets, n_optimizers = data.shape
+    
+    if n_datasets < 2:
+        raise ValueError("Need at least 2 datasets/seeds for Friedman test")
+    if n_optimizers < 2:
+        raise ValueError("Need at least 2 optimizers for Friedman test")
+    
+    # Perform Friedman test (non-parametric alternative to repeated-measures ANOVA)
+    statistic, p_value = stats.friedmanchisquare(*[data[:, i] for i in range(n_optimizers)])
+    
+    # Compute average ranks (rank within each dataset, then average across datasets)
+    # Lower rank = better performance
+    ranks = np.zeros_like(data)
+    for i in range(n_datasets):
+        # Rank in descending order (higher values = lower ranks = better)
+        ranks[i, :] = stats.rankdata(-data[i, :])
+    
+    mean_ranks = ranks.mean(axis=0)
+    
+    if optimizer_names is None:
+        optimizer_names = [f"Optimizer {i+1}" for i in range(n_optimizers)]
+    
+    return {
+        'statistic': statistic,
+        'p_value': p_value,
+        'significant': p_value < 0.05,
+        'mean_ranks': mean_ranks,
+        'optimizer_names': optimizer_names,
+        'n_datasets': n_datasets,
+        'n_optimizers': n_optimizers
+    }
+
+
+def nemenyi_test(data: np.ndarray, optimizer_names: List[str] = None, alpha: float = 0.05) -> Dict:
+    """
+    Nemenyi post-hoc test for pairwise comparisons after Friedman test.
+    
+    This is the standard post-hoc test for ranking algorithms, as specified by
+    Demšar (JMLR 2006). It controls the Family-Wise Error Rate (FWER).
+    
+    Args:
+        data: 2D array of shape (n_datasets, n_optimizers)
+        optimizer_names: List of optimizer names (optional)
+        alpha: Significance level (default: 0.05)
+        
+    Returns:
+        Dictionary with:
+        - critical_distance: Critical difference for significance
+        - pairwise_differences: Matrix of rank differences
+        - significant_pairs: List of (i, j, rank_diff, is_significant) tuples
+        - mean_ranks: Average ranks
+    """
+    if data.ndim != 2:
+        raise ValueError("Data must be 2D array (n_datasets x n_optimizers)")
+    
+    n_datasets, n_optimizers = data.shape
+    
+    # Compute ranks
+    ranks = np.zeros_like(data)
+    for i in range(n_datasets):
+        ranks[i, :] = stats.rankdata(-data[i, :])
+    
+    mean_ranks = ranks.mean(axis=0)
+    
+    # Critical difference for Nemenyi test
+    # CD = q_α * sqrt(k(k+1) / (6N))
+    # where q_α is the critical value from Studentized range distribution
+    q_alpha = {
+        0.05: {2: 1.960, 3: 2.343, 4: 2.569, 5: 2.728, 6: 2.850, 
+               7: 2.949, 8: 3.031, 9: 3.102, 10: 3.164},
+        0.10: {2: 1.645, 3: 2.052, 4: 2.291, 5: 2.459, 6: 2.589,
+               7: 2.693, 8: 2.780, 9: 2.855, 10: 2.920}
+    }
+    
+    # Get q value (use linear interpolation if needed)
+    if alpha in q_alpha and n_optimizers in q_alpha[alpha]:
+        q = q_alpha[alpha][n_optimizers]
+    else:
+        # Fallback: use approximate formula
+        # For α=0.05: q ≈ 1.96 + 0.37 * sqrt(k-2) (rough approximation)
+        q = 1.96 + 0.37 * np.sqrt(max(0, n_optimizers - 2))
+    
+    critical_distance = q * np.sqrt(n_optimizers * (n_optimizers + 1) / (6 * n_datasets))
+    
+    # Pairwise comparisons
+    pairwise_diffs = np.abs(mean_ranks[:, None] - mean_ranks[None, :])
+    
+    significant_pairs = []
+    for i in range(n_optimizers):
+        for j in range(i + 1, n_optimizers):
+            rank_diff = abs(mean_ranks[i] - mean_ranks[j])
+            is_significant = rank_diff > critical_distance
+            significant_pairs.append((i, j, rank_diff, is_significant))
+    
+    if optimizer_names is None:
+        optimizer_names = [f"Optimizer {i+1}" for i in range(n_optimizers)]
+    
+    return {
+        'critical_distance': critical_distance,
+        'pairwise_differences': pairwise_diffs,
+        'significant_pairs': significant_pairs,
+        'mean_ranks': mean_ranks,
+        'optimizer_names': optimizer_names,
+        'alpha': alpha
+    }
+
+
+def print_friedman_results(results: Dict):
+    """Print Friedman test results."""
+    print(f"\n{'='*70}")
+    print(f"Friedman Test Results (Omnibus Test)")
+    print(f"{'='*70}")
+    print(f"Number of datasets/seeds: {results['n_datasets']}")
+    print(f"Number of optimizers: {results['n_optimizers']}")
+    print(f"Friedman χ² statistic: {results['statistic']:.4f}")
+    print(f"P-value: {results['p_value']:.6f}")
+    
+    if results['significant']:
+        print(f"✅ SIGNIFICANT: Optimizers differ significantly (p < 0.05)")
+    else:
+        print(f"❌ NOT SIGNIFICANT: No significant difference between optimizers")
+    
+    print(f"\nAverage Ranks (lower is better):")
+    sorted_indices = np.argsort(results['mean_ranks'])
+    for rank_order, idx in enumerate(sorted_indices, 1):
+        opt_name = results['optimizer_names'][idx]
+        mean_rank = results['mean_ranks'][idx]
+        print(f"  {rank_order}. {opt_name}: {mean_rank:.2f}")
+    print(f"{'='*70}\n")
+
+
+def print_nemenyi_results(results: Dict):
+    """Print Nemenyi post-hoc test results."""
+    print(f"\n{'='*70}")
+    print(f"Nemenyi Post-hoc Test Results")
+    print(f"{'='*70}")
+    print(f"Critical Distance (CD): {results['critical_distance']:.4f}")
+    print(f"Significance level: α = {results['alpha']}")
+    print(f"\nPairwise Comparisons:")
+    print(f"{'─'*70}")
+    
+    optimizer_names = results['optimizer_names']
+    for i, j, rank_diff, is_sig in results['significant_pairs']:
+        status = "✅ SIGNIFICANT" if is_sig else "  Not significant"
+        print(f"{status}: {optimizer_names[i]} vs {optimizer_names[j]}")
+        print(f"           Rank difference: {rank_diff:.4f} (CD = {results['critical_distance']:.4f})")
+    
+    print(f"{'='*70}\n")
+
+
+def plot_critical_difference_diagram(mean_ranks: np.ndarray, 
+                                     optimizer_names: List[str],
+                                     critical_distance: float,
+                                     title: str = "Critical Difference Diagram",
+                                     save_path: str = None):
+    """
+    Plot Critical Difference (CD) diagram for visualizing Nemenyi results.
+    
+    This is the standard visualization for optimizer rankings, as used in
+    Demšar (JMLR 2006) and countless ML papers.
+    
+    Args:
+        mean_ranks: Average ranks for each optimizer
+        optimizer_names: List of optimizer names
+        critical_distance: Critical distance from Nemenyi test
+        title: Plot title
+        save_path: Path to save figure (optional)
+    """
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Rectangle
+    
+    n_optimizers = len(mean_ranks)
+    sorted_indices = np.argsort(mean_ranks)
+    sorted_ranks = mean_ranks[sorted_indices]
+    sorted_names = [optimizer_names[i] for i in sorted_indices]
+    
+    fig, ax = plt.subplots(figsize=(12, 6))
+    
+    # Plot horizontal line for ranks
+    ax.plot([1, n_optimizers], [0, 0], 'k-', linewidth=2)
+    
+    # Plot each optimizer
+    y_offset = 0
+    for i, (rank, name) in enumerate(zip(sorted_ranks, sorted_names)):
+        # Alternate y positions for readability
+        y_pos = y_offset + 0.2 * (i % 2)
+        
+        # Plot point
+        ax.plot(rank, y_pos, 'o', markersize=12, color=f'C{i}')
+        
+        # Add label
+        ax.text(rank, y_pos + 0.15, name, ha='center', va='bottom', fontsize=10)
+    
+    # Draw critical difference bars
+    for i in range(n_optimizers):
+        for j in range(i + 1, n_optimizers):
+            if abs(sorted_ranks[i] - sorted_ranks[j]) <= critical_distance:
+                # Not significantly different - draw connecting bar
+                y_bar = -0.3 - 0.1 * (i + j) % 3
+                ax.plot([sorted_ranks[i], sorted_ranks[j]], [y_bar, y_bar], 
+                       'k-', linewidth=3)
+    
+    # Add CD annotation
+    ax.annotate('', xy=(1, -0.6), xytext=(1 + critical_distance, -0.6),
+                arrowprops=dict(arrowstyle='<->', lw=2, color='red'))
+    ax.text(1 + critical_distance/2, -0.75, f'CD = {critical_distance:.2f}',
+            ha='center', fontsize=12, color='red', weight='bold')
+    
+    ax.set_xlim(0.5, n_optimizers + 0.5)
+    ax.set_ylim(-1, 0.8)
+    ax.set_xlabel('Average Rank', fontsize=14)
+    ax.set_title(title, fontsize=16, weight='bold')
+    ax.set_yticks([])
+    ax.grid(axis='x', alpha=0.3)
+    
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"Critical Difference diagram saved to {save_path}")
+    
+    plt.show()
+    return fig
+
+
+# ============================================================================
 # Multiple Comparison Corrections
 # ============================================================================
 

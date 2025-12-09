@@ -1,0 +1,90 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "GDSearch Experiment Configuration Schema",
+  "type": "object",
+  "properties": {
+    "dataset": {
+      "type": "string",
+      "enum": ["MNIST", "CIFAR10", "IMDB"]
+    },
+    "model": {
+      "type": "string"
+    },
+    "seed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "batch_size": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "sweeps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "optimizer": {
+            "type": "string",
+            "enum": ["SGD", "SGD_Momentum", "Adam", "AdamW", "AMSGrad", "RMSprop", "Adagrad", "Adadelta", "Lookahead", "SAM", "Lion"]
+          },
+          "learning_rate": {
+            "type": "array",
+            "items": {"type": "number", "exclusiveMinimum": 0}
+          },
+          "lr_values": {
+            "type": "array",
+            "items": {"type": "number", "exclusiveMinimum": 0}
+          },
+          "weight_decay": {
+            "type": "array",
+            "items": {"type": "number", "minimum": 0}
+          },
+          "weight_decay_values": {
+            "type": "array",
+            "items": {"type": "number", "minimum": 0}
+          },
+          "momentum": {
+            "type": "array",
+            "items": {"type": "number", "minimum": 0, "maximum": 1}
+          },
+          "momentum_values": {
+            "type": "array",
+            "items": {"type": "number", "minimum": 0, "maximum": 1}
+          },
+          "betas": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {"type": "number"},
+              "minItems": 2,
+              "maxItems": 2
+            }
+          },
+          "epochs": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": ["optimizer"]
+      }
+    },
+    "final": {
+      "type": "object",
+      "properties": {
+        "epochs": {"type": "integer", "minimum": 1},
+        "capture_layer_grad_epochs": {
+          "type": "array",
+          "items": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    "convergence": {
+      "type": "object",
+      "properties": {
+        "grad_norm_threshold": {"type": "number", "exclusiveMinimum": 0},
+        "loss_delta_threshold": {"type": "number", "exclusiveMinimum": 0},
+        "loss_window": {"type": "integer", "minimum": 1}
+      }
+    }
+  }
+}

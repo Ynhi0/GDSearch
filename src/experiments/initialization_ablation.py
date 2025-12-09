@@ -341,8 +341,8 @@ def run_initialization_ablation(
         train_dataset = torch.utils.data.Subset(train_dataset, range(5000))
         test_dataset = torch.utils.data.Subset(test_dataset, range(1000))
     
-    train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True, num_workers=2)
-    test_loader = DataLoader(test_dataset, batch_size=256, shuffle=False, num_workers=2)
+    train_loader = make_dataloader(train_dataset, batch_size=128, shuffle=True, seed=42, num_workers=2, pin_memory=True)
+    test_loader = make_dataloader(test_dataset, batch_size=256, shuffle=False, num_workers=2, pin_memory=True)
     
     # Define configurations
     if quick:

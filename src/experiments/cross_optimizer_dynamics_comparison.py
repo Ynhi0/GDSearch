@@ -276,8 +276,8 @@ def run_cross_optimizer_dynamics_comparison(
     else:
         raise ValueError(f"Unsupported dataset: {dataset}")
     
-    train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True, num_workers=2)
-    test_loader = DataLoader(test_dataset, batch_size=256, shuffle=False, num_workers=2)
+    train_loader = make_dataloader(train_dataset, batch_size=128, shuffle=True, seed=42, num_workers=2, pin_memory=True)
+    test_loader = make_dataloader(test_dataset, batch_size=256, shuffle=False, num_workers=2, pin_memory=True)
     
     # Optimizer configurations (tuned values)
     optimizer_configs = {

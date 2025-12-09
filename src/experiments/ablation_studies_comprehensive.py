@@ -160,8 +160,10 @@ def ablation_momentum_effect(
         'data/', train=False, download=True, transform=transform
     )
     
-    train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=1000, shuffle=False)
+    # Use make_dataloader for consistent num_workers and pin_memory settings
+    from run_all_kaggle import make_dataloader
+    train_loader = make_dataloader(train_dataset, batch_size=128, shuffle=True, seed=seeds[0] if seeds else None, num_workers=2, pin_memory=True)
+    test_loader = make_dataloader(test_dataset, batch_size=1000, shuffle=False, num_workers=2, pin_memory=True)
     
     results = []
     
@@ -261,8 +263,10 @@ def ablation_adaptive_lr(
         'data/', train=False, download=True, transform=transform
     )
     
-    train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=1000, shuffle=False)
+    # Use make_dataloader for consistent settings
+    from run_all_kaggle import make_dataloader
+    train_loader = make_dataloader(train_dataset, batch_size=128, shuffle=True, seed=seeds[0] if seeds else None, num_workers=2, pin_memory=True)
+    test_loader = make_dataloader(test_dataset, batch_size=1000, shuffle=False, num_workers=2, pin_memory=True)
     
     results = []
     
@@ -361,8 +365,10 @@ def ablation_weight_decay(
         'data/', train=False, download=True, transform=transform
     )
     
-    train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=1000, shuffle=False)
+    # Use make_dataloader for consistent settings
+    from run_all_kaggle import make_dataloader
+    train_loader = make_dataloader(train_dataset, batch_size=128, shuffle=True, seed=seeds[0] if seeds else None, num_workers=2, pin_memory=True)
+    test_loader = make_dataloader(test_dataset, batch_size=1000, shuffle=False, num_workers=2, pin_memory=True)
     
     results = []
     

@@ -80,3 +80,61 @@ class DelayedOptimizer:
     @property
     def param_groups(self):
         return self.optimizer.param_groups
+    
+    def state_dict(self):
+        """
+        AUDIT FIX: Save complete wrapper state for checkpoint persistence.
+        
+        Returns dict containing:
+        - optimizer: base optimizer state
+        - delay_steps: delay configuration
+        - grad_queue: queued gradients (as nested lists for serializability)
+        - param_count: number of tracked parameters for validation
+        """
+        # Convert queue of tensor lists to serializable nested lists
+        serialized_queue = []
+        for grad_snapshot in self.grad_queue:
+            snapshot_list = []
+            for g in grad_snapshot:
+                if g is None:
+                    snapshot_list.append(None)
+                else:
+                    snapshot_list.append(g.cpu().tolist())
+            serialized_queue.append(snapshot_list)
+        
+        return {
+            'optimizer': self.optimizer.state_dict(),
+            'delay_steps': self.delay_steps,
+            'grad_queue': serialized_queue,
+            'param_count': len(self.params),
+        }
+    
+    def load_state_dict(self, state_dict):
+        """
+        AUDIT FIX: Restore complete wrapper state from checkpoint.
+        
+        Validates param_count matches and reconstructs grad_queue as tensors.
+        """
+        self.optimizer.load_state_dict(state_dict['optimizer'])
+        self.delay_steps = state_dict['delay_steps']
+        
+        # Validate parameter count
+        if state_dict['param_count'] != len(self.params):
+            raise ValueError(
+                f"Parameter count mismatch: checkpoint has {state_dict['param_count']} "
+                f"but model has {len(self.params)} parameters"
+            )
+        
+        # Reconstruct grad_queue from serialized lists
+        self.grad_queue.clear()
+        for snapshot_list in state_dict['grad_queue']:
+            grad_snapshot = []
+            for i, g_data in enumerate(snapshot_list):
+                if g_data is None:
+                    grad_snapshot.append(None)
+                else:
+                    # Reconstruct tensor with same device/dtype as parameter
+                    param = self.params[i]
+                    grad_tensor = torch.tensor(g_data, dtype=param.dtype, device=param.device)
+                    grad_snapshot.append(grad_tensor)
+            self.grad_queue.append(grad_snapshot)

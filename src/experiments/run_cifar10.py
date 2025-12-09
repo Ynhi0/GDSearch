@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 """
-Minimal CIFAR-10 multi-seed runner with multiple optimizers.
+CIFAR-10 multi-seed benchmark with ResNet-18.
+
+ARCHITECTURE STANDARDIZATION (Dec 2025):
+    - Previously used SimpleCIFARNet (toy model: 2 conv layers, ~0.5M params)
+    - NOW uses ResNet-18 (industry standard: 18 layers, ~11M params)
+    - Reason: Match Kaggle benchmarks for valid cross-comparison
+    - SimpleCIFARNet deprecated but available in models.py as SimpleCNN
+
 Outputs per-run CSVs compatible with the project's result conventions.
-Designed to be simple and Kaggle-friendly if needed.
 """
 
 from __future__ import annotations
@@ -25,30 +31,10 @@ import matplotlib
 matplotlib.use('Agg')  # Non-interactive backend
 import matplotlib.pyplot as plt
 from src.core.training_utils import set_seed
+from src.core.models import ResNet18  # ARCHITECTURE STANDARDIZATION
 
-
-class SimpleCIFARNet(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.conv1 = nn.Conv2d(3, 32, 3, padding=1)
-        self.conv2 = nn.Conv2d(32, 64, 3, padding=1)
-        self.pool = nn.MaxPool2d(2, 2)
-        # Input: 32x32 -> conv1 (32x32) -> pool (16x16) -> conv2 (16x16) -> pool (8x8)
-        self.fc1 = nn.Linear(64 * 8 * 8, 256)
-        self.fc2 = nn.Linear(256, 10)
-
-    def forward(self, x):
-        x = self.pool(F.relu(self.conv1(x)))  # 32x32 -> 16x16
-        x = self.pool(F.relu(self.conv2(x)))  # 16x16 -> 8x8
-        x = torch.flatten(x, 1)  # 64 * 8 * 8 = 4096
-        x = F.relu(self.fc1(x))
-        x = self.fc2(x)
-        return x
-
-
-# Removed duplicate set_seed - using from src.core.training_utils
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+# NOTE: SimpleCIFARNet removed - use ResNet18 for all CIFAR-10 benchmarks
+# For legacy compatibility, SimpleCNN is available in src.core.models
 
 
 def get_loaders(batch_size: int = 128):
@@ -67,8 +53,10 @@ def get_loaders(batch_size: int = 128):
     trainset = torchvision.datasets.CIFAR10(root=root, train=True, download=True, transform=transform_train)
     testset = torchvision.datasets.CIFAR10(root=root, train=False, download=True, transform=transform_test)
 
-    trainloader = DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=2)
-    testloader = DataLoader(testset, batch_size=batch_size, shuffle=False, num_workers=2)
+    # Use make_dataloader for consistent settings
+    from run_all_kaggle import make_dataloader
+    trainloader = make_dataloader(trainset, batch_size=batch_size, shuffle=True, seed=42, num_workers=2, pin_memory=True)
+    testloader = make_dataloader(testset, batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=True)
     return trainloader, testloader
 
 
@@ -151,7 +139,8 @@ def run_single(optimizer_name: str, seed: int, lr: float, epochs: int, batch_siz
     df['elapsed_seconds'] = elapsed
     df['peak_gpu_mb'] = peak_mb
 
-    out = results_dir / f"NN_SimpleCIFAR10_{optimizer_name}_lr{lr}_seed{seed}.csv"
+    # Updated naming: ResNet18 instead of SimpleCIFAR10
+    out = results_dir / f"NN_ResNet18_CIFAR10_{optimizer_name}_lr{lr}_seed{seed}.csv"
     df.to_csv(out, index=False)
     return out
 
@@ -165,7 +154,11 @@ def create_cifar10_summary_plots(results_dir: Path, output_file: str = 'cifar10_
     import glob
     
     # Find all result CSVs
-    csv_files = glob.glob(str(results_dir / "NN_SimpleCIFAR10_*.csv"))
+    # Support both legacy (SimpleCIFAR10) and new (ResNet18) naming
+    csv_files = glob.glob(str(results_dir / "NN_ResNet18_CIFAR10_*.csv"))
+    if not csv_files:
+        # Fallback to legacy naming for old results
+        csv_files = glob.glob(str(results_dir / "NN_SimpleCIFAR10_*.csv"))
     
     if not csv_files:
         print("⚠️  No CIFAR-10 results found for visualization")
@@ -177,11 +170,19 @@ def create_cifar10_summary_plots(results_dir: Path, output_file: str = 'cifar10_
         df = pd.read_csv(csv_file)
         # Extract optimizer and seed from filename
         basename = os.path.basename(csv_file)
-        # Format: NN_SimpleCIFAR10_{optimizer}_lr{lr}_seed{seed}.csv
+        # Format: NN_ResNet18_CIFAR10_{optimizer}_lr{lr}_seed{seed}.csv
+        # Legacy: NN_SimpleCIFAR10_{optimizer}_lr{lr}_seed{seed}.csv
         parts = basename.replace('.csv', '').split('_')
         
-        # Find optimizer name (between SimpleCIFAR10 and lr)
-        opt_start = parts.index('SimpleCIFAR10') + 1
+        # Find optimizer name (after model architecture identifier, before lr)
+        if 'ResNet18' in parts and 'CIFAR10' in parts:
+            opt_start = parts.index('CIFAR10') + 1  # New format
+        elif 'SimpleCIFAR10' in parts:
+            opt_start = parts.index('SimpleCIFAR10') + 1  # Legacy format
+        else:
+            print(f"⚠️  Skipping unrecognized format: {basename}")
+            continue
+        
         opt_parts = []
         for i in range(opt_start, len(parts)):
             if parts[i].startswith('lr'):

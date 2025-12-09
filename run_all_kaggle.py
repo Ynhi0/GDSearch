@@ -2052,16 +2052,25 @@ def dice_coefficient(pred, target, smooth=1e-6):
 # HYPERPARAMETER TUNING FUNCTIONS
 # ==============================================================================
 
-def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, test_loader, 
+def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader, 
                         device, epochs=3, n_trials=10, seed=42):
     """
     Quick hyperparameter tuning for an optimizer.
+    
+    CRITICAL SAFETY (BLOCKER-1): The 'val_loader' parameter MUST contain
+    VALIDATION data, NOT true test data. Using test data for hyperparameter
+    tuning constitutes adaptive overfitting and invalidates generalization claims.
+    
+    Proper workflow:
+    1. Split data into train/val/test (e.g., 70%/15%/15%)
+    2. Use train_loader for training, val_loader for VALIDATION during tuning
+    3. After selecting best hyperparameters, evaluate ONCE on held-out test set
     
     Args:
         optimizer_name: Name of optimizer ('SGD', 'Adam', etc.)
         model_fn: Function that returns a new model instance
         train_loader: Training DataLoader
-        test_loader: Test DataLoader
+        val_loader: VALIDATION DataLoader (NOT test set!) for trial evaluation
         device: torch.device
         epochs: Number of epochs for each trial
         n_trials: Number of tuning trials
@@ -2076,6 +2085,34 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, test_loade
     except ImportError:
         logging.warning("Optuna not available, using default hyperparameters")
         return get_default_hyperparameters(optimizer_name)
+    
+    # AUDIT FIX: Robust validation to prevent test set leakage
+    # Uses multiple validation strategies instead of unreliable name check
+    try:
+        from src.core.loader_validation import enforce_no_test_in_tuning
+        enforce_no_test_in_tuning(val_loader)
+    except ImportError:
+        # Fallback to basic check if validation module not available
+        loader_name = getattr(val_loader, 'name', '')
+        split_type = getattr(val_loader, '_split_type', '')
+        
+        if 'test' in str(loader_name).lower() or split_type == 'test':
+            raise ValueError(
+                f"CRITICAL: val_loader appears to be test data (name='{loader_name}', split='{split_type}'). "
+                "Hyperparameter tuning MUST use validation data only. "
+                "Using test data for tuning invalidates generalization claims."
+            )
+        
+        # Additional check: dataset identity validation
+        if hasattr(val_loader, '_test_dataset_ref'):
+            test_ref = val_loader._test_dataset_ref
+            if val_loader.dataset is test_ref:
+                raise ValueError(
+                    "CRITICAL: val_loader dataset is identical to test dataset reference. "
+                    "This constitutes test set leakage and invalidates research."
+                )
+        
+        logging.debug(f"Loader validation: name='{loader_name}', split='{split_type}', len={len(val_loader.dataset)}")
     
     logging.info(f"  Tuning {optimizer_name} ({n_trials} trials, {epochs} epochs each)")
     
@@ -2144,7 +2181,7 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, test_loade
         correct = 0
         total = 0
         with torch.no_grad():
-            for inputs, targets in test_loader:
+            for inputs, targets in val_loader:
                 inputs, targets = inputs.to(device), targets.to(device)
                 outputs = model(inputs)
                 _, predicted = outputs.max(1)
@@ -2153,7 +2190,7 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, test_loade
         
         # Protect against division by zero
         if total == 0:
-            logging.warning("No test samples found in Optuna objective!")
+            logging.warning("No validation samples found in Optuna objective!")
             return 0.0
         
         accuracy = 100.0 * correct / total
@@ -2289,11 +2326,18 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
                 logging.info("\nHYPERPARAMETER TUNING PHASE")
                 logging.info("-" * 80)
                 
-                # Create small tuning loaders
+                # AUDIT FIX: Create validation split from TRAINING data (not test set)
+                # This prevents adaptive overfitting / test-set leakage during tuning
+                # Reference: Agarwal et al. (2021) on overtuning in hyperparameter selection
                 tune_size = min(5000, len(train_dataset))
-                val_size = min(1000, len(test_dataset))
-                tune_subset = torch.utils.data.Subset(train_dataset, range(tune_size))
-                val_subset = torch.utils.data.Subset(test_dataset, range(val_size))
+                val_size = min(1000, len(train_dataset) - tune_size)
+                
+                # Split train_dataset into tune and validation subsets
+                tune_indices = list(range(tune_size))
+                val_indices = list(range(tune_size, tune_size + val_size))
+                
+                tune_subset = torch.utils.data.Subset(train_dataset, tune_indices)
+                val_subset = torch.utils.data.Subset(train_dataset, val_indices)
                 
                 train_bs, test_bs = get_batch_size('mnist', 128, 256)
                 dl_kwargs = get_dataloader_kwargs()
@@ -2460,17 +2504,36 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
                         if checkpoint_manager:
                             checkpoint = checkpoint_manager.load_checkpoint(ckpt_file, f"MNIST_{opt_name}_seed{seed}")
                             if checkpoint:
+                                # Check if experiment already completed
+                                if checkpoint.get('metadata', {}).get('completed', False):
+                                    logging.info(f"⚠ Experiment {opt_name} seed {seed} already completed at epoch {checkpoint.get('epoch', 0)}")
+                                    logging.info("  Skipping to avoid duplicate work")
+                                    continue  # Skip this run
+                                
                                 # Validate optimizer compatibility
                                 if checkpoint_manager.validate_optimizer_compatibility(checkpoint, opt_name):
                                     model.load_state_dict(checkpoint['model'], strict=False)
                                     try:
-                                        if opt_name.startswith('SAM'):
-                                            if isinstance(optimizer, SAM):
-                                                optimizer.base_optimizer.load_state_dict(checkpoint['optimizer'])
-                                        else:
-                                            optimizer.load_state_dict(checkpoint['optimizer'])
+                                        # AUDIT FIX-7: Use unified optimizer.load_state_dict for all wrappers
+                                        # SAMWrapper and other wrappers implement their own state dict handling.
+                                        optimizer.load_state_dict(checkpoint['optimizer'])
+                                        
                                         start_epoch = int(checkpoint.get('epoch', 0)) + 1
                                         history = checkpoint.get('history', [])
+                                        
+                                        # BLOCKER-2 FIX: Restore scheduler state
+                                        if checkpoint.get('scheduler') and scheduler is not None:
+                                            scheduler.load_state_dict(checkpoint['scheduler'])
+                                            logging.info(f"✓ Restored scheduler state (last_epoch={scheduler.last_epoch})")
+                                        
+                                        # AMP scaler and EMA not used in MNIST baseline
+                                        # (Would restore here if mixed precision training was enabled)
+                                        
+                                        # BLOCKER-2 FIX: Restore training metadata
+                                        metadata = checkpoint.get('metadata', {})
+                                        best_val_acc = metadata.get('best_val_acc', 0.0)
+                                        patience_counter = metadata.get('patience_counter', 0)
+                                        logging.info(f"✓ Restored metadata: best_val_acc={best_val_acc:.2f}%, patience={patience_counter}")
                                         
                                         # Restore RNG states for reproducibility
                                         checkpoint_manager.restore_rng_states(checkpoint)
@@ -2522,6 +2585,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
 
                         # Training with enhanced monitoring and OOM recovery
                         start_time = time.time()
+                        training_start_time = time.time()  # Track total training time for metadata
                         try:
                             for epoch in range(start_epoch, epochs + 1):
                                 model.train()
@@ -2652,15 +2716,29 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
                                       f"Train Acc={train_acc:.1f}%, Test Loss={test_loss:.4f}, "
                                       f"Test Acc={test_acc:.1f}%")
 
-                                # Enhanced checkpointing
+                                # Enhanced checkpointing with COMPLETE training state (BLOCKER-2 fix)
                                 if checkpoint_manager:
                                     checkpoint_data = {
                                         'model': model.state_dict(),
-                                        'optimizer': optimizer.state_dict() if not opt_name.startswith('SAM') else optimizer.base_optimizer.state_dict(),
+                                        # Save optimizer wrapper state using the wrapper's state_dict() so it
+                                        # can fully represent wrapper-specific state (e.g., SAM's rho/adaptive,
+                                        # Lookahead slow_params, etc.). Previously SAM was special-cased
+                                        # to save only base optimizer state which caused resumed runs to
+                                        # diverge from the original training dynamics.
+                                        'optimizer': optimizer.state_dict(),
+                                        'scheduler': scheduler.state_dict() if scheduler is not None else None,  # ADDED: scheduler state
+                                        'scaler': None,  # AMP scaler (not used in MNIST baseline)
+                                        'ema': None,  # EMA weights (not used in MNIST baseline)
                                         'epoch': epoch,
                                         'history': history,
                                         'opt_name': opt_name,
                                         'seed': seed,
+                                        'metadata': {  # ADDED: training metadata
+                                            'current_lr': optimizer.param_groups[0]['lr'],
+                                            'best_val_acc': best_val_acc,
+                                            'patience_counter': patience_counter,
+                                            'completed': epoch >= epochs
+                                        }
                                     }
                                     checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"MNIST_{opt_name}_seed{seed}")
                         
@@ -2907,6 +2985,9 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[42,123,456,789,
                         start_epoch = int(checkpoint.get('epoch', 0)) + 1
                         history = checkpoint.get('history', [])
                         
+                        # Scheduler will be created after this block, so we skip restore here
+                        # AMP scaler and EMA not used in CIFAR10 baseline
+                        
                         # Restore RNG states for reproducibility
                         checkpoint_manager.restore_rng_states(checkpoint)
                         
@@ -2928,6 +3009,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[42,123,456,789,
             
             logging.info(f"Training CIFAR-10 with {opt_name} (seed={seed}, lr={lr})")
             
+            training_start_time = time.time()  # Track total training time for metadata
             try:
                 for epoch in range(start_epoch, epochs + 1):
                     # Train
@@ -3023,16 +3105,27 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[42,123,456,789,
 
                     print(f"{opt_name} Epoch {epoch}/{epochs} - Train: {train_acc:.1f}% | Test: {test_acc:.1f}%")
 
-                    # Save checkpoint
+                    # Save checkpoint with complete training state (BLOCKER-2 fix)
                     if checkpoint_manager:
                         try:
                             checkpoint_data = {
                                 'model': model.state_dict(),
                                 'optimizer': optimizer.state_dict(),
+                                'scheduler': scheduler.state_dict() if scheduler is not None else None,
+                                'scaler': None,  # AMP scaler (not used in CIFAR10 baseline)
+                                'ema': None,  # EMA weights (not used in CIFAR10 baseline)
                                 'epoch': epoch,
                                 'history': history,
                                 'opt_name': opt_name,
                                 'seed': seed,
+                                'metadata': {
+                                    'current_lr': optimizer.param_groups[0]['lr'],
+                                    'best_val_acc': best_val_acc if 'best_val_acc' in locals() else 0.0,
+                                    'patience_counter': patience_counter if 'patience_counter' in locals() else 0,
+                                    'training_time_sec': time.time() - training_start_time if 'training_start_time' in locals() else 0.0,
+                                    'total_epochs_trained': epoch + 1,
+                                    'completed': epoch >= epochs
+                                }
                             }
                             checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"CIFAR10_{opt_name}_seed{seed}")
                         except Exception as e:
@@ -3367,6 +3460,9 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
                         start_epoch = int(checkpoint.get('epoch', 0)) + 1
                         history = checkpoint.get('history', [])
                         
+                        # Scheduler will be created later, skip restore here
+                        # AMP scaler and EMA not used in IMDB baseline
+                        
                         # Restore RNG states for reproducibility
                         checkpoint_manager.restore_rng_states(checkpoint)
                         
@@ -3376,6 +3472,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
 
             # Training loop with OOM recovery
             start_time = time.time()
+            training_start_time = time.time()  # Track total training time for metadata
 
             try:
                 for epoch in range(start_epoch, epochs + 1):
@@ -3478,18 +3575,29 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
                     print(f"Epoch {epoch}/{epochs}: Train Loss={train_loss:.4f}, "
                           f"Test Loss={test_loss:.4f}, Test Acc={test_acc:.1f}%")
 
-                    # Save checkpoint
+                    # Save checkpoint with complete training state (BLOCKER-2 fix)
                     if checkpoint_manager:
                         try:
                             checkpoint_data = {
                                 'model': model.state_dict(),
                                 'optimizer': optimizer.state_dict(),
+                                'scheduler': scheduler.state_dict() if scheduler is not None else None,
+                                'scaler': None,  # AMP scaler (not used in IMDB baseline)
+                                'ema': None,  # EMA weights (not used in IMDB baseline)
                                 'epoch': epoch,
                                 'history': history,
                                 'opt_name': opt_name,
                                 'seed': seed,
                                 'lr': lr,
                                 'model_name': model_name,
+                                'metadata': {
+                                    'current_lr': optimizer.param_groups[0]['lr'],
+                                    'best_val_acc': best_val_acc if 'best_val_acc' in locals() else 0.0,
+                                    'patience_counter': patience_counter if 'patience_counter' in locals() else 0,
+                                    'training_time_sec': time.time() - training_start_time if 'training_start_time' in locals() else 0.0,
+                                    'total_epochs_trained': epoch + 1,
+                                    'completed': epoch >= epochs
+                                }
                             }
                             checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"IMDB_{model_name.replace('/', '_')}_{opt_name}_lr{lr}_seed{seed}")
                         except Exception as e:
@@ -3986,6 +4094,9 @@ def run_medical_experiment(results_dir="results_medical", seeds=[42,123,456,789,
                         start_epoch = int(checkpoint.get('epoch', 0)) + 1
                         history = checkpoint.get('history', [])
                         
+                        # Scheduler will be created later, skip restore here
+                        # AMP scaler and EMA not used in Medical baseline
+                        
                         # Restore RNG states for reproducibility
                         checkpoint_manager.restore_rng_states(checkpoint)
                         
@@ -3995,6 +4106,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=[42,123,456,789,
 
             # Training loop
             start_time = time.time()
+            training_start_time = time.time()  # Track total training time for metadata
 
             for epoch in range(start_epoch, epochs + 1):
                 model.train()
@@ -4095,17 +4207,28 @@ def run_medical_experiment(results_dir="results_medical", seeds=[42,123,456,789,
                       f"Train Dice={train_dice:.4f}, Test Loss={test_loss:.4f}, "
                       f"Test Dice={test_dice:.4f}")
 
-                # Save checkpoint
+                # Save checkpoint with complete training state (BLOCKER-2 fix)
                 if checkpoint_manager:
                     try:
                         checkpoint_data = {
                             'model': model.state_dict(),
                             'optimizer': optimizer.state_dict(),
+                            'scheduler': scheduler.state_dict() if scheduler is not None else None,
+                            'scaler': None,  # AMP scaler (not used in Medical baseline)
+                            'ema': None,  # EMA weights (not used in Medical baseline)
                             'epoch': epoch,
                             'history': history,
                             'opt_name': opt_name,
                             'seed': seed,
                             'lr': lr,
+                            'metadata': {
+                                'current_lr': optimizer.param_groups[0]['lr'],
+                                'best_dice': best_dice if 'best_dice' in locals() else 0.0,
+                                'patience_counter': patience_counter if 'patience_counter' in locals() else 0,
+                                'training_time_sec': time.time() - training_start_time if 'training_start_time' in locals() else 0.0,
+                                'total_epochs_trained': epoch + 1,
+                                'completed': epoch >= epochs
+                            }
                         }
                         checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"Medical_UNet_{opt_name}_lr{lr}_seed{seed}")
                     except Exception as e:
@@ -6759,6 +6882,8 @@ Examples:
                         help='Maximum runtime in hours before graceful exit (default: 11.0 for Kaggle)')
     parser.add_argument('--run-all-ablations', action='store_true',
                         help='Run all ablation studies including batch_size, lr, wd, scheduler ablations')
+    parser.add_argument('--strict-config', action='store_true',
+                        help='AUDIT MODE: Treat config warnings and zombie keys as errors (fails fast on config issues)')
     
     args = parser.parse_args()
     

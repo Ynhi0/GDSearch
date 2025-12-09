@@ -1,46 +1,68 @@
-# Updated requirements to resolve dependency conflicts
-# Note: These are base requirements. Kaggle pre-installs torch with CUDA support.
+# Requirements for GDSearch - Gradient Descent Optimizer Benchmarking Framework
+# CRITICAL: All major dependencies are PINNED to ensure reproducibility
+# Last verified: December 2025 with PyTorch 2.6.0
+#
+# For Kaggle execution, use requirements_kaggle.txt which adapts to pre-installed packages
 
-# Core Scientific Stack
-numpy>=1.26.0,<2.0  # Compatible with most packages
-matplotlib
-pandas
-scipy
+# ============================================================================
+# CORE SCIENTIFIC STACK - PINNED FOR REPRODUCIBILITY
+# ============================================================================
+numpy==1.26.4  # PINNED: Compatible with PyTorch 2.6 and scipy
+matplotlib==3.9.2  # PINNED: Stable plotting
+pandas==2.2.3  # PINNED: Data analysis
+scipy==1.14.1  # PINNED: Scientific computing
 
-# Filesystem & Data (Kaggle-compatible)
-fsspec==2025.3.0  # FIXED: Exact version required by gcsfs on Kaggle
-pyarrow>=14.0.0,<20.0.0  # FIXED: Compatible with cudf-cu12 (Kaggle GPU DataFrames)
-huggingface-hub<1.0,>=0.30.0  # Compatible with transformers
-transformers>=4.34.0
+# ============================================================================
+# DEEP LEARNING STACK - PINNED
+# ============================================================================
+torch==2.6.0  # PINNED: Optimizer behavior varies between versions
+torchvision==0.20.0  # PINNED: Must match torch version
+torchtext==0.18.0; python_version < '3.13'  # PINNED: NLP support (not available for py3.13)
 
-# Utilities
-tqdm
-click>=7.0,!=8.3.0  # FIXED: Compatible with ray 2.51.1
-rich>=12.4.4,<14  # FIXED: Compatible with bigframes
+# ============================================================================
+# HYPERPARAMETER OPTIMIZATION & EXPERIMENT TRACKING - PINNED
+# ============================================================================
+optuna==4.1.0  # PINNED: Search algorithms change between versions
+mlflow==2.19.0  # PINNED: Experiment tracking
 
-# Machine Learning
-torch>=2.0.0  # Kaggle has torch 2.6.0+cu124 pre-installed
-torchvision
-# CRITICAL FIX: Downgraded datasets to maintain compatibility with pyarrow<20 (Kaggle constraint)
-# datasets>=4.4.0 requires pyarrow>=21.0.0 which conflicts with cudf-cu12
-datasets>=2.14.0,<3.0.0
-optuna
-mlflow
+# ============================================================================
+# VISUALIZATION - PINNED
+# ============================================================================
+plotly==5.24.1  # PINNED: Interactive plots
+kaleido==0.2.1  # PINNED: Static image export
+seaborn==0.13.2  # PINNED: Statistical visualization
 
-# Visualization
-plotly
-kaleido
-seaborn
+# ============================================================================
+# UTILITIES - COMPATIBLE RANGES
+# ============================================================================
+tqdm>=4.66.0,<5.0
+click>=7.0,<9.0,!=8.3.0
+rich>=12.4.4,<14.0
 
-# Legacy/Compatibility
-protobuf>=3.20.3,<4.0.0  # FIXED: TensorFlow requires >=3.20.3, but <6.0 causes issues
-# torchtext wheels are not available for Python 3.13 on all platforms. Make optional for py>=3.13
-torchtext>=0.14.0; python_version < '3.13'
+# ============================================================================
+# DATA PROCESSING - VERSION CONSTRAINED
+# ============================================================================
+fsspec==2025.3.0  # Exact version for Kaggle gcsfs compatibility
+pyarrow>=14.0.0,<20.0.0  # Compatible with cudf-cu12 (Kaggle GPU DataFrames)
+datasets>=2.14.0,<3.0.0  # CRITICAL: >4.4.0 breaks pyarrow compatibility
+huggingface-hub>=0.30.0,<1.0
+transformers>=4.34.0,<5.0
+
+# ============================================================================
+# SPECIALIZED ML LIBRARIES
+# ============================================================================
 portalocker>=2.0.0
-medpy>=0.4.0
-pydantic>=2.0,<2.12  # Compatible with gradio
-cryptography>=19.0,<44  # FIXED: Compatible with pydrive2
-pyOpenSSL>=19.1.0,<=24.2.1  # FIXED: Compatible with pydrive2
+medpy>=0.4.0,<1.0  # Medical image processing
 
-# Testing
-pytest
+# ============================================================================
+# SECURITY & COMPATIBILITY
+# ============================================================================
+protobuf>=3.20.3,<4.0.0  # TensorFlow compatibility
+pydantic>=2.0,<2.12  # Gradio/FastAPI compatibility  
+cryptography>=19.0,<44  # pydrive2 compatibility
+pyOpenSSL>=19.1.0,<=24.2.1  # pydrive2 compatibility
+
+# ============================================================================
+# TESTING
+# ============================================================================
+pytest==8.3.4  # PINNED: Test framework

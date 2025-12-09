@@ -81,8 +81,8 @@ def load_mnist(batch_size=128, quick=False):
         train_dataset = torch.utils.data.Subset(train_dataset, range(10000))
         test_dataset = torch.utils.data.Subset(test_dataset, range(2000))
     
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    train_loader = make_dataloader(train_dataset, batch_size=batch_size, shuffle=True, seed=42, num_workers=2, pin_memory=True)
+    test_loader = make_dataloader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=True)
     
     return train_loader, test_loader
 

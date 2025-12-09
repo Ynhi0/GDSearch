@@ -6,15 +6,25 @@ from typing import Tuple, Optional
 import random
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split, Subset
 from torchvision import datasets, transforms
 
 
-def get_mnist_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optional[int] = None) -> Tuple[DataLoader, DataLoader]:
+def get_mnist_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optional[int] = None, val_split: Optional[float] = None) -> Tuple[DataLoader, ...]:
     """
     Create train and test DataLoaders for MNIST.
     Normalization uses standard MNIST mean/std.
     If seed is provided, DataLoader workers and RNG are seeded for determinism.
+    
+    Args:
+        batch_size: Batch size for DataLoaders
+        num_workers: Number of worker threads
+        seed: Random seed for reproducibility
+        val_split: If provided, fraction of training data to use for validation (e.g., 0.1 for 10%)
+        
+    Returns:
+        If val_split is None: (train_loader, test_loader)
+        If val_split is provided: (train_loader, val_loader, test_loader)
     """
     # Disable multiprocessing on Windows due to pickle issues
     import platform
@@ -30,7 +40,7 @@ def get_mnist_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optiona
         transforms.Normalize((0.1307,), (0.3081,)),
     ])
 
-    train_dataset = datasets.MNIST(root="./data", train=True, download=True, transform=transform_train)
+    full_train_dataset = datasets.MNIST(root="./data", train=True, download=True, transform=transform_train)
     test_dataset = datasets.MNIST(root="./data", train=False, download=True, transform=transform_test)
 
     worker_seed = seed
@@ -47,33 +57,97 @@ def get_mnist_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optiona
         generator = torch.Generator()
         generator.manual_seed(int(seed))
 
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=num_workers,
-        pin_memory=torch.cuda.is_available(),
-        worker_init_fn=_worker_init_fn if seed is not None else None,
-        generator=generator,
-    )
-    test_loader = DataLoader(
-        test_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers,
-        pin_memory=torch.cuda.is_available(),
-        worker_init_fn=_worker_init_fn if seed is not None else None,
-        generator=generator,
-    )
+    # Split train into train/val if requested
+    if val_split is not None:
+        if not 0.0 < val_split < 1.0:
+            raise ValueError(f"val_split must be between 0 and 1, got {val_split}")
+        
+        total_train = len(full_train_dataset)
+        val_size = int(total_train * val_split)
+        train_size = total_train - val_size
+        
+        # Use same generator for reproducible splits
+        split_generator = torch.Generator()
+        if seed is not None:
+            split_generator.manual_seed(int(seed))
+        
+        train_dataset, val_dataset = random_split(
+            full_train_dataset, 
+            [train_size, val_size],
+            generator=split_generator
+        )
+        
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=num_workers,
+            pin_memory=torch.cuda.is_available(),
+            worker_init_fn=_worker_init_fn if seed is not None else None,
+            generator=generator,
+        )
+        
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=torch.cuda.is_available(),
+            worker_init_fn=_worker_init_fn if seed is not None else None,
+            generator=generator,
+        )
+        
+        test_loader = DataLoader(
+            test_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=torch.cuda.is_available(),
+            worker_init_fn=_worker_init_fn if seed is not None else None,
+            generator=generator,
+        )
+        
+        return train_loader, val_loader, test_loader
+    
+    else:
+        # Original behavior: only train and test
+        train_loader = DataLoader(
+            full_train_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=num_workers,
+            pin_memory=torch.cuda.is_available(),
+            worker_init_fn=_worker_init_fn if seed is not None else None,
+            generator=generator,
+        )
+        test_loader = DataLoader(
+            test_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=torch.cuda.is_available(),
+            worker_init_fn=_worker_init_fn if seed is not None else None,
+            generator=generator,
+        )
 
-    return train_loader, test_loader
+        return train_loader, test_loader
 
 
-def get_cifar10_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optional[int] = None) -> Tuple[DataLoader, DataLoader]:
+def get_cifar10_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optional[int] = None, val_split: Optional[float] = None) -> Tuple[DataLoader, ...]:
     """
     Create train and test DataLoaders for CIFAR-10.
     Normalization uses CIFAR-10 mean/std.
     If seed is provided, DataLoader workers and RNG are seeded for determinism.
+    
+    Args:
+        batch_size: Batch size for DataLoaders
+        num_workers: Number of worker threads
+        seed: Random seed for reproducibility
+        val_split: If provided, fraction of training data to use for validation (e.g., 0.1 for 10%)
+        
+    Returns:
+        If val_split is None: (train_loader, test_loader)
+        If val_split is provided: (train_loader, val_loader, test_loader)
     """
     # Disable multiprocessing on Windows due to pickle issues
     import platform
@@ -94,7 +168,7 @@ def get_cifar10_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optio
         transforms.Normalize(mean, std),
     ])
 
-    train_dataset = datasets.CIFAR10(root="./data", train=True, download=True, transform=transform_train)
+    full_train_dataset = datasets.CIFAR10(root="./data", train=True, download=True, transform=transform_train)
     test_dataset = datasets.CIFAR10(root="./data", train=False, download=True, transform=transform_test)
 
     worker_seed = seed
@@ -111,23 +185,77 @@ def get_cifar10_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optio
         generator = torch.Generator()
         generator.manual_seed(int(seed))
 
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=num_workers,
-        pin_memory=torch.cuda.is_available(),
-        worker_init_fn=_worker_init_fn if seed is not None else None,
-        generator=generator,
-    )
-    test_loader = DataLoader(
-        test_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers,
-        pin_memory=torch.cuda.is_available(),
-        worker_init_fn=_worker_init_fn if seed is not None else None,
-        generator=generator,
-    )
+    # Split train into train/val if requested
+    if val_split is not None:
+        if not 0.0 < val_split < 1.0:
+            raise ValueError(f"val_split must be between 0 and 1, got {val_split}")
+        
+        total_train = len(full_train_dataset)
+        val_size = int(total_train * val_split)
+        train_size = total_train - val_size
+        
+        # Use same generator for reproducible splits
+        split_generator = torch.Generator()
+        if seed is not None:
+            split_generator.manual_seed(int(seed))
+        
+        train_dataset, val_dataset = random_split(
+            full_train_dataset, 
+            [train_size, val_size],
+            generator=split_generator
+        )
+        
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=num_workers,
+            pin_memory=torch.cuda.is_available(),
+            worker_init_fn=_worker_init_fn if seed is not None else None,
+            generator=generator,
+        )
+        
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=torch.cuda.is_available(),
+            worker_init_fn=_worker_init_fn if seed is not None else None,
+            generator=generator,
+        )
+        
+        test_loader = DataLoader(
+            test_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=torch.cuda.is_available(),
+            worker_init_fn=_worker_init_fn if seed is not None else None,
+            generator=generator,
+        )
+        
+        return train_loader, val_loader, test_loader
+    
+    else:
+        # Original behavior: only train and test
+        train_loader = DataLoader(
+            full_train_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=num_workers,
+            pin_memory=torch.cuda.is_available(),
+            worker_init_fn=_worker_init_fn if seed is not None else None,
+            generator=generator,
+        )
+        test_loader = DataLoader(
+            test_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=torch.cuda.is_available(),
+            worker_init_fn=_worker_init_fn if seed is not None else None,
+            generator=generator,
+        )
 
-    return train_loader, test_loader
+        return train_loader, test_loader

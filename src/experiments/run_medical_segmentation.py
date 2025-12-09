@@ -1,6 +1,23 @@
 """
 Medical image segmentation (3D U-Net, MONAI) with Dice metric logging and CSV output.
 
+⚠️ DEMO/PROOF-OF-CONCEPT SCRIPT ⚠️
+
+CRITICAL LIMITATION (AUDIT FLAG):
+This is a SCAFFOLD with PLACEHOLDER data paths and supports ONLY the Adam optimizer.
+It is NOT a complete medical imaging experiment and should NOT be used for 
+cross-domain generalization claims without:
+- Real medical imaging dataset (e.g., BraTS, LIDC-IDRI)
+- Full optimizer suite testing (not just Adam)
+- Proper train/val/test splits
+- Statistical validation with multiple seeds
+
+For SOTA research claims:
+1. Replace placeholder data_dicts with real medical imaging data
+2. Extend to support all optimizers from the benchmark suite
+3. Add multi-seed experiments and statistical analysis
+4. Clearly document limitations in publications
+
 This is a scaffold that expects user-provided data dicts or a dataset loader.
 Imports MONAI lazily to avoid hard dependency during CI or environments without MONAI.
 """
@@ -54,8 +71,11 @@ def medical_image_segmentation(data_dicts: List[Dict[str, str]] | None = None, e
     val_data = data_dicts[-1:]
     train_ds = CacheDataset(data=train_data, transform=train_transforms)
     val_ds = CacheDataset(data=val_data, transform=train_transforms)
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_ds, batch_size=1, shuffle=False)
+    
+    # Use make_dataloader for consistent settings
+    from run_all_kaggle import make_dataloader
+    train_loader = make_dataloader(train_ds, batch_size=batch_size, shuffle=True, seed=42, num_workers=0, pin_memory=True)
+    val_loader = make_dataloader(val_ds, batch_size=1, shuffle=False, num_workers=0, pin_memory=True)
 
     # Model & loss/metrics
     model = UNet(spatial_dims=3, in_channels=1, out_channels=1, channels=(16, 32, 64, 128, 256),

@@ -232,11 +232,11 @@ def run_dynamics_overhead_ablation(
         np.random.seed(seed)
         
         # Create dataloaders
-        train_loader = DataLoader(
-            train_dataset, batch_size=128, shuffle=True,
+        train_loader = make_dataloader(
+            train_dataset, batch_size=128, shuffle=True, seed=seed,
             num_workers=2, pin_memory=True if device.type == 'cuda' else False
         )
-        test_loader = DataLoader(
+        test_loader = make_dataloader(
             test_dataset, batch_size=256, shuffle=False,
             num_workers=2, pin_memory=True if device.type == 'cuda' else False
         )

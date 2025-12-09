@@ -1,6 +1,20 @@
 """
 Fine-tune a Transformer (BERT) on IMDB with optimizer comparisons and gradient dynamics logging.
 
+⚠️ DEMO/PROOF-OF-CONCEPT SCRIPT ⚠️
+
+CRITICAL LIMITATION (AUDIT FLAG):
+This script uses a LIMITED subset of IMDB (2000 train, 1000 test) and supports
+only a SUBSET of optimizers (AdamW, SGD). It is a proof-of-concept for NLP
+domain applicability and should NOT be used for strong cross-domain generalization
+claims without extension to:
+- Full dataset size
+- Full optimizer suite (SAM, Lookahead, RMSProp, etc.)
+- Multiple NLP tasks (not just sentiment classification)
+
+For SOTA research claims, extend this script or clearly state its limitations
+in publications.
+
 Outputs per-run CSVs compatible with the repository's result conventions.
 This script guards optional dependencies (transformers, datasets) so import errors won't break CI.
 """
@@ -135,8 +149,10 @@ def run_single_imdb(optimizer_name: str, seed: int, lr: float, epochs: int, batc
         return out
 
     # Use num_workers=0 to avoid tokenizer parallelism issues
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn, num_workers=0)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn, num_workers=0)
+    # Use make_dataloader for consistent settings
+    from run_all_kaggle import make_dataloader
+    train_loader = make_dataloader(train_dataset, batch_size=batch_size, shuffle=True, seed=42, collate_fn=collate_fn, num_workers=0, pin_memory=True)
+    test_loader = make_dataloader(test_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn, num_workers=0, pin_memory=True)
 
     # Model
     model = BertForSequenceClassification.from_pretrained('bert-base-uncased', num_labels=2).to(device)

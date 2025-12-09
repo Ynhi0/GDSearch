@@ -38,8 +38,14 @@ def create_objective_function(optimizer_name='Adam', epochs=10, device='cpu'):
         # Suggest hyperparameters
         params = suggest_optimizer_params(trial, optimizer_name)
         
-        # Get data loaders
-        train_loader, test_loader = get_mnist_loaders(batch_size=128, train_size=50000)
+        # Get data loaders with validation split (NO TEST SET ACCESS)
+        # Using 10% of training data for validation to prevent data leakage
+        train_loader, val_loader, test_loader = get_mnist_loaders(
+            batch_size=128, 
+            num_workers=2,
+            seed=42,  # Fixed seed for reproducible splits
+            val_split=0.1  # 10% validation split
+        )
         
         # Create model
         model = SimpleMLP(input_size=784, hidden_size=256, output_size=10).to(device)
@@ -94,12 +100,13 @@ def create_objective_function(optimizer_name='Adam', epochs=10, device='cpu'):
             if trial.should_prune():
                 raise optuna.exceptions.TrialPruned()
         
-        # Evaluate on test set
+        # Evaluate on VALIDATION set (NOT TEST SET)
+        # The test set must remain untouched during hyperparameter optimization
         model.eval()
         correct = 0
         total = 0
         with torch.no_grad():
-            for data, target in test_loader:
+            for data, target in val_loader:
                 data, target = data.to(device), target.to(device)
                 data = data.view(data.size(0), -1)
                 output = model(data)
@@ -107,9 +114,9 @@ def create_objective_function(optimizer_name='Adam', epochs=10, device='cpu'):
                 total += target.size(0)
                 correct += (predicted == target).sum().item()
         
-        accuracy = 100.0 * correct / max(1, total)
+        val_accuracy = 100.0 * correct / max(1, total)
         
-        return accuracy
+        return val_accuracy
     
     return objective
 
@@ -187,8 +194,10 @@ def main():
     print(f"Optimizer: {args.optimizer}")
     for param, value in results['best_params'].items():
         print(f"  {param}: {value}")
-    print(f"\nTest Accuracy: {results['best_value']:.2f}%")
+    print(f"\nValidation Accuracy: {results['best_value']:.2f}%")
     print("="*80)
+    print("\nNOTE: This is VALIDATION accuracy (used for tuning).")
+    print("Final TEST accuracy should be reported separately after retraining.")
 
 
 if __name__ == '__main__':

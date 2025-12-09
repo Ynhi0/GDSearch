@@ -88,15 +88,18 @@ class SGDMomentumWrapper(Optimizer):
         if closure is not None:
             loss = closure()
         
-        for group in self.param_groups:
-            for i, p in enumerate(group['params']):
+        for group_idx, group in enumerate(self.param_groups):
+            for param_idx, p in enumerate(group['params']):
                 if p.grad is None:
                     continue
                 
+                # Use (group_idx, param_idx) as key for cross-process safety
+                key = (group_idx, param_idx)
+                
                 # Initialize optimizer for this parameter if needed
-                if id(p) not in self.custom_opts:
+                if key not in self.custom_opts:
                     # Map torch's momentum -> beta in custom optimizer
-                    self.custom_opts[id(p)] = CustomSGDMomentum(
+                    self.custom_opts[key] = CustomSGDMomentum(
                         lr=group['lr'],
                         beta=group['momentum']
                     )
@@ -106,12 +109,47 @@ class SGDMomentumWrapper(Optimizer):
                 param_np = p.data.cpu().numpy()
                 
                 # Compute update
-                updated_param = self.custom_opts[id(p)].step(param_np.flatten(), grad.flatten())
+                updated_param = self.custom_opts[key].step(param_np.flatten(), grad.flatten())
                 
                 # Reshape and update parameter
                 p.data = torch.from_numpy(updated_param.reshape(param_np.shape)).to(p.device)
         
         return loss
+    
+    def state_dict(self):
+        """AUDIT FIX: Save custom optimizer states with index-based keys for cross-process safety."""
+        base_state = super().state_dict()
+        # Serialize custom_opts: map (group_idx, param_idx) to optimizer state (v=velocity, not m)
+        custom_state = {}
+        for key, opt in self.custom_opts.items():
+            # Convert tuple key to string for JSON serialization
+            key_str = f"{key[0]},{key[1]}"
+            custom_state[key_str] = {
+                'v': opt.v.tolist() if opt.v is not None else None,
+            }
+        base_state['custom_opts'] = custom_state
+        return base_state
+    
+    def load_state_dict(self, state_dict):
+        """AUDIT FIX: Restore custom optimizer states from checkpoint using index mapping."""
+        import numpy as np
+        custom_state = state_dict.pop('custom_opts', {})
+        super().load_state_dict(state_dict)
+        
+        # Reconstruct custom_opts from serialized state using index mapping
+        self.custom_opts = {}
+        for key_str, opt_state in custom_state.items():
+            # Parse string key back to tuple
+            group_idx, param_idx = map(int, key_str.split(','))
+            key = (group_idx, param_idx)
+            
+            # Validate indices
+            if group_idx < len(self.param_groups):
+                group = self.param_groups[group_idx]
+                if param_idx < len(group['params']):
+                    opt = CustomSGDMomentum(lr=group['lr'], beta=group['momentum'])
+                    opt.v = np.array(opt_state['v']) if opt_state['v'] is not None else None
+                    self.custom_opts[key] = opt
 
 
 class AdamWrapper(Optimizer):
@@ -128,14 +166,17 @@ class AdamWrapper(Optimizer):
         if closure is not None:
             loss = closure()
         
-        for group in self.param_groups:
-            for i, p in enumerate(group['params']):
+        for group_idx, group in enumerate(self.param_groups):
+            for param_idx, p in enumerate(group['params']):
                 if p.grad is None:
                     continue
                 
+                # Use (group_idx, param_idx) as key for cross-process safety
+                key = (group_idx, param_idx)
+                
                 # Initialize optimizer for this parameter if needed
-                if id(p) not in self.custom_opts:
-                    self.custom_opts[id(p)] = CustomAdam(
+                if key not in self.custom_opts:
+                    self.custom_opts[key] = CustomAdam(
                         lr=group['lr'],
                         beta1=group['beta1'],
                         beta2=group['beta2'],
@@ -147,12 +188,52 @@ class AdamWrapper(Optimizer):
                 param_np = p.data.cpu().numpy()
                 
                 # Compute update
-                updated_param = self.custom_opts[id(p)].step(param_np.flatten(), grad.flatten())
+                updated_param = self.custom_opts[key].step(param_np.flatten(), grad.flatten())
                 
                 # Reshape and update parameter
                 p.data = torch.from_numpy(updated_param.reshape(param_np.shape)).to(p.device)
         
         return loss
+    
+    def state_dict(self):
+        """AUDIT FIX: Save custom Adam optimizer states with index-based keys."""
+        base_state = super().state_dict()
+        custom_state = {}
+        for key, opt in self.custom_opts.items():
+            # Convert tuple key to string for JSON serialization
+            key_str = f"{key[0]},{key[1]}"
+            custom_state[key_str] = {
+                'm': opt.m.tolist() if opt.m is not None else None,
+                'v': opt.v.tolist() if opt.v is not None else None,
+                't': opt.t
+            }
+        base_state['custom_opts'] = custom_state
+        return base_state
+    
+    def load_state_dict(self, state_dict):
+        """AUDIT FIX: Restore custom Adam states using index mapping."""
+        import numpy as np
+        custom_state = state_dict.pop('custom_opts', {})
+        super().load_state_dict(state_dict)
+        
+        self.custom_opts = {}
+        for key_str, opt_state in custom_state.items():
+            # Parse string key back to tuple
+            group_idx, param_idx = map(int, key_str.split(','))
+            key = (group_idx, param_idx)
+            
+            # Validate indices
+            if group_idx < len(self.param_groups):
+                group = self.param_groups[group_idx]
+                if param_idx < len(group['params']):
+                    opt = CustomAdam(
+                        lr=group['lr'], beta1=group['beta1'],
+                        beta2=group['beta2'], epsilon=group['epsilon']
+                    )
+                    opt.m = np.array(opt_state['m']) if opt_state['m'] is not None else None
+                    opt.v = np.array(opt_state['v']) if opt_state['v'] is not None else None
+                    opt.t = opt_state['t']
+                    self.custom_opts[key] = opt
 
 
 class SGDNesterovWrapper(Optimizer):
@@ -168,21 +249,58 @@ class SGDNesterovWrapper(Optimizer):
         if closure is not None:
             loss = closure()
 
-        for group in self.param_groups:
-            for p in group['params']:
+        for group_idx, group in enumerate(self.param_groups):
+            for param_idx, p in enumerate(group['params']):
                 if p.grad is None:
                     continue
-                if id(p) not in self.custom_opts:
-                    self.custom_opts[id(p)] = CustomSGDNesterov(
+                
+                # Use (group_idx, param_idx) as key for cross-process safety
+                key = (group_idx, param_idx)
+                
+                if key not in self.custom_opts:
+                    self.custom_opts[key] = CustomSGDNesterov(
                         lr=group['lr'],
                         beta=group['momentum']
                     )
                 grad = p.grad.data.cpu().numpy()
                 param_np = p.data.cpu().numpy()
-                updated_param = self.custom_opts[id(p)].step(param_np.flatten(), grad.flatten())
+                updated_param = self.custom_opts[key].step(param_np.flatten(), grad.flatten())
                 p.data = torch.from_numpy(updated_param.reshape(param_np.shape)).to(p.device)
 
         return loss
+    
+    def state_dict(self):
+        """AUDIT FIX: Save Nesterov momentum states with index-based keys."""
+        base_state = super().state_dict()
+        custom_state = {}
+        for key, opt in self.custom_opts.items():
+            # Convert tuple key to string for JSON serialization
+            key_str = f"{key[0]},{key[1]}"
+            custom_state[key_str] = {
+                'v': opt.v.tolist() if opt.v is not None else None,
+            }
+        base_state['custom_opts'] = custom_state
+        return base_state
+    
+    def load_state_dict(self, state_dict):
+        """AUDIT FIX: Restore Nesterov states using index mapping."""
+        import numpy as np
+        custom_state = state_dict.pop('custom_opts', {})
+        super().load_state_dict(state_dict)
+        
+        self.custom_opts = {}
+        for key_str, opt_state in custom_state.items():
+            # Parse string key back to tuple
+            group_idx, param_idx = map(int, key_str.split(','))
+            key = (group_idx, param_idx)
+            
+            # Validate indices
+            if group_idx < len(self.param_groups):
+                group = self.param_groups[group_idx]
+                if param_idx < len(group['params']):
+                    opt = CustomSGDNesterov(lr=group['lr'], beta=group['momentum'])
+                    opt.v = np.array(opt_state['v']) if opt_state['v'] is not None else None
+                    self.custom_opts[key] = opt
 
 
 class RMSPropWrapper(Optimizer):
@@ -199,15 +317,18 @@ class RMSPropWrapper(Optimizer):
         if closure is not None:
             loss = closure()
         
-        for group in self.param_groups:
-            for i, p in enumerate(group['params']):
+        for group_idx, group in enumerate(self.param_groups):
+            for param_idx, p in enumerate(group['params']):
                 if p.grad is None:
                     continue
                 
+                # Use (group_idx, param_idx) as key for cross-process safety
+                key = (group_idx, param_idx)
+                
                 # Initialize optimizer for this parameter if needed
-                if id(p) not in self.custom_opts:
+                if key not in self.custom_opts:
                     # Map torch's alpha (smoothing) -> decay_rate in custom RMSProp
-                    self.custom_opts[id(p)] = CustomRMSProp(
+                    self.custom_opts[key] = CustomRMSProp(
                         lr=group['lr'],
                         decay_rate=group['alpha'],
                         epsilon=group['epsilon']
@@ -218,12 +339,50 @@ class RMSPropWrapper(Optimizer):
                 param_np = p.data.cpu().numpy()
                 
                 # Compute update
-                updated_param = self.custom_opts[id(p)].step(param_np.flatten(), grad.flatten())
+                updated_param = self.custom_opts[key].step(param_np.flatten(), grad.flatten())
                 
                 # Reshape and update parameter
                 p.data = torch.from_numpy(updated_param.reshape(param_np.shape)).to(p.device)
         
         return loss
+    
+    def state_dict(self):
+        """AUDIT FIX: Save RMSProp states with index-based keys."""
+        base_state = super().state_dict()
+        custom_state = {}
+        for key, opt in self.custom_opts.items():
+            # Convert tuple key to string for JSON serialization
+            key_str = f"{key[0]},{key[1]}"
+            custom_state[key_str] = {
+                's': opt.s.tolist() if opt.s is not None else None,
+                't': opt.t
+            }
+        base_state['custom_opts'] = custom_state
+        return base_state
+    
+    def load_state_dict(self, state_dict):
+        """AUDIT FIX: Restore RMSProp states using index mapping."""
+        import numpy as np
+        custom_state = state_dict.pop('custom_opts', {})
+        super().load_state_dict(state_dict)
+        
+        self.custom_opts = {}
+        for key_str, opt_state in custom_state.items():
+            # Parse string key back to tuple
+            group_idx, param_idx = map(int, key_str.split(','))
+            key = (group_idx, param_idx)
+            
+            # Validate indices
+            if group_idx < len(self.param_groups):
+                group = self.param_groups[group_idx]
+                if param_idx < len(group['params']):
+                    opt = CustomRMSProp(
+                        lr=group['lr'], decay_rate=group['alpha'],
+                        epsilon=group['epsilon']
+                    )
+                    opt.s = np.array(opt_state['s']) if opt_state['s'] is not None else None
+                    opt.t = opt_state['t']
+                    self.custom_opts[key] = opt
 
 
 class AdamWWrapper(Optimizer):
@@ -240,13 +399,17 @@ class AdamWWrapper(Optimizer):
         if closure is not None:
             loss = closure()
 
-        for group in self.param_groups:
+        for group_idx, group in enumerate(self.param_groups):
             beta1, beta2 = group['betas']
-            for p in group['params']:
+            for param_idx, p in enumerate(group['params']):
                 if p.grad is None:
                     continue
-                if id(p) not in self.custom_opts:
-                    self.custom_opts[id(p)] = CustomAdamW(
+                
+                # Use (group_idx, param_idx) as key for cross-process safety
+                key = (group_idx, param_idx)
+                
+                if key not in self.custom_opts:
+                    self.custom_opts[key] = CustomAdamW(
                         lr=group['lr'],
                         beta1=beta1,
                         beta2=beta2,
@@ -255,96 +418,240 @@ class AdamWWrapper(Optimizer):
                     )
                 grad = p.grad.data.cpu().numpy()
                 param_np = p.data.cpu().numpy()
-                updated_param = self.custom_opts[id(p)].step(param_np.flatten(), grad.flatten())
+                updated_param = self.custom_opts[key].step(param_np.flatten(), grad.flatten())
                 p.data = torch.from_numpy(updated_param.reshape(param_np.shape)).to(p.device)
 
         return loss
+    
+    def state_dict(self):
+        """AUDIT FIX: Save AdamW states with index-based keys."""
+        base_state = super().state_dict()
+        custom_state = {}
+        for key, opt in self.custom_opts.items():
+            # Convert tuple key to string for JSON serialization
+            key_str = f"{key[0]},{key[1]}"
+            custom_state[key_str] = {
+                'm': opt.m.tolist() if opt.m is not None else None,
+                'v': opt.v.tolist() if opt.v is not None else None,
+                't': opt.t
+            }
+        base_state['custom_opts'] = custom_state
+        return base_state
+    
+    def load_state_dict(self, state_dict):
+        """AUDIT FIX: Restore AdamW states using index mapping."""
+        import numpy as np
+        custom_state = state_dict.pop('custom_opts', {})
+        super().load_state_dict(state_dict)
+        
+        self.custom_opts = {}
+        for key_str, opt_state in custom_state.items():
+            # Parse string key back to tuple
+            group_idx, param_idx = map(int, key_str.split(','))
+            key = (group_idx, param_idx)
+            
+            # Validate indices
+            if group_idx < len(self.param_groups):
+                group = self.param_groups[group_idx]
+                beta1, beta2 = group['betas']
+                if param_idx < len(group['params']):
+                    opt = CustomAdamW(
+                        lr=group['lr'], beta1=beta1, beta2=beta2,
+                        epsilon=group['eps'], weight_decay=group['weight_decay']
+                    )
+                    opt.m = np.array(opt_state['m']) if opt_state['m'] is not None else None
+                    opt.v = np.array(opt_state['v']) if opt_state['v'] is not None else None
+                    opt.t = opt_state['t']
+                    self.custom_opts[key] = opt
 
 
 class SAMWrapper(Optimizer):
-    """PyTorch wrapper for SAM (Sharpness-Aware Minimization) optimizer."""
+    """
+    Unified SAM (Sharpness-Aware Minimization) wrapper for PyTorch optimizers.
     
-    def __init__(self, params, lr=0.01, rho=0.05, base_optimizer='SGD', **base_kwargs):
+    Compatible with any base optimizer (SGD, Adam, AdamW, etc.) and supports
+    both closure-based and standard step() interfaces.
+    
+    Usage:
+        # With torch optimizers
+        base_opt = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
+        optimizer = SAMWrapper(base_opt, rho=0.05)
+        
+        # Training loop
+        def closure():
+            optimizer.zero_grad()
+            output = model(input)
+            loss = criterion(output, target)
+            loss.backward()
+            return loss
+        
+        loss = optimizer.step(closure)
+    
+    Reference: Foret et al., "Sharpness-Aware Minimization for Efficiently 
+               Improving Generalization", ICLR 2021
+    """
+    
+    def __init__(self, base_optimizer, rho=0.05, adaptive=False):
         """
-        Initialize SAM optimizer.
+        Initialize SAM optimizer wrapper.
         
         Args:
-            params: Model parameters
-            lr: Learning rate
-            rho: Neighborhood size (sharpness radius)
-            base_optimizer: Base optimizer class name ('SGD', 'Adam', etc.)
-            **base_kwargs: Additional arguments for base optimizer
+            base_optimizer: Any PyTorch optimizer instance (SGD, Adam, etc.)
+            rho: Neighborhood size for sharpness (default: 0.05)
+            adaptive: Use adaptive SAM variant (default: False)
         """
-        defaults = dict(lr=lr, rho=rho)
-        super().__init__(params, defaults)
+        # SAM wraps an existing optimizer
+        self.base_optimizer = base_optimizer
+        self.rho = rho
+        self.adaptive = adaptive
         
-        # Import here to avoid circular imports
-        from src.core.optimizers import SAM as CustomSAM
-        self.custom_opt = CustomSAM(lr=lr, rho=rho, base_optimizer=base_optimizer, **base_kwargs)
+        # Inherit param_groups from base optimizer
+        self.param_groups = base_optimizer.param_groups
+        self.state = base_optimizer.state
         
-        # Store model reference for adversarial step computation
-        self.model = None
-        self.criterion = None
+        # Not a true Optimizer subclass - we delegate to base_optimizer
+        # But we maintain compatibility with the Optimizer interface
+        # Local container for adversarial perturbations to avoid mutating
+        # base_optimizer.state entries, which can interfere with lazy
+        # initialization of base optimizers (e.g., Adam's 'exp_avg').
+        self._perturbations = {}
+    
+    @torch.no_grad()
+    def _get_grad_norm(self):
+        """Compute gradient norm across all parameters."""
+        shared_device = self.param_groups[0]["params"][0].device
+        norm = torch.norm(
+            torch.stack([
+                ((torch.abs(p) if self.adaptive else 1.0) * p.grad).norm(p=2).to(shared_device)
+                for group in self.param_groups for p in group["params"]
+                if p.grad is not None
+            ]),
+            p=2
+        )
+        return norm
+    
+    @torch.no_grad()
+    def _ascent_step(self):
+        """Take adversarial step in direction of gradient."""
+        grad_norm = self._get_grad_norm()
+        scale = self.rho / (grad_norm + 1e-12)
         
-    def set_model_and_criterion(self, model, criterion):
-        """Set model and criterion for SAM adversarial step computation."""
-        self.model = model
-        self.criterion = criterion
+        for group in self.param_groups:
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+                # Compute and apply perturbation
+                if self.adaptive:
+                    e_w = (torch.pow(p, 2) if self.adaptive else 1.0) * p.grad * scale.to(p)
+                else:
+                    e_w = p.grad * scale.to(p)
+                p.add_(e_w)  # Move to adversarial point
+                # Store perturbation for later restoration in local map
+                # (do NOT write into base optimizer state dict)
+                self._perturbations[p] = e_w
+    
+    @torch.no_grad()
+    def _descent_step(self):
+        """Restore parameters and apply base optimizer update."""
+        for group in self.param_groups:
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+                # Restore original parameters using locally stored perturbations
+                e_w = self._perturbations.pop(p, None)
+                if e_w is not None:
+                    p.sub_(e_w)
+        
+        # Apply base optimizer update with adversarial gradients
+        self.base_optimizer.step()
     
     def step(self, closure=None):
         """
-        Perform SAM update step.
+        Perform SAM optimization step.
         
-        For SAM to work properly, you need to call set_model_and_criterion() first
-        and provide a closure that computes the loss.
+        Args:
+            closure: A closure that reevaluates the model and returns the loss.
+                     REQUIRED for SAM to compute adversarial gradients.
+        
+        Returns:
+            loss value from closure
         """
-        if self.model is None or self.criterion is None:
-            raise ValueError("SAM requires model and criterion to be set via set_model_and_criterion()")
-        
         if closure is None:
-            raise ValueError("SAM requires a closure function to compute adversarial gradients")
+            raise ValueError(
+                "SAM requires a closure function to compute adversarial gradients. "
+                "Pass a closure that computes and backpropagates the loss."
+            )
         
-        loss = None
-        if closure is not None:
-            loss = closure()
+        # First forward-backward pass (compute gradients at current point)
+        loss = closure()
         
-        # Store original parameters
-        original_params = []
-        for group in self.param_groups:
-            for p in group['params']:
-                original_params.append(p.data.clone())
+        # Save current parameters and take adversarial step
+        self._ascent_step()
         
-        # Compute adversarial step
-        # First, compute gradients at current point
-        for group in self.param_groups:
-            for p in group['params']:
-                if p.grad is None:
-                    continue
-                # Compute perturbation: ρ * (g / ||g||)
-                grad_norm = torch.norm(p.grad)
-                if grad_norm > 1e-12:
-                    perturbation = group['rho'] * (p.grad / grad_norm)
-                    p.data.add_(perturbation)
+        # Second forward-backward pass (compute gradients at adversarial point)
+        closure()  # Recompute loss and gradients at perturbed parameters
         
-        # Compute loss and gradients at adversarial point
-        adv_loss = closure()
-        
-        # Now restore original parameters and use adversarial gradients for update
-        idx = 0
-        for group in self.param_groups:
-            for p in group['params']:
-                p.data.copy_(original_params[idx])
-                idx += 1
-        
-        # The gradients are now computed at the adversarial point
-        # Use base optimizer logic (simplified - in practice would delegate to base opt)
-        for group in self.param_groups:
-            for p in group['params']:
-                if p.grad is None:
-                    continue
-                p.data.add_(p.grad, alpha=-group['lr'])
+        # Restore parameters and apply update
+        self._descent_step()
         
         return loss
+    
+    def zero_grad(self):
+        """Delegate to base optimizer."""
+        self.base_optimizer.zero_grad()
+    
+    def state_dict(self):
+        """Return state dict including base optimizer state."""
+        return {
+            'base_optimizer': self.base_optimizer.state_dict(),
+            'rho': self.rho,
+            'adaptive': self.adaptive,
+        }
+    
+    def load_state_dict(self, state_dict):
+        """Load state dict."""
+        self.base_optimizer.load_state_dict(state_dict['base_optimizer'])
+        self.rho = state_dict['rho']
+        self.adaptive = state_dict.get('adaptive', False)
+
+
+# Legacy aliases for backward compatibility
+class SAMSGDWrapper(SAMWrapper):
+    """
+    DEPRECATED: Use SAMWrapper(torch.optim.SGD(...), rho=0.05) instead.
+    
+    Legacy wrapper for SAM with SGD base optimizer.
+    Maintained for backward compatibility only.
+    """
+    def __init__(self, params, lr=0.01, momentum=0.0, rho=0.05, weight_decay=0.0):
+        import warnings
+        warnings.warn(
+            "SAMSGDWrapper is deprecated. Use: "
+            "SAMWrapper(torch.optim.SGD(params, lr=lr, momentum=momentum, weight_decay=weight_decay), rho=rho)",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        base_opt = torch.optim.SGD(params, lr=lr, momentum=momentum, weight_decay=weight_decay)
+        super().__init__(base_opt, rho=rho)
+
+
+class SAMAdamWrapper(SAMWrapper):
+    """
+    DEPRECATED: Use SAMWrapper(torch.optim.Adam(...), rho=0.05) instead.
+    
+    Legacy wrapper for SAM with Adam base optimizer.
+    Maintained for backward compatibility only.
+    """
+    def __init__(self, params, lr=0.001, betas=(0.9, 0.999), eps=1e-8, rho=0.05, weight_decay=0.0):
+        import warnings
+        warnings.warn(
+            "SAMAdamWrapper is deprecated. Use: "
+            "SAMWrapper(torch.optim.Adam(params, lr=lr, betas=betas, eps=eps, weight_decay=weight_decay), rho=rho)",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        base_opt = torch.optim.Adam(params, lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
+        super().__init__(base_opt, rho=rho)
 
 
 class LookaheadWrapper(Optimizer):
@@ -396,6 +703,24 @@ class LookaheadWrapper(Optimizer):
                     idx += 1
         
         return loss
+    
+    def state_dict(self):
+        """Return state dict including base optimizer and slow params state."""
+        return {
+            'base_optimizer': self.base_optimizer.state_dict(),
+            'slow_params': [p.clone() for p in self.slow_params],
+            'step_count': self.step_count,
+            'k': self.k,
+            'alpha': self.alpha,
+        }
+    
+    def load_state_dict(self, state_dict):
+        """Load state dict and restore slow params."""
+        self.base_optimizer.load_state_dict(state_dict['base_optimizer'])
+        self.slow_params = [p.clone() for p in state_dict['slow_params']]
+        self.step_count = state_dict['step_count']
+        self.k = state_dict['k']
+        self.alpha = state_dict['alpha']
 
 
 def test_sam_and_lookahead():
