@@ -325,14 +325,14 @@ def run_optimizer_comparison_matrix(
     print(f"Matrices saved to {output_dir}/")
     
     # Create visualizations
-    print("\n📊 Creating visualizations...")
+    print("\nCreating visualizations...")
     plot_comparison_heatmaps(
         p_value_df, effect_size_df, win_loss_df,
         save_path=f"{output_dir}/comparison_heatmaps.png"
     )
     
     # Generate report
-    print("\n📝 Generating comprehensive report...")
+    print("\nGenerating comprehensive report...")
     generate_comparison_report(
         optimizer_results,
         p_value_df,

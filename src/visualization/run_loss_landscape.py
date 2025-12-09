@@ -34,7 +34,7 @@ def train_quick(config):
     Train a model quickly for visualization (snapshot mode).
     
     NOTE: This is a QUICK TRAINING SNAPSHOT for visualization purposes.
-    For publication-quality loss landscapes, use --load-checkpoint with a
+    For high-quality loss landscapes, use --load-checkpoint with a
     fully trained model checkpoint.
     """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -142,7 +142,7 @@ def main():
         filename_suffix = "_final"
     else:
         print("WARNING: Using quick training snapshot (2 epochs).")
-        print("For publication-quality plots, use --load-checkpoint with a fully trained model.")
+        print("For high-quality plots, use --load-checkpoint with a fully trained model.")
         model, loader, criterion, device = train_quick(config)
         mode_label = "Quick Snapshot (2 epochs)"
         filename_suffix = "_snapshot"

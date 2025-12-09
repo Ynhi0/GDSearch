@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NN Ablation Study (Publication-ready)
+NN Ablation Study (Analysis-ready)
 
 Aggregates multi-seed MNIST results produced by kaggle/mnist_benchmark/mnist_benchmark.py
 and generates benchmark-ready summaries and plots with error bars.

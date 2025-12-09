@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """ 2D Trajectory Visualization for Optimizer Dynamics
 
-Creates publication-quality visualizations of optimizer trajectories on 2D test functions.
+Creates high-quality visualizations of optimizer trajectories on 2D test functions.
 Addresses research proposal requirement: "detailed visualization of kinetic data
 (example: 2D trajectory, loss/gradient norm plots over iterations)"
 

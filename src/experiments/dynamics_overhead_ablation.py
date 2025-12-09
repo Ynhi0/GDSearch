@@ -242,7 +242,7 @@ def run_dynamics_overhead_ablation(
         )
         
         # Test 1: WITHOUT dynamics tracking (baseline)
-        print("   🚀 Testing WITHOUT dynamics tracking (baseline)...")
+        print("   Testing WITHOUT dynamics tracking (baseline)...")
         model_baseline = SimpleMLP().to(device)
         optimizer_baseline = optim.Adam(model_baseline.parameters(), lr=1e-3)
         
@@ -257,7 +257,7 @@ def run_dynamics_overhead_ablation(
         )
         
         # Test 2: WITH dynamics tracking
-        print("   📊 Testing WITH dynamics tracking...")
+        print("   Testing WITH dynamics tracking...")
         model_tracked = SimpleMLP().to(device)
         optimizer_tracked = optim.Adam(model_tracked.parameters(), lr=1e-3)
         
@@ -315,7 +315,7 @@ def run_dynamics_overhead_ablation(
     
     # Generate summary statistics
     print("\n" + "="*80)
-    print("📊 ABLATION STUDY SUMMARY")
+    print("ABLATION STUDY SUMMARY")
     print("="*80)
     
     baseline_df = df[df['condition'] == 'baseline']
@@ -351,7 +351,7 @@ def run_dynamics_overhead_ablation(
 
 
 def create_ablation_visualization(df: pd.DataFrame, output_dir: str):
-    """Create publication-quality visualization of ablation results"""
+    """Create high-quality visualization of ablation results"""
     fig, axes = plt.subplots(1, 3, figsize=(15, 4), dpi=300)
     
     baseline_df = df[df['condition'] == 'baseline']
@@ -386,7 +386,7 @@ def create_ablation_visualization(df: pd.DataFrame, output_dir: str):
     
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, 'dynamics_overhead_ablation.png'), dpi=300, bbox_inches='tight')
-    print(f"   📊 Visualization saved to {output_dir}/dynamics_overhead_ablation.png")
+    print(f"   Visualization saved to {output_dir}/dynamics_overhead_ablation.png")
 
 
 if __name__ == '__main__':

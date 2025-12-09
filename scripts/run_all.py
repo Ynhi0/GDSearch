@@ -156,8 +156,8 @@ def list_outputs():
     results_count = len(list(Path("results").glob("*.csv"))) if Path("results").exists() else 0
     plots_count = len(list(Path("plots").glob("*.png"))) if Path("plots").exists() else 0
     
-    log(f"📊 Generated {results_count} CSV files in results/")
-    log(f"📈 Generated {plots_count} PNG plots in plots/")
+    log(f"Generated {results_count} CSV files in results/")
+    log(f"Generated {plots_count} PNG plots in plots/")
     
     # List key artifacts
     key_files = [
@@ -189,7 +189,7 @@ def main():
     args = parser.parse_args()
     
     start_time = time.time()
-    log("🚀 Starting GDSearch Complete Pipeline")
+    log("Starting GDSearch Complete Pipeline")
     log(f"Working directory: {os.getcwd()}")
     
     # Ensure directories exist

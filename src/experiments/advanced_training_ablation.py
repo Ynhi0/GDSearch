@@ -472,7 +472,7 @@ def create_visualizations(df: pd.DataFrame, results_dir: str):
     viz_dir = Path(results_dir) / "visualizations"
     viz_dir.mkdir(parents=True, exist_ok=True)
     
-    print(f"\n📊 Generating visualizations in {viz_dir}/...")
+    print(f"\nGenerating visualizations in {viz_dir}/...")
     
     # 1. Bar plot: Final test accuracy comparison
     fig, ax = plt.subplots(figsize=(12, 6))

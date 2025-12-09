@@ -993,7 +993,7 @@ def main():
         beta_col = 'Beta1'
     
     print("\n" + "=" * 80)
-    print("📊 SUMMARY STATISTICS")
+    print("SUMMARY STATISTICS")
     print("=" * 80)
     if args.optimizer == 'adam_grid':
         print(df.groupby(['Beta1', 'Beta2'])[

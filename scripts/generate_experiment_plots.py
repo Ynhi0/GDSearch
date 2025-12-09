@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Universal visualization generator for all experiments.
-Reads CSV files from results/ and automatically generates publication-quality plots.
+Reads CSV files from results/ and automatically generates high-quality plots.
 """
 
 import os

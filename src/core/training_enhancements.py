@@ -558,7 +558,7 @@ class SelfHealingTrainer:
     2. NOISE SPIKE: Sudden batch size halving (e.g., 128→64) doubles gradient variance
     
     RECOMMENDATION: Treat runs that triggered OOM recovery as INVALID for strict
-    convergence analysis. Use for exploratory runs only. For publication-quality
+    convergence analysis. Use for exploratory runs only. For high-quality
     results, re-run with a smaller fixed batch size.
     
     Usage:
@@ -1177,7 +1177,7 @@ def auto_tune_training_config(
     # Memory-aware batch sizing
     if find_batch_size:
         if verbose:
-            print("\n📊 Finding optimal batch size...")
+            print("\nFinding optimal batch size...")
         
         sizer = MemoryAwareBatchSizer()
         config['gpu_info'] = sizer.get_gpu_info()
@@ -1199,7 +1199,7 @@ def auto_tune_training_config(
     # LR Finding
     if find_lr:
         if verbose:
-            print("\n📈 Finding optimal learning rate...")
+            print("\nFinding optimal learning rate...")
         
         # Create a fresh optimizer for LR finding
         optimizer = torch.optim.SGD(model.parameters(), lr=1e-7, momentum=0.9)

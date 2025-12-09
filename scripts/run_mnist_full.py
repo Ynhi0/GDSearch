@@ -168,7 +168,7 @@ def run_statistical_comparison(results_dir='results'):
     all_results = []
     
     for opt_a, opt_b in comparisons:
-        print(f"\n📊 Comparing {opt_a} vs {opt_b}...")
+        print(f"\nComparing {opt_a} vs {opt_b}...")
         
         try:
             # Find result files

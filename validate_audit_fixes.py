@@ -198,10 +198,10 @@ def main():
         print("ALL AUDIT FIXES VALIDATED SUCCESSFULLY!")
         print("="*80)
         print("\nThe codebase now satisfies:")
-        print("  • Scientific Validity (OOM taint tracking)")
-        print("  • Maintainability (no code duplication)")
-        print("  • Configuration Authority (benchmark configs loaded)")
-        print("  • Reproducibility (checkpoints enabled by default)")
+        print("  - Scientific Validity (OOM taint tracking)")
+        print("  - Maintainability (no code duplication)")
+        print("  - Configuration Authority (benchmark configs loaded)")
+        print("  - Reproducibility (checkpoints enabled by default)")
         print("\nReady for NeurIPS reproducibility review!")
         return 0
     else:

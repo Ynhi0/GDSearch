@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Generate Statistical Report (MNIST, Publication-ready)
+Generate Statistical Report (MNIST, Analysis-ready)
 
 Reads per-seed MNIST CSVs (produced by kaggle/mnist_benchmark/mnist_benchmark.py),
 computes paired comparisons with normality checks, effect sizes, Holm-Bonferroni correction,

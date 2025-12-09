@@ -235,7 +235,7 @@ def ablation_momentum_effect(
     mom_accs = df[df['optimizer'] == 'SGD_Momentum']['final_test_accuracy'].values
     
     improvement = mom_accs.mean() - sgd_accs.mean()
-    logging.info(f"\n📊 Results:")
+    logging.info(f"\nResults:")
     logging.info(f"   SGD: {sgd_accs.mean():.2f}% ± {sgd_accs.std():.2f}%")
     logging.info(f"   Momentum: {mom_accs.mean():.2f}% ± {mom_accs.std():.2f}%")
     logging.info(f"   Improvement: {improvement:+.2f}%")
@@ -337,7 +337,7 @@ def ablation_adaptive_lr(
     adam_accs = df[df['optimizer'] == 'Adam']['final_test_accuracy'].values
     
     improvement = adam_accs.mean() - sgd_accs.mean()
-    logging.info(f"\n📊 Results:")
+    logging.info(f"\nResults:")
     logging.info(f"   SGD+Momentum: {sgd_accs.mean():.2f}% ± {sgd_accs.std():.2f}%")
     logging.info(f"   Adam: {adam_accs.mean():.2f}% ± {adam_accs.std():.2f}%")
     logging.info(f"   Improvement: {improvement:+.2f}%")
@@ -439,7 +439,7 @@ def ablation_weight_decay(
     adamw_accs = df[df['optimizer'] == 'AdamW']['final_test_accuracy'].values
     
     improvement = adamw_accs.mean() - adam_accs.mean()
-    logging.info(f"\n📊 Results:")
+    logging.info(f"\nResults:")
     logging.info(f"   Adam: {adam_accs.mean():.2f}% ± {adam_accs.std():.2f}%")
     logging.info(f"   AdamW: {adamw_accs.mean():.2f}% ± {adamw_accs.std():.2f}%")
     logging.info(f"   Improvement: {improvement:+.2f}%")

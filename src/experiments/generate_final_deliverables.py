@@ -429,7 +429,7 @@ class FinalDeliverablesGenerator:
                 f.write(f"{i}. `{rel_path}`\n")
             
             f.write("\n## Usage\n\n")
-            f.write("- **Visualizations**: PNG/PDF files for publications\n")
+            f.write("- **Visualizations**: PNG/PDF files for analysis\n")
             f.write("- **Interactive Plots**: Open HTML files in web browser\n")
             f.write("- **Analysis Reports**: CSV/TXT files with detailed analysis\n")
             f.write("- **Statistical Reports**: Rigorous statistical comparisons\n")

@@ -1,7 +1,7 @@
 """
 Strict data splitting utilities to prevent data leakage and adaptive overfitting.
 
-This module enforces the "Two-Stage Protocol" mandated for A* publication standards:
+This module enforces the "Two-Stage Protocol" mandated for rigorous research standards:
     1. Hyperparameter Tuning: Use ONLY train + validation splits
     2. Final Evaluation: Use ONLY test split with frozen hyperparameters
 

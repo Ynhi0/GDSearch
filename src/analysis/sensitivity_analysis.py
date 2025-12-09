@@ -335,14 +335,14 @@ def main():
     robustness = analyze_robustness(results_df, threshold=0.01)
     
     if robustness['status'] == 'success':
-        print(f"\n📊 Results:")
+        print(f"\nResults:")
         print(f"  Best Accuracy:        {robustness['best_accuracy']:.4f}")
         print(f"  Mean Accuracy:        {robustness['mean_accuracy']:.4f}")
         print(f"  Std Accuracy:         {robustness['std_accuracy']:.4f}")
         print(f"  Coeff. of Variation:  {robustness['coefficient_of_variation']:.4f}")
         print(f"  Within ±1% ratio:     {robustness['within_threshold_ratio']:.2%}")
-        print(f"\n🎯 Classification: {robustness['classification']}")
-        print(f"\n💡 Interpretation:\n{robustness['interpretation']}")
+        print(f"\nClassification: {robustness['classification']}")
+        print(f"\nInterpretation:\n{robustness['interpretation']}")
     else:
         print(f"{robustness['message']}")
     

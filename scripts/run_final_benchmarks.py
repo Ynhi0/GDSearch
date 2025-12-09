@@ -44,7 +44,7 @@ def run_mnist_experiments(seeds: list = None, results_dir: str = 'results'):
         seeds = list(range(1, 11))  # Seeds 1-10 for statistical validity
     
     print("="*80)
-    print("MNIST EXPERIMENTS - PUBLICATION QUALITY")
+    print("MNIST EXPERIMENTS - HIGH QUALITY")
     print("="*80)
     print(f"Number of seeds: {len(seeds)}")
     print(f"Seeds: {seeds}")
@@ -389,7 +389,7 @@ def main():
     Run all benchmark-quality experiments.
     """
     print("\n" + "="*80)
-    print(" PUBLICATION-QUALITY EXPERIMENT SUITE ")
+    print(" HIGH-QUALITY EXPERIMENT SUITE ")
     print("="*80)
     print("\nThis will generate comprehensive results for your scientific paper:")
     print("1. Multi-seed MNIST experiments (10 seeds × 5 optimizers = 50 runs)")
@@ -445,13 +445,13 @@ def main():
     print("\n" + "="*80)
     print(" EXPERIMENT SUITE COMPLETE ")
     print("="*80)
-    print("\n📊 Results ready for benchmark:")
-    print(f"\n📁 Results directory: {results_dir}/")
+    print("\nResults ready for benchmark:")
+    print(f"\nResults directory: {results_dir}/")
     print("   - mnist_statistical_comparisons_benchmark.csv")
     print("   - optimizer_ablation_summary.csv")
     print("   - initial_condition_robustness_*.csv")
     print("   - Individual experiment CSVs")
-    print(f"\n📈 Plots directory: {plots_dir}/")
+    print(f"\nPlots directory: {plots_dir}/")
     print("   - optimizer_ablation_study.png")
     print("   - initial_condition_robustness_*.png")
     print("   - statistical_*_vs_*.png")

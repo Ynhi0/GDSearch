@@ -10,7 +10,7 @@ This experiment:
 1. Trains the SAME model on the SAME dataset with DIFFERENT optimizers
 2. Tracks detailed dynamics metrics during training
 3. Generates comparative visualizations showing HOW optimizers differ in their dynamics
-4. Provides academic-quality analysis suitable for research publication
+4. Provides detailed analysis suitable for research
 
 Academic Value:
 - Goes beyond final accuracy to understand optimizer BEHAVIOR
@@ -368,14 +368,14 @@ def run_cross_optimizer_dynamics_comparison(
     print(f"\nResults saved to {csv_path}")
     
     # Generate visualizations
-    print("\n📊 Generating comparative visualizations...")
+    print("\nGenerating comparative visualizations...")
     generate_dynamics_comparison_plots(all_results, results_dir, dataset)
     
     return df
 
 
 def generate_dynamics_comparison_plots(results: List[Dict], output_dir: str, dataset: str):
-    """Generate publication-quality comparative plots."""
+    """Generate high-quality comparative plots."""
     
     sns.set_style("whitegrid")
     
@@ -465,7 +465,7 @@ if __name__ == "__main__":
     
     if df is not None:
         print("\n" + "="*80)
-        print("📊 SUMMARY STATISTICS")
+        print("SUMMARY STATISTICS")
         print("="*80)
         print(df.groupby('Optimizer')[['Final_Test_Acc', 'Mean_Speed', 'Smoothness', 'Oscillation_Index']].mean())
         print("="*80)

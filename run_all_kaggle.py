@@ -1022,13 +1022,13 @@ def check_system_requirements():
     if issues:
         print("\nCritical issues found:")
         for issue in issues:
-            print(f"   • {issue}")
+            print(f"   - {issue}")
         return False
 
     if recommendations:
         print("\nRecommendations:")
         for rec in recommendations:
-            print(f"   • {rec}")
+            print(f"   - {rec}")
 
 def setup_logging(log_file: str = "gdsearch_benchmark.log"):
     """Setup comprehensive logging"""
@@ -2814,7 +2814,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
                                 logging.error(f"OOM Error detected for {opt_name}: {e}")
                                 logging.info("Self-Healing: Reducing batch size - skipping this config")
                                 logging.warning("SCIENTIFIC INTEGRITY: This run is INVALID for strict convergence analysis.")
-                                logging.warning("    Re-run with smaller fixed batch size for publication-quality results.")
+                                logging.warning("    Re-run with smaller fixed batch size for high-quality results.")
                                 torch.cuda.empty_cache()
                                 continue  # Skip this optimizer config
                             else:
@@ -3232,7 +3232,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[42,123,456,789,
                     logging.error(f"OOM Error detected for {opt_name}: {e}")
                     logging.info("Self-Healing: Marking run as TAINTED and continuing with reduced functionality")
                     logging.warning("SCIENTIFIC INTEGRITY: This run is TAINTED for strict convergence analysis.")
-                    logging.warning("    Re-run with smaller fixed batch size for publication-quality results.")
+                    logging.warning("    Re-run with smaller fixed batch size for high-quality results.")
                     
                     # AUDIT FIX 5b: Mark as tainted instead of skipping
                     run_tainted = True
@@ -3726,7 +3726,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
                     logging.error(f"OOM Error detected for {opt_name}: {e}")
                     logging.info("Self-Healing: Transformer OOM - skipping this config")
                     logging.warning("SCIENTIFIC INTEGRITY: This run is INVALID for strict convergence analysis.")
-                    logging.warning("    Re-run with smaller fixed batch size for publication-quality results.")
+                    logging.warning("    Re-run with smaller fixed batch size for high-quality results.")
                     torch.cuda.empty_cache()
                     continue  # Skip this optimizer config
                 else:
@@ -7777,7 +7777,7 @@ Examples:
     if '2d_visualization' in selected_experiments:
         with error_context("2D Trajectory Visualization", continue_on_error=True):
             print("\n" + "="*80)
-            print("📊 2D TRAJECTORY VISUALIZATION")
+            print("2D TRAJECTORY VISUALIZATION")
             print("="*80)
             try:
                 from src.visualization.trajectory_2d import (
@@ -8039,7 +8039,7 @@ Examples:
     # Run statistical analysis if scipy available
     if HAS_SCIPY:
         print("\n" + "="*80)
-        print("📊 RUNNING STATISTICAL ANALYSIS...")
+        print("RUNNING STATISTICAL ANALYSIS...")
         print("="*80)
         with error_context("Statistical Analysis", continue_on_error=True):
             stats_df = run_statistical_analysis(results_dir=str(results_dir))

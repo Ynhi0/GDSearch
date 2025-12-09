@@ -147,7 +147,7 @@ def run_single(optimizer_name: str, seed: int, lr: float, epochs: int, batch_siz
 
 def create_cifar10_summary_plots(results_dir: Path, output_file: str = 'cifar10_summary.png'):
     """
-    Create publication-quality summary plots from CIFAR-10 results.
+    Create high-quality summary plots from CIFAR-10 results.
     Generates learning curves comparing all optimizers across seeds.
     """
     import matplotlib.pyplot as plt

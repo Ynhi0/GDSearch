@@ -6,7 +6,7 @@ Provides reusable plotting functions for:
 - Initialization ablation  
 - Comprehensive ablation studies
 
-All functions generate publication-quality plots in PNG and PDF formats.
+All functions generate high-quality plots in PNG and PDF formats.
 """
 
 import numpy as np

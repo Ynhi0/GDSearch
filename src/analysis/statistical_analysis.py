@@ -8,7 +8,7 @@ Includes:
 - Normality testing (Shapiro-Wilk, Anderson-Darling, Kolmogorov-Smirnov)
 - Non-parametric tests (Mann-Whitney U, Wilcoxon signed-rank)
 - Confidence intervals
-- Publication-ready visualizations
+- High-quality visualizations
 """
 
 import os

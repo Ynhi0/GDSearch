@@ -2,7 +2,7 @@
 Hessian Spectrum Analysis for validating optimizer quality.
 
 This module provides tools to analyze the loss landscape curvature and
-flatness of minima found by optimizers - critical evidence for A* publications.
+flatness of minima found by optimizers - critical evidence for rigorous research.
 
 Key analyses:
 - Hessian eigenvalue spectrum (λ_min, λ_max, condition number)

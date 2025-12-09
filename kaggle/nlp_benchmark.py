@@ -151,7 +151,7 @@ def main():
     args = parser.parse_args()
 
     os.makedirs(args.results_dir, exist_ok=True)
-    print(f"🚀 NLP Benchmark using device: {device}")
+    print(f"NLP Benchmark using device: {device}")
 
     # Data
     train_loader, valid_loader, vocab_size = create_data_loaders(args.batch_size)

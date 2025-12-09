@@ -529,7 +529,7 @@ def generate_summary_statistics(results_dir: str = 'results'):
     # MNIST results
     mnist_files = glob.glob(f"{results_dir}/NN_SimpleMLP_MNIST_*_final.csv")
     if mnist_files:
-        print(f"\n📊 MNIST Experiments:")
+        print(f"\nMNIST Experiments:")
         print(f"   Total runs: {len(mnist_files)}")
         
         # Group by optimizer

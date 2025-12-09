@@ -180,20 +180,20 @@ def validate_all_configs(config_dir: str = 'configs', strict: bool = False) -> b
         if issues['errors']:
             print(f"  ERRORS:")
             for err in issues['errors']:
-                print(f"     • {err}")
+                print(f"     - {err}")
             all_valid = False
         
         if issues['zombies']:
-            print(f"  👻 ZOMBIE KEYS (may be ignored by code):")
+            print(f"  ZOMBIE KEYS (may be ignored by code):")
             for zombie in issues['zombies']:
-                print(f"     • {zombie}")
+                print(f"     - {zombie}")
             if strict:
                 all_valid = False
         
         if issues['warnings']:
             print(f"  WARNINGS:")
             for warn in issues['warnings']:
-                print(f"     • {warn}")
+                print(f"     - {warn}")
             if strict:
                 all_valid = False
         
@@ -232,20 +232,20 @@ if __name__ == '__main__':
         issues = validate_config_keys(config_path, strict=strict)
         
         if issues['zombies']:
-            print("👻 ZOMBIE KEYS:")
+            print("ZOMBIE KEYS:")
             for zombie in issues['zombies']:
-                print(f"  • {zombie}")
+                print(f"  - {zombie}")
         
         if issues['errors']:
             print("ERRORS:")
             for err in issues['errors']:
-                print(f"  • {err}")
+                print(f"  - {err}")
             sys.exit(1)
         
         if issues['warnings']:
             print("WARNINGS:")
             for warn in issues['warnings']:
-                print(f"  • {warn}")
+                print(f"  - {warn}")
             if strict:
                 sys.exit(1)
     else:

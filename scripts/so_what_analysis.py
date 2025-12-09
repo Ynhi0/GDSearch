@@ -71,13 +71,13 @@ class SoWhatAnalyzer:
             for i, finding in enumerate(self.findings, 1):
                 f.write(f"## Finding {i}: {', '.join(finding.keywords)}\n\n")
                 
-                f.write("### 📊 Observation\n\n")
+                f.write("### Observation\n\n")
                 f.write(f"{finding.observation}\n\n")
                 
-                f.write("### 🔍 SO WHAT? (Level 1: Mechanistic Insight)\n\n")
+                f.write("### SO WHAT? (Level 1: Mechanistic Insight)\n\n")
                 f.write(f"{finding.so_what_1}\n\n")
                 
-                f.write("### 💡 SO WHAT? (Level 2: Practical Implication)\n\n")
+                f.write("### SO WHAT? (Level 2: Practical Implication)\n\n")
                 f.write(f"{finding.so_what_2}\n\n")
                 
                 f.write("### 📚 Evidence\n\n")
@@ -186,13 +186,13 @@ def main():
     analyzer = create_gdsearch_findings()
     analyzer.generate_report()
     
-    print(f"\n📊 Analysis Statistics:")
+    print(f"\nAnalysis Statistics:")
     print(f"  Total findings: {len(analyzer.findings)}")
     print(f"  Observation → Insight → Implication chains: {len(analyzer.findings)}")
     
-    print(f"\n💡 This analysis demonstrates:")
-    print(f"  ✅ Systematic progression from observation to insight")
-    print(f"  ✅ Clear practical implications")
+    print(f"\nThis analysis demonstrates:")
+    print(f"  Systematic progression from observation to insight")
+    print(f"  Clear practical implications")
     print(f"  ✅ Evidence-backed conclusions")
     print(f"  ✅ Actionable guidance for practitioners")
     

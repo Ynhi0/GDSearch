@@ -178,7 +178,7 @@ def main():
     
     # Device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"🚀 Using device: {device}")
+    print(f"Using device: {device}")
     if torch.cuda.is_available():
         print(f"   GPU: {torch.cuda.get_device_name(0)}")
     print()
@@ -280,9 +280,9 @@ def main():
         # Final summary for this rho
         elapsed_time = time.time() - start_time
         print("=" * 80)
-        print("✅ Training Complete!")
-        print(f"📊 Best Test Accuracy: {best_acc:.2f}%")
-        print(f"⏱️  Total Time: {elapsed_time:.2f}s ({elapsed_time/60:.2f} minutes)")
+        print("Training Complete!")
+        print(f"Best Test Accuracy: {best_acc:.2f}%")
+        print(f"Total Time: {elapsed_time:.2f}s ({elapsed_time/60:.2f} minutes)")
         print("=" * 80)
         print()
         
@@ -299,7 +299,7 @@ def main():
     # Print summary if multiple rho values
     if len(rho_values) > 1:
         print("=" * 80)
-        print("📊 SAM SENSITIVITY ANALYSIS SUMMARY")
+        print("SAM SENSITIVITY ANALYSIS SUMMARY")
         print("=" * 80)
         print(f"Optimizer: {args.optimizer}")
         print(f"Learning Rate: {LEARNING_RATE}")

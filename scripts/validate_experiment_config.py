@@ -92,15 +92,15 @@ class ExperimentValidator:
                 
                 if num_seeds >= RECOMMENDED_CONFIG['recommended_seeds']:
                     self.successes.append(
-                        f"✅ Default seeds: {num_seeds} seeds (excellent for statistical rigor)"
+                        f"PASS: Default seeds: {num_seeds} seeds (excellent for statistical rigor)"
                     )
                 elif num_seeds >= RECOMMENDED_CONFIG['min_seeds']:
                     self.warnings.append(
-                        f"⚠️  Default seeds: {num_seeds} seeds (acceptable, but 10 recommended)"
+                        f"WARNING: Default seeds: {num_seeds} seeds (acceptable, but 10 recommended)"
                     )
                 else:
                     self.issues.append(
-                        f"❌ Default seeds: {num_seeds} seeds (insufficient, minimum 5 required)"
+                        f"FAIL: Default seeds: {num_seeds} seeds (insufficient, minimum 5 required)"
                     )
             
             # Check experiment functions
@@ -115,11 +115,11 @@ class ExperimentValidator:
                 
                 if num_seeds >= RECOMMENDED_CONFIG['min_seeds']:
                     self.successes.append(
-                        f"✅ {func_name}: {num_seeds} default seeds"
+                        f"PASS: {func_name}: {num_seeds} default seeds"
                     )
                 else:
                     self.warnings.append(
-                        f"⚠️  {func_name}: only {num_seeds} default seeds (5+ recommended)"
+                        f"WARNING: {func_name}: only {num_seeds} default seeds (5+ recommended)"
                     )
     
     def check_epoch_configuration(self):
@@ -156,15 +156,15 @@ class ExperimentValidator:
                     
                     if max_full >= 50:
                         self.successes.append(
-                            f"✅ Production epochs: {min_full}-{max_full} (excellent)"
+                            f"PASS: Production epochs: {min_full}-{max_full} (excellent)"
                         )
                     elif max_full >= 20:
                         self.successes.append(
-                            f"✅ Production epochs: {min_full}-{max_full} (good)"
+                            f"PASS: Production epochs: {min_full}-{max_full} (good)"
                         )
                     else:
                         self.warnings.append(
-                            f"⚠️  Production epochs: {min_full}-{max_full} (consider increasing)"
+                            f"WARNING: Production epochs: {min_full}-{max_full} (consider increasing)"
                         )
     
     def check_vram_tracking(self):
@@ -193,11 +193,11 @@ class ExperimentValidator:
             
             if not missing_metrics:
                 self.successes.append(
-                    f"✅ All VRAM metrics tracked: {', '.join(found_metrics)}"
+                    f"PASS: All VRAM metrics tracked: {', '.join(found_metrics)}"
                 )
             else:
                 self.issues.append(
-                    f"❌ Missing VRAM metrics: {', '.join(missing_metrics)}"
+                    f"FAIL: Missing VRAM metrics: {', '.join(missing_metrics)}"
                 )
     
     def check_checkpoint_logic(self):
@@ -219,9 +219,9 @@ class ExperimentValidator:
             
             for component, pattern in required_components.items():
                 if pattern in content:
-                    self.successes.append(f"✅ {component} implemented")
+                    self.successes.append(f"PASS: {component} implemented")
                 else:
-                    self.issues.append(f"❌ {component} missing")
+                    self.issues.append(f"FAIL: {component} missing")
     
     def check_output_integrity(self):
         """Check that experiments produce valid, usable output"""
@@ -235,9 +235,9 @@ class ExperimentValidator:
             
             # Check for DataFrame and CSV exports
             if 'pd.DataFrame' in content and '.to_csv' in content:
-                self.successes.append("✅ CSV output format implemented")
+                self.successes.append("PASS: CSV output format implemented")
             else:
-                self.issues.append("❌ CSV output format not found")
+                self.issues.append("FAIL: CSV output format not found")
             
             # Check for required result fields
             result_fields = [
@@ -252,11 +252,11 @@ class ExperimentValidator:
             found_fields = sum(1 for field in result_fields if field in content)
             if found_fields >= len(result_fields) - 1:  # Allow 1 missing
                 self.successes.append(
-                    f"✅ Result fields: {found_fields}/{len(result_fields)} found"
+                    f"PASS: Result fields: {found_fields}/{len(result_fields)} found"
                 )
             else:
                 self.warnings.append(
-                    f"⚠️  Result fields: only {found_fields}/{len(result_fields)} found"
+                    f"WARNING: Result fields: only {found_fields}/{len(result_fields)} found"
                 )
     
     def check_config_files(self):
@@ -280,34 +280,34 @@ class ExperimentValidator:
                     
                     if epochs >= min_epochs:
                         self.successes.append(
-                            f"✅ {config_file.name}: {epochs} final epochs"
+                            f"PASS: {config_file.name}: {epochs} final epochs"
                         )
                     else:
                         self.issues.append(
-                            f"❌ {config_file.name}: {epochs} epochs (< {min_epochs} recommended)"
+                            f"FAIL: {config_file.name}: {epochs} epochs (< {min_epochs} recommended)"
                         )
                     
                 except Exception as e:
-                    self.issues.append(f"❌ {config_file.name}: Invalid JSON - {e}")
+                    self.issues.append(f"FAIL: {config_file.name}: Invalid JSON - {e}")
     
     def print_summary(self):
         """Print validation summary"""
         print("\n" + "=" * 70)
-        print("📊 VALIDATION SUMMARY")
+        print("VALIDATION SUMMARY")
         print("=" * 70)
         
         if self.successes:
-            print(f"\n✅ PASSED ({len(self.successes)}):")
+            print(f"\nPASSED ({len(self.successes)}):")
             for success in self.successes:
                 print(f"  {success}")
         
         if self.warnings:
-            print(f"\n⚠️  WARNINGS ({len(self.warnings)}):")
+            print(f"\nWARNINGS ({len(self.warnings)}):")
             for warning in self.warnings:
                 print(f"  {warning}")
         
         if self.issues:
-            print(f"\n❌ ISSUES ({len(self.issues)}):")
+            print(f"\nISSUES ({len(self.issues)}):")
             for issue in self.issues:
                 print(f"  {issue}")
         
@@ -315,11 +315,11 @@ class ExperimentValidator:
         print("\n" + "=" * 70)
         if not self.issues:
             if not self.warnings:
-                print("✅ ALL CHECKS PASSED - Codebase is production-ready!")
+                print("ALL CHECKS PASSED - Codebase is analysis-ready!")
             else:
-                print("⚠️  MOSTLY GOOD - Some minor improvements recommended")
+                print("MOSTLY GOOD - Some minor improvements recommended")
         else:
-            print("❌ ISSUES FOUND - Please address the problems above")
+            print("ISSUES FOUND - Please address the problems above")
         print("=" * 70)
         
         # Return exit code

@@ -23,7 +23,7 @@ print(f"   Final params: {params}")
 print(f"   No division by zero or NaN errors")
 
 # Test 2: AdamW with epsilon guards
-print("\n✅ Test 2: AdamW optimizer with epsilon guards")
+print("\nPASS: Test 2: AdamW optimizer with epsilon guards")
 opt_adamw = AdamW(lr=0.001, weight_decay=0.01)
 params2 = np.array([1.0, 2.0])
 for i in range(100):
@@ -31,7 +31,7 @@ for i in range(100):
 print(f"   AdamW ran 100 steps successfully")
 
 # Test 3: All advanced optimizers
-print("\n✅ Test 3: Advanced optimizers (AdaBound, RAdam, LAMB)")
+print("\nPASS: Test 3: Advanced optimizers (AdaBound, RAdam, LAMB)")
 optimizers = [
     AdaBound(lr=0.001),
     RAdam(lr=0.001),
@@ -45,7 +45,7 @@ for opt in optimizers:
     print(f"   {opt.name} ran 50 steps successfully")
 
 # Test 4: Verify no duplicate initialization
-print("\n✅ Test 4: Verify Adam initialization (no duplicates)")
+print("\nPASS: Test 4: Verify Adam initialization (no duplicates)")
 opt_test = Adam(lr=0.001)
 params_init = np.array([5.0, 5.0])
 grads_init = np.array([0.5, 0.5])
@@ -57,6 +57,6 @@ print("\n" + "=" * 60)
 print("ALL VALIDATION TESTS PASSED")
 print("=" * 60)
 print("\nSummary:")
-print("  ✅ BUG #1 Fixed: No duplicate v initialization")
-print("  ✅ BUG #2 Fixed: Epsilon guards prevent division by zero")
-print("  ✅ All optimizers numerically stable for 100+ steps")
+print("  PASS: BUG #1 Fixed: No duplicate v initialization")
+print("  PASS: BUG #2 Fixed: Epsilon guards prevent division by zero")
+print("  PASS: All optimizers numerically stable for 100+ steps")

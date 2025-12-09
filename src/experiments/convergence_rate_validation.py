@@ -335,5 +335,5 @@ if __name__ == '__main__':
     
     results = run_convergence_rate_comparison()
     
-    print("\n📊 Theory vs Practice Validation Complete!")
+    print("\nTheory vs Practice Validation Complete!")
     print("   Check plots and CSV files for detailed analysis.")
