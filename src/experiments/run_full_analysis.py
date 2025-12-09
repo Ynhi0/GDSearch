@@ -81,7 +81,7 @@ def run_full_pipeline(
         results_dir=results_dir
     )
     
-    print(f"✅ Completed {len(result_files)} experiment runs")
+    print(f"Completed {len(result_files)} experiment runs")
     
     # ====================================================================
     # PHASE 2: AGGREGATE RESULTS
@@ -111,7 +111,7 @@ def run_full_pipeline(
     # Save aggregated results
     agg_path = os.path.join(results_dir, 'aggregated_results.json')
     save_aggregated_results(aggregated, agg_path)
-    print(f"\n✅ Aggregated results saved to: {agg_path}")
+    print(f"\nAggregated results saved to: {agg_path}")
     
     # ====================================================================
     # PHASE 3: STATISTICAL COMPARISONS
@@ -135,7 +135,7 @@ def run_full_pipeline(
             dfs_B = load_multiseed_results(pattern_B, results_dir)
             
             if not dfs_A or not dfs_B:
-                print(f"⚠️ Missing results for {opt_A} or {opt_B}, skipping...")
+                print(f"Missing results for {opt_A} or {opt_B}, skipping...")
                 continue
             
             # Extract final metric
@@ -181,7 +181,7 @@ def run_full_pipeline(
                 
                 # Warn if seeds don't fully match
                 if seeds_A_only or seeds_B_only:
-                    print(f"⚠️  Seed mismatch detected:")
+                    print(f"Seed mismatch detected:")
                     print(f"   {opt_A} has {len(map_A)} seeds, {opt_B} has {len(map_B)} seeds, {n_common_seeds} in common")
                     if seeds_A_only:
                         print(f"   {opt_A}-only seeds: {sorted(seeds_A_only)}")
@@ -193,11 +193,11 @@ def run_full_pipeline(
                     results_A = np.array([map_A[s] for s in common], dtype=float)
                     results_B = np.array([map_B[s] for s in common], dtype=float)
                     paired = True
-                    print(f"✅ Using paired test with {n_common_seeds} common seeds: {common}\n")
+                    print(f"Using paired test with {n_common_seeds} common seeds: {common}\n")
                 else:
                     # Fallback to unpaired if insufficient common seeds
                     if n_common_seeds > 0:
-                        print(f"⚠️  Only {n_common_seeds} common seed(s), need ≥3 for pairing. Falling back to unpaired.\n")
+                        print(f"Only {n_common_seeds} common seed(s), need ≥3 for pairing. Falling back to unpaired.\n")
                     finals_A = []
                     finals_B = []
                     for df in dfs_A:
@@ -318,7 +318,7 @@ def run_full_pipeline(
             paired_count = df_summary['Paired'].sum()
             unpaired_count = len(df_summary) - paired_count
             if unpaired_count > 0 and task_type == 'neural_network':
-                print(f"\n⚠️  Seed Consistency Summary:")
+                print(f"\nSeed Consistency Summary:")
                 print(f"   {paired_count}/{len(df_summary)} comparisons used paired tests.")
                 print(f"   {unpaired_count}/{len(df_summary)} fell back to unpaired (insufficient common seeds).")
                 if df_summary['n_common_seeds'].notna().any():
@@ -381,7 +381,7 @@ def run_full_pipeline(
     )
     
     print("\n" + "="*70)
-    print("✅ FULL PIPELINE COMPLETED!")
+    print("FULL PIPELINE COMPLETED!")
     print("="*70)
     print(f"Results directory: {results_dir}")
     print(f"Plots directory: {plots_dir}")
@@ -421,7 +421,7 @@ def main():
         # If the config looks like a tuning config (has 'sweeps'/'final') but no top-level 'optimizer',
         # provide a helpful message instead of failing deep inside.
         if 'optimizer' not in base_cfg_preview and ('sweeps' in base_cfg_preview or 'final' in base_cfg_preview):
-            print("\n⚠️ The provided config appears to be a tuning spec (contains 'sweeps'/'final') without a top-level 'optimizer'.")
+            print("\nThe provided config appears to be a tuning spec (contains 'sweeps'/'final') without a top-level 'optimizer'.")
             print("   This runner expects a single-optimizer config, e.g.: {\n     'model': 'SimpleMLP', 'dataset': 'MNIST', 'optimizer': 'AdamW', 'lr': 1e-3, 'epochs': 5, 'batch_size': 128\n   }")
             print("   To generate tuned configs and results, run: python scripts/tune_nn.py (which reads configs/nn_tuning.json).\n")
     except Exception:

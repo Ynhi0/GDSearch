@@ -156,7 +156,7 @@ def run_optimizer_ablation(
     df_summary = pd.DataFrame(summary_metrics)
     summary_path = os.path.join(results_dir, 'optimizer_ablation_summary.csv')
     df_summary.to_csv(summary_path, index=False)
-    print(f"\n✅ Summary saved to: {summary_path}")
+    print(f"\nSummary saved to: {summary_path}")
     
     # Create figure with subplots
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
@@ -247,7 +247,7 @@ def run_optimizer_ablation(
     
     plot_path = os.path.join(plots_dir, 'optimizer_ablation_study.png')
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
-    print(f"✅ Plot saved to: {plot_path}")
+    print(f"Plot saved to: {plot_path}")
     plt.close()
     
     # Print summary table
@@ -281,7 +281,7 @@ def main():
         plots_dir='plots'
     )
     
-    print("✅ Ablation study complete!")
+    print("Ablation study complete!")
 
 
 if __name__ == '__main__':

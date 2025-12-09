@@ -1,7 +1,7 @@
 """
 Fine-tune a Transformer (BERT) on IMDB with optimizer comparisons and gradient dynamics logging.
 
-⚠️ DEMO/PROOF-OF-CONCEPT SCRIPT ⚠️
+DEMO/PROOF-OF-CONCEPT SCRIPT
 
 CRITICAL LIMITATION (AUDIT FLAG):
 This script uses a LIMITED subset of IMDB (2000 train, 1000 test) and supports

@@ -1173,7 +1173,7 @@ def load_experiment_config(config_path: str = None) -> Dict[str, Any]:
         else:
             # AUDIT FIX (Dec 2025): Fail loudly on missing config for transparency
             raise FileNotFoundError(
-                f"❌ CRITICAL: Config file not found: {config_path}\n"
+                f"CRITICAL: Config file not found: {config_path}\n"
                 f"   Expected config at specified path but file does not exist.\n"
                 f"   Either provide valid config path or set to None for defaults."
             )
@@ -1182,7 +1182,7 @@ def load_experiment_config(config_path: str = None) -> Dict[str, Any]:
     except Exception as e:
         # AUDIT FIX (Dec 2025): Fail loudly on config errors
         raise RuntimeError(
-            f"❌ CRITICAL: Error loading config from {config_path}: {e}\n"
+            f"CRITICAL: Error loading config from {config_path}: {e}\n"
             f"   Config file exists but cannot be parsed. Fix the config file or use None for defaults."
         ) from e
 
@@ -5606,7 +5606,7 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=[42], resum
                 logging.info(f"   Retrying... ({attempt+2}/{max_retries})")
                 time.sleep(2)
             else:
-                logging.error(f"❌ Failed to download MNIST after {max_retries} attempts")
+                logging.error(f"Failed to download MNIST after {max_retries} attempts")
                 raise
     
     train_loader = make_dataloader(train_dataset, batch_size=256, shuffle=True, seed=seed, num_workers=2, pin_memory=True)
@@ -5985,12 +5985,12 @@ def run_distributed_experiment(results_dir="results_distributed", world_size=2, 
 
     # Check if distributed training is possible
     if not torch.cuda.is_available():
-        print("❌ Distributed training requires CUDA GPUs")
+        print("Distributed training requires CUDA GPUs")
         return None
 
     gpu_count = torch.cuda.device_count()
     if gpu_count < 2:
-        print(f"❌ Distributed training requires at least 2 GPUs, found {gpu_count}")
+        print(f"Distributed training requires at least 2 GPUs, found {gpu_count}")
         return None
 
     print(f"Setting up distributed training with {gpu_count} GPUs")
@@ -6015,7 +6015,7 @@ def run_distributed_experiment(results_dir="results_distributed", world_size=2, 
         return {"status": "success", "world_size": world_size, "backend": backend}
 
     except Exception as e:
-        print(f"❌ Distributed training failed: {e}")
+        print(f"Distributed training failed: {e}")
         return {"status": "failed", "error": str(e)}
 
 def distributed_training_worker(rank, world_size, backend, results_dir):
@@ -6117,7 +6117,7 @@ def run_advanced_architecture_experiment(results_dir="results_advanced_arch", ep
                 logging.info(f"   Retrying... ({attempt+2}/{max_retries})")
                 time.sleep(2)
             else:
-                logging.error(f"❌ Failed to download CIFAR-10 after {max_retries} attempts")
+                logging.error(f"Failed to download CIFAR-10 after {max_retries} attempts")
                 raise
     
     train_loader = make_dataloader(train_dataset, batch_size=32, shuffle=True, seed=None, num_workers=0)
@@ -6276,12 +6276,12 @@ def run_code_quality_checks():
             result = subprocess.run([sys.executable, "-m", "black", "--check", "--diff", "src/"],
                                   capture_output=True, text=True)
             if result.returncode == 0:
-                print("✅ Code formatting is correct")
+                print("Code formatting is correct")
             else:
-                print("⚠️  Code formatting issues found:")
+                print("Code formatting issues found:")
                 print(result.stdout[:500] + "..." if len(result.stdout) > 500 else result.stdout)
         except FileNotFoundError:
-            print("⚠️  black not available")
+            print("black not available")
 
         # Run import sorting check
         print("📦 Checking import sorting with isort...")
@@ -6289,17 +6289,17 @@ def run_code_quality_checks():
             result = subprocess.run([sys.executable, "-m", "isort", "--check-only", "--diff", "src/"],
                                   capture_output=True, text=True)
             if result.returncode == 0:
-                print("✅ Imports are properly sorted")
+                print("Imports are properly sorted")
             else:
-                print("⚠️  Import sorting issues found:")
+                print("Import sorting issues found:")
                 print(result.stdout[:500] + "..." if len(result.stdout) > 500 else result.stdout)
         except FileNotFoundError:
-            print("⚠️  isort not available")
+            print("isort not available")
 
-        print("✅ Code quality checks completed")
+        print("Code quality checks completed")
 
     except Exception as e:
-        print(f"⚠️  Code quality checks failed: {e}")
+        print(f"Code quality checks failed: {e}")
 
 def generate_documentation(results_dir="docs"):
     """Generate comprehensive documentation and reports"""
@@ -6416,7 +6416,7 @@ This project is part of the GDSearch research platform for optimizer comparison.
     with open(f"{results_dir}/PERFORMANCE_REPORT.md", "w") as f:
         f.write(perf_report)
 
-    print(f"✅ Documentation generated in {results_dir}/")
+    print(f"Documentation generated in {results_dir}/")
     print("   - BENCHMARK_README.md")
     print("   - PERFORMANCE_REPORT.md")
 
@@ -6622,15 +6622,15 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=[42,123,456,789,10
         try:
             train_dataset = torchvision.datasets.CIFAR10('./data', train=True, download=True, transform=transform)
             test_dataset = torchvision.datasets.CIFAR10('./data', train=False, download=True, transform=transform)
-            logging.info("✅ CIFAR-10 dataset loaded successfully for ResNet")
+            logging.info("CIFAR-10 dataset loaded successfully for ResNet")
             break
         except Exception as e:
             if attempt < max_retries - 1:
-                logging.warning(f"⚠️  CIFAR-10 download attempt {attempt+1} failed: {e}")
+                logging.warning(f"CIFAR-10 download attempt {attempt+1} failed: {e}")
                 logging.info(f"   Retrying... ({attempt+2}/{max_retries})")
                 time.sleep(2)
             else:
-                logging.error(f"❌ Failed to download CIFAR-10 after {max_retries} attempts")
+                logging.error(f"Failed to download CIFAR-10 after {max_retries} attempts")
                 raise
 
     # Get optimized batch sizes and DataLoader kwargs
@@ -6682,7 +6682,7 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=[42,123,456,789,10
 
         # Sanity check: Verify all batches were processed
         if epoch > 1 and train_acc < 10.0:
-            logging.error(f"⚠️ SANITY CHECK FAILED: ResNet train accuracy {train_acc:.1f}% is suspiciously low")
+            logging.error(f"SANITY CHECK FAILED: ResNet train accuracy {train_acc:.1f}% is suspiciously low")
 
         # Test
         model.eval()
@@ -6964,7 +6964,7 @@ def get_kaggle_t4_config():
         config['multi_gpu'] = False
         config['gpu_memory_gb'] = 0
         config['use_amp'] = False
-        print("⚠️  No GPU detected - T4 optimizations disabled")
+        print("No GPU detected - T4 optimizations disabled")
     
     return config
 
@@ -7038,7 +7038,7 @@ Examples:
     parser.add_argument('--strict-config', action='store_true',
                         help='AUDIT MODE: Treat config warnings and zombie keys as errors (fails fast on config issues)')
     
-    # ✅ AUDIT FIX 10: Add CLI flags for advanced training features
+    # AUDIT FIX 10: Add CLI flags for advanced training features
     parser.add_argument('--use-amp', action='store_true',
                         help='Enable Automatic Mixed Precision (AMP) training for faster training on GPUs')
     parser.add_argument('--use-ema', action='store_true',
@@ -7048,22 +7048,22 @@ Examples:
     
     args = parser.parse_args()
     
-    # ✅ AUDIT FIX 1: Load experiment configuration from JSON if provided
+    # AUDIT FIX 1: Load experiment configuration from JSON if provided
     # This ensures that --config CLI argument is actually used and config authority is enforced
     experiment_config = None
     if args.config:
         try:
             experiment_config = load_experiment_config(args.config)
-            print(f"✅ Loaded experiment config from: {args.config}")
+            print(f"Loaded experiment config from: {args.config}")
             if args.strict_config:
                 # In strict mode, validate that all config keys are recognized
-                print("   🔒 Strict config mode: validating configuration keys...")
+                print("   Strict config mode: validating configuration keys...")
         except Exception as e:
             error_msg = f"Failed to load config from {args.config}: {e}"
             if args.strict_config:
                 raise RuntimeError(error_msg)
             else:
-                print(f"⚠️  {error_msg}")
+                print(f"{error_msg}")
                 print("   Continuing with default configuration...")
     
     # Store loaded config in global namespace for experiment functions to access
@@ -7098,7 +7098,7 @@ Examples:
     ]
     
     for name, available, deps in modules_status:
-        status = "✅" if available else "⚠️ "
+        status = "" if available else "WARNING: "
         availability = "Available" if available else f"Not available (install {deps})"
         print(f"   {status} {name}: {availability}")
     
@@ -7112,7 +7112,7 @@ Examples:
     ADAPTIVE_BATCH_ENABLED = args.adaptive_batch or args.auto_tune
     ULTRA_QUICK_MODE = args.ultra_quick
     
-    # ✅ AUDIT FIX 10b: Wire advanced training features to global flags
+    # AUDIT FIX 10b: Wire advanced training features to global flags
     USE_AMP = args.use_amp or (args.kaggle_t4 if hasattr(args, 'kaggle_t4') else False)
     USE_EMA = args.use_ema
     LABEL_SMOOTHING = args.label_smoothing
@@ -7128,11 +7128,11 @@ Examples:
     if ADAPTIVE_BATCH_ENABLED:
         print("📦 Adaptive batch sizing enabled: will auto-detect optimal batch size")
     
-    # ✅ AUDIT FIX 10c: Display advanced training features status
+    # AUDIT FIX 10c: Display advanced training features status
     if USE_AMP:
-        print("⚡ Automatic Mixed Precision (AMP) enabled: faster training with reduced memory")
+        print("Automatic Mixed Precision (AMP) enabled: faster training with reduced memory")
     if USE_EMA:
-        print("📈 Exponential Moving Average (EMA) enabled: smoother model weight updates")
+        print("Exponential Moving Average (EMA) enabled: smoother model weight updates")
     if LABEL_SMOOTHING > 0:
         print(f"🎯 Label Smoothing enabled: factor={LABEL_SMOOTHING}")
     
@@ -7168,7 +7168,7 @@ Examples:
     profiler = PerformanceProfiler() if args.profile else None
     tracker = None if args.no_mlflow else (ExperimentTracker() if HAS_MLFLOW else None)
     
-    # ✅ AUDIT FIX 4: Checkpoint manager ALWAYS initialized (enabled by default)
+    # AUDIT FIX 4: Checkpoint manager ALWAYS initialized (enabled by default)
     # This ensures model weights are saved for post-hoc loss landscape visualization
     # and reproducibility. Checkpoints include model, optimizer, scheduler, RNG states.
     checkpoint_manager = RobustCheckpointManager(
@@ -7209,7 +7209,7 @@ Examples:
                 f.write("## Completed Experiments\n")
                 for exp, result in experiment_results.items():
                     if result is not None:
-                        f.write(f"- ✅ {exp}\n")
+                        f.write(f"- {exp}\n")
                 f.write("\n## Pending Experiments (run with --resume)\n")
                 for exp in selected_experiments:
                     if exp not in experiment_results or experiment_results.get(exp) is None:
@@ -7331,7 +7331,7 @@ Examples:
             all_match = True
             for key in weights_10:
                 if not torch.allclose(weights_10[key], weights_resumed[key], atol=1e-6):
-                    print(f"   ❌ Mismatch in {key}:")
+                    print(f"   Mismatch in {key}:")
                     print(f"      10-step: {weights_10[key]}")
                     print(f"      resumed: {weights_resumed[key]}")
                     all_match = False
@@ -7340,15 +7340,15 @@ Examples:
             os.unlink(checkpoint_path)
             
             if all_match:
-                print("   ✅ GOLDEN TEST PASSED: Resume produces identical weights!")
+                print("   GOLDEN TEST PASSED: Resume produces identical weights!")
                 print("   Train(10) == Train(5) → Save → Load → Train(5)")
             else:
-                print("   ❌ GOLDEN TEST FAILED: Resume produces different weights!")
+                print("   GOLDEN TEST FAILED: Resume produces different weights!")
                 print("   This indicates a bug in checkpoint save/restore logic.")
                 return None
                 
         except Exception as e:
-            print(f"   ❌ GOLDEN TEST ERROR: {e}")
+            print(f"   GOLDEN TEST ERROR: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -7410,7 +7410,7 @@ Examples:
             return experiment_results
         with error_context("NLP Experiment", continue_on_error=True):
             if not HAS_HF:
-                print("⚠️  Hugging Face transformers not available - skipping NLP")
+                print("Hugging Face transformers not available - skipping NLP")
                 experiment_results['nlp'] = None
             else:
                 experiment_results['nlp'] = run_nlp_experiment(
@@ -7532,7 +7532,7 @@ Examples:
                     seeds=seeds,
                     results_dir=str(experiments_dir / "lr_ablation")
                 )
-                print("✅ Learning rate ablation completed!")
+                print("Learning rate ablation completed!")
             except Exception as e:
                 logging.error(f"Learning rate ablation failed: {e}")
                 experiment_results['lr_ablation'] = None
@@ -7563,7 +7563,7 @@ Examples:
                     seeds=seeds,
                     results_dir=str(experiments_dir / "wd_ablation")
                 )
-                print("✅ Weight decay ablation completed!")
+                print("Weight decay ablation completed!")
             except Exception as e:
                 logging.error(f"Weight decay ablation failed: {e}")
                 experiment_results['wd_ablation'] = None
@@ -7617,7 +7617,7 @@ Examples:
                     )
                     
                     experiment_results['missing_ablations'] = results_dict
-                    print("✅ Missing ablation studies completed (all 5)!")
+                    print("Missing ablation studies completed (all 5)!")
             except Exception as e:
                 logging.error(f"Missing ablations failed: {e}")
                 experiment_results['missing_ablations'] = None
@@ -7643,9 +7643,9 @@ Examples:
                         alpha=0.05
                     )
                     experiment_results['optimizer_comparison'] = "Completed"
-                    print("✅ Optimizer comparison matrix completed!")
+                    print("Optimizer comparison matrix completed!")
                 else:
-                    print("⚠️  MNIST results not found - run MNIST experiments first")
+                    print("MNIST results not found - run MNIST experiments first")
                     experiment_results['optimizer_comparison'] = None
             except Exception as e:
                 logging.error(f"Optimizer comparison failed: {e}")
@@ -7711,7 +7711,7 @@ Examples:
                     )
                     
                     experiment_results['hyperparam_sensitivity'] = "Completed"
-                    print("✅ Hyperparameter sensitivity analysis completed!")
+                    print("Hyperparameter sensitivity analysis completed!")
             except Exception as e:
                 logging.error(f"Hyperparameter sensitivity failed: {e}")
                 experiment_results['hyperparam_sensitivity'] = None
@@ -7742,7 +7742,7 @@ Examples:
                     )
                     
                     experiment_results['convergence_validation'] = "Completed"
-                    print("✅ Convergence rate validation completed!")
+                    print("Convergence rate validation completed!")
             except Exception as e:
                 logging.error(f"Convergence validation failed: {e}")
                 experiment_results['convergence_validation'] = None
@@ -7768,7 +7768,7 @@ Examples:
                     run_all_ablation_studies(output_dir=ablation_dir)
                     
                     experiment_results['ablation_comprehensive'] = "Completed"
-                    print("✅ Comprehensive ablation studies completed!")
+                    print("Comprehensive ablation studies completed!")
             except Exception as e:
                 logging.error(f"Comprehensive ablation failed: {e}")
                 experiment_results['ablation_comprehensive'] = None
@@ -7818,7 +7818,7 @@ Examples:
                     )
                     
                     experiment_results['2d_visualization'] = "Completed"
-                    print("✅ 2D trajectory visualization completed!")
+                    print("2D trajectory visualization completed!")
             except Exception as e:
                 logging.error(f"2D visualization failed: {e}")
                 experiment_results['2d_visualization'] = None

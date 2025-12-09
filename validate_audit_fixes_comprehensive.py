@@ -62,7 +62,7 @@ class AuditFixValidator:
             passed, message = check_func()
             self.results.append((name, passed, message))
             
-            status = "✅ PASS" if passed else "❌ FAIL"
+            status = "PASS" if passed else "FAIL"
             print(f"{status} - {name}")
             if message:
                 print(f"      {message}")
@@ -78,14 +78,14 @@ class AuditFixValidator:
         print(f"Passed: {passed_count}/{total_count}")
         
         if passed_count == total_count:
-            print("\n🎉 ALL AUDIT FIXES VALIDATED SUCCESSFULLY!")
+            print("\nALL AUDIT FIXES VALIDATED SUCCESSFULLY!")
             return True
         else:
-            print("\n⚠️  SOME AUDIT FIXES FAILED VALIDATION")
+            print("\nSOME AUDIT FIXES FAILED VALIDATION")
             print("\nFailed checks:")
             for name, passed, message in self.results:
                 if not passed:
-                    print(f"  ❌ {name}")
+                    print(f"  {name}")
                     if message:
                         print(f"      {message}")
             return False
@@ -264,7 +264,7 @@ def main():
         success = validator.validate_all()
         
         if success:
-            print("\n✅ All critical audit fixes have been successfully validated!")
+            print("\nAll critical audit fixes have been successfully validated!")
             print("\nNext steps:")
             print("  1. Run a quick test: python run_all_kaggle.py --ultra-quick --experiments mnist")
             print("  2. Test config loading: python run_all_kaggle.py --config configs/benchmark_hyperparameters.json --quick")
@@ -272,11 +272,11 @@ def main():
             print("  4. Run full validation: python scripts/quick_validation_test.py")
             return 0
         else:
-            print("\n❌ Validation failed. Please review and fix the failing checks.")
+            print("\nValidation failed. Please review and fix the failing checks.")
             return 1
             
     except Exception as e:
-        print(f"\n❌ Validation error: {e}")
+        print(f"\nValidation error: {e}")
         import traceback
         traceback.print_exc()
         return 1

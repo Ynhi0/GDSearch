@@ -1,7 +1,7 @@
 """
 Medical image segmentation (3D U-Net, MONAI) with Dice metric logging and CSV output.
 
-⚠️ DEMO/PROOF-OF-CONCEPT SCRIPT ⚠️
+DEMO/PROOF-OF-CONCEPT SCRIPT
 
 CRITICAL LIMITATION (AUDIT FLAG):
 This is a SCAFFOLD with PLACEHOLDER data paths and supports ONLY the Adam optimizer.

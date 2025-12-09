@@ -194,7 +194,7 @@ def run_robustness_experiment(
     # Save detailed results
     detail_path = os.path.join(results_dir, f'initial_condition_robustness_detailed_{func_type}.csv')
     df_detailed.to_csv(detail_path, index=False)
-    print(f"\n✅ Detailed results saved to: {detail_path}")
+    print(f"\nDetailed results saved to: {detail_path}")
     
     # Aggregate by optimizer
     agg_rows = []
@@ -232,7 +232,7 @@ def run_robustness_experiment(
     # Save aggregated results
     agg_path = os.path.join(results_dir, f'initial_condition_robustness_summary_{func_type}.csv')
     df_agg.to_csv(agg_path, index=False)
-    print(f"✅ Aggregated summary saved to: {agg_path}")
+    print(f"Aggregated summary saved to: {agg_path}")
     
     # Plot success rate comparison
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -257,7 +257,7 @@ def run_robustness_experiment(
     plt.tight_layout()
     plot_path = os.path.join(plots_dir, f'initial_condition_robustness_{func_type}.png')
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
-    print(f"✅ Plot saved to: {plot_path}")
+    print(f"Plot saved to: {plot_path}")
     plt.close()
     
     # Print summary
@@ -318,7 +318,7 @@ def main():
         plots_dir=args.plots_dir
     )
     
-    print("\n✅ Robustness experiment complete!")
+    print("\nRobustness experiment complete!")
 
 
 if __name__ == '__main__':

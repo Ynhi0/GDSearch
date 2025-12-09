@@ -161,7 +161,7 @@ def create_cifar10_summary_plots(results_dir: Path, output_file: str = 'cifar10_
         csv_files = glob.glob(str(results_dir / "NN_SimpleCIFAR10_*.csv"))
     
     if not csv_files:
-        print("⚠️  No CIFAR-10 results found for visualization")
+        print("No CIFAR-10 results found for visualization")
         return
     
     # Parse results
@@ -180,7 +180,7 @@ def create_cifar10_summary_plots(results_dir: Path, output_file: str = 'cifar10_
         elif 'SimpleCIFAR10' in parts:
             opt_start = parts.index('SimpleCIFAR10') + 1  # Legacy format
         else:
-            print(f"⚠️  Skipping unrecognized format: {basename}")
+            print(f"Skipping unrecognized format: {basename}")
             continue
         
         opt_parts = []
@@ -310,7 +310,7 @@ def create_cifar10_summary_plots(results_dir: Path, output_file: str = 'cifar10_
     plt.tight_layout()
     output_path = results_dir / output_file
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    print(f"✅ CIFAR-10 summary plot saved: {output_path}")
+    print(f"CIFAR-10 summary plot saved: {output_path}")
     plt.close()
     
     return output_path

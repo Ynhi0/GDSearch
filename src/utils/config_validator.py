@@ -178,7 +178,7 @@ def validate_all_configs(config_dir: str = 'configs', strict: bool = False) -> b
         issues = validate_config_keys(str(config_file), strict=strict)
         
         if issues['errors']:
-            print(f"  ❌ ERRORS:")
+            print(f"  ERRORS:")
             for err in issues['errors']:
                 print(f"     • {err}")
             all_valid = False
@@ -191,14 +191,14 @@ def validate_all_configs(config_dir: str = 'configs', strict: bool = False) -> b
                 all_valid = False
         
         if issues['warnings']:
-            print(f"  ⚠️  WARNINGS:")
+            print(f"  WARNINGS:")
             for warn in issues['warnings']:
                 print(f"     • {warn}")
             if strict:
                 all_valid = False
         
         if not issues['errors'] and not issues['warnings'] and not issues['zombies']:
-            print(f"  ✅ Valid")
+            print(f"  Valid")
     
     return all_valid
 
@@ -237,13 +237,13 @@ if __name__ == '__main__':
                 print(f"  • {zombie}")
         
         if issues['errors']:
-            print("❌ ERRORS:")
+            print("ERRORS:")
             for err in issues['errors']:
                 print(f"  • {err}")
             sys.exit(1)
         
         if issues['warnings']:
-            print("⚠️  WARNINGS:")
+            print("WARNINGS:")
             for warn in issues['warnings']:
                 print(f"  • {warn}")
             if strict:
@@ -255,4 +255,4 @@ if __name__ == '__main__':
             print("(STRICT MODE: warnings and zombies treated as errors)")
         if not validate_all_configs(strict=strict):
             sys.exit(1)
-        print("\n✅ All configs validated successfully!")
+        print("\nAll configs validated successfully!")
