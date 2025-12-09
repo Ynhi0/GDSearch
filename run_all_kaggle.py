@@ -6089,7 +6089,7 @@ def distributed_training_worker(rank, world_size, backend, results_dir):
 def run_advanced_architecture_experiment(results_dir="results_advanced_arch", epochs=5):
     """Run experiments with advanced architectures like Vision Transformer"""
     print("\n" + "="*80)
-    print("🚀 ADVANCED ARCHITECTURE EXPERIMENTS")
+    print("ADVANCED ARCHITECTURE EXPERIMENTS")
     print("="*80)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -6559,7 +6559,7 @@ This report provides detailed performance analysis of the GDSearch benchmark sui
 def print_system_info():
     """Print system information"""
     info = get_system_info()
-    print("📊 System Information:")
+    print("System Information:")
     for k, v in info.items():
         print(f"  {k}: {v}")
     print()
@@ -7121,10 +7121,10 @@ Examples:
     if ULTRA_QUICK_MODE:
         args.quick = True
         args.skip_tuning = True
-        print("⚡ Ultra-quick mode: 2 epochs, ALL optimizers, ALL experiments, skip tuning")
+        print("Ultra-quick mode: 2 epochs, ALL optimizers, ALL experiments, skip tuning")
     
     if AUTO_LR_ENABLED:
-        print("🔍 Auto-LR enabled: will use LR Finder before training")
+        print("Auto-LR enabled: will use LR Finder before training")
     if ADAPTIVE_BATCH_ENABLED:
         print("📦 Adaptive batch sizing enabled: will auto-detect optimal batch size")
     
@@ -7219,7 +7219,7 @@ Examples:
             print(f"   ✗ Could not generate partial report: {e}")
     
     print("="*80)
-    print("🚀 GDSEARCH KAGGLE BENCHMARK SUITE")
+    print("GDSEARCH KAGGLE BENCHMARK SUITE")
     print("="*80)
     print(f"Configuration:")
     print(f"  Seeds: {seeds}")
@@ -7625,7 +7625,7 @@ Examples:
     if 'optimizer_comparison' in selected_experiments and HAS_STATS:
         with error_context("Optimizer Comparison Matrix", continue_on_error=True):
             print("\n" + "="*80)
-            print("📊 OPTIMIZER COMPARISON MATRIX")
+            print("OPTIMIZER COMPARISON MATRIX")
             print("="*80)
             try:
                 from src.analysis.optimizer_comparison_matrix import run_optimizer_comparison_matrix
@@ -8128,15 +8128,15 @@ Examples:
     print("="*80)
     
     if profiler:
-        print("\n📊 Performance Summary:")
+        print("\n Performance Summary:")
         profiler.print_summary()
     
     print("\n" + "="*80)
-    print("📖 QUICK ACCESS GUIDE")
+    print(" QUICK ACCESS GUIDE")
     print("="*80)
-    print(f"  📁 Main directory: {results_dir}/")
+    print(f"  Main directory: {results_dir}/")
     print(f"")
-    print(f"  📊 Analysis Results:")
+    print(f"   Analysis Results:")
     print(f"     - Basic stats: {results_dir}/analysis/00_basic_statistics.csv")
     print(f"     - Cross-experiment: {results_dir}/analysis/cross_experiment_aggregation.csv")
     print(f"     - Optimizer rankings: {results_dir}/analysis/optimizer_rankings.csv")
@@ -8147,25 +8147,25 @@ Examples:
         print(f"     - Cross-exp stats: {results_dir}/analysis/cross_experiment_statistics.csv")
     print(f"")
     if HAS_INTERACTIVE:
-        print(f"  📈 Visualizations:")
+        print(f"  Visualizations:")
         print(f"     - Interactive (per-experiment): {results_dir}/visualizations/interactive/*_interactive_comparison.html")
         print(f"     - Static plots (per-experiment): {results_dir}/visualizations/static/*/")
         print(f"       · Training/test loss curves")
         print(f"       · Accuracy progression plots")
         print(f"       · Final performance comparisons")
         print(f"")
-    print(f"  📄 Reports:")
+    print(f"  Reports:")
     print(f"     - Summary: {results_dir}/reports/00_EXPERIMENT_SUMMARY.md")
     print(f"     - Structure: {results_dir}/README.md")
     print(f"")
-    print(f"  🔬 Experiment Data:")
+    print(f"  Experiment Data:")
     print(f"     - Location: {results_dir}/experiments/*/")
     print(f"     - Format: {{DATASET}}_{{MODEL}}_{{OPTIMIZER}}_seed{{N}}.csv")
     print("="*80)
     
     # Generate universal plots for ALL experiments
     print("\n" + "="*80)
-    print("📈 GENERATING PUBLICATION-QUALITY PLOTS")
+    print("GENERATING HIGH-QUALITY PLOTS")
     print("="*80)
     try:
         import subprocess
@@ -8175,7 +8175,7 @@ Examples:
             result = subprocess.run([sys.executable, str(plot_script), "--results-dir", str(results_dir)], 
                                    capture_output=True, text=True, timeout=300)
             if result.returncode == 0:
-                print("Publication-quality plots generated successfully")
+                print("High-quality plots generated successfully")
                 print(f"   Plots saved to: {results_dir}/visualizations/")
             else:
                 print(f"Plot generation completed with warnings (non-critical)")
