@@ -7,6 +7,7 @@ import numpy as np
 
 class TestFunction:
     """Base class for 2D test functions."""
+    __test__ = False
 
     def __init__(self):
         pass

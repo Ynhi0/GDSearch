@@ -36,6 +36,7 @@ class SimpleModel(nn.Module):
 def train_n_steps(model, optimizer, n_steps=5, closure_fn=None):
     """Train model for n steps and return losses."""
     model.train()
+    model = model.float()
     losses = []
     
     for _ in range(n_steps):

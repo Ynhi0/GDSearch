@@ -202,7 +202,7 @@ def run_single_experiment(
     # Track metrics
     history = []
     start_time = time.time()
-    start_memory = torch.cuda.memory_allocated(device) if torch.cuda.is_available() else 0
+    start_memory = torch.cuda.memory_allocated(device) if torch.cuda.is_available() and device.type == 'cuda' else 0
     
     # Training loop
     for epoch in range(epochs):

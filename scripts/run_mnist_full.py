@@ -32,7 +32,7 @@ def run_mnist_experiments(seeds=None, results_dir='results'):
         seeds = list(range(1, 11))  # 10 seeds for benchmark
     
     print("=" * 80)
-    print("MNIST EXPERIMENTS - PUBLICATION QUALITY")
+    print("MNIST EXPERIMENTS - HIGH QUALITY")
     print("=" * 80)
     print(f"Number of seeds: {len(seeds)}")
     print(f"Seeds: {seeds}")
@@ -107,10 +107,10 @@ def run_mnist_experiments(seeds=None, results_dir='results'):
             df = train_and_evaluate(config)
             results.append(df)
         except Exception as e:
-            print(f"\n❌ Error in experiment {config['optimizer']} seed {config['seed']}: {e}")
+            print(f"\nERROR in experiment {config['optimizer']} seed {config['seed']}: {e}")
             continue
     
-    print(f"\n✅ Completed {len(results)}/{len(all_configs)} experiments")
+    print(f"\nCompleted {len(results)}/{len(all_configs)} experiments")
     
     # Verify all files were created
     print("\n" + "=" * 80)
@@ -134,9 +134,9 @@ def run_mnist_experiments(seeds=None, results_dir='results'):
         else:
             missing_files.append(fname)
     
-    print(f"✅ Found: {len(found_files)}/{len(expected_files)} result files")
+    print(f"Found: {len(found_files)}/{len(expected_files)} result files")
     if missing_files:
-        print(f"\n⚠️  Missing files:")
+        print(f"\nWARNING: Missing files:")
         for fname in missing_files[:5]:
             print(f"   - {fname}")
         if len(missing_files) > 5:

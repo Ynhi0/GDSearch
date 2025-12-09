@@ -24,7 +24,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from run_all_kaggle import RobustCheckpointManager
 from src.core.pytorch_optimizers import AdamWrapper, SGDMomentumWrapper
-from src.utils.dataloader_utils import make_dataloader
+from run_all_kaggle import make_dataloader
 
 
 class TinyNet(nn.Module):
@@ -79,6 +79,7 @@ class TestBasicResumeEquivalence:
         # Continuous training
         torch.manual_seed(42)
         model_cont = TinyNet()
+        model_cont = model_cont.float()
         dataloader_cont = make_dataloader(dataset, batch_size=10, shuffle=True, seed=42)
         opt_cont = optimizer_cls(model_cont.parameters(), **kwargs)
         final_cont = train_n_epochs(model_cont, opt_cont, dataloader_cont, epochs=10)
@@ -86,6 +87,7 @@ class TestBasicResumeEquivalence:
         # Resumed training
         torch.manual_seed(42)
         model_resume = TinyNet()
+        model_resume = model_resume.float()
         dataloader_resume = make_dataloader(dataset, batch_size=10, shuffle=True, seed=42)
         opt_resume = optimizer_cls(model_resume.parameters(), **kwargs)
         
@@ -159,6 +161,7 @@ class TestRobustCheckpointManager:
             # Continuous training
             torch.manual_seed(42)
             model_cont = TinyNet()
+            model_cont = model_cont.float()
             dataloader_cont = make_dataloader(dataset, batch_size=10, shuffle=True, seed=42)
             opt_cont = optim.Adam(model_cont.parameters(), lr=0.001)
             
@@ -175,12 +178,13 @@ class TestRobustCheckpointManager:
             # Resumed training with checkpoint manager
             torch.manual_seed(42)
             model_resume = TinyNet()
+            model_resume = model_resume.float()
             dataloader_resume = make_dataloader(dataset, batch_size=10, shuffle=True, seed=42)
             opt_resume = optim.Adam(model_resume.parameters(), lr=0.001)
             
             ckpt_manager = RobustCheckpointManager(
-                checkpoint_dir=tmpdir,
-                max_checkpoints=3
+                base_dir=tmpdir,
+                max_backups=3
             )
             
             # Train 5 epochs and checkpoint
@@ -223,10 +227,11 @@ class TestRobustCheckpointManager:
         
         with tempfile.TemporaryDirectory() as tmpdir:
             model = TinyNet()
+            model = model.float()
             dataloader = make_dataloader(dataset, batch_size=10, shuffle=False)
             opt = optim.SGD(model.parameters(), lr=0.01)
             
-            manager = RobustCheckpointManager(tmpdir, max_checkpoints=5)
+            manager = RobustCheckpointManager(tmpdir, max_backups=5)
             
             criterion = nn.CrossEntropyLoss()
             
@@ -243,6 +248,7 @@ class TestRobustCheckpointManager:
             
             # Load latest (should be epoch 5)
             model_new = TinyNet()
+            model_new = model_new.float()
             opt_new = optim.SGD(model_new.parameters(), lr=0.01)
             loaded_data = manager.load_latest_checkpoint(model_new, opt_new)
             

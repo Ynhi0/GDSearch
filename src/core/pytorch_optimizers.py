@@ -376,7 +376,7 @@ class RMSPropWrapper(Optimizer):
             if group_idx < len(self.param_groups):
                 group = self.param_groups[group_idx]
                 if param_idx < len(group['params']):
-                    opt = RMSProp(
+                    opt = CustomRMSProp(
                         lr=group['lr'], decay_rate=group['alpha'],
                         epsilon=group['epsilon']
                     )
