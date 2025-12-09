@@ -316,7 +316,6 @@ class Adam(Optimizer):
             if self.m is None or self.m.shape != params.shape:
                 self.m = np.zeros_like(params)
                 self.v = np.zeros_like(params)
-                self.v = np.zeros_like(params)
             
             # Update biased first moment estimate
             self.m = self.beta1 * self.m + (1 - self.beta1) * gradients
@@ -325,8 +324,9 @@ class Adam(Optimizer):
             self.v = self.beta2 * self.v + (1 - self.beta2) * gradients**2
             
             # Compute bias-corrected moment estimates
-            m_hat = self.m / (1 - self.beta1**self.t)
-            v_hat = self.v / (1 - self.beta2**self.t)
+            # 🐛 BUG FIX (Dec 2025): Add epsilon guard for numerical stability
+            m_hat = self.m / max(1 - self.beta1**self.t, 1e-8)
+            v_hat = self.v / max(1 - self.beta2**self.t, 1e-8)
             
             # Update parameters
             return params - self.lr * m_hat / (np.sqrt(v_hat) + self.epsilon)
@@ -403,8 +403,9 @@ class AdamW(Optimizer):
                 self.v = np.zeros_like(params)
             self.m = self.beta1 * self.m + (1 - self.beta1) * gradients
             self.v = self.beta2 * self.v + (1 - self.beta2) * (gradients ** 2)
-            m_hat = self.m / (1 - self.beta1 ** self.t)
-            v_hat = self.v / (1 - self.beta2 ** self.t)
+            # 🐛 BUG FIX (Dec 2025): Add epsilon guard for numerical stability
+            m_hat = self.m / max(1 - self.beta1 ** self.t, 1e-8)
+            v_hat = self.v / max(1 - self.beta2 ** self.t, 1e-8)
             step = self.lr * m_hat / (np.sqrt(v_hat) + self.epsilon)
             # Decoupled weight decay
             params = params - self.lr * self.weight_decay * params
@@ -801,10 +802,11 @@ class AdaBound(Optimizer):
             self.v_y = self.beta2 * self.v_y + (1 - self.beta2) * grad_y ** 2
             
             # Compute bias-corrected moments
-            m_x_hat = self.m_x / (1 - self.beta1 ** self.t)
-            m_y_hat = self.m_y / (1 - self.beta1 ** self.t)
-            v_x_hat = self.v_x / (1 - self.beta2 ** self.t)
-            v_y_hat = self.v_y / (1 - self.beta2 ** self.t)
+            # 🐛 BUG FIX (Dec 2025): Add epsilon guard for numerical stability
+            m_x_hat = self.m_x / max(1 - self.beta1 ** self.t, 1e-8)
+            m_y_hat = self.m_y / max(1 - self.beta1 ** self.t, 1e-8)
+            v_x_hat = self.v_x / max(1 - self.beta2 ** self.t, 1e-8)
+            v_y_hat = self.v_y / max(1 - self.beta2 ** self.t, 1e-8)
             
             # Compute dynamic bounds
             final_lr_t = self.final_lr * self.lr / self.gamma
@@ -896,7 +898,8 @@ class RAdam(Optimizer):
             self.v_y = self.beta2 * self.v_y + (1 - self.beta2) * grad_y ** 2
             
             # Bias correction for first moment
-            m_x_hat = self.m_x / (1 - self.beta1 ** self.t)
+            # 🐛 BUG FIX (Dec 2025): Add epsilon guard for numerical stability
+            m_x_hat = self.m_x / max(1 - self.beta1 ** self.t, 1e-8)
             m_y_hat = self.m_y / (1 - self.beta1 ** self.t)
             
             # Compute length of the approximated SMA
@@ -990,10 +993,11 @@ class LAMB(Optimizer):
             self.v_y = self.beta2 * self.v_y + (1 - self.beta2) * grad_y ** 2
             
             # Bias correction
-            m_x_hat = self.m_x / (1 - self.beta1 ** self.t)
-            m_y_hat = self.m_y / (1 - self.beta1 ** self.t)
-            v_x_hat = self.v_x / (1 - self.beta2 ** self.t)
-            v_y_hat = self.v_y / (1 - self.beta2 ** self.t)
+            # 🐛 BUG FIX (Dec 2025): Add epsilon guard for numerical stability
+            m_x_hat = self.m_x / max(1 - self.beta1 ** self.t, 1e-8)
+            m_y_hat = self.m_y / max(1 - self.beta1 ** self.t, 1e-8)
+            v_x_hat = self.v_x / max(1 - self.beta2 ** self.t, 1e-8)
+            v_y_hat = self.v_y / max(1 - self.beta2 ** self.t, 1e-8)
             
             # Adam update (before trust ratio)
             update_x = m_x_hat / (np.sqrt(v_x_hat) + self.epsilon) + self.weight_decay * x

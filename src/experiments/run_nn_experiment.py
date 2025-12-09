@@ -1,5 +1,9 @@
 """
 Run neural network experiments on MNIST and CIFAR-10 with detailed logging.
+
+AUDIT FIX (Dec 2025): Added OOM-safe training with taint tracking to ensure
+scientific validity of results. Tainted runs (with reduced batch sizes due to OOM)
+are marked and should be excluded from statistical analysis.
 """
 import os
 from typing import Dict, Any, Tuple
@@ -25,6 +29,28 @@ from src.core.pytorch_optimizers import (
     AdamWrapper,
     AdamWWrapper
 )
+
+# AUDIT FIX: Import OOM-safe training function for taint tracking
+try:
+    # Try to import from run_all_kaggle (will work when run from repo root)
+    import sys
+    from pathlib import Path
+    repo_root = Path(__file__).parent.parent.parent
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from run_all_kaggle import oom_safe_train_step
+    HAS_OOM_SAFE = True
+except ImportError:
+    HAS_OOM_SAFE = False
+    # Fallback: define a simple wrapper that doesn't handle OOM
+    def oom_safe_train_step(model, optimizer, criterion, inputs, targets, device, opt_name="", max_retries=3, min_batch_size=1):
+        """Fallback OOM-safe wrapper without actual OOM handling."""
+        optimizer.zero_grad()
+        outputs = model(inputs.to(device))
+        loss = criterion(outputs, targets.to(device))
+        loss.backward()
+        optimizer.step()
+        return loss.item(), inputs.size(0), outputs, False  # tainted=False
 
 
 # Removed duplicate set_seed - using from src.core.training_utils
@@ -171,6 +197,12 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
     capture_epochs = set(config.get('capture_layer_grad_epochs', []))
     named_params = list(model.named_parameters())
     start_time = time.time()
+    
+    # AUDIT FIX: Track tainted status for OOM recovery
+    run_tainted = False
+    original_batch_size = batch_size
+    effective_batch_size = batch_size
+    
     # Meta row with environment info
     try:
         history.append({
@@ -200,43 +232,88 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
         pbar = tqdm(train_loader, desc=f"Train epoch {epoch}/{epochs}")
         num_batches = len(train_loader)
         for batch_idx, (inputs, targets) in enumerate(pbar, start=1):
-            inputs = inputs.to(device, non_blocking=True)
-            targets = targets.to(device, non_blocking=True)
+            # AUDIT FIX: Use OOM-safe training step with taint tracking
+            if HAS_OOM_SAFE:
+                # Get optimizer name for SAM handling
+                opt_name = config.get('optimizer', 'Unknown')
+                
+                # grad norm before step (capture before OOM-safe call modifies gradients)
+                grad_norm = _flattened_grad_norm(model)
+                
+                # capture params before update
+                params_before = _params_clone(model)
+                
+                try:
+                    loss_value, actual_batch_size, outputs, batch_tainted = oom_safe_train_step(
+                        model=model,
+                        optimizer=optimizer,
+                        criterion=criterion,
+                        inputs=inputs,
+                        targets=targets,
+                        device=device,
+                        opt_name=opt_name,
+                        max_retries=3,
+                        min_batch_size=1
+                    )
+                    
+                    # Track if any batch was tainted
+                    if batch_tainted:
+                        run_tainted = True
+                        effective_batch_size = actual_batch_size
+                    
+                    update_norm = _update_norm(model, params_before)
+                except RuntimeError as e:
+                    if 'out of memory' in str(e).lower():
+                        # OOM that couldn't be recovered
+                        run_tainted = True
+                        effective_batch_size = 1
+                        raise
+                    else:
+                        raise
+            else:
+                # Fallback: standard training without OOM handling
+                inputs = inputs.to(device, non_blocking=True)
+                targets = targets.to(device, non_blocking=True)
 
-            optimizer.zero_grad()
-            logits = model(inputs)
-            loss = criterion(logits, targets)
-            loss.backward()
+                optimizer.zero_grad()
+                logits = model(inputs)
+                loss = criterion(logits, targets)
+                loss.backward()
 
-            # grad norm before step (based on current grads)
-            grad_norm = _flattened_grad_norm(model)
+                # grad norm before step (based on current grads)
+                grad_norm = _flattened_grad_norm(model)
 
-            # capture params before update to compute update_norm
-            params_before = _params_clone(model)
+                # capture params before update to compute update_norm
+                params_before = _params_clone(model)
 
-            # step (possibly delayed optimizer)
-            optimizer.step()
+                # step (possibly delayed optimizer)
+                optimizer.step()
 
-            update_norm = _update_norm(model, params_before)
+                update_norm = _update_norm(model, params_before)
+                loss_value = loss.item()
 
             global_step += 1
 
             elapsed = time.time() - start_time
+            # AUDIT FIX: Add tainted tracking to history
             history.append({
                 'phase': 'train',
                 'epoch': epoch,
                 'batch': batch_idx,
                 'global_step': global_step,
-                'train_loss': loss.item(),
+                'train_loss': loss_value,
                 'grad_norm': grad_norm,
                 'update_norm': update_norm,
                 'lr': float(config.get('lr', 1e-3)),
                 'time_sec': elapsed,
+                'tainted': run_tainted,
+                'effective_batch_size': effective_batch_size,
+                'original_batch_size': original_batch_size
             })
 
             # Maintain loss window for convergence check
             if conv_loss_window > 0:
-                train_loss_window.append(loss.item())
+                train_loss_window.append(loss_value)
                 if len(train_loss_window) > conv_loss_window:
                     train_loss_window.pop(0)
 
@@ -268,6 +345,7 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
 
         # evaluation after each epoch
         test_loss, test_acc = evaluate(model, test_loader, criterion, device)
+        # AUDIT FIX: Include tainted status in eval phase
         history.append({
             'phase': 'eval',
             'epoch': epoch,
@@ -275,6 +353,9 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
             'test_loss': test_loss,
             'test_accuracy': test_acc,
             'time_sec': time.time() - start_time,
+            'tainted': run_tainted,
+            'effective_batch_size': effective_batch_size,
+            'original_batch_size': original_batch_size
         })
 
     df = pd.DataFrame(history)

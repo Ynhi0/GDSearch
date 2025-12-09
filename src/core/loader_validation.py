@@ -123,9 +123,10 @@ def create_validated_loaders(
     test_loader.name = 'test'
     
     # Store dataset references for cross-validation
-    train_loader._split_type = DatasetSplit.TRAIN
-    val_loader._split_type = DatasetSplit.VALIDATION
-    test_loader._split_type = DatasetSplit.TEST
+    # Mark loaders with split type (using attribute assignment for tracking)
+    setattr(train_loader, '_split_type', DatasetSplit.TRAIN)
+    setattr(val_loader, '_split_type', DatasetSplit.VALIDATION)
+    setattr(test_loader, '_split_type', DatasetSplit.TEST)
     
     # Store cross-references for identity checks
     val_loader._test_dataset_ref = test_loader.dataset

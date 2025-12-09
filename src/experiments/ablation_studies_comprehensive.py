@@ -9,6 +9,15 @@ Systematically evaluates the contribution of each advanced feature:
 5. Lookahead meta-learning
 6. Advanced training features (Label Smoothing, EMA, AMP)
 
+AUDIT FIX (Dec 2025): Standardized Hyperparameters
+All ablations use FIXED hyperparameters to ensure ceteris paribus:
+- Batch size: 128 (consistent across all optimizers)
+- Epochs: 10 (quick validation) or 20 (full study)
+- Learning rates: Scaled appropriately per optimizer family
+  - SGD family: lr=0.01 (standard for SGD without adaptive scaling)
+  - Adam family: lr=0.001 (1/10 of SGD, standard Adam default)
+- All other settings identical across compared optimizers
+
 Addresses research proposal requirement for ablation studies with actual
 scientific value and academic rigor.
 """

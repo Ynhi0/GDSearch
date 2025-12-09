@@ -10,7 +10,7 @@ to avoid CPU-GPU data transfer overhead.
 
 import torch
 from torch.optim.optimizer import Optimizer
-from typing import List, Optional, Callable
+from typing import Optional, Callable
 
 
 class TorchSGDMomentum(Optimizer):
@@ -372,7 +372,8 @@ class TorchLookahead(Optimizer):
             raise ValueError(f"Invalid k value: {k}")
         
         self.base_optimizer = base_optimizer
-        self.param_groups = self.base_optimizer.param_groups
+        # Initialize parent with base optimizer's param_groups
+        super(TorchLookahead, self).__init__(base_optimizer.param_groups, {})
         self.k = k
         self.alpha = alpha
         self.step_counter = 0
@@ -425,8 +426,8 @@ class TorchLookahead(Optimizer):
         
         return loss
     
-    def zero_grad(self):
-        self.base_optimizer.zero_grad()
+    def zero_grad(self, set_to_none: bool = False):
+        self.base_optimizer.zero_grad(set_to_none=set_to_none)
 
 
 # Convenience factory functions

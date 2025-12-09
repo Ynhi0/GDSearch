@@ -59,6 +59,11 @@ class DelayedOptimizer:
     def step(self, closure=None):
         # Enqueue current grads
         current_grads = self._capture_current_grads()
+        
+        # 🐛 BUG FIX (Dec 2025): Validate gradient shapes
+        if len(current_grads) != len(self.params):
+            raise ValueError(f"Gradient count mismatch: {len(current_grads)} vs {len(self.params)}")
+        
         self.grad_queue.append(current_grads)
 
         if len(self.grad_queue) < self.delay_steps:

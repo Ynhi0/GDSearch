@@ -19,7 +19,10 @@ from pathlib import Path
 import tempfile
 import shutil
 
-from src.core.training import RobustCheckpointManager
+# Import from run_all_kaggle.py where RobustCheckpointManager is defined
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from run_all_kaggle import RobustCheckpointManager
 from src.core.pytorch_optimizers import AdamWrapper, SGDMomentumWrapper
 from src.utils.dataloader_utils import make_dataloader
 

@@ -21,7 +21,7 @@ Usage:
 
 import torch
 from torch.optim import Optimizer
-from typing import Dict, Type, Any, Callable, Optional, List
+from typing import Dict, Type, Any, Callable, Optional, List, Union
 import logging
 import json
 from pathlib import Path
@@ -170,7 +170,7 @@ class OptimizerRegistry:
     
     def register(self,
                  name: str,
-                 optimizer_class: Type[Optimizer] or Callable,
+                 optimizer_class: Union[Type[Optimizer], Callable],
                  default_hyperparams: Dict[str, Any],
                  search_space: Optional[Dict[str, tuple]] = None,
                  description: str = ""):
@@ -186,7 +186,7 @@ class OptimizerRegistry:
             description: Human-readable description
         """
         if name in self._registry:
-            logging.warning(f"Overwriting existing optimizer: {name}")
+            logging.warning("Overwriting existing optimizer: %s", name)
         
         self._registry[name] = {
             'class': optimizer_class,
@@ -195,7 +195,7 @@ class OptimizerRegistry:
             'description': description
         }
         
-        logging.debug(f"Registered optimizer: {name}")
+        logging.debug("Registered optimizer: %s", name)
     
     def create(self, name: str, params, **override_hyperparams) -> Optimizer:
         """
@@ -223,11 +223,11 @@ class OptimizerRegistry:
         
         try:
             optimizer = optimizer_class(params, **hyperparams)
-        except TypeError as e:
+        except TypeError:
             # Handle callable factories
             optimizer = optimizer_class(params=params, **hyperparams)
         
-        logging.debug(f"Created optimizer {name} with hyperparams: {hyperparams}")
+        logging.debug("Created optimizer %s with hyperparams: %s", name, hyperparams)
         return optimizer
     
     def get_default_hyperparams(self, name: str) -> Dict[str, Any]:
@@ -277,7 +277,7 @@ class OptimizerRegistry:
         
         print("\n" + "="*70)
     
-    def load_from_config(self, config_path: str or Path):
+    def load_from_config(self, config_path: Union[str, Path]):
         """
         Load optimizer configurations from JSON file.
         
@@ -297,7 +297,7 @@ class OptimizerRegistry:
         if not config_path.exists():
             raise FileNotFoundError(f"Config file not found: {config_path}")
         
-        with open(config_path, 'r') as f:
+        with open(config_path, 'r', encoding='utf-8') as f:
             config = json.load(f)
         
         for opt_config in config.get('optimizers', []):
@@ -319,9 +319,9 @@ class OptimizerRegistry:
                     description=f"Custom variant of {base}"
                 )
         
-        logging.info(f"Loaded {len(config.get('optimizers', []))} optimizer configs from {config_path}")
+        logging.info("Loaded %d optimizer configs from %s", len(config.get('optimizers', [])), config_path)
     
-    def save_to_config(self, config_path: str or Path, optimizer_names: Optional[List[str]] = None):
+    def save_to_config(self, config_path: Union[str, Path], optimizer_names: Optional[List[str]] = None):
         """
         Save optimizer configurations to JSON file.
         
@@ -347,10 +347,10 @@ class OptimizerRegistry:
                 'search_space': info['search_space']
             })
         
-        with open(config_path, 'w') as f:
+        with open(config_path, 'w', encoding='utf-8') as f:
             json.dump(config, f, indent=2)
         
-        logging.info(f"Saved {len(config['optimizers'])} optimizer configs to {config_path}")
+        logging.info("Saved %d optimizer configs to %s", len(config['optimizers']), config_path)
 
 
 # Global registry instance
@@ -373,7 +373,7 @@ def create_optimizer_from_config(config: Dict, model_params) -> Optimizer:
     return registry.create(name, model_params, **hyperparams)
 
 
-def load_experiment_config(config_path: str or Path) -> List[Dict]:
+def load_experiment_config(config_path: Union[str, Path]) -> List[Dict]:
     """
     Load experiment configuration from JSON file.
     
@@ -390,7 +390,7 @@ def load_experiment_config(config_path: str or Path) -> List[Dict]:
     """
     config_path = Path(config_path)
     
-    with open(config_path, 'r') as f:
+    with open(config_path, 'r', encoding='utf-8') as f:
         config = json.load(f)
     
     return config.get('optimizers', [])
