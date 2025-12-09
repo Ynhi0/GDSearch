@@ -312,8 +312,10 @@ class Adam(Optimizer):
             return new_x, new_y
         else:
             # Handle array (for neural networks)
-            if self.m is None:
+            # 🐛 BUG FIX #8: Validate shape compatibility
+            if self.m is None or self.m.shape != params.shape:
                 self.m = np.zeros_like(params)
+                self.v = np.zeros_like(params)
                 self.v = np.zeros_like(params)
             
             # Update biased first moment estimate
@@ -395,7 +397,8 @@ class AdamW(Optimizer):
             new_y = y - step_y
             return new_x, new_y
         else:
-            if self.m is None:
+            # 🐛 BUG FIX #8: Validate shape compatibility
+            if self.m is None or self.m.shape != params.shape:
                 self.m = np.zeros_like(params)
                 self.v = np.zeros_like(params)
             self.m = self.beta1 * self.m + (1 - self.beta1) * gradients
@@ -469,7 +472,8 @@ class AMSGrad(Optimizer):
             new_y = y - self.lr * m_y_hat / (np.sqrt(self.vhat_max_y) + self.epsilon)
             return new_x, new_y
         else:
-            if self.m is None:
+            # 🐛 BUG FIX #8: Validate shape compatibility
+            if self.m is None or self.m.shape != params.shape:
                 self.m = np.zeros_like(params)
                 self.v = np.zeros_like(params)
                 self.vhat_max = np.zeros_like(params)
@@ -996,10 +1000,11 @@ class LAMB(Optimizer):
             update_y = m_y_hat / (np.sqrt(v_y_hat) + self.epsilon) + self.weight_decay * y
             
             # Compute trust ratio
+            # 🐛 BUG FIX #9: Add epsilon for numerical stability in edge cases
             param_norm = np.sqrt(x**2 + y**2)
             update_norm = np.sqrt(update_x**2 + update_y**2)
             
-            if param_norm > 0 and update_norm > 0:
+            if param_norm > self.epsilon and update_norm > self.epsilon:
                 trust_ratio = param_norm / update_norm
             else:
                 trust_ratio = 1.0
@@ -1023,10 +1028,11 @@ class LAMB(Optimizer):
             
             update = m_hat / (np.sqrt(v_hat) + self.epsilon) + self.weight_decay * params
             
+            # 🐛 BUG FIX #9: Use epsilon for numerical stability in norm comparison
             param_norm = np.linalg.norm(params)
             update_norm = np.linalg.norm(update)
             
-            if param_norm > 0 and update_norm > 0:
+            if param_norm > self.epsilon and update_norm > self.epsilon:
                 trust_ratio = param_norm / update_norm
             else:
                 trust_ratio = 1.0

@@ -191,7 +191,9 @@ class CodebaseHealthChecker:
                 if re.search(r'except\s*:', content):
                     bare_except_count += 1
                     self.warnings.append(f"⚠️  Bare except in {py_file.name}")
-            except:
+            except (IOError, UnicodeDecodeError) as e:
+                # 🐛 BUG FIX #20: Handle file reading errors
+                logging.debug(f"Failed to read {py_file.name}: {e}")
                 pass
         
         self.info.append(f"✅ Error handling: {total_try_blocks} try blocks in {files_with_try} files")

@@ -353,9 +353,9 @@ class RMSPropWrapper(Optimizer):
         for key, opt in self.custom_opts.items():
             # Convert tuple key to string for JSON serialization
             key_str = f"{key[0]},{key[1]}"
+            # 🐛 BUG FIX #1: RMSProp only has 's' attribute, not 't'
             custom_state[key_str] = {
-                's': opt.s.tolist() if opt.s is not None else None,
-                't': opt.t
+                's': opt.s.tolist() if opt.s is not None else None
             }
         base_state['custom_opts'] = custom_state
         return base_state
@@ -376,13 +376,17 @@ class RMSPropWrapper(Optimizer):
             if group_idx < len(self.param_groups):
                 group = self.param_groups[group_idx]
                 if param_idx < len(group['params']):
-                    opt = CustomRMSProp(
+                    opt = RMSProp(
                         lr=group['lr'], decay_rate=group['alpha'],
                         epsilon=group['epsilon']
                     )
                     opt.s = np.array(opt_state['s']) if opt_state['s'] is not None else None
-                    opt.t = opt_state['t']
+                    # 🐛 BUG FIX #1: RMSProp doesn't have 't' attribute
                     self.custom_opts[key] = opt
+            else:
+                # 🐛 BUG FIX #4: Log warning when indices are invalid
+                import logging
+                logging.warning(f"Skipping invalid optimizer state for key {key_str} (indices out of bounds)")
 
 
 class AdamWWrapper(Optimizer):
@@ -515,6 +519,10 @@ class SAMWrapper(Optimizer):
         # base_optimizer.state entries, which can interfere with lazy
         # initialization of base optimizers (e.g., Adam's 'exp_avg').
         self._perturbations = {}
+        
+        # 🐛 BUG FIX #11: Track sharpness metric for telemetry
+        self.sharpness_history = []  # List of (step, sharpness) tuples
+        self._step_count = 0
     
     @torch.no_grad()
     def _get_grad_norm(self):
@@ -584,12 +592,19 @@ class SAMWrapper(Optimizer):
         
         # First forward-backward pass (compute gradients at current point)
         loss = closure()
+        loss_at_current = loss.item() if hasattr(loss, 'item') else float(loss)
         
         # Save current parameters and take adversarial step
         self._ascent_step()
         
         # Second forward-backward pass (compute gradients at adversarial point)
-        closure()  # Recompute loss and gradients at perturbed parameters
+        loss_adv = closure()  # Recompute loss and gradients at perturbed parameters
+        loss_at_adversarial = loss_adv.item() if hasattr(loss_adv, 'item') else float(loss_adv)
+        
+        # 🐛 BUG FIX #11: Track sharpness (loss difference between adversarial and current point)
+        sharpness = abs(loss_at_adversarial - loss_at_current)
+        self._step_count += 1
+        self.sharpness_history.append((self._step_count, sharpness))
         
         # Restore parameters and apply update
         self._descent_step()
@@ -599,6 +614,29 @@ class SAMWrapper(Optimizer):
     def zero_grad(self):
         """Delegate to base optimizer."""
         self.base_optimizer.zero_grad()
+    
+    def get_sharpness_history(self):
+        """🐛 BUG FIX #11: Get sharpness tracking history for analysis.
+        
+        Returns:
+            List of (step, sharpness) tuples tracking loss landscape sharpness
+        """
+        return self.sharpness_history.copy()
+    
+    def get_average_sharpness(self, last_n_steps=None):
+        """🐛 BUG FIX #11: Get average sharpness over recent steps.
+        
+        Args:
+            last_n_steps: Number of recent steps to average (None = all steps)
+            
+        Returns:
+            Average sharpness value
+        """
+        if not self.sharpness_history:
+            return 0.0
+        
+        history_slice = self.sharpness_history[-last_n_steps:] if last_n_steps else self.sharpness_history
+        return sum(s for _, s in history_slice) / len(history_slice) if history_slice else 0.0
     
     def state_dict(self):
         """Return state dict including base optimizer state."""

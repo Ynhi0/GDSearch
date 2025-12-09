@@ -246,9 +246,12 @@ def check_gradient_health(model: torch.nn.Module, threshold: float = 1e3):
         RuntimeError: If gradients are unhealthy
     """
     total_norm = 0.0
+    # 🐛 BUG FIX #10: Track whether we found any gradients
+    has_gradients = False
     
     for name, param in model.named_parameters():
         if param.grad is not None:
+            has_gradients = True
             # Check for NaN/Inf
             if torch.isnan(param.grad).any():
                 raise RuntimeError(f"NaN gradient in {name}")
@@ -259,6 +262,12 @@ def check_gradient_health(model: torch.nn.Module, threshold: float = 1e3):
             # Accumulate norm
             param_norm = param.grad.data.norm(2).item()
             total_norm += param_norm ** 2
+    
+    # 🐛 BUG FIX #10: Distinguish between no gradients vs zero gradients
+    if not has_gradients:
+        import warnings
+        warnings.warn("No gradients found in model. Did you call backward()?")
+        return 0.0
     
     total_norm = np.sqrt(total_norm)
     

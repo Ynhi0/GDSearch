@@ -159,8 +159,10 @@ def compute_convergence_smoothness(losses: np.ndarray, window: int = 50) -> floa
         
         return normalized_rmse
         
-    except:
+    except Exception as e:
+        # 🐛 BUG FIX #14: Specify exception type for better error tracking
         # Fit failed - return high value
+        logging.debug(f"Smoothness fit failed: {e}")
         return float('inf')
 
 

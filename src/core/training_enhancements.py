@@ -167,8 +167,15 @@ class LRFinder:
             loss.backward()
             self.optimizer.step()
             
-            # Smooth the loss
+            # 🐛 BUG FIX #7: Clean up memory to prevent leaks
+            # Detach tensors and clear cache periodically
             loss_val = loss.item()
+            del outputs, loss  # Explicitly delete large tensors
+            
+            if batch_num % 10 == 0:  # Every 10 batches
+                torch.cuda.empty_cache() if torch.cuda.is_available() else None
+            
+            # Smooth the loss
             if batch_num == 0:
                 avg_loss = loss_val
             else:
@@ -205,6 +212,10 @@ class LRFinder:
         
         # Restore model and optimizer state
         self._restore_state()
+        
+        # 🐛 BUG FIX #7: Final memory cleanup
+        del iterator, inputs, targets
+        torch.cuda.empty_cache() if torch.cuda.is_available() else None
         
         if verbose:
             print(f"   Completed {len(self.lrs)} steps")

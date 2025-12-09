@@ -114,7 +114,9 @@ def main():
                 seeds_ok = True
             else:
                 seeds_ok = False
-    except:
+    except (FileNotFoundError, ValueError) as e:
+        # 🐛 BUG FIX #17: Specify exception types for config file errors
+        logging.debug(f"Config check failed: {e}")
         seeds_ok = False
     
     all_passed &= seeds_ok
@@ -127,7 +129,9 @@ def main():
             content = f.read()
             cleanup_count = content.count('clear_gpu_memory')
             vram_ok = cleanup_count >= 10  # Should have 10+ cleanup calls
-    except:
+    except (FileNotFoundError, IOError) as e:
+        # 🐛 BUG FIX #18: Handle file read errors
+        logging.debug(f"File read failed: {e}")
         vram_ok = False
     
     all_passed &= vram_ok
@@ -138,7 +142,9 @@ def main():
         with open(project_root / 'run_all_kaggle.py') as f:
             content = f.read()
             path_ok = 'sys.path.insert(0, str(project_root / \'src\'))' in content
-    except:
+    except (FileNotFoundError, IOError) as e:
+        # 🐛 BUG FIX #19: Handle file read errors
+        logging.debug(f"File read failed: {e}")
         path_ok = False
     
     all_passed &= path_ok

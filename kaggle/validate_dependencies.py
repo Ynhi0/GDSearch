@@ -25,7 +25,9 @@ def parse_version(version_str: str) -> Tuple[int, ...]:
     try:
         # Handle versions like '2025.3.0' or '1.26.4'
         return tuple(int(x) for x in version_str.split('.')[:3])
-    except:
+    except (ValueError, AttributeError) as e:
+        # 🐛 BUG FIX #21: Handle malformed version strings
+        logging.debug(f"Failed to parse version '{version_str}': {e}")
         return (0, 0, 0)
 
 def check_version(package: str, constraints: tuple) -> Tuple[bool, str]:

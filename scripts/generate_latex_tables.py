@@ -179,7 +179,8 @@ def _export_to_excel_mnist(df: pd.DataFrame, excel_path: str):
             try:
                 if len(str(cell.value)) > max_length:
                     max_length = len(str(cell.value))
-            except:
+            except (TypeError, AttributeError):
+                # 🐛 BUG FIX #15: Handle None or non-stringable cell values
                 pass
         adjusted_width = min(max_length + 2, 50)
         ws.column_dimensions[column_letter].width = adjusted_width
@@ -273,7 +274,8 @@ def _export_to_excel_ablation(df: pd.DataFrame, excel_path: str):
             try:
                 if len(str(cell.value)) > max_length:
                     max_length = len(str(cell.value))
-            except:
+            except (TypeError, AttributeError):
+                # 🐛 BUG FIX #16: Handle None or non-stringable cell values
                 pass
         adjusted_width = min(max_length + 2, 50)
         ws.column_dimensions[column_letter].width = adjusted_width
