@@ -37,7 +37,7 @@ def run_command(cmd: str, description: str, check=True):
             log("Stopping pipeline due to error")
             sys.exit(1)
     else:
-        log(f"✅ Completed: {description} (took {elapsed:.1f}s)")
+        log(f"Completed: {description} (took {elapsed:.1f}s)")
     return result.returncode
 
 

@@ -401,7 +401,7 @@ python visualize_flatness_comparison.py \
 
 - Quantitative flatness metrics (variance, area ratios)
 - Controlled random directions for fair comparison
-- Publication-quality contour plots
+- High-quality contour plots
 - Empirical evidence for SAM's flatter minima
 
 ### `plot_eigenvalues.py` - Curvature Analysis

@@ -3,48 +3,6 @@
 """
 GDSearch Complete Benchmark Suite - Kaggle Edition
 Runs all experiments: MNIST, CIFAR-10, NLP, Medical Segmentation
-
-Enhanced with performance profiling, experiment tracking, robust checkpointing,
-and advanced error handling for smoother execution.
-
-Designed for Kaggle notebooks with GPU acceleration.
-IMPORTANT: Requires src/ module to be available in Python path.
-For Kaggle: Upload repository as dataset and add sys.path.insert(0, '/kaggle/input/gdsearch-repository')
-For local: Run from repository root or ensure src/ is in PYTHONPATH.
-
-================================================================================
-AUDIT FIXES APPLIED (December 2025)
-================================================================================
-This file has been refactored to address critical scientific validity and 
-maintainability issues identified in the NeurIPS reproducibility audit:
-
-FIX 1 - MONOLITH DIVERGENCE (Critical Maintainability):
-  - Removed: Duplicated ResNet18, BasicBlock, and SAM class definitions
-  - Fixed: Now imports canonical versions from src/core/models and 
-           src/core/pytorch_optimizers (SAMWrapper)
-  Impact: Eliminates version drift, ensures checkpoint compatibility
-
-FIX 2 - SCIENTIFIC VALIDITY (Highest Priority - OOM Taint Tracking):
-  - Problem: Silent batch size reduction during OOM recovery invalidated 
-             optimizer comparisons (variable batch sizes)
-  - Fixed: Added 'tainted' flag and 'effective_batch_size' columns to all 
-           CSV results; runs with OOM recovery are now marked for exclusion
-  Impact: Ensures fair optimizer comparisons with controlled batch sizes
-
-FIX 3 - ZOMBIE CONFIGURATION (Config Authority):
-  - Problem: Experiments used hardcoded defaults instead of 
-             configs/benchmark_hyperparameters.json
-  - Fixed: load_experiment_config() now defaults to loading 
-           benchmark_hyperparameters.json if no config specified
-  Impact: Ensures experiments use authoritative hyperparameters
-
-FIX 4 - VISUALIZATION SUPPORT (Checkpoint Availability):
-  - Fixed: RobustCheckpointManager always initialized (checkpoints enabled 
-           by default); includes model, optimizer, scheduler, RNG states
-  Impact: Enables post-hoc loss landscape visualization and full reproducibility
-
-All fixes preserve backward compatibility while enforcing scientific rigor.
-================================================================================
 """
 
 import os
@@ -67,6 +25,7 @@ os.environ['GRPC_VERBOSITY'] = 'ERROR'
 os.environ['GLOG_minloglevel'] = '2'
 
 import time
+import functools
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -1348,6 +1307,17 @@ def save_run_artifacts(base_results_dir: str, dataset: str, model_name: str, opt
         return None, None
 
 
+def _worker_init(worker_id, seed):
+    """Initialize worker with deterministic seed."""
+    worker_seed = int(seed) + worker_id + 1
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+    try:
+        torch.manual_seed(worker_seed)
+    except Exception:
+        pass
+
+
 def make_dataloader(dataset, batch_size=64, shuffle=False, seed: Optional[int] = None,
                     num_workers: int = 0, pin_memory: bool = False, collate_fn=None,
                     sampler=None, drop_last: bool = False, persistent_workers: bool = False):
@@ -1365,17 +1335,7 @@ def make_dataloader(dataset, batch_size=64, shuffle=False, seed: Optional[int] =
         try:
             generator = torch.Generator()
             generator.manual_seed(int(seed))
-
-            def _worker_init(worker_id):
-                worker_seed = int(seed) + worker_id + 1
-                np.random.seed(worker_seed)
-                random.seed(worker_seed)
-                try:
-                    torch.manual_seed(worker_seed)
-                except Exception:
-                    pass
-
-            worker_init_fn = _worker_init
+            worker_init_fn = functools.partial(_worker_init, seed=seed)
         except Exception:
             generator = None
             worker_init_fn = None

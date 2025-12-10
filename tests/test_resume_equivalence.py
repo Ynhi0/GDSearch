@@ -39,7 +39,7 @@ class TinyNet(nn.Module):
 
 def create_dummy_dataset(size=100):
     """Generate simple dataset."""
-    X = torch.randn(size, 10)
+    X = torch.randn(size, 10, dtype=torch.float32)
     y = torch.randint(0, 2, (size,))
     return torch.utils.data.TensorDataset(X, y)
 
@@ -195,16 +195,19 @@ class TestRobustCheckpointManager:
                     loss.backward()
                     opt_resume.step()
             
-            ckpt_manager.save_checkpoint(
-                model=model_resume,
-                optimizer=opt_resume,
-                epoch=5,
-                metrics={'loss': 0.5}
-            )
+            checkpoint_data = {
+                'model': model_resume.state_dict(),
+                'optimizer': opt_resume.state_dict(),
+                'epoch': 5,
+                'metrics': {'loss': 0.5}
+            }
+            ckpt_manager.save_checkpoint(checkpoint_data, 'checkpoint.pt', 'test_experiment')
             
             # Resume from checkpoint
-            loaded = ckpt_manager.load_latest_checkpoint(model_resume, opt_resume)
-            assert loaded, "Failed to load checkpoint"
+            loaded_data = ckpt_manager.load_checkpoint('checkpoint.pt', 'test_experiment')
+            assert loaded_data is not None, "Failed to load checkpoint"
+            model_resume.load_state_dict(loaded_data['model'])
+            opt_resume.load_state_dict(loaded_data['optimizer'])
             
             # Continue 5 more epochs
             for epoch in range(5):
@@ -244,13 +247,23 @@ class TestRobustCheckpointManager:
                         loss.backward()
                         opt.step()
                 
-                manager.save_checkpoint(model, opt, epoch=target_epoch, metrics={'loss': 1.0 / target_epoch})
+                checkpoint_data = {
+                    'model': model.state_dict(),
+                    'optimizer': opt.state_dict(),
+                    'epoch': target_epoch,
+                    'metrics': {'loss': 1.0 / target_epoch}
+                }
+                manager.save_checkpoint(checkpoint_data, f'checkpoint_epoch_{target_epoch}.pt', 'test_experiment')
             
             # Load latest (should be epoch 5)
             model_new = TinyNet()
             model_new = model_new.float()
             opt_new = optim.SGD(model_new.parameters(), lr=0.01)
-            loaded_data = manager.load_latest_checkpoint(model_new, opt_new)
+            loaded_data = manager.load_checkpoint('checkpoint_epoch_5.pt', 'test_experiment')
+            
+            assert loaded_data is not None, "Failed to load checkpoint"
+            model_new.load_state_dict(loaded_data['model'])
+            opt_new.load_state_dict(loaded_data['optimizer'])
             
             assert loaded_data['epoch'] == 5, f"Loaded wrong checkpoint: epoch {loaded_data['epoch']}"
 

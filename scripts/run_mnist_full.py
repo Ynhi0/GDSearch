@@ -307,7 +307,7 @@ def run_statistical_comparison(results_dir='results'):
     output_path = f"{results_dir}/mnist_statistical_comparisons_benchmark.csv"
     df.to_csv(output_path, index=False)
     
-    print(f"\n✅ Statistical analysis saved to: {output_path}")
+    print(f"\nStatistical analysis saved to: {output_path}")
     print(f"\nSignificant differences (after Holm-Bonferroni correction): {corrected_sig.sum()}/{n_tests}")
     
     return df
@@ -346,7 +346,7 @@ def main():
     run_statistical_comparison(results_dir=args.results_dir)
     
     print("\n" + "=" * 80)
-    print("✅ MNIST BENCHMARK EXPERIMENTS COMPLETE")
+    print("MNIST BENCHMARK EXPERIMENTS COMPLETE")
     print("=" * 80)
     print("\nNext steps:")
     print("1. Run: python scripts/generate_latex_tables.py")

@@ -191,7 +191,7 @@ def get_imdb_loaders(
     
     # Load dataset with robust fallback for environment compatibility
     try:
-        dataset = load_dataset('imdb', cache_dir='/tmp/hf_cache')
+        dataset = load_dataset('imdb')
     except (ValueError, Exception) as e:
         print(f"Warning: Failed to load IMDB dataset via primary method: {e}")
         print("Trying alternative loading method...")

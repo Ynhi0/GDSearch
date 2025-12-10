@@ -261,13 +261,13 @@ def generate_all_plots(results_dir: str = 'results'):
     
     print("\n" + "="*80)
     print(f"✅ Created {plots_created} visualization sets in: {viz_dir}")
-    print(f"   All plots are publication-quality (300 DPI)")
+    print(f"   All plots are high-quality (300 DPI)")
 
 
 if __name__ == '__main__':
     import argparse
     
-    parser = argparse.ArgumentParser(description='Generate publication-quality plots from experiment CSVs')
+    parser = argparse.ArgumentParser(description='Generate high-quality plots from experiment CSVs')
     parser.add_argument('--results-dir', type=str, default='results',
                         help='Results directory containing CSV files')
     

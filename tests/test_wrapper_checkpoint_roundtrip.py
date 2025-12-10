@@ -40,7 +40,7 @@ def train_n_steps(model, optimizer, n_steps=5, closure_fn=None):
     losses = []
     
     for _ in range(n_steps):
-        x = torch.randn(4, 10)
+        x = torch.randn(4, 10, dtype=torch.float32)
         y = torch.randint(0, 5, (4,))
         
         def closure():

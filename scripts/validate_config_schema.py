@@ -116,7 +116,7 @@ def main():
     print("=" * 80)
     
     if not all_valid:
-        print("\n❌ Config validation FAILED")
+        print("\nConfig validation FAILED")
         print("\nRecommendations:")
         print("1. Review the errors above")
         print("2. Fix the config files to match the schema")

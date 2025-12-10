@@ -86,10 +86,12 @@ def test_deterministic_flag():
         ], capture_output=True, text=True, timeout=120)
         
         # Check for deterministic mode messages in output
-        assert "deterministic mode" in result.stdout.lower() or "deterministic" in result.stderr.lower(), \
+        stdout_check = "deterministic mode" in result.stdout.lower() if result.stdout else False
+        stderr_check = "deterministic" in result.stderr.lower() if result.stderr else False
+        assert stdout_check or stderr_check, \
             "Deterministic mode not indicated in output"
         
-        assert result.returncode == 0, f"Deterministic run failed: {result.stderr}"
+        assert result.returncode == 0, f"Deterministic run failed: {result.stderr or 'No stderr'}"
 
 
 def test_multi_seed_consistency():
