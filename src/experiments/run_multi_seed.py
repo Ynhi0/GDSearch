@@ -53,7 +53,7 @@ def run_multi_seed_experiment(base_config: Dict[str, Any], seeds: List[int], res
     return result_files
 
 
-def aggregate_results(result_files: List[str], metric: str = 'test_accuracy') -> Dict[str, Any]:
+def aggregate_results(result_files: List[str], metric: str = 'test_accuracy', exclude_tainted: bool = True) -> Dict[str, Any]:
     """
     Aggregate results from multiple seeds.
     
@@ -68,6 +68,9 @@ def aggregate_results(result_files: List[str], metric: str = 'test_accuracy') ->
     
     for filepath in result_files:
         df = pd.read_csv(filepath)
+        # Skip tainted runs if requested
+        if exclude_tainted and 'tainted' in df.columns and df['tainted'].any():
+            continue
         eval_df = df[df['phase'] == 'eval']
         if not eval_df.empty:
             final_value = eval_df[metric].iloc[-1]

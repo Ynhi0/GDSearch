@@ -178,6 +178,9 @@ def analyze_batch_size_results(
             for seed in eval_df['seed'].unique():
                 seed_df = eval_df[eval_df['seed'] == seed]
                 if not seed_df.empty:
+                    # Skip tainted runs
+                    if 'tainted' in seed_df.columns and seed_df['tainted'].any():
+                        continue
                     final_accs.append(seed_df['test_accuracy'].iloc[-1])
             
             if final_accs:
@@ -334,6 +337,9 @@ def perform_batch_size_comparisons(
         for seed in baseline_eval['seed'].unique():
             seed_df = baseline_eval[baseline_eval['seed'] == seed]
             if not seed_df.empty:
+                # Skip tainted seeds
+                if 'tainted' in seed_df.columns and seed_df['tainted'].any():
+                    continue
                 baseline_accs.append(seed_df['test_accuracy'].iloc[-1])
         
         baseline_accs = np.array(baseline_accs)
@@ -355,6 +361,9 @@ def perform_batch_size_comparisons(
             for seed in eval_df['seed'].unique():
                 seed_df = eval_df[eval_df['seed'] == seed]
                 if not seed_df.empty:
+                    # Skip tainted seeds
+                    if 'tainted' in seed_df.columns and seed_df['tainted'].any():
+                        continue
                     accs.append(seed_df['test_accuracy'].iloc[-1])
             
             accs = np.array(accs)

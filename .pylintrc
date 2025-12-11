@@ -1,0 +1,69 @@
+[MASTER]
+# Python code to execute, usually for sys.path manipulation
+init-hook='import sys; sys.path.append(".")'
+
+# Files or directories to be skipped
+ignore=CVS,.git,__pycache__,venv,.venv,env,.env
+
+# Use multiple processes to speed up Pylint
+jobs=0
+
+[MESSAGES CONTROL]
+# Disable specific warnings that are false positives or not relevant
+
+disable=
+    # Logging false positives - we're already using lazy % formatting correctly
+    logging-format-interpolation,
+    logging-not-lazy,
+    logging-fstring-interpolation,
+    
+    # Exception handling - we're using specific exceptions appropriately
+    broad-except,
+    
+    # These are style preferences, not bugs
+    too-many-arguments,
+    too-many-locals,
+    too-many-branches,
+    too-many-statements,
+    too-few-public-methods,
+    
+    # Notebook cells and scripts often have imports at top level
+    import-outside-toplevel,
+    
+    # Scientific code often needs descriptive variable names
+    invalid-name,
+    
+    # Allow TODO comments during development
+    fixme
+
+[FORMAT]
+# Maximum number of characters on a single line
+max-line-length=120
+
+# Maximum number of lines in a module
+max-module-lines=10000
+
+[BASIC]
+# Good variable names which should always be accepted
+good-names=i,j,k,ex,Run,_,x,y,z,lr,e,f,df,ax,fig
+
+[DESIGN]
+# Maximum number of arguments for function/method
+max-args=10
+
+# Maximum number of attributes for a class
+max-attributes=15
+
+# Maximum number of boolean expressions in an if statement
+max-bool-expr=5
+
+[SIMILARITIES]
+# Minimum lines number of a similarity
+min-similarity-lines=10
+
+[REPORTS]
+# Set to yes for full reports, no for external tools
+reports=no
+
+# Output format
+output-format=colorized

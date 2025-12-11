@@ -379,11 +379,17 @@ def perform_statistical_tests(results: Dict):
         pytorch_accs = []
         
         for df in impl_dict['custom']:
+            # Skip tainted runs
+            if 'tainted' in df.columns and df['tainted'].any():
+                continue
             eval_df = df[df['phase'] == 'eval']
             if not eval_df.empty:
                 custom_accs.append(eval_df['test_accuracy'].iloc[-1])
         
         for df in impl_dict['pytorch']:
+            # Skip tainted runs
+            if 'tainted' in df.columns and df['tainted'].any():
+                continue
             eval_df = df[df['phase'] == 'eval']
             if not eval_df.empty:
                 pytorch_accs.append(eval_df['test_accuracy'].iloc[-1])

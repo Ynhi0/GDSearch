@@ -99,7 +99,7 @@ try:
     from src.core.pytorch_optimizers import SGDWrapper, AdamWrapper, SAMWrapper
     from src.core.models import ResNet18, BasicBlock
     print(f"Successfully imported core modules from {project_root / 'src'}")
-    print(f"AUDIT FIX 1: Using canonical ResNet18, BasicBlock, SAM from src/core/")
+    print("AUDIT FIX 1: Using canonical ResNet18, BasicBlock, SAM from src/core/")
 except ImportError as e:
     print(f"CRITICAL: Failed to import core modules from {project_root / 'src'}")
     print(f"Error: {e}")
@@ -127,7 +127,7 @@ def check_gradient_health_quick(model, epoch=None, threshold=1e3, context=""):
             if param.grad is not None:
                 if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
                     epoch_str = f" at epoch {epoch}" if epoch is not None else ""
-                    logging.warning(f"NaN/Inf gradient detected{epoch_str} ({context})")
+                    logging.warning("NaN/Inf gradient detected%s (%s)", epoch_str, context)
                     has_bad_grad = True
                     break
         
@@ -139,11 +139,11 @@ def check_gradient_health_quick(model, epoch=None, threshold=1e3, context=""):
         
         if grad_norm > threshold:
             epoch_str = f" at epoch {epoch}" if epoch is not None else ""
-            logging.warning(f"Large gradient norm{epoch_str}: {grad_norm:.2e} ({context})")
+            logging.warning("Large gradient norm%s: %.2e (%s)", epoch_str, grad_norm, context)
         
         return grad_norm if not has_bad_grad else float('inf')
-    except Exception as e:
-        logging.debug(f"Gradient check failed ({context}): {e}")
+    except (RuntimeError, ValueError, AttributeError) as e:
+        logging.debug("Gradient check failed (%s): %s", context, e)
         return 0.0
 
 
@@ -158,7 +158,7 @@ try:
     from src.experiments.convergence_analysis import ConvergenceAnalyzer, analyze_non_convex_convergence
     HAS_CONVERGENCE = True
 except ImportError as e:
-    logging.debug(f"Convergence analysis not available: {e}")
+    logging.debug("Convergence analysis not available: %s", e)
 
 try:
     from src.core.training_utils import (
@@ -173,7 +173,7 @@ try:
     logging.info("Advanced training utilities loaded (AMP, Label Smoothing, EMA)")
 except ImportError as e:
     HAS_TRAINING_UTILS = False
-    logging.debug(f"Training utilities not available: {e}")
+    logging.debug("Training utilities not available: %s", e)
 
 # Training Enhancements: LR Finder, Memory-Aware Batch Sizing, OOM Recovery, Time Budget, Hessian Analysis
 HAS_TRAINING_ENHANCEMENTS = False
@@ -190,7 +190,7 @@ try:
     HAS_TRAINING_ENHANCEMENTS = True
     logging.info("Training enhancements loaded (LR Finder, Memory-Aware Sizing, Time Budget, Hessian)")
 except ImportError as e:
-    logging.debug(f"Training enhancements not available: {e}")
+    logging.debug("Training enhancements not available: %s", e)
 
 try:
     from src.visualization.interactive_plots import (
@@ -200,13 +200,13 @@ try:
     )
     HAS_INTERACTIVE = True
 except ImportError as e:
-    logging.debug(f"Interactive plots not available: {e}")
+    logging.debug("Interactive plots not available: %s", e)
 
 try:
     from src.visualization.loss_landscape import probe_loss_2d, evaluate_loss
     HAS_LANDSCAPE = True
 except ImportError as e:
-    logging.debug(f"Loss landscape not available: {e}")
+    logging.debug("Loss landscape not available: %s", e)
 
 try:
     from src.analysis.statistical_analysis import (
@@ -216,7 +216,7 @@ try:
     )
     HAS_STATS = True
 except ImportError as e:
-    logging.debug(f"Statistical analysis not available: {e}")
+    logging.debug("Statistical analysis not available: %s", e)
 
 # Try to import optional dependencies
 try:
@@ -227,14 +227,12 @@ except ImportError:
     HAS_HF = False
     # Don't auto-install in local development - only on Kaggle where imports are missing
     # Check if we're in a Kaggle environment by looking for /kaggle directory
-    import os
     is_kaggle = os.path.exists('/kaggle') or os.environ.get('KAGGLE_KERNEL_RUN_TYPE') is not None
     
     if is_kaggle:
         logging.warning("transformers/datasets not available. Attempting to install for Kaggle...")
         try:
             import subprocess
-            import sys
             print("Installing transformers and datasets for NLP experiments...")
             # Use --no-input to prevent interactive prompts
             subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "--no-input", "transformers", "datasets"], 
@@ -246,8 +244,8 @@ except ImportError:
         except subprocess.TimeoutExpired:
             logging.warning("Installation timed out. NLP experiments will be simplified.")
             HAS_HF = False
-        except Exception as e:
-            logging.warning(f"Could not install transformers/datasets: {e}. NLP experiments will be simplified.")
+        except (subprocess.CalledProcessError, OSError, ImportError) as e:
+            logging.warning("Could not install transformers/datasets: %s. NLP experiments will be simplified.", e)
             HAS_HF = False
     else:
         logging.warning("transformers/datasets not available. NLP experiments will be simplified. Install with: pip install transformers datasets")
@@ -330,16 +328,16 @@ class PerformanceProfiler:
         """Log performance metrics"""
         if experiment_name in self.metrics:
             m = self.metrics[experiment_name]
-            logging.info(f"Performance for {experiment_name}:")
-            logging.info(f"  Duration: {m.get('duration_seconds', 0):.1f}s")
-            logging.info(f"  Memory delta: {m.get('memory_delta_mb', 0):.1f}MB")
+            logging.info("Performance for %s:", experiment_name)
+            logging.info("  Duration: %.1fs", m.get('duration_seconds', 0))
+            logging.info("  Memory delta: %.1fMB", m.get('memory_delta_mb', 0))
             if m.get('gpu_memory_peak_mb'):
-                logging.info(f"  GPU memory peak: {m.get('gpu_memory_peak_mb', 0):.1f}MB")
+                logging.info("  GPU memory peak: %.1fMB", m.get('gpu_memory_peak_mb', 0))
             if m.get('gpu_memory_free_mb'):
-                logging.info(f"  GPU memory free: {m.get('gpu_memory_free_mb', 0):.1f}MB")
+                logging.info("  GPU memory free: %.1fMB", m.get('gpu_memory_free_mb', 0))
             if additional_metrics:
                 for k, v in additional_metrics.items():
-                    logging.info(f"  {k}: {v}")
+                    logging.info("  %s: %s", k, v)
 
     def get_summary(self):
         """Get summary of all performance metrics as dict"""
@@ -448,8 +446,8 @@ class ExperimentTracker:
                 
                 try:
                     mlflow.log_param(k, v)
-                except Exception as e:
-                    logging.warning(f"Failed to log param {k}={v}: {e}")
+                except (ValueError, mlflow.exceptions.MlflowException) as e:
+                    logging.warning("Failed to log param %s=%s: %s", k, v, e)
 
     def log_metrics(self, metrics: Dict[str, float], step: int = None):
         """Log metrics"""
@@ -486,8 +484,8 @@ class RobustCheckpointManager:
                     min_free_gb=min_free_gb, 
                     max_checkpoints=max_backups * 3
                 )
-            except Exception as e:
-                logging.debug(f"DiskSpaceGuardian not available: {e}")
+            except (ImportError, AttributeError) as e:
+                logging.debug("DiskSpaceGuardian not available: %s", e)
 
     def save_checkpoint(self, checkpoint_data: Dict, filename: str,
                         experiment_name: str) -> bool:
@@ -497,7 +495,7 @@ class RobustCheckpointManager:
         # Check disk space before saving
         if self._disk_guardian:
             if not self._disk_guardian.can_save_checkpoint(estimated_size_mb=500):
-                logging.error(f"Insufficient disk space to save checkpoint {filename}")
+                logging.error("Insufficient disk space to save checkpoint %s", filename)
                 return False
         
         try:
@@ -515,18 +513,18 @@ class RobustCheckpointManager:
                 if torch.cuda.is_available():
                     try:
                         rng['torch_cuda_rng_state_all'] = torch.cuda.get_rng_state_all()
-                    except Exception as e:
+                    except (RuntimeError, AttributeError) as e:
                         rng['torch_cuda_rng_state_all'] = None
-                        logging.warning(f"REPRODUCIBILITY: Failed to capture CUDA RNG state: {e}. "
-                                       "Checkpoint may not be fully reproducible across GPU/CPU environments.")
+                        logging.warning("REPRODUCIBILITY: Failed to capture CUDA RNG state: %s. "
+                                       "Checkpoint may not be fully reproducible across GPU/CPU environments.", e)
                 else:
                     rng['torch_cuda_rng_state_all'] = None
                     logging.info("CUDA not available - CPU-only RNG state captured. "
                                "Checkpoint reproducibility limited to CPU environments.")
                 checkpoint_data.setdefault('rng_states', rng)
-            except Exception as e:
-                logging.warning(f'CRITICAL: Could not capture RNG state for checkpoint: {e}. '
-                               'Reproducibility may be compromised.')
+            except (AttributeError, RuntimeError, ImportError) as e:
+                logging.warning('CRITICAL: Could not capture RNG state for checkpoint: %s. '
+                               'Reproducibility may be compromised.', e)
 
             # Atomic save: write to temp file in same directory then replace
             tmp_path = ckpt_path.with_suffix('.tmp')
@@ -544,22 +542,22 @@ class RobustCheckpointManager:
                 if tmp_path.exists():
                     try:
                         tmp_path.unlink()
-                    except Exception:
+                    except (OSError, PermissionError):
                         pass
 
             # Validate checkpoint
             if self._validate_checkpoint(ckpt_path, checkpoint_data):
-                logging.info(f"Checkpoint saved: {ckpt_path}")
+                logging.info("Checkpoint saved: %s", ckpt_path)
                 return True
             else:
-                logging.debug(f"Checkpoint validation failed: {ckpt_path}")
+                logging.debug("Checkpoint validation failed: %s", ckpt_path)
                 return False
 
-        except Exception as e:
-            logging.error(f"Failed to save checkpoint {filename}: {e}")
+        except (OSError, RuntimeError, ValueError) as e:
+            logging.error("Failed to save checkpoint %s: %s", filename, e)
             return False
 
-    def load_checkpoint(self, filename: str, experiment_name: str) -> Optional[Dict]:
+    def load_checkpoint(self, filename: str, _experiment_name: str = None) -> Optional[Dict]:
         """Load checkpoint with fallback to backup"""
         ckpt_path = self.base_dir / filename
 
@@ -567,10 +565,10 @@ class RobustCheckpointManager:
         if ckpt_path.exists():
             try:
                 checkpoint = torch.load(ckpt_path, map_location='cpu', weights_only=False)
-                logging.info(f"Loaded checkpoint: {ckpt_path}")
+                logging.info("Loaded checkpoint: %s", ckpt_path)
                 return checkpoint
-            except Exception as e:
-                logging.warning(f"Failed to load primary checkpoint: {e}")
+            except (FileNotFoundError, OSError, RuntimeError) as e:
+                logging.warning("Failed to load primary checkpoint: %s", e)
 
         # Try backup checkpoints
         for i in range(self.max_backups):
@@ -578,15 +576,15 @@ class RobustCheckpointManager:
             if backup_path.exists():
                 try:
                     checkpoint = torch.load(backup_path, map_location='cpu', weights_only=False)
-                    logging.info(f"Loaded backup checkpoint: {backup_path}")
+                    logging.info("Loaded backup checkpoint: %s", backup_path)
                     return checkpoint
-                except Exception as e:
-                    logging.debug(f"Failed to load backup {i}: {e}")
+                except (FileNotFoundError, OSError, RuntimeError) as e:
+                    logging.debug("Failed to load backup %d: %s", i, e)
 
-        logging.debug(f"No valid checkpoint found for {filename} (first run or checkpoint missing)")
+        logging.debug("No valid checkpoint found for %s (first run or checkpoint missing)", filename)
         return None
 
-    def _create_backup(self, ckpt_path: Path, experiment_name: str):
+    def _create_backup(self, ckpt_path: Path, _experiment_name: str):
         """Create rolling backup - only if checkpoint exists. Thread-safe with file locking."""
         if not ckpt_path.exists():
             return
@@ -596,7 +594,6 @@ class RobustCheckpointManager:
         
         try:
             # Try to acquire lock (with timeout)
-            import time
             max_wait = 30  # seconds
             wait_time = 0
             while lock_file.exists() and wait_time < max_wait:
@@ -604,7 +601,7 @@ class RobustCheckpointManager:
                 wait_time += 0.1
             
             if lock_file.exists():
-                logging.warning(f"Backup lock timeout for {ckpt_path.name}, skipping backup")
+                logging.warning("Backup lock timeout for %s, skipping backup", ckpt_path.name)
                 return
             
             # Create lock file
@@ -617,33 +614,33 @@ class RobustCheckpointManager:
                 if src.exists():
                     try:
                         src.replace(dst)
-                    except Exception as e:
-                        logging.debug(f"Failed to rotate backup {i}: {e}")
+                    except (OSError, RuntimeError) as e:
+                        logging.debug("Failed to rotate backup %d: %s", i, e)
 
             # Create new backup from current checkpoint
             backup_path = self.base_dir / f"{ckpt_path.name}.backup_0"
             try:
                 import shutil
                 shutil.copy2(str(ckpt_path), str(backup_path))
-            except Exception as e:
-                logging.debug(f"Failed to create backup: {e}")
+            except (OSError, RuntimeError) as e:
+                logging.debug("Failed to create backup: %s", e)
         
         finally:
             # Always release lock
             try:
                 if lock_file.exists():
                     lock_file.unlink()
-            except Exception as e:
-                logging.debug(f"Failed to remove lock file: {e}")
+            except OSError as e:
+                logging.debug("Failed to remove lock file: %s", e)
 
-    def _validate_checkpoint(self, ckpt_path: Path, expected_data: Dict) -> bool:
+    def _validate_checkpoint(self, ckpt_path: Path, _expected_data: Dict) -> bool:
         """Validate checkpoint integrity"""
         try:
             loaded = torch.load(ckpt_path, map_location='cpu', weights_only=False)
             # Check for essential keys
             essential_keys = ['epoch', 'model']
             return all(key in loaded for key in essential_keys)
-        except Exception:
+        except (FileNotFoundError, OSError, RuntimeError):
             return False
     
     def validate_optimizer_compatibility(self, checkpoint: Dict, optimizer_name: str) -> bool:
@@ -656,7 +653,7 @@ class RobustCheckpointManager:
         
         if ckpt_opt_name is None:
             # Old checkpoint without opt_name, warn and allow
-            logging.warning(f"Checkpoint missing optimizer name, assuming compatibility")
+            logging.warning("Checkpoint missing optimizer name, assuming compatibility")
             return True
         
         # Check exact match
@@ -665,16 +662,16 @@ class RobustCheckpointManager:
         
         # Check if state dict shapes would match (for similar optimizers)
         try:
-            ckpt_state = checkpoint.get('optimizer', {})
+            _ckpt_state = checkpoint.get('optimizer', {})
             # If both are Adam-family optimizers, they might be compatible
             adam_family = ['Adam', 'AdamW', 'AMSGrad', 'AdaBound', 'RAdam', 'LAMB']
             if ckpt_opt_name in adam_family and optimizer_name in adam_family:
-                logging.warning(f"Loading {ckpt_opt_name} checkpoint into {optimizer_name} optimizer (Adam-family)")
+                logging.warning("Loading %s checkpoint into %s optimizer (Adam-family)", ckpt_opt_name, optimizer_name)
                 return True
-        except Exception:
+        except (KeyError, TypeError):
             pass
         
-        logging.warning(f"Optimizer mismatch: checkpoint has {ckpt_opt_name}, current is {optimizer_name}")
+        logging.warning("Optimizer mismatch: checkpoint has %s, current is %s", ckpt_opt_name, optimizer_name)
         return False
     
     def restore_rng_states(self, checkpoint: Dict) -> bool:
@@ -714,16 +711,16 @@ class RobustCheckpointManager:
                         saved_device_count = len(rng_states['torch_cuda_rng_state_all'])
                         current_device_count = torch.cuda.device_count()
                         if saved_device_count != current_device_count:
-                            logging.warning(f"Device count mismatch: checkpoint has {saved_device_count}, current has {current_device_count}. Reproducibility may be compromised.")
+                            logging.warning("Device count mismatch: checkpoint has %d, current has %d. Reproducibility may be compromised.", saved_device_count, current_device_count)
                         torch.cuda.set_rng_state_all(rng_states['torch_cuda_rng_state_all'])
-                    except Exception as e:
-                        logging.debug(f"Failed to restore CUDA RNG states: {e}")
+                    except (RuntimeError, ValueError) as e:
+                        logging.debug("Failed to restore CUDA RNG states: %s", e)
             
             logging.info("Successfully restored RNG states from checkpoint")
             return True
             
-        except Exception as e:
-            logging.warning(f"Failed to restore RNG states: {e}")
+        except (RuntimeError, ValueError, KeyError) as e:
+            logging.warning("Failed to restore RNG states: %s", e)
             return False
 
 # Global list to track failed experiments for summary reporting
@@ -738,8 +735,6 @@ def error_context(context: str, continue_on_error: bool = False):
         error_msg = f"Error in {context}: {str(e)}"
         logging.error(error_msg)
         # Only print traceback once, avoid duplicate printing
-        import io
-        import sys
         traceback_str = traceback.format_exc()
         # Print a condensed error message
         print(f"\nFAILED: {context} - {str(e)[:200]}")
@@ -762,7 +757,7 @@ def error_context(context: str, continue_on_error: bool = False):
         if not continue_on_error:
             raise
         else:
-            print(f"   Continuing with remaining experiments...")
+            print("   Continuing with remaining experiments...")
 
 
 def oom_safe_train_step(model, optimizer, criterion, inputs, targets, device, 
@@ -826,7 +821,7 @@ def oom_safe_train_step(model, optimizer, criterion, inputs, targets, device,
                 
                 # Check for loss divergence
                 if torch.isnan(loss) or torch.isinf(loss):
-                    logging.warning(f"Loss divergence detected: {loss.item()}")
+                    logging.warning("Loss divergence detected: %f", loss.item())
                     return float('inf'), current_inputs.size(0), outputs, tainted
                 
                 return loss.item(), current_inputs.size(0), outputs, tainted
@@ -841,18 +836,18 @@ def oom_safe_train_step(model, optimizer, criterion, inputs, targets, device,
                 
                 # 🐛 BUG FIX (Dec 2025): Check BatchNorm compatibility BEFORE reduction
                 if new_size < 2:
-                    logging.error(f"Cannot reduce batch to {new_size} (BatchNorm requires >= 2)")
-                    raise RuntimeError("Batch size too small for BatchNorm layers")
+                    logging.error("Cannot reduce batch to %d (BatchNorm requires >= 2)", new_size)
+                    raise RuntimeError("Batch size too small for BatchNorm layers") from e
                 
                 if new_size < min_batch_size:
-                    logging.error(f"OOM: Cannot reduce batch below {min_batch_size}")
+                    logging.error("OOM: Cannot reduce batch below %d", min_batch_size)
                     raise
                 
                 # AUDIT FIX 2: Mark run as tainted and log warning
                 tainted = True
-                logging.warning(f"AUDIT WARNING: Run Tainted - Batch size reduced from {original_batch_size} to {new_size}")
-                logging.warning(f"    CUDA OOM! Reducing batch: {old_size}->{new_size} (retry {retries}/{max_retries})")
-                logging.warning(f"    SCIENTIFIC INTEGRITY: This run uses variable batch size and should be excluded from fair comparisons.")
+                logging.warning("AUDIT WARNING: Run Tainted - Batch size reduced from %d to %d", original_batch_size, new_size)
+                logging.warning("    CUDA OOM! Reducing batch: %d->%d (retry %d/%d)", old_size, new_size, retries, max_retries)
+                logging.warning("    SCIENTIFIC INTEGRITY: This run uses variable batch size and should be excluded from fair comparisons.")
                 
                 # Slice the batch
                 current_inputs = inputs[:new_size]
@@ -863,8 +858,8 @@ def oom_safe_train_step(model, optimizer, criterion, inputs, targets, device,
             else:
                 raise
     
-    logging.error(f"OOM recovery failed after {max_retries} retries")
-    raise RuntimeError(f"CUDA OOM after {max_retries} recovery attempts")
+    logging.error("OOM recovery failed after %d retries", max_retries)
+    raise RuntimeError("CUDA OOM after {} recovery attempts".format(max_retries))
 
 
 def clear_gpu_memory(force=False):
@@ -901,11 +896,11 @@ def clear_gpu_memory(force=False):
         allocated = torch.cuda.memory_allocated() / 1024**2
         reserved = torch.cuda.memory_reserved() / 1024**2
         free = (torch.cuda.get_device_properties(0).total_memory / 1024**2) - allocated
-        logging.info(f"GPU memory cleaned: {allocated:.1f}MB used, {free:.1f}MB free")
+        logging.info("GPU memory cleaned: %.1fMB used, %.1fMB free", allocated, free)
         
         # Warn if memory is still high
         if allocated > 1000:  # >1GB still allocated
-            logging.warning(f"High GPU memory usage: {allocated:.1f}MB still allocated after cleanup")
+            logging.warning("High GPU memory usage: %.1fMB still allocated after cleanup", allocated)
 
 
 def check_system_requirements():
@@ -1055,15 +1050,15 @@ def is_experiment_completed(results_dir: str, dataset: str, model_name: str, opt
             try:
                 df = pd.read_csv(csv_path)
                 if len(df) > 0:
-                    logging.info(f"Found existing result: {csv_path.name}")
+                    logging.info("Found existing result: %s", csv_path.name)
                     return True
-            except Exception:
+            except (OSError, pd.errors.ParserError):
                 # File exists but is corrupted, need to re-run
-                logging.warning(f"Corrupted result file: {csv_path.name}, will re-run")
+                logging.warning("Corrupted result file: %s, will re-run", csv_path.name)
                 return False
         return False
-    except Exception as e:
-        logging.debug(f"Error checking experiment completion: {e}")
+    except (OSError, ValueError) as e:
+        logging.debug("Error checking experiment completion: %s", e)
         return False
 
 
@@ -1110,9 +1105,9 @@ def load_experiment_config(config_path: str = None) -> Dict[str, Any]:
         benchmark_config_path = Path(__file__).parent / 'configs' / 'benchmark_hyperparameters.json'
         if benchmark_config_path.exists():
             config_path = str(benchmark_config_path)
-            logging.info(f"AUDIT FIX 3: Loaded authoritative config from {config_path}")
+            logging.info("AUDIT FIX 3: Loaded authoritative config from %s", config_path)
         else:
-            logging.warning(f"Benchmark config not found: {benchmark_config_path}, using hardcoded defaults")
+            logging.warning("Benchmark config not found: %s, using hardcoded defaults", benchmark_config_path)
             return default_config
     
     try:
@@ -1127,7 +1122,7 @@ def load_experiment_config(config_path: str = None) -> Dict[str, Any]:
                     merged_config[key].update(value)
                 else:
                     merged_config[key] = value
-            logging.info(f"Loaded authoritative config from {config_path}")
+            logging.info("Loaded authoritative config from %s", config_path)
             return merged_config
         else:
             # AUDIT FIX (Dec 2025): Fail loudly on missing config for transparency
@@ -1172,7 +1167,7 @@ def get_provenance_info() -> Dict[str, Any]:
             provenance['git_commit'] = git_hash.stdout.strip()
         else:
             provenance['git_commit'] = 'unknown'
-    except Exception:
+    except (subprocess.SubprocessError, OSError, FileNotFoundError):
         provenance['git_commit'] = 'unknown'
     
     # Git dirty status
@@ -1183,7 +1178,7 @@ def get_provenance_info() -> Dict[str, Any]:
         )
         if git_status.returncode == 0:
             provenance['git_dirty'] = len(git_status.stdout.strip()) > 0
-    except Exception:
+    except (subprocess.SubprocessError, OSError, FileNotFoundError):
         provenance['git_dirty'] = None
     
     # GPU information
@@ -1194,7 +1189,7 @@ def get_provenance_info() -> Dict[str, Any]:
             props = torch.cuda.get_device_properties(0)
             provenance['gpu_memory_gb'] = props.total_memory / (1024 ** 3)
             provenance['cuda_version'] = torch.version.cuda
-        except Exception as e:
+        except (RuntimeError, AttributeError) as e:
             provenance['gpu_error'] = str(e)
     else:
         provenance['gpu_name'] = 'CPU'
@@ -1208,7 +1203,7 @@ def get_provenance_info() -> Dict[str, Any]:
         )
         if nvidia_smi.returncode == 0:
             provenance['nvidia_driver'] = nvidia_smi.stdout.strip()
-    except Exception:
+    except (subprocess.SubprocessError, OSError, FileNotFoundError):
         provenance['nvidia_driver'] = 'unknown'
     
     return provenance
@@ -2177,6 +2172,53 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader
             beta1 = trial.suggest_float('beta1', 0.85, 0.95)
             beta2 = trial.suggest_float('beta2', 0.9, 0.9999)
             optimizer = optim.Adam(model.parameters(), lr=lr, betas=(beta1, beta2), amsgrad=True)
+        elif optimizer_name == 'SAM_SGD':
+            from src.core.pytorch_optimizers import SAMWrapper
+            lr = trial.suggest_float('lr', 1e-4, 1e-1, log=True)
+            rho = trial.suggest_float('rho', 0.01, 0.2)
+            base_opt = optim.SGD(model.parameters(), lr=lr)
+            optimizer = SAMWrapper(model.parameters(), optim.SGD, lr=lr, rho=rho)
+        elif optimizer_name == 'SAM_Adam':
+            from src.core.pytorch_optimizers import SAMWrapper
+            lr = trial.suggest_float('lr', 1e-5, 1e-2, log=True)
+            rho = trial.suggest_float('rho', 0.01, 0.2)
+            optimizer = SAMWrapper(model.parameters(), optim.Adam, lr=lr, rho=rho)
+        elif optimizer_name == 'Lookahead_SGD':
+            from src.core.pytorch_optimizers import LookaheadWrapper
+            lr = trial.suggest_float('lr', 1e-4, 1e-1, log=True)
+            k = trial.suggest_int('k', 3, 10)
+            alpha = trial.suggest_float('alpha', 0.3, 0.8)
+            base_opt = optim.SGD(model.parameters(), lr=lr)
+            optimizer = LookaheadWrapper(base_opt, k=k, alpha=alpha)
+        elif optimizer_name == 'Lookahead_Adam':
+            from src.core.pytorch_optimizers import LookaheadWrapper
+            lr = trial.suggest_float('lr', 1e-5, 1e-2, log=True)
+            k = trial.suggest_int('k', 3, 10)
+            alpha = trial.suggest_float('alpha', 0.3, 0.8)
+            base_opt = optim.Adam(model.parameters(), lr=lr)
+            optimizer = LookaheadWrapper(base_opt, k=k, alpha=alpha)
+        elif optimizer_name == 'AdaBound':
+            from src.core.pytorch_optimizers import AdaBoundWrapper
+            lr = trial.suggest_float('lr', 1e-5, 1e-2, log=True)
+            beta1 = trial.suggest_float('beta1', 0.85, 0.95)
+            beta2 = trial.suggest_float('beta2', 0.9, 0.9999)
+            final_lr = trial.suggest_float('final_lr', 0.01, 0.5)
+            gamma = trial.suggest_float('gamma', 1e-4, 1e-2, log=True)
+            optimizer = AdaBoundWrapper(model.parameters(), lr=lr, betas=(beta1, beta2), 
+                                       final_lr=final_lr, gamma=gamma)
+        elif optimizer_name == 'RAdam':
+            from src.core.pytorch_optimizers import RAdamWrapper
+            lr = trial.suggest_float('lr', 1e-5, 1e-2, log=True)
+            beta1 = trial.suggest_float('beta1', 0.85, 0.95)
+            beta2 = trial.suggest_float('beta2', 0.9, 0.9999)
+            optimizer = RAdamWrapper(model.parameters(), lr=lr, betas=(beta1, beta2))
+        elif optimizer_name == 'LAMB':
+            from src.core.pytorch_optimizers import LAMBWrapper
+            lr = trial.suggest_float('lr', 1e-5, 1e-2, log=True)
+            beta1 = trial.suggest_float('beta1', 0.85, 0.95)
+            beta2 = trial.suggest_float('beta2', 0.9, 0.9999)
+            wd = trial.suggest_float('weight_decay', 1e-6, 1e-2, log=True)
+            optimizer = LAMBWrapper(model.parameters(), lr=lr, betas=(beta1, beta2), weight_decay=wd)
         else:
             return get_default_hyperparameters(optimizer_name)
         
@@ -2602,6 +2644,14 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
                         # Create learning rate scheduler (cosine annealing)
                         scheduler = CosineAnnealingLR(optimizer, T_max=epochs, eta_min=base_lr*0.01)
                         
+                        # Early stopping setup - MUST be initialized before checkpoint restoration
+                        # BUG FIX (Dec 2025): Initialize variables BEFORE trying to restore from checkpoint
+                        # This prevents UnboundLocalError if checkpoint loading fails
+                        best_val_acc = 0.0
+                        best_model_state = None
+                        patience = 10
+                        patience_counter = 0
+                        
                         # AUDIT FIX 3: Restore scheduler state if resuming from checkpoint
                         # This ensures that learning rate scheduling continues correctly from the saved state
                         if checkpoint and 'scheduler' in checkpoint:
@@ -2610,12 +2660,6 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
                                 logging.info(f"✓ Restored scheduler state (last_epoch={scheduler.last_epoch})")
                             except Exception as e:
                                 logging.warning(f"Could not restore scheduler state: {e}. Using fresh scheduler.")
-                        
-                        # Early stopping setup
-                        best_val_acc = 0.0
-                        best_model_state = None
-                        patience = 10
-                        patience_counter = 0
                         
                         # AUDIT FIX 2: Track OOM taint status and effective batch size
                         run_tainted = False
@@ -2659,7 +2703,8 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
                                         
                                         train_loss += loss_value
                                         _, predicted = outputs.max(1)
-                                        train_correct += predicted.eq(targets).sum().item()
+                                        # FIX: Move targets to same device as outputs for comparison
+                                        train_correct += predicted.eq(targets.to(device)).sum().item()
                                         
                                     except RuntimeError as e:
                                         if 'out of memory' in str(e).lower():
@@ -3088,7 +3133,8 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[42,123,456,789,
                             
                             train_loss += loss_value
                             _, predicted = outputs.max(1)
-                            train_correct += predicted.eq(targets).sum().item()
+                            # FIX: Move targets to same device as outputs for comparison
+                            train_correct += predicted.eq(targets.to(device)).sum().item()
                             
                         except RuntimeError as e:
                             if 'out of memory' in str(e).lower():
@@ -3404,8 +3450,11 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
 
             # Load dataset with robust fallback for environment compatibility
             try:
-                # Try loading with cache_dir first (may avoid fsspec pattern issues)
-                raw = load_dataset('imdb', cache_dir='/tmp/hf_cache')
+                # Use platform-independent temp directory
+                import tempfile
+                cache_dir = tempfile.gettempdir()
+                # Try loading without cache_dir to avoid fsspec pattern issues on Windows
+                raw = load_dataset('imdb', cache_dir=None)
             except (ValueError, Exception) as dataset_err:
                 logging.warning(f"Failed to load IMDB dataset via HuggingFace: {dataset_err}")
                 logging.warning("Falling back to simplified NLP experiment...")
@@ -3768,12 +3817,16 @@ def run_nlp_experiment_simple(results_dir="results_nlp", seeds=[42,123,456,789,1
         os.environ['HF_HUB_OFFLINE'] = '0'
         os.environ['TOKENIZERS_PARALLELISM'] = 'false'
         
+        # Use platform-independent temp directory
+        import tempfile
+        hf_cache = tempfile.gettempdir()
+        
         # Try with different caching strategies and sources
         load_attempts = [
-            ('imdb', '/tmp/hf_cache', {}),
+            ('imdb', None, {}),  # Let HuggingFace use default cache
             ('imdb', None, {'trust_remote_code': False}),
-            ('stanfordnlp/imdb', '/tmp/hf_cache', {}),
-            ('imdb', '/tmp/hf_cache', {'download_mode': 'force_redownload'}),
+            ('stanfordnlp/imdb', None, {}),
+            ('imdb', None, {'download_mode': 'reuse_cache_if_exists'}),
         ]
         
         use_real_data = False
@@ -6003,7 +6056,9 @@ def distributed_training_worker(rank, world_size, backend, results_dir):
             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
         ])
 
-        train_dataset = torchvision.datasets.CIFAR10('./data', train=True, download=False, transform=transform)
+        # BUG FIX (Dec 2025): Changed download=False → download=True for Kaggle compatibility
+        # On fresh Kaggle kernels, dataset may not exist, causing immediate failure
+        train_dataset = torchvision.datasets.CIFAR10('./data', train=True, download=True, transform=transform)
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset, num_replicas=world_size, rank=rank)
         train_loader = DataLoader(train_dataset, batch_size=128, sampler=train_sampler)
 
@@ -6968,7 +7023,7 @@ Examples:
     parser.add_argument('--seeds', type=str, default='42,123,456,789,1011,1213,1415,1617,1819,2021',
                         help='Comma-separated random seeds (default: 10 seeds for statistical rigor)')
     parser.add_argument('--experiments', type=str, default='all',
-                        help='Comma-separated experiment names (mnist,cifar10,nlp,medical,2d,robustness,sam,ablation,advanced_ablation,init_ablation,batch_ablation,lr_ablation,wd_ablation,scheduler_ablation,optimizer_comparison,resnet,highdim,hyperparam_sensitivity,convergence_validation,ablation_comprehensive,2d_visualization,dynamics_overhead,theory_practice,cross_optimizer_dynamics) or "all"')
+                        help='Comma-separated experiment names (mnist,cifar10,nlp,medical,2d,robustness,sam,ablation,advanced_ablation,init_ablation,batch_ablation,lr_ablation,wd_ablation,scheduler_ablation,optimizer_comparison,resnet,highdim,hyperparam_sensitivity,convergence_validation,ablation_comprehensive,2d_visualization,dynamics_overhead,theory_practice,cross_optimizer_dynamics,label_noise) or "all"')
     parser.add_argument('--results-dir', type=str, default='results',
                         help='Output directory for results (default: results/)')
     parser.add_argument('--config', type=str, default=None,
@@ -7043,7 +7098,7 @@ Examples:
                                 'hyperparam_sensitivity', 'convergence_validation', 
                                 'ablation_comprehensive', '2d_visualization',
                                 'dynamics_overhead', 'theory_practice', 'cross_optimizer_dynamics',
-                                'beta_sensitivity_training']
+                                'beta_sensitivity_training', 'label_noise']
     else:
         selected_experiments = [e.strip() for e in args.experiments.split(',')]
     
@@ -7995,6 +8050,135 @@ Examples:
             except Exception as e:
                 logging.error(f"Beta sensitivity training failed: {e}")
                 experiment_results['beta_sensitivity_training'] = None
+    
+    # NEW: Label Noise Ablation (CRITICAL for flat minima / robustness claims)
+    if 'label_noise' in selected_experiments:
+        with error_context("Label Noise Ablation", continue_on_error=True):
+            print("\n" + "="*80)
+            print("🔬 LABEL NOISE ABLATION STUDY")
+            print("="*80)
+            print("📌 This addresses critical methodological gap:")
+            print("   'Label noise ablation is the gold standard for validating claims")
+            print("    about flat minima and optimizer robustness to noisy labels'")
+            print("="*80)
+            try:
+                from src.experiments.run_label_noise_ablation import (
+                    run_label_noise_ablation,
+                    LabelNoiseConfig
+                )
+                from src.utils.fairness_check import validate_tuning_fairness
+                
+                label_noise_dir = str(results_dir / "label_noise")
+                
+                # Check if already completed
+                mnist_csv = Path(label_noise_dir) / "label_noise_results_mnist_mlp.csv"
+                cifar10_csv = Path(label_noise_dir) / "label_noise_results_cifar10_resnet18.csv"
+                
+                if args.resume and mnist_csv.exists() and cifar10_csv.exists():
+                    print("   Label noise ablation already completed")
+                    experiment_results['label_noise'] = "Skipped (already complete)"
+                else:
+                    # Configure label noise experiments
+                    noise_config = LabelNoiseConfig(
+                        noise_rates=[0.0, 0.1, 0.2, 0.4] if not args.quick else [0.0, 0.2],
+                        seeds=seeds[:3] if args.quick else seeds[:5],
+                        epochs=20 if args.quick else 50,
+                        batch_size=128,
+                        device='cuda' if torch.cuda.is_available() else 'cpu'
+                    )
+                    
+                    # Get tuned hyperparameters for all optimizers
+                    optimizers_to_test = ['SGD', 'SGD_Momentum', 'Adam', 'AdamW', 'AMSGrad']
+                    
+                    # Add advanced optimizers if not in quick mode
+                    if not args.quick:
+                        optimizers_to_test.extend(['SAM_SGD', 'SAM_Adam', 'Lookahead_SGD', 
+                                                   'Lookahead_Adam', 'RAdam'])
+                    
+                    # Build optimizer configs from tuned hyperparameters
+                    mnist_optimizers_config = {}
+                    cifar10_optimizers_config = {}
+                    tuning_fairness_config = {}
+                    
+                    for opt_name in optimizers_to_test:
+                        # Get hyperparameters from config
+                        mnist_params = get_default_hyperparameters(opt_name, 'mnist_mlp')
+                        cifar10_params = get_default_hyperparameters(opt_name, 'resnet_cifar10')
+                        
+                        mnist_optimizers_config[opt_name] = mnist_params
+                        cifar10_optimizers_config[opt_name] = cifar10_params
+                        
+                        # Track tuning budgets for fairness validation
+                        tuning_fairness_config[opt_name] = {
+                            'n_trials': 15,  # All optimizers now get equal tuning
+                            'epochs': 3,
+                            'is_tuned': True
+                        }
+                    
+                    # Validate tuning fairness before running experiments
+                    print("\n🔍 Validating tuning fairness across optimizers...")
+                    try:
+                        validate_tuning_fairness(
+                            optimizers_to_test,
+                            tuning_fairness_config,
+                            strict=True
+                        )
+                        print("   ✓ Tuning fairness validated: all optimizers have equal budgets")
+                    except Exception as e:
+                        logging.warning(f"   ⚠ Tuning fairness validation: {e}")
+                        print("   Proceeding with experiments (non-strict mode)")
+                    
+                    results_dict = {}
+                    
+                    # Run MNIST label noise ablation
+                    if not mnist_csv.exists() or not args.resume:
+                        print("\n🔹 Running label noise ablation on MNIST MLP...")
+                        mnist_results = run_label_noise_ablation(
+                            dataset_name='mnist',
+                            model_name='mlp',
+                            optimizers_config=mnist_optimizers_config,
+                            config=noise_config,
+                            output_dir=label_noise_dir
+                        )
+                        results_dict['mnist'] = mnist_results
+                        print(f"   ✓ MNIST ablation complete: {len(mnist_results)} results")
+                    
+                    # Run CIFAR-10 label noise ablation (if not quick mode)
+                    if not args.quick:
+                        if not cifar10_csv.exists() or not args.resume:
+                            print("\n🔹 Running label noise ablation on CIFAR-10 ResNet-18...")
+                            cifar10_results = run_label_noise_ablation(
+                                dataset_name='cifar10',
+                                model_name='resnet18',
+                                optimizers_config=cifar10_optimizers_config,
+                                config=noise_config,
+                                output_dir=label_noise_dir
+                            )
+                            results_dict['cifar10'] = cifar10_results
+                            print(f"   ✓ CIFAR-10 ablation complete: {len(cifar10_results)} results")
+                    
+                    experiment_results['label_noise'] = results_dict
+                    print("✓ Label noise ablation completed!")
+                    
+                    # Generate summary statistics
+                    print("\n📊 Generating robustness analysis...")
+                    from src.experiments.run_label_noise_ablation import (
+                        create_label_noise_summary,
+                        analyze_robustness_to_noise
+                    )
+                    
+                    for dataset_name, results_df in results_dict.items():
+                        summary = create_label_noise_summary(results_df)
+                        robustness = analyze_robustness_to_noise(summary)
+                        
+                        print(f"\n{dataset_name.upper()} Robustness Summary:")
+                        print(robustness.to_string(index=False))
+                        
+            except Exception as e:
+                logging.error(f"Label noise ablation failed: {e}")
+                import traceback
+                traceback.print_exc()
+                experiment_results['label_noise'] = None
     
     # Run statistical analysis if scipy available
     if HAS_SCIPY:

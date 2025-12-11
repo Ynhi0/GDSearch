@@ -883,7 +883,8 @@ def plot_multiseed_comparison(
     results_dict: dict,
     metric: str = 'test_accuracy',
     title: str = "Multi-Seed Comparison",
-    save_path: str = None
+    save_path: str = None,
+    exclude_tainted: bool = True
 ):
     """
     Plot comparison between optimizers with error bars from multiple seeds.
@@ -912,7 +913,14 @@ def plot_multiseed_comparison(
         all_values = []
         x_values = None
         
+        # Optionally exclude tainted runs
+        filtered_dfs = []
         for df in dfs:
+            if exclude_tainted and 'tainted' in df.columns and df['tainted'].any():
+                continue
+            filtered_dfs.append(df)
+
+        for df in filtered_dfs:
             if is_eval and 'phase' in df.columns:
                 eval_df = df[df['phase'] == 'eval']
                 x = eval_df['epoch'].values
@@ -981,7 +989,8 @@ def plot_final_metric_comparison(
     results_dict: dict,
     metric: str = 'test_accuracy',
     title: str = "Final Metric Comparison",
-    save_path: str = None
+    save_path: str = None,
+    exclude_tainted: bool = True
 ):
     """
     Bar plot comparing final metric values across optimizers with error bars.
@@ -1003,6 +1012,9 @@ def plot_final_metric_comparison(
     for opt_name, dfs in results_dict.items():
         finals = []
         for df in dfs:
+            # Skip tainted runs by default
+            if exclude_tainted and 'tainted' in df.columns and df['tainted'].any():
+                continue
             if metric in ('test_accuracy', 'test_loss') and 'phase' in df.columns:
                 eval_df = df[df['phase'] == 'eval']
                 if not eval_df.empty:

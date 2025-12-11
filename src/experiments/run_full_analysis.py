@@ -158,6 +158,10 @@ def run_full_pipeline(
                         continue
                     try:
                         df = pd.read_csv(f)
+                        # Skip runs that were tainted (OOM recovery)
+                        if 'tainted' in df.columns and df['tainted'].any():
+                            print(f"Skipping tainted run for {opt_A}, seed={s}")
+                            continue
                         ev = df[df['phase'] == 'eval']
                         if not ev.empty:
                             map_A[s] = float(ev[metric].iloc[-1])
@@ -169,6 +173,10 @@ def run_full_pipeline(
                         continue
                     try:
                         df = pd.read_csv(f)
+                        # Skip runs that were tainted (OOM recovery)
+                        if 'tainted' in df.columns and df['tainted'].any():
+                            print(f"Skipping tainted run for {opt_B}, seed={s}")
+                            continue
                         ev = df[df['phase'] == 'eval']
                         if not ev.empty:
                             map_B[s] = float(ev[metric].iloc[-1])
@@ -201,10 +209,16 @@ def run_full_pipeline(
                     finals_A = []
                     finals_B = []
                     for df in dfs_A:
+                        # Skip any tainted runs by default
+                        if 'tainted' in df.columns and df['tainted'].any():
+                            continue
                         ev = df[df['phase'] == 'eval']
                         if not ev.empty:
                             finals_A.append(ev[metric].iloc[-1])
                     for df in dfs_B:
+                        # Skip any tainted runs by default
+                        if 'tainted' in df.columns and df['tainted'].any():
+                            continue
                         ev = df[df['phase'] == 'eval']
                         if not ev.empty:
                             finals_B.append(ev[metric].iloc[-1])
@@ -362,7 +376,8 @@ def run_full_pipeline(
             optimizer_results,
             metric=metric,
             title=f'{metric.replace("_", " ").title()} - Multi-Seed Comparison',
-            save_path=plot_path
+            save_path=plot_path,
+            exclude_tainted=True
         )
     
     # Plot final metric comparison (bar plot with error bars)
@@ -377,7 +392,8 @@ def run_full_pipeline(
         optimizer_results,
         metric=primary_metric,
         title=f'Final {primary_metric.replace("_", " ").title()} Comparison',
-        save_path=plot_path
+        save_path=plot_path,
+        exclude_tainted=True
     )
     
     print("\n" + "="*70)

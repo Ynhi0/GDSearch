@@ -36,10 +36,31 @@ def load_multiseed_results(pattern: str, results_dir: str = 'results') -> List[p
     return [pd.read_csv(f) for f in sorted(files)]
 
 
-def extract_final_metric(dfs: List[pd.DataFrame], metric: str = 'test_accuracy') -> np.ndarray:
-    """Extract final metric value from each run."""
+def extract_final_metric(dfs: List[pd.DataFrame], metric: str = 'test_accuracy', exclude_tainted: bool = True) -> np.ndarray:
+    """Extract final metric value from each run.
+
+    Args:
+        dfs: List of DataFrames produced by runs
+        metric: Name of the metric to extract from `eval` phase rows
+        exclude_tainted: If True, skip runs (DataFrames) where any `tainted` flag is True.
+    """
     values = []
     for df in dfs:
+        # If requested, skip runs that are marked tainted (OOM recovery happened)
+        if exclude_tainted and 'tainted' in df.columns:
+            # Some exported CSVs may have a single boolean per run; if so, use any(True) to decide
+            try:
+                if df['tainted'].any():
+                    continue
+            except Exception:
+                # If type mismatch or other problem, attempt element-wise check
+                try:
+                    if any(bool(x) for x in df['tainted'].values):
+                        continue
+                except Exception:
+                    # If inspection fails, fall back to include the run (don't silently drop)
+                    pass
+
         eval_df = df[df['phase'] == 'eval']
         if not eval_df.empty:
             values.append(eval_df[metric].iloc[-1])

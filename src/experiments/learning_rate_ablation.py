@@ -169,11 +169,14 @@ def analyze_learning_rate_results(
             if eval_df.empty:
                 continue
             
-            # Group by seed and get final accuracy
+            # Group by seed and get final accuracy; skip tainted seeds
             final_accs = []
             for seed in eval_df['seed'].unique():
                 seed_df = eval_df[eval_df['seed'] == seed]
                 if not seed_df.empty:
+                    # Skip tainted seeds if present
+                    if 'tainted' in seed_df.columns and seed_df['tainted'].any():
+                        continue
                     final_accs.append(seed_df['test_accuracy'].iloc[-1])
             
             if final_accs:

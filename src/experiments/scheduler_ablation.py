@@ -186,6 +186,9 @@ def analyze_scheduler_results(
             for seed in eval_df['seed'].unique():
                 seed_df = eval_df[eval_df['seed'] == seed]
                 if not seed_df.empty:
+                    # Skip tainted seeds
+                    if 'tainted' in seed_df.columns and seed_df['tainted'].any():
+                        continue
                     final_accs.append(seed_df['test_accuracy'].iloc[-1])
                     
                     # Estimate convergence epoch (when accuracy stabilizes)

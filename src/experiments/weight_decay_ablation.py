@@ -179,6 +179,9 @@ def analyze_weight_decay_results(
             for seed in eval_df['seed'].unique():
                 seed_eval = eval_df[eval_df['seed'] == seed]
                 if not seed_eval.empty:
+                    # Skip tainted seeds
+                    if 'tainted' in seed_eval.columns and seed_eval['tainted'].any():
+                        continue
                     final_test_accs.append(seed_eval['test_accuracy'].iloc[-1])
                     final_test_losses.append(seed_eval['test_loss'].iloc[-1])
                     

@@ -148,7 +148,7 @@ class SGDMomentumWrapper(Optimizer):
                 group = self.param_groups[group_idx]
                 if param_idx < len(group['params']):
                     opt = CustomSGDMomentum(lr=group['lr'], beta=group['momentum'])
-                    opt.v = np.array(opt_state['v']) if opt_state['v'] is not None else None
+                    opt.v = np.array(opt_state['v'], dtype=np.float32) if opt_state['v'] is not None else None
                     self.custom_opts[key] = opt
 
 
@@ -230,8 +230,8 @@ class AdamWrapper(Optimizer):
                         lr=group['lr'], beta1=group['beta1'],
                         beta2=group['beta2'], epsilon=group['epsilon']
                     )
-                    opt.m = np.array(opt_state['m']) if opt_state['m'] is not None else None
-                    opt.v = np.array(opt_state['v']) if opt_state['v'] is not None else None
+                    opt.m = np.array(opt_state['m'], dtype=np.float32) if opt_state['m'] is not None else None
+                    opt.v = np.array(opt_state['v'], dtype=np.float32) if opt_state['v'] is not None else None
                     opt.t = opt_state['t']
                     self.custom_opts[key] = opt
 
@@ -299,7 +299,7 @@ class SGDNesterovWrapper(Optimizer):
                 group = self.param_groups[group_idx]
                 if param_idx < len(group['params']):
                     opt = CustomSGDNesterov(lr=group['lr'], beta=group['momentum'])
-                    opt.v = np.array(opt_state['v']) if opt_state['v'] is not None else None
+                    opt.v = np.array(opt_state['v'], dtype=np.float32) if opt_state['v'] is not None else None
                     self.custom_opts[key] = opt
 
 
@@ -380,7 +380,7 @@ class RMSPropWrapper(Optimizer):
                         lr=group['lr'], decay_rate=group['alpha'],
                         epsilon=group['epsilon']
                     )
-                    opt.s = np.array(opt_state['s']) if opt_state['s'] is not None else None
+                    opt.s = np.array(opt_state['s'], dtype=np.float32) if opt_state['s'] is not None else None
                     # 🐛 BUG FIX #1: RMSProp doesn't have 't' attribute
                     self.custom_opts[key] = opt
             else:
@@ -463,8 +463,8 @@ class AdamWWrapper(Optimizer):
                         lr=group['lr'], beta1=beta1, beta2=beta2,
                         epsilon=group['eps'], weight_decay=group['weight_decay']
                     )
-                    opt.m = np.array(opt_state['m']) if opt_state['m'] is not None else None
-                    opt.v = np.array(opt_state['v']) if opt_state['v'] is not None else None
+                    opt.m = np.array(opt_state['m'], dtype=np.float32) if opt_state['m'] is not None else None
+                    opt.v = np.array(opt_state['v'], dtype=np.float32) if opt_state['v'] is not None else None
                     opt.t = opt_state['t']
                     self.custom_opts[key] = opt
 

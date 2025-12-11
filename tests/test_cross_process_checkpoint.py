@@ -40,9 +40,39 @@ def create_simple_model():
 
 def create_test_data():
     """Create test input/target data."""
-    x = torch.randn(8, 10)
+    x = torch.randn(8, 10, dtype=torch.float32)
     y = torch.randint(0, 5, (8,))
     return x, y
+
+
+def _train_and_get_state(optimizer_cls, kwargs, state_before):
+    """Train optimizer in separate process and return final state."""
+    import torch
+    import torch.nn as nn
+    
+    # Set seed for reproducibility
+    torch.manual_seed(42)
+    
+    # Create model and optimizer
+    model = create_simple_model()
+    optimizer = optimizer_cls(model.parameters(), **kwargs)
+    criterion = nn.CrossEntropyLoss()
+    
+    # Load initial state
+    optimizer.load_state_dict(state_before)
+    
+    # Train for 5 steps
+    for _ in range(5):
+        x = torch.randn(4, 10, dtype=torch.float32)
+        y = torch.randint(0, 2, (4,))
+        
+        optimizer.zero_grad()
+        output = model(x)
+        loss = criterion(output, y)
+        loss.backward()
+        optimizer.step()
+    
+    return optimizer.state_dict()
 
 
 class TestCrossProcessCheckpoint:
