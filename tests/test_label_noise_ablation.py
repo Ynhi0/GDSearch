@@ -224,7 +224,7 @@ class TestTrainWithNoisyLabels:
         val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
         test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
         
-        model = SimpleMLP(input_dim=784, num_classes=10)
+        model = SimpleMLP(input_size=784, num_classes=10)
         
         return model, train_loader, val_loader, test_loader
     

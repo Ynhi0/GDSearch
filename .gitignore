@@ -76,3 +76,5 @@ mlruns/
 *.temp
 .cache/
 
+.github/agents/judge.agent.md
+.gitignore

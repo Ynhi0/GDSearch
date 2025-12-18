@@ -73,12 +73,12 @@ class TestCheckpointCompleteness:
         
         model = SimpleModel().cuda()
         optimizer = optim.Adam(model.parameters())
-        scaler = torch.cuda.amp.GradScaler()
+        scaler = torch.amp.GradScaler('cuda')
         
         # Simulate training with AMP
         for _ in range(5):
             optimizer.zero_grad()
-            with torch.cuda.amp.autocast():
+            with torch.amp.autocast('cuda'):
                 loss = model(torch.randn(5, 10).cuda()).sum()
             scaler.scale(loss).backward()
             scaler.step(optimizer)
@@ -98,7 +98,7 @@ class TestCheckpointCompleteness:
         assert 'scale' in checkpoint['scaler'] or '_scale' in checkpoint['scaler']
         
         # Verify we can restore it
-        new_scaler = torch.cuda.amp.GradScaler()
+        new_scaler = torch.amp.GradScaler('cuda')
         new_scaler.load_state_dict(checkpoint['scaler'])
         
         # Scale should match

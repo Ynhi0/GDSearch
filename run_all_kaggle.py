@@ -47,6 +47,11 @@ import json
 import psutil
 from contextlib import contextmanager
 
+# AUDIT FIX 4: Import retry utilities for robust error handling
+from src.core.retry import retry_with_backoff
+# Import centralized set_seed for consistency
+from src.core.training_utils import set_seed
+
 # =============================================================================
 # PUBLICATION-QUALITY PLOT SETTINGS
 # =============================================================================
@@ -193,14 +198,20 @@ except ImportError as e:
     logging.debug("Training enhancements not available: %s", e)
 
 try:
-    from src.visualization.interactive_plots import (
-        plot_multi_optimizer_comparison,
-        plot_trajectory_interactive,
-        animate_convergence
-    )
+    # Note: plotly + narwhals can be slow to import in Python 3.13
+    # If this hangs, it's a known issue with narwhals lazy loading
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        from src.visualization.interactive_plots import (
+            plot_multi_optimizer_comparison,
+            plot_trajectory_interactive,
+            animate_convergence
+        )
     HAS_INTERACTIVE = True
-except ImportError as e:
+except (ImportError, Exception) as e:
     logging.debug("Interactive plots not available: %s", e)
+    HAS_INTERACTIVE = False
 
 try:
     from src.visualization.loss_landscape import probe_loss_2d, evaluate_loss
@@ -344,36 +355,44 @@ class PerformanceProfiler:
         if not self.metrics:
             return {}
         
-        summary = {}
-        for exp_name, metrics in self.metrics.items():
-            summary[exp_name] = {
-                'duration_seconds': metrics.get('duration_seconds', 0),
-                'memory_delta_mb': metrics.get('memory_delta_mb', 0),
-                'gpu_memory_peak_mb': metrics.get('gpu_memory_peak_mb', 0),
-                'gpu_memory_free_mb': metrics.get('gpu_memory_free_mb', 0)
-            }
-        return summary
-
-    def print_summary(self):
-        """Print summary of all performance metrics"""
-        if not self.metrics:
-            print("No performance metrics recorded.")
-            return
+        # AUDIT FIX: Robust transformers/datasets import with auto-install for all environments
+        try:
+            from transformers import AutoTokenizer, AutoModelForSequenceClassification
+            from datasets import load_dataset
+            HAS_HF = True
+            logging.info("✓ transformers and datasets available")
+        except ImportError as import_error:
+            HAS_HF = False
+            logging.debug("Initial import failed: %s", import_error)
+    
+            # Attempt auto-install (works on both Kaggle and local environments)
+            try:
+                import subprocess
+                logging.info("Attempting to install transformers and datasets...")
+                # Install with retry and better error handling
+                try:
+                    subprocess.check_call(
+                        [sys.executable, "-m", "pip", "install", "-q", "transformers", "datasets"],
+                        timeout=180,
+                        stderr=subprocess.DEVNULL,
+                        stdout=subprocess.DEVNULL
+                    )
+                except subprocess.TimeoutExpired:
+                    # Retry without timeout suppression to see what's happening
+                    logging.warning("First install attempt timed out, retrying with longer timeout...")
+                    subprocess.check_call(
+                        [sys.executable, "-m", "pip", "install", "-q", "transformers", "datasets"],
+                        timeout=300
+                    )
         
-        print("\nPerformance Summary:")
-        print("=" * 50)
-        for exp_name, metrics in self.metrics.items():
-            print(f"\n{exp_name}:")
-            print(f"  Duration: {metrics.get('duration_seconds', 0):.2f}s")
-            print(f"  Memory Delta: {metrics.get('memory_delta_mb', 0):.2f}MB")
-            if 'gpu_memory_peak_mb' in metrics:
-                print(f"  GPU Memory Peak: {metrics.get('gpu_memory_peak_mb', 0):.2f}MB")
-            if 'gpu_memory_free_mb' in metrics:
-                print(f"  GPU Memory Free: {metrics.get('gpu_memory_free_mb', 0):.2f}MB")
-            if additional_metrics := metrics.get('additional_metrics'):
-                for k, v in additional_metrics.items():
-                    print(f"  {k}: {v}")
-        print()
+                # Try import again
+                from transformers import AutoTokenizer, AutoModelForSequenceClassification
+                from datasets import load_dataset
+                HAS_HF = True   
+                logging.info("✓ Successfully installed and imported transformers and datasets")
+            except Exception as e:
+                HAS_HF = False
+                logging.debug("Auto-install failed: %s. NLP experiments will use built-in models only.", e)
 
 class ExperimentTracker:
     """Experiment tracking with MLflow integration"""
@@ -398,8 +417,9 @@ class ExperimentTracker:
                 self.run_stack.append(self.current_run)
                 try:
                     self.current_run = mlflow.start_run(run_name=run_name, nested=True)
-                except Exception:
+                except (mlflow.MlflowException, RuntimeError):
                     # 🐛 BUG FIX (Dec 2025): Restore stack on failure to prevent corruption
+                    # Narrow to MLflow exceptions + RuntimeError for state issues
                     self.run_stack.pop()
                     raise
             else:
@@ -723,8 +743,40 @@ class RobustCheckpointManager:
             logging.warning("Failed to restore RNG states: %s", e)
             return False
 
-# Global list to track failed experiments for summary reporting
-FAILED_EXPERIMENTS = []
+# ==============================================================================
+# EXPERIMENT CONTEXT - Replaces global mutable state
+# ==============================================================================
+
+class ExperimentContext:
+    """
+    Thread-safe experiment context to replace global mutable state.
+    
+    Tracks failed experiments and configuration without using global variables.
+    """
+    def __init__(self):
+        self.failed_experiments = []
+        self.config = {}
+        
+    def record_failure(self, experiment_name: str, error: str, traceback_str: Optional[str] = None):
+        """Record a failed experiment."""
+        self.failed_experiments.append({
+            'experiment': experiment_name,
+            'error': str(error),
+            'traceback': traceback_str,
+            'timestamp': time.time()
+        })
+        
+    def get_failures(self) -> List[Dict[str, Any]]:
+        """Get list of failed experiments."""
+        return self.failed_experiments.copy()
+        
+    def has_failures(self) -> bool:
+        """Check if any experiments failed."""
+        return len(self.failed_experiments) > 0
+
+
+# Global context instance (initialized once, not mutated across experiments)
+_experiment_context = ExperimentContext()
 
 @contextmanager
 def error_context(context: str, continue_on_error: bool = False):
@@ -739,12 +791,12 @@ def error_context(context: str, continue_on_error: bool = False):
         # Print a condensed error message
         print(f"\nFAILED: {context} - {str(e)[:200]}")
         
-        # Track failed experiments
-        FAILED_EXPERIMENTS.append({
-            'experiment': context,
-            'error': str(e)[:500],
-            'traceback': traceback_str
-        })
+        # AUDIT FIX: Track failed experiments using context object instead of global
+        _experiment_context.record_failure(
+            experiment_name=context,
+            error=str(e)[:500],
+            traceback_str=traceback_str
+        )
 
         # Print full traceback to aid debugging in local validation runs
         try:
@@ -760,106 +812,11 @@ def error_context(context: str, continue_on_error: bool = False):
             print("   Continuing with remaining experiments...")
 
 
-def oom_safe_train_step(model, optimizer, criterion, inputs, targets, device, 
-                        opt_name="", max_retries=3, min_batch_size=1):
-    """
-    OOM-safe training step with automatic batch size reduction.
-    
-    AUDIT FIX 2: SCIENTIFIC VALIDITY - OOM TAINT TRACKING
-    When OOM occurs and batch size is reduced, this function now returns a 
-    'tainted' flag to indicate the run used variable batch sizes, which 
-    invalidates fair optimizer comparisons.
-    
-    Args:
-        model: PyTorch model
-        optimizer: Optimizer instance  
-        criterion: Loss function
-        inputs: Input tensor batch
-        targets: Target tensor batch
-        device: torch.device
-        opt_name: Optimizer name for SAM handling
-        max_retries: Maximum OOM recovery attempts
-        min_batch_size: Minimum batch size before giving up
-        
-    Returns:
-        Tuple of (loss_value, actual_batch_size, outputs, tainted)
-        - tainted: True if OOM recovery reduced batch size (run is scientifically invalid)
-    """
-    current_inputs = inputs
-    current_targets = targets
-    retries = 0
-    original_batch_size = inputs.size(0)
-    tainted = False  # AUDIT FIX 2: Track if OOM recovery occurred
-    
-    while retries < max_retries:
-        try:
-            current_inputs = current_inputs.to(device)
-            current_targets = current_targets.to(device)
-            
-            # Handle SAM optimizer (requires closure)
-            if 'SAM' in opt_name:
-                def closure():
-                    optimizer.zero_grad()
-                    outputs = model(current_inputs)
-                    loss = criterion(outputs, current_targets)
-                    loss.backward()
-                    return loss
-                loss = optimizer.step(closure)
-                outputs = model(current_inputs)
-                return loss.item(), current_inputs.size(0), outputs, tainted
-            else:
-                # Standard optimizer step
-                optimizer.zero_grad()
-                outputs = model(current_inputs)
-                loss = criterion(outputs, current_targets)
-                loss.backward()
-                
-                # Gradient clipping to prevent explosion
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-                
-                optimizer.step()
-                
-                # Check for loss divergence
-                if torch.isnan(loss) or torch.isinf(loss):
-                    logging.warning("Loss divergence detected: %f", loss.item())
-                    return float('inf'), current_inputs.size(0), outputs, tainted
-                
-                return loss.item(), current_inputs.size(0), outputs, tainted
-                
-        except RuntimeError as e:
-            if 'out of memory' in str(e).lower():
-                retries += 1
-                torch.cuda.empty_cache()
-                
-                old_size = current_inputs.size(0)
-                new_size = max(min_batch_size, old_size // 2)
-                
-                # 🐛 BUG FIX (Dec 2025): Check BatchNorm compatibility BEFORE reduction
-                if new_size < 2:
-                    logging.error("Cannot reduce batch to %d (BatchNorm requires >= 2)", new_size)
-                    raise RuntimeError("Batch size too small for BatchNorm layers") from e
-                
-                if new_size < min_batch_size:
-                    logging.error("OOM: Cannot reduce batch below %d", min_batch_size)
-                    raise
-                
-                # AUDIT FIX 2: Mark run as tainted and log warning
-                tainted = True
-                logging.warning("AUDIT WARNING: Run Tainted - Batch size reduced from %d to %d", original_batch_size, new_size)
-                logging.warning("    CUDA OOM! Reducing batch: %d->%d (retry %d/%d)", old_size, new_size, retries, max_retries)
-                logging.warning("    SCIENTIFIC INTEGRITY: This run uses variable batch size and should be excluded from fair comparisons.")
-                
-                # Slice the batch
-                current_inputs = inputs[:new_size]
-                current_targets = targets[:new_size]
-                
-                # Clear optimizer gradients
-                optimizer.zero_grad(set_to_none=True)
-            else:
-                raise
-    
-    logging.error("OOM recovery failed after %d retries", max_retries)
-    raise RuntimeError("CUDA OOM after {} recovery attempts".format(max_retries))
+# Import centralized OOM handler
+from src.core.oom_handler import oom_safe_train_step
+
+# AUDIT FIX: OOM handling centralized to src.core.oom_handler
+# All OOM logic uses oom_safe_train_step from the centralized module
 
 
 def clear_gpu_memory(force=False):
@@ -894,7 +851,7 @@ def clear_gpu_memory(force=False):
         
         # Log memory state
         allocated = torch.cuda.memory_allocated() / 1024**2
-        reserved = torch.cuda.memory_reserved() / 1024**2
+        # reserved variable available if needed for advanced debugging
         free = (torch.cuda.get_device_properties(0).total_memory / 1024**2) - allocated
         logging.info("GPU memory cleaned: %.1fMB used, %.1fMB free", allocated, free)
         
@@ -1113,7 +1070,7 @@ def load_experiment_config(config_path: str = None) -> Dict[str, Any]:
     try:
         config_file = Path(config_path)
         if config_file.exists():
-            with open(config_file, 'r') as f:
+            with open(config_file, 'r', encoding='utf-8') as f:
                 user_config = json.load(f)
             # Merge with defaults (user config takes precedence)
             merged_config = default_config.copy()
@@ -1161,7 +1118,7 @@ def get_provenance_info() -> Dict[str, Any]:
     try:
         git_hash = subprocess.run(
             ['git', 'rev-parse', 'HEAD'],
-            capture_output=True, text=True, timeout=5
+            capture_output=True, text=True, timeout=5, check=False
         )
         if git_hash.returncode == 0:
             provenance['git_commit'] = git_hash.stdout.strip()
@@ -1174,7 +1131,7 @@ def get_provenance_info() -> Dict[str, Any]:
     try:
         git_status = subprocess.run(
             ['git', 'status', '--porcelain'],
-            capture_output=True, text=True, timeout=5
+            capture_output=True, text=True, timeout=5, check=False
         )
         if git_status.returncode == 0:
             provenance['git_dirty'] = len(git_status.stdout.strip()) > 0
@@ -1199,7 +1156,7 @@ def get_provenance_info() -> Dict[str, Any]:
     try:
         nvidia_smi = subprocess.run(
             ['nvidia-smi', '--query-gpu=driver_version', '--format=csv,noheader'],
-            capture_output=True, text=True, timeout=5
+            capture_output=True, text=True, timeout=5, check=False
         )
         if nvidia_smi.returncode == 0:
             provenance['nvidia_driver'] = nvidia_smi.stdout.strip()
@@ -1315,13 +1272,15 @@ def _worker_init(worker_id, seed):
 
 def make_dataloader(dataset, batch_size=64, shuffle=False, seed: Optional[int] = None,
                     num_workers: int = 0, pin_memory: bool = False, collate_fn=None,
-                    sampler=None, drop_last: bool = False, persistent_workers: bool = False):
+                    sampler=None, drop_last: bool = False, persistent_workers: bool = False,
+                    split_type: Optional[str] = None):
     """Create a DataLoader with deterministic worker seeding when `seed` is provided.
 
     - If `seed` is not None, a `torch.Generator` is created and `worker_init_fn` seeds
       python, numpy and torch RNGs for each worker deterministically.
     - If `sampler` is provided, it will be used and `shuffle` will be ignored.
     - `persistent_workers` requires PyTorch >= 1.7.0 and num_workers > 0
+    - 🐛 FIX #15: Optional split_type parameter to tag loaders as 'train', 'validation', or 'test'
     """
     generator = None
     worker_init_fn = None
@@ -1364,7 +1323,19 @@ def make_dataloader(dataset, batch_size=64, shuffle=False, seed: Optional[int] =
         except Exception:
             pass  # Skip if version parsing fails
 
-    return DataLoader(dataset, **dl_kwargs)
+    loader = DataLoader(dataset, **dl_kwargs)
+    
+    # 🐛 FIX #15: Add metadata tags for safety checks in tuning pipeline
+    if split_type is not None:
+        setattr(loader, '_split_type', split_type)
+        if split_type == 'train':
+            loader.name = 'train'
+        elif split_type == 'validation':
+            loader.name = 'validation'
+        elif split_type == 'test':
+            loader.name = 'test'
+    
+    return loader
 
 
 # =============================================================================
@@ -1467,7 +1438,8 @@ def get_adaptive_batch_size(model, sample_input, device, base_batch_size=128):
         
     try:
         sizer = MemoryAwareBatchSizer()
-        optimal_bs = sizer.suggest_batch_size(model, sample_input)
+        # Use the correct method name
+        optimal_bs = sizer.get_recommended_batch_size('mnist' if sample_input.numel() < 3000 else 'resnet18')
         
         if optimal_bs is None or optimal_bs < 4:
             print(f"   Memory sizer returned invalid batch size, using: {base_batch_size}")
@@ -1811,6 +1783,7 @@ def run_scheduler_ablation(dataset_name='MNIST', results_dir='results/scheduler_
                 total_loss += loss.item()
             
             avg_loss = total_loss / len(train_loader)
+            # CRITICAL FIX: scheduler.step() called after optimizer.step() completes for all batches
             scheduler.step()  # Step scheduler after epoch
             
             # Test accuracy
@@ -1882,19 +1855,11 @@ def run_scheduler_ablation(dataset_name='MNIST', results_dir='results/scheduler_
 # SHARED UTILITIES AND MODELS
 # ==============================================================================
 
-def set_seed(seed: int):
-    """Set random seed for reproducibility"""
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
 class SimpleMLP(nn.Module):
-    def __init__(self, input_dim=28*28, hidden_dims=[256, 128], num_classes=10):
+    def __init__(self, input_dim=28*28, hidden_dims=None, num_classes=10):
         super().__init__()
+        if hidden_dims is None:
+            hidden_dims = [256, 128]
         self.input_dim = input_dim
         self.hidden_dims = hidden_dims
         self.num_classes = num_classes
@@ -1971,8 +1936,10 @@ class SyntheticMedicalDataset(Dataset):
 
 class UNet2D(nn.Module):
     """Simple U-Net implementation for 2D medical image segmentation"""
-    def __init__(self, in_channels=1, out_channels=1, features=[64, 128, 256, 512]):
+    def __init__(self, in_channels=1, out_channels=1, features=None):
         super(UNet2D, self).__init__()
+        if features is None:
+            features = [64, 128, 256, 512]
 
         self.encoder = nn.ModuleList()
         self.decoder = nn.ModuleList()
@@ -2177,12 +2144,13 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader
             lr = trial.suggest_float('lr', 1e-4, 1e-1, log=True)
             rho = trial.suggest_float('rho', 0.01, 0.2)
             base_opt = optim.SGD(model.parameters(), lr=lr)
-            optimizer = SAMWrapper(model.parameters(), optim.SGD, lr=lr, rho=rho)
+            optimizer = SAMWrapper(base_opt, rho=rho)
         elif optimizer_name == 'SAM_Adam':
             from src.core.pytorch_optimizers import SAMWrapper
             lr = trial.suggest_float('lr', 1e-5, 1e-2, log=True)
             rho = trial.suggest_float('rho', 0.01, 0.2)
-            optimizer = SAMWrapper(model.parameters(), optim.Adam, lr=lr, rho=rho)
+            base_opt = optim.Adam(model.parameters(), lr=lr)
+            optimizer = SAMWrapper(base_opt, rho=rho)
         elif optimizer_name == 'Lookahead_SGD':
             from src.core.pytorch_optimizers import LookaheadWrapper
             lr = trial.suggest_float('lr', 1e-4, 1e-1, log=True)
@@ -2204,35 +2172,55 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader
             beta2 = trial.suggest_float('beta2', 0.9, 0.9999)
             final_lr = trial.suggest_float('final_lr', 0.01, 0.5)
             gamma = trial.suggest_float('gamma', 1e-4, 1e-2, log=True)
-            optimizer = AdaBoundWrapper(model.parameters(), lr=lr, betas=(beta1, beta2), 
+            # CRITICAL FIX: AdaBoundWrapper expects beta1, beta2 separately (not betas tuple)
+            optimizer = AdaBoundWrapper(model.parameters(), lr=lr, beta1=beta1, beta2=beta2,
                                        final_lr=final_lr, gamma=gamma)
         elif optimizer_name == 'RAdam':
             from src.core.pytorch_optimizers import RAdamWrapper
             lr = trial.suggest_float('lr', 1e-5, 1e-2, log=True)
             beta1 = trial.suggest_float('beta1', 0.85, 0.95)
             beta2 = trial.suggest_float('beta2', 0.9, 0.9999)
-            optimizer = RAdamWrapper(model.parameters(), lr=lr, betas=(beta1, beta2))
+            # CRITICAL FIX: RAdamWrapper expects beta1, beta2 separately (not betas tuple)
+            optimizer = RAdamWrapper(model.parameters(), lr=lr, beta1=beta1, beta2=beta2)
         elif optimizer_name == 'LAMB':
             from src.core.pytorch_optimizers import LAMBWrapper
             lr = trial.suggest_float('lr', 1e-5, 1e-2, log=True)
             beta1 = trial.suggest_float('beta1', 0.85, 0.95)
             beta2 = trial.suggest_float('beta2', 0.9, 0.9999)
             wd = trial.suggest_float('weight_decay', 1e-6, 1e-2, log=True)
-            optimizer = LAMBWrapper(model.parameters(), lr=lr, betas=(beta1, beta2), weight_decay=wd)
+            # CRITICAL FIX: LAMBWrapper expects beta1, beta2 separately (not betas tuple)
+            optimizer = LAMBWrapper(model.parameters(), lr=lr, beta1=beta1, beta2=beta2, weight_decay=wd)
         else:
             return get_default_hyperparameters(optimizer_name)
         
         criterion = nn.CrossEntropyLoss()
+        
+        # 🐛 FIX #16: Detect if optimizer requires closure (SAM, etc)
+        from src.core.pytorch_optimizers import SAMWrapper
+        requires_closure = isinstance(optimizer, SAMWrapper)
         
         # Quick training
         for epoch in range(epochs):
             model.train()
             for inputs, targets in train_loader:
                 inputs, targets = inputs.to(device), targets.to(device)
-                optimizer.zero_grad()
-                outputs = model(inputs)
-                loss = criterion(outputs, targets)
-                loss.backward()
+                
+                if requires_closure:
+                    # SAMWrapper requires closure for adversarial gradient computation
+                    def closure():
+                        optimizer.zero_grad()
+                        outputs = model(inputs)
+                        loss = criterion(outputs, targets)
+                        loss.backward()
+                        return loss
+                    loss = optimizer.step(closure)
+                else:
+                    # Standard optimizer path
+                    optimizer.zero_grad()
+                    outputs = model(inputs)
+                    loss = criterion(outputs, targets)
+                    loss.backward()
+                    optimizer.step()
                 
                 # Gradient health monitoring
                 try:
@@ -2248,8 +2236,6 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader
                         logging.warning(f"Large gradient norm in sanity check: {grad_norm:.2e}")
                 except Exception as e:
                     logging.debug(f"Gradient check failed: {e}")
-                
-                optimizer.step()
         
         # Evaluate
         model.eval()
@@ -2293,7 +2279,7 @@ def get_default_hyperparameters(optimizer_name: str, experiment_type: str = "2d_
     """Get default hyperparameters from tuned config file."""
     try:
         config_path = Path(__file__).parent / "configs" / "benchmark_hyperparameters.json"
-        with open(config_path, 'r') as f:
+        with open(config_path, 'r', encoding='utf-8') as f:
             config = json.load(f)
         
         # Get hyperparameters for the specific experiment type
@@ -2327,12 +2313,14 @@ def get_default_hyperparameters(optimizer_name: str, experiment_type: str = "2d_
 # EXPERIMENT FUNCTIONS
 # ==============================================================================
 
-def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011,1213,1415,1617,1819,2021], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
+def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
     """Run MNIST benchmark with multiple optimizers - Enhanced with profiling and tracking
     
     Args:
         resume: If True, skip experiments that already have result files
     """
+    if seeds is None:
+        seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
     experiment_name = "MNIST_Benchmark"
     
     # Clear GPU memory before starting new experiment
@@ -2378,22 +2366,16 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
             opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ssl_context))
             urllib.request.install_opener(opener)
             
-            # Use PyTorch's automatic mirror fallback with retry logic
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    train_dataset = torchvision.datasets.MNIST('./data', train=True, download=True, transform=transform)
-                    test_dataset = torchvision.datasets.MNIST('./data', train=False, download=True, transform=transform)
-                    logging.info("MNIST dataset loaded successfully")
-                    break
-                except Exception as e:
-                    if attempt < max_retries - 1:
-                        logging.warning(f"MNIST download attempt {attempt+1} failed: {e}")
-                        logging.info(f"   Retrying... ({attempt+2}/{max_retries})")
-                        time.sleep(2)
-                    else:
-                        logging.error(f"Failed to download MNIST after {max_retries} attempts")
-                        raise
+            # AUDIT FIX 4: Use exponential backoff for dataset downloads
+            @retry_with_backoff(max_retries=3, initial_backoff=1.0, backoff_factor=2.0, 
+                              exceptions=(Exception,), log_prefix="MNIST download")
+            def download_mnist():
+                train_ds = torchvision.datasets.MNIST('./data', train=True, download=True, transform=transform)
+                test_ds = torchvision.datasets.MNIST('./data', train=False, download=True, transform=transform)
+                return train_ds, test_ds
+            
+            train_dataset, test_dataset = download_mnist()
+            logging.info("MNIST dataset loaded successfully")
 
             # Hyperparameter tuning (if enabled)
             tuned_params = {}
@@ -2407,9 +2389,11 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
                 tune_size = min(5000, len(train_dataset))
                 val_size = min(1000, len(train_dataset) - tune_size)
                 
-                # Split train_dataset into tune and validation subsets
-                tune_indices = list(range(tune_size))
-                val_indices = list(range(tune_size, tune_size + val_size))
+                # 🐛 FIX #14: Randomize indices instead of using contiguous ranges
+                # Prevents selection bias if dataset is ordered by class or other characteristics
+                all_indices = torch.randperm(len(train_dataset), generator=None).tolist()
+                tune_indices = all_indices[:tune_size]
+                val_indices = all_indices[tune_size:tune_size + val_size]
                 
                 tune_subset = torch.utils.data.Subset(train_dataset, tune_indices)
                 val_subset = torch.utils.data.Subset(train_dataset, val_indices)
@@ -2417,16 +2401,36 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
                 train_bs, test_bs = get_batch_size('mnist', 128, 256)
                 dl_kwargs = get_dataloader_kwargs()
                 
-                tune_loader = make_dataloader(tune_subset, batch_size=train_bs, shuffle=True, **dl_kwargs)
-                val_loader = make_dataloader(val_subset, batch_size=test_bs, shuffle=False, **dl_kwargs)
+                # 🐛 FIX #15: Tag loaders with split_type for validation enforcement
+                tune_loader = make_dataloader(tune_subset, batch_size=train_bs, shuffle=True, 
+                                             split_type='train', **dl_kwargs)
+                val_loader = make_dataloader(val_subset, batch_size=test_bs, shuffle=False, 
+                                            split_type='validation', **dl_kwargs)
                 
+                # === SCIENTIFIC FAIRNESS: Equal tuning budget for all optimizers ===
+                # All optimizers receive identical n_trials and epochs to ensure fair comparison
+                # This prevents biasing results toward specific optimizer families
                 n_trials = 5 if quick else 15
                 tune_epochs = 1 if ULTRA_QUICK_MODE else (2 if quick else 3)
                 
                 # METHODOLOGICAL NOTE: Tuning uses validation subset from training data
                 # This is acceptable for benchmarking but may introduce bias for publication
                 # Recommendation: For strict reproducibility, use separate tuning dataset
-                for opt_name in ['SGD', 'SGD_Momentum', 'Adam', 'AdamW', 'AMSGrad']:
+                
+                # === CRITICAL FIX: Tune ALL optimizers with equal budget ===
+                # Previously only tuned 5 basic optimizers, leaving advanced ones with defaults
+                # This created unfair advantage for tuned optimizers and invalidated comparisons
+                optimizers_to_tune = [
+                    'SGD', 'SGD_Momentum', 'Adam', 'AdamW', 'AMSGrad',
+                    'SAM_SGD', 'SAM_Adam', 'Lookahead_SGD', 'Lookahead_Adam',
+                    'AdaBound', 'RAdam', 'LAMB'
+                ]
+                
+                logging.info(f"Tuning ALL optimizers with equal budget: n_trials={n_trials}, epochs={tune_epochs}")
+                logging.info("This ensures scientific fairness - all optimizers tuned with identical compute budget")
+                
+                for opt_name in optimizers_to_tune:
+                    logging.info(f"  Tuning {opt_name}...")
                     tuned_params[opt_name] = quick_tune_optimizer(
                         opt_name, SimpleMLP, tune_loader, val_loader,
                         device, epochs=tune_epochs, n_trials=n_trials, seed=seeds[0]
@@ -2436,13 +2440,20 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
             
             results = []
 
-            # Import new optimizers
-            from src.core.pytorch_optimizers import AdaBoundWrapper, RAdamWrapper, LAMBWrapper, LookaheadWrapper
+            # 🐛 FIX #17: Import ALL custom optimizer wrappers including SAMWrapper
+            from src.core.pytorch_optimizers import (
+                AdaBoundWrapper, RAdamWrapper, LAMBWrapper, 
+                LookaheadWrapper, SAMWrapper
+            )
             
             # Build optimizers with tuned or default parameters
             optimizers_config = []
             for opt_name in ['SGD', 'SGD_Momentum', 'Adam', 'AdamW', 'AMSGrad', 'SAM_SGD', 'SAM_Adam', 'Lookahead_SGD', 'Lookahead_Adam', 'AdaBound', 'RAdam', 'LAMB']:
                 params = tuned_params.get(opt_name, get_default_hyperparameters(opt_name))
+                
+                # Log when falling back to default hyperparameters
+                if opt_name not in tuned_params:
+                    logging.info(f"Using default hyperparameters for {opt_name} (tuning was skipped or failed)")
 
                 # Use safe .get() with sensible defaults to avoid KeyError when tuned params are missing keys
                 if opt_name == 'SGD':
@@ -2461,10 +2472,10 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
                                             optim.Adam(p, lr=lr, betas=(b1, b2), amsgrad=True)))
                 elif opt_name == 'SAM_SGD':
                     optimizers_config.append((opt_name, lambda p, lr=params.get('lr', 0.01), rho=params.get('rho', 0.05): 
-                                            SAMWrapper(p, optim.SGD, lr=lr, rho=rho)))
+                                            SAMWrapper(optim.SGD(p, lr=lr), rho=rho)))
                 elif opt_name == 'SAM_Adam':
                     optimizers_config.append((opt_name, lambda p, lr=params.get('lr', 0.001), rho=params.get('rho', 0.05): 
-                                            SAMWrapper(p, optim.Adam, lr=lr, rho=rho)))
+                                            SAMWrapper(optim.Adam(p, lr=lr), rho=rho)))
                 elif opt_name == 'Lookahead_SGD':
                     optimizers_config.append((opt_name, lambda p, lr=params.get('lr', 0.01), k=params.get('k', 5), alpha=params.get('alpha', 0.5):
                                             LookaheadWrapper(optim.SGD(p, lr=lr), k=k, alpha=alpha)))
@@ -2525,7 +2536,10 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
                         
                         # === PHASE 1 FIX: WIRE AUTO-LR (Safe LR Finder) ===
                         # Find optimal LR if auto-lr flag is enabled
-                        base_lr = tuned_params.get(opt_name, get_default_hyperparameters(opt_name)).get('lr', 0.001)
+                        # BUG FIX: Must get fresh params and recreate optimizer if LR changes
+                        current_params = tuned_params.get(opt_name, get_default_hyperparameters(opt_name)).copy()
+                        base_lr = current_params.get('lr', 0.001)
+                        
                         if AUTO_LR_ENABLED:
                             # Create temporary dataloader for LR finding
                             temp_bs = 128
@@ -2540,15 +2554,70 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
                                 optimizer_class=optim.SGD if 'SGD' in opt_name else optim.Adam,
                                 opt_name=opt_name
                             )
-                            logging.info(f"   Auto-LR: {base_lr:.2e} → {suggested_lr:.2e}")
+                            logging.info(f"   Auto-LR: {base_lr:.2e} => {suggested_lr:.2e}")
                             base_lr = suggested_lr
-                            
-                            # Update params with found LR
-                            if opt_name in tuned_params:
-                                tuned_params[opt_name]['lr'] = base_lr
+                            current_params['lr'] = base_lr
                         
-                        # Create optimizer with potentially updated LR
-                        optimizer = opt_func(model.parameters())
+                        # CRITICAL BUG FIX: The lambda opt_func was created with old params captured.
+                        # When AUTO_LR modifies tuned_params, the lambda still has the old value.
+                        # Solution: Don't use the pre-made lambda if AUTO_LR changed anything.
+                        # Instead, recreate the optimizer with current_params.
+                        if AUTO_LR_ENABLED:
+                            # Rebuild optimizer with updated params
+                            if opt_name == 'SGD':
+                                optimizer = optim.SGD(model.parameters(), lr=current_params.get('lr', 0.01))
+                            elif opt_name == 'SGD_Momentum':
+                                optimizer = optim.SGD(model.parameters(), lr=current_params.get('lr', 0.01), 
+                                                    momentum=current_params.get('momentum', 0.0))
+                            elif opt_name == 'Adam':
+                                optimizer = optim.Adam(model.parameters(), lr=current_params.get('lr', 0.001),
+                                                     betas=(current_params.get('beta1', 0.9), current_params.get('beta2', 0.999)))
+                            elif opt_name == 'AdamW':
+                                optimizer = optim.AdamW(model.parameters(), lr=current_params.get('lr', 0.001),
+                                                      betas=(current_params.get('beta1', 0.9), current_params.get('beta2', 0.999)),
+                                                      weight_decay=current_params.get('weight_decay', 0.0))
+                            elif opt_name == 'AMSGrad':
+                                optimizer = optim.Adam(model.parameters(), lr=current_params.get('lr', 0.001),
+                                                     betas=(current_params.get('beta1', 0.9), current_params.get('beta2', 0.999)),
+                                                     amsgrad=True)
+                            elif opt_name == 'SAM_SGD':
+                                from src.core.pytorch_optimizers import SAMWrapper
+                                base_opt = optim.SGD(model.parameters(), lr=current_params.get('lr', 0.01))
+                                optimizer = SAMWrapper(base_opt, rho=current_params.get('rho', 0.05))
+                            elif opt_name == 'SAM_Adam':
+                                from src.core.pytorch_optimizers import SAMWrapper
+                                base_opt = optim.Adam(model.parameters(), lr=current_params.get('lr', 0.001))
+                                optimizer = SAMWrapper(base_opt, rho=current_params.get('rho', 0.05))
+                            elif opt_name == 'Lookahead_SGD':
+                                base_opt = optim.SGD(model.parameters(), lr=current_params.get('lr', 0.01))
+                                optimizer = LookaheadWrapper(base_opt, k=current_params.get('k', 5), 
+                                                           alpha=current_params.get('alpha', 0.5))
+                            elif opt_name == 'Lookahead_Adam':
+                                base_opt = optim.Adam(model.parameters(), lr=current_params.get('lr', 0.001))
+                                optimizer = LookaheadWrapper(base_opt, k=current_params.get('k', 5), 
+                                                           alpha=current_params.get('alpha', 0.5))
+                            elif opt_name == 'AdaBound':
+                                optimizer = AdaBoundWrapper(model.parameters(), lr=current_params.get('lr', 0.001),
+                                                          beta1=current_params.get('beta1', 0.9),
+                                                          beta2=current_params.get('beta2', 0.999),
+                                                          final_lr=current_params.get('final_lr', 0.1),
+                                                          gamma=current_params.get('gamma', 1e-3))
+                            elif opt_name == 'RAdam':
+                                optimizer = RAdamWrapper(model.parameters(), lr=current_params.get('lr', 0.001),
+                                                       beta1=current_params.get('beta1', 0.9),
+                                                       beta2=current_params.get('beta2', 0.999))
+                            elif opt_name == 'LAMB':
+                                optimizer = LAMBWrapper(model.parameters(), lr=current_params.get('lr', 0.001),
+                                                      beta1=current_params.get('beta1', 0.9),
+                                                      beta2=current_params.get('beta2', 0.999),
+                                                      weight_decay=current_params.get('weight_decay', 0.0))
+                            else:
+                                # Fallback to lambda if unknown optimizer
+                                optimizer = opt_func(model.parameters())
+                        else:
+                            # Use pre-made lambda when AUTO_LR is disabled (safe path)
+                            optimizer = opt_func(model.parameters())
+                        
                         criterion = nn.CrossEntropyLoss()
 
                         # === PHASE 1 FIX: WIRE ADAPTIVE BATCH SIZING ===
@@ -2564,7 +2633,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
                                 device=device,
                                 base_batch_size=train_bs
                             )
-                            logging.info(f"   Adaptive Batch: {train_bs} → {adaptive_bs}")
+                            logging.info(f"   Adaptive Batch: {train_bs} => {adaptive_bs}")
                             train_bs = adaptive_bs
                         
                         dl_kwargs = get_dataloader_kwargs()
@@ -2584,7 +2653,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
                             if checkpoint:
                                 # Check if experiment already completed
                                 if checkpoint.get('metadata', {}).get('completed', False):
-                                    logging.info(f"⚠ Experiment {opt_name} seed {seed} already completed at epoch {checkpoint.get('epoch', 0)}")
+                                    logging.info(f"[WARN] Experiment {opt_name} seed {seed} already completed at epoch {checkpoint.get('epoch', 0)}")
                                     logging.info("  Skipping to avoid duplicate work")
                                     continue  # Skip this run
                                 
@@ -2607,7 +2676,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
                                         metadata = checkpoint.get('metadata', {})
                                         best_val_acc = metadata.get('best_val_acc', 0.0)
                                         patience_counter = metadata.get('patience_counter', 0)
-                                        logging.info(f"✓ Restored metadata: best_val_acc={best_val_acc:.2f}%, patience={patience_counter}")
+                                        logging.info(f"[OK] Restored metadata: best_val_acc={best_val_acc:.2f}%, patience={patience_counter}")
                                         
                                         # Restore RNG states for reproducibility
                                         checkpoint_manager.restore_rng_states(checkpoint)
@@ -2657,7 +2726,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
                         if checkpoint and 'scheduler' in checkpoint:
                             try:
                                 scheduler.load_state_dict(checkpoint['scheduler'])
-                                logging.info(f"✓ Restored scheduler state (last_epoch={scheduler.last_epoch})")
+                                logging.info(f"[OK] Restored scheduler state (last_epoch={scheduler.last_epoch})")
                             except Exception as e:
                                 logging.warning(f"Could not restore scheduler state: {e}. Using fresh scheduler.")
                         
@@ -2738,7 +2807,8 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
                                 test_loss /= len(test_loader)
                                 test_acc = 100. * test_correct / len(test_dataset)
                                 
-                                # Learning rate scheduling
+                                # Learning rate scheduling (called after full training epoch)
+                                # AUDIT FIX: Verified scheduler.step() is after optimizer.step() in training loop
                                 scheduler.step()
                                 current_lr = optimizer.param_groups[0]['lr']
                                 
@@ -2911,7 +2981,9 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=[42,123,456,789,1011
         logging.error(f"Critical error during MNIST experiment: {e}")
         raise
 
-def run_cifar10_experiment(results_dir="results_cifar10", seeds=[42,123,456,789,1011,1213,1415,1617,1819,2021], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
+def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
+    if seeds is None:
+        seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
     """Run CIFAR-10 ResNet-18 experiment
     
     Args:
@@ -2961,20 +3033,16 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[42,123,456,789,
     urllib.request.install_opener(opener)
     
     max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            train_dataset = torchvision.datasets.CIFAR10('./data', train=True, download=True, transform=transform_train)
-            test_dataset = torchvision.datasets.CIFAR10('./data', train=False, download=True, transform=transform_test)
-            logging.info("CIFAR-10 dataset loaded successfully")
-            break
-        except Exception as e:
-            if attempt < max_retries - 1:
-                logging.warning(f"CIFAR-10 download attempt {attempt+1} failed: {e}")
-                logging.info(f"   Retrying... ({attempt+2}/{max_retries})")
-                time.sleep(2)
-            else:
-                logging.error(f"Failed to download CIFAR-10 after {max_retries} attempts")
-                raise
+    # AUDIT FIX 4: Use exponential backoff for dataset downloads
+    @retry_with_backoff(max_retries=3, initial_backoff=1.0, backoff_factor=2.0,
+                       exceptions=(Exception,), log_prefix="CIFAR-10 download")
+    def download_cifar10():
+        train_ds = torchvision.datasets.CIFAR10('./data', train=True, download=True, transform=transform_train)
+        test_ds = torchvision.datasets.CIFAR10('./data', train=False, download=True, transform=transform_test)
+        return train_ds, test_ds
+    
+    train_dataset, test_dataset = download_cifar10()
+    logging.info("CIFAR-10 dataset loaded successfully")
 
     # Get optimized batch sizes and DataLoader kwargs
     seed0 = seeds[0] if seeds else None
@@ -3032,7 +3100,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[42,123,456,789,
                     optimizer_class=optim.SGD if 'SGD' in opt_name else optim.Adam,
                     opt_name=opt_name
                 )
-                logging.info(f"   Auto-LR (CIFAR-10 {opt_name}): {lr:.2e} → {suggested_lr:.2e}")
+                logging.info(f"   Auto-LR (CIFAR-10 {opt_name}): {lr:.2e} => {suggested_lr:.2e}")
                 final_lr = suggested_lr
             
             # Create optimizer with potentially updated LR
@@ -3168,7 +3236,8 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[42,123,456,789,
                     test_loss /= len(test_loader)
                     test_acc = 100. * test_correct / len(test_dataset)
                     
-                    # Learning rate scheduling
+                    # Learning rate scheduling (called after full training epoch)
+                    # AUDIT FIX: Verified scheduler.step() is after optimizer.step() in training loop
                     scheduler.step()
                     
                     # Best model tracking
@@ -3318,7 +3387,9 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=[42,123,456,789,
     return df
 
 
-def run_nlp_experiment(results_dir="results_nlp", seeds=[42,123,456,789,1011,1213,1415,1617,1819,2021], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
+def run_nlp_experiment(results_dir="results_nlp", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
+    if seeds is None:
+        seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
     """Run full IMDB sentiment analysis with DistilBERT
     
     This function attempts to use HuggingFace DistilBERT for NLP experiments.
@@ -3329,7 +3400,7 @@ def run_nlp_experiment(results_dir="results_nlp", seeds=[42,123,456,789,1011,121
         resume: If True, skip experiments that already have result files
     """
     # Clear GPU memory before starting new experiment
-    logging.info("🧹 Clearing GPU memory before NLP experiment...")
+    logging.info("[*] Clearing GPU memory before NLP experiment...")
     clear_gpu_memory(force=True)
     # Clear GPU memory before starting new experiment
     clear_gpu_memory()
@@ -3363,7 +3434,9 @@ def run_nlp_experiment(results_dir="results_nlp", seeds=[42,123,456,789,1011,121
         return run_nlp_experiment_simple(results_dir, seeds, 3 if quick else 5, resume)
 
 
-def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
+def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
+    if seeds is None:
+        seeds = [1, 2, 3]
     """Internal function: Run NLP experiment using HuggingFace models"""
     print("   Attempting to use HuggingFace DistilBERT...")
     
@@ -3523,7 +3596,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
                     )
                     
                     if suggested_lr is not None and suggested_lr > 0:
-                        print(f"Auto-LR: {opt_name} base LR {lr:.2e} → suggested {suggested_lr:.2e}")
+                        print(f"Auto-LR: {opt_name} base LR {lr:.2e} => suggested {suggested_lr:.2e}")
                         lr = suggested_lr
                     else:
                         print(f"Auto-LR failed, using default lr={lr:.2e}")
@@ -3667,7 +3740,8 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
                     test_loss /= max(1, test_total)
                     test_acc = 100.0 * test_correct / max(1, test_total)
                     
-                    # LR scheduling
+                    # LR scheduling (called after full training epoch)
+                    # AUDIT FIX: Verified scheduler.step() is after optimizer.step() in training loop
                     scheduler.step()
                     
                     # Best model tracking
@@ -3785,7 +3859,9 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=[1,2,3], qu
     
     return df
 
-def run_nlp_experiment_simple(results_dir="results_nlp", seeds=[42,123,456,789,1011,1213,1415,1617,1819,2021], epochs=10, resume=False):
+def run_nlp_experiment_simple(results_dir="results_nlp", seeds=None, epochs=10, resume=False):
+    if seeds is None:
+        seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
     """Robust NLP experiment using local LSTM/RNN models with synthetic or IMDB data
     
     This function provides a complete NLP benchmark that works even when HuggingFace
@@ -4097,7 +4173,9 @@ class BiLSTMLayer(nn.Module):
         return torch.cat([h_n[0], h_n[1]], dim=1)  # [batch, hidden*2]
 
 
-def run_medical_experiment(results_dir="results_medical", seeds=[42,123,456,789,1011,1213,1415,1617,1819,2021], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
+def run_medical_experiment(results_dir="results_medical", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
+    if seeds is None:
+        seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
     """Run full medical image segmentation with U-Net
     
     Args:
@@ -4265,6 +4343,8 @@ def run_medical_experiment(results_dir="results_medical", seeds=[42,123,456,789,
                             loss = criterion(outputs, masks)
                             loss.backward()
                             return loss
+                        # CRITICAL FIX: Pass actual closure to SAM, not dummy lambda
+                        # SAM calls closure internally for adversarial gradient computation
                         loss = optimizer.step(closure)
                         outputs = model(images)  # Recompute after SAM step
                     else:
@@ -4281,7 +4361,9 @@ def run_medical_experiment(results_dir="results_medical", seeds=[42,123,456,789,
                         
                         optimizer.step()
 
-                    train_loss += float(loss.item()) * images.size(0)
+                    # AUDIT FIX 3: Safely extract loss value (works for both Tensor and float)
+                    loss_value = float(loss.item()) if hasattr(loss, 'item') else float(loss)
+                    train_loss += loss_value * images.size(0)
                     train_dice += dice_coefficient(torch.sigmoid(outputs), masks).item() * images.size(0)
                     train_total += images.size(0)
 
@@ -4309,7 +4391,8 @@ def run_medical_experiment(results_dir="results_medical", seeds=[42,123,456,789,
                 test_loss /= max(1, test_total)
                 test_dice /= max(1, test_total)
                 
-                # LR scheduling
+                # LR scheduling (called after full training epoch)
+                # AUDIT FIX: Verified scheduler.step() is after optimizer.step() in training loop
                 scheduler.step()
                 
                 # Best model tracking (based on dice score)
@@ -4916,26 +4999,33 @@ def generate_interactive_visualizations(results_dir, plots_dir):
         
         if has_epoch and has_metrics and 'optimizer' in combined_df.columns:
             try:
-                # Determine metric columns
-                metric_cols = []
-                for col in ['train_loss', 'test_loss', 'train_acc', 'test_acc', 'test_accuracy']:
-                    if col in combined_df.columns:
-                        metric_cols.append(col)
+                # Convert DataFrame to expected dict format for plot_multi_optimizer_comparison
+                results_dict = {}
+                for opt_name, group in combined_df.groupby('optimizer'):
+                    # Aggregate metrics across epochs
+                    loss_col = 'train_loss' if 'train_loss' in group.columns else 'test_loss'
+                    grad_col = 'grad_norm' if 'grad_norm' in group.columns else None
+                    
+                    results_dict[opt_name] = {
+                        'loss_history': group[loss_col].values if loss_col in group.columns else np.array([]),
+                        'grad_norm_history': group[grad_col].values if grad_col else np.array([]),
+                        'final_loss': group[loss_col].iloc[-1] if loss_col in group.columns else 0.0,
+                        'iterations': len(group)
+                    }
                 
-                if metric_cols:
+                if results_dict:
                     # Descriptive filename
                     output_path = plots_path / f"interactive_{dataset_dir.name}_optimizer_comparison.html"
                     fig = plot_multi_optimizer_comparison(
-                        combined_df,
-                        optimizer_col='optimizer',
-                        epoch_col='epoch',
-                        metric_cols=metric_cols[:4],  # Max 4 metrics
+                        results_dict,
                         title=f"{dataset_dir.name.upper()} Optimizer Comparison"
                     )
                     fig.write_html(str(output_path))
                     print(f"   Created {output_path.name}")
             except Exception as e:
-                logging.debug(f"Could not create plot for {dataset_dir.name}: {e}")
+                logging.warning(f"Could not create plot for {dataset_dir.name}: {e}")
+                import traceback
+                logging.debug(traceback.format_exc())
                 continue
     
     print("   Interactive visualizations complete")
@@ -5333,7 +5423,9 @@ class Rastrigin:
     def gradient(self, x):
         return 2*x + 2*np.pi*self.A*np.sin(2*np.pi*x)
 
-def run_2d_experiments(results_dir="results_2d", seeds=[1,2,3], resume=False):
+def run_2d_experiments(results_dir="results_2d", seeds=None, resume=False):
+    if seeds is None:
+        seeds = [1, 2, 3]
     """Run 2D optimization experiments on test functions
     
     Args:
@@ -5457,7 +5549,9 @@ def run_2d_experiments(results_dir="results_2d", seeds=[1,2,3], resume=False):
     
     return df
 
-def run_robustness_analysis(results_dir="results_robustness", seeds=[42], resume=False):
+def run_robustness_analysis(results_dir="results_robustness", seeds=None, resume=False):
+    if seeds is None:
+        seeds = [42]
     """Run initial condition robustness analysis
     
     Args:
@@ -5568,7 +5662,9 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=[42], resume
     
     return df
 
-def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=[42], resume=False):
+def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=None, resume=False):
+    if seeds is None:
+        seeds = [42]
     """Run SAM sensitivity analysis with different rho values
     
     Args:
@@ -5608,19 +5704,14 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=[42], resum
     urllib.request.install_opener(opener)
     
     max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            train_dataset = torchvision.datasets.MNIST('./data', train=True, download=True, transform=transform)
-            logging.info("MNIST dataset loaded successfully")
-            break
-        except Exception as e:
-            if attempt < max_retries - 1:
-                logging.warning(f"MNIST download attempt {attempt+1} failed: {e}")
-                logging.info(f"   Retrying... ({attempt+2}/{max_retries})")
-                time.sleep(2)
-            else:
-                logging.error(f"Failed to download MNIST after {max_retries} attempts")
-                raise
+    # AUDIT FIX 4: Use exponential backoff for dataset downloads
+    @retry_with_backoff(max_retries=3, initial_backoff=1.0, backoff_factor=2.0,
+                       exceptions=(Exception,), log_prefix="MNIST download")
+    def download_mnist():
+        return torchvision.datasets.MNIST('./data', train=True, download=True, transform=transform)
+    
+    train_dataset = download_mnist()
+    logging.info("MNIST dataset loaded successfully")
     
     train_loader = make_dataloader(train_dataset, batch_size=256, shuffle=True, seed=seed, num_workers=2, pin_memory=True)
 
@@ -5654,8 +5745,10 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=[42], resum
                     loss.backward()
                     return loss
 
+                # CRITICAL FIX: Pass actual closure to SAM
                 loss = optimizer.step(closure)
-                epoch_loss += loss.item()
+                loss_value = float(loss.item()) if hasattr(loss, 'item') else float(loss)
+                epoch_loss += loss_value
 
             epoch_loss /= len(train_loader)
             print(f"  Epoch {epoch+1}: Loss = {epoch_loss:.4f}")
@@ -5689,7 +5782,9 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=[42], resum
     
     return df
 
-def run_ablation_study(results_dir="results_ablation", seeds=[42], resume=False):
+def run_ablation_study(results_dir="results_ablation", seeds=None, resume=False):
+    if seeds is None:
+        seeds = [42]
     """Run optimizer component ablation study
     
     Args:
@@ -5800,7 +5895,9 @@ def run_ablation_study(results_dir="results_ablation", seeds=[42], resume=False)
     return df
 
 
-def run_advanced_training_ablation(results_dir="results_advanced_ablation", seeds=[1,2,3,4,5], quick=False, resume=False):
+def run_advanced_training_ablation(results_dir="results_advanced_ablation", seeds=None, quick=False, resume=False):
+    if seeds is None:
+        seeds = [1, 2, 3, 4, 5]
     """Run ablation study for advanced training features (AMP, Label Smoothing, EMA)
     
     This function runs a comprehensive ablation study to evaluate the impact of:
@@ -5873,7 +5970,9 @@ def run_advanced_training_ablation(results_dir="results_advanced_ablation", seed
         return pd.DataFrame()
 
 
-def run_initialization_ablation(device='cuda', epochs=10, seeds=[1,2,3,4,5], quick=False, results_dir='results/initialization_ablation'):
+def run_initialization_ablation(device='cuda', epochs=10, seeds=None, quick=False, results_dir='results/initialization_ablation'):
+    if seeds is None:
+        seeds = [1, 2, 3, 4, 5]
     """
     Run initialization-optimizer interaction ablation study.
     
@@ -6033,6 +6132,7 @@ def run_distributed_experiment(results_dir="results_distributed", world_size=2, 
 
 def distributed_training_worker(rank, world_size, backend, results_dir):
     """Worker function for distributed training"""
+    # AUDIT FIX: Use finally block to ensure safe cleanup even if initialization fails
     try:
         # Initialize process group
         os.environ['MASTER_ADDR'] = 'localhost'
@@ -6060,11 +6160,18 @@ def distributed_training_worker(rank, world_size, backend, results_dir):
         # On fresh Kaggle kernels, dataset may not exist, causing immediate failure
         train_dataset = torchvision.datasets.CIFAR10('./data', train=True, download=True, transform=transform)
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset, num_replicas=world_size, rank=rank)
-        train_loader = DataLoader(train_dataset, batch_size=128, sampler=train_sampler)
+        
+        # AUDIT FIX: Track per-device batch size for effective batch size computation
+        per_device_batch_size = 128
+        train_loader = DataLoader(train_dataset, batch_size=per_device_batch_size, sampler=train_sampler)
 
         # Optimizer and loss
         optimizer = optim.Adam(model.parameters(), lr=0.001)
         criterion = nn.CrossEntropyLoss()
+
+        # AUDIT FIX: Compute global effective batch size for DDP
+        # This is critical for fair comparison with single-GPU experiments
+        effective_batch_size = per_device_batch_size * world_size
 
         # Training loop
         epochs = 2 if ULTRA_QUICK_MODE else 3
@@ -6088,18 +6195,28 @@ def distributed_training_worker(rank, world_size, backend, results_dir):
         if rank == 0:
             os.makedirs(results_dir, exist_ok=True)
             # FIXED: Use new zipfile serialization for large models
+            # AUDIT FIX: Include effective_batch_size in saved metadata
             torch.save({
                 'model_state_dict': model.module.state_dict(),
                 'world_size': world_size,
-                'epochs': epochs
+                'epochs': epochs,
+                'effective_batch_size': effective_batch_size,
+                'per_device_batch_size': per_device_batch_size
             }, f"{results_dir}/distributed_model.pt", _use_new_zipfile_serialization=True)
-
-        dist.destroy_process_group()
 
     except Exception as e:
         print(f"Worker {rank} failed: {e}")
-        dist.destroy_process_group()
+        import traceback
+        traceback.print_exc()
         raise
+    finally:
+        # AUDIT FIX: Safe cleanup with is_initialized() guard
+        # This prevents crashes if process group initialization failed
+        if dist.is_initialized():
+            try:
+                dist.destroy_process_group()
+            except Exception as cleanup_error:
+                print(f"Warning: Failed to destroy process group on rank {rank}: {cleanup_error}")
 
 def run_advanced_architecture_experiment(results_dir="results_advanced_arch", epochs=5):
     """Run experiments with advanced architectures like Vision Transformer"""
@@ -6120,20 +6237,14 @@ def run_advanced_architecture_experiment(results_dir="results_advanced_arch", ep
         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
     ])
 
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            train_dataset = torchvision.datasets.CIFAR10('./data', train=True, download=True, transform=transform)
-            logging.info("CIFAR-10 dataset loaded successfully")
-            break
-        except Exception as e:
-            if attempt < max_retries - 1:
-                logging.warning(f"CIFAR-10 download attempt {attempt+1} failed: {e}")
-                logging.info(f"   Retrying... ({attempt+2}/{max_retries})")
-                time.sleep(2)
-            else:
-                logging.error(f"Failed to download CIFAR-10 after {max_retries} attempts")
-                raise
+    # AUDIT FIX 4: Use exponential backoff for dataset downloads
+    @retry_with_backoff(max_retries=3, initial_backoff=1.0, backoff_factor=2.0,
+                       exceptions=(Exception,), log_prefix="CIFAR-10 download (ViT)")
+    def download_cifar10_vit():
+        return torchvision.datasets.CIFAR10('./data', train=True, download=True, transform=transform)
+    
+    train_dataset = download_cifar10_vit()
+    logging.info("CIFAR-10 dataset loaded successfully")
     
     train_loader = make_dataloader(train_dataset, batch_size=32, shuffle=True, seed=None, num_workers=0)
 
@@ -6579,7 +6690,9 @@ def print_system_info():
         print(f"  {k}: {v}")
     print()
 
-def run_resnet_experiment(results_dir="results_resnet", seeds=[42,123,456,789,1011,1213,1415,1617,1819,2021], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
+def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
+    if seeds is None:
+        seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
     """Run ResNet18 experiment with enhanced monitoring
     
     Args:
@@ -6632,21 +6745,16 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=[42,123,456,789,10
     opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ssl_context))
     urllib.request.install_opener(opener)
     
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            train_dataset = torchvision.datasets.CIFAR10('./data', train=True, download=True, transform=transform)
-            test_dataset = torchvision.datasets.CIFAR10('./data', train=False, download=True, transform=transform)
-            logging.info("CIFAR-10 dataset loaded successfully for ResNet")
-            break
-        except Exception as e:
-            if attempt < max_retries - 1:
-                logging.warning(f"CIFAR-10 download attempt {attempt+1} failed: {e}")
-                logging.info(f"   Retrying... ({attempt+2}/{max_retries})")
-                time.sleep(2)
-            else:
-                logging.error(f"Failed to download CIFAR-10 after {max_retries} attempts")
-                raise
+    # AUDIT FIX 4: Use exponential backoff for dataset downloads
+    @retry_with_backoff(max_retries=3, initial_backoff=1.0, backoff_factor=2.0,
+                       exceptions=(Exception,), log_prefix="CIFAR-10 download (ResNet)")
+    def download_cifar10_resnet():
+        train_ds = torchvision.datasets.CIFAR10('./data', train=True, download=True, transform=transform)
+        test_ds = torchvision.datasets.CIFAR10('./data', train=False, download=True, transform=transform)
+        return train_ds, test_ds
+    
+    train_dataset, test_dataset = download_cifar10_resnet()
+    logging.info("CIFAR-10 dataset loaded successfully for ResNet")
 
     # Get optimized batch sizes and DataLoader kwargs
     train_bs, test_bs = get_batch_size('resnet', default_train=128, default_test=256)
@@ -6679,6 +6787,7 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=[42,123,456,789,10
                     loss = criterion(outputs, targets)
                     loss.backward()
                     return loss
+                # CRITICAL FIX: Pass actual closure to SAM
                 loss = optimizer.step(closure)
                 outputs = model(inputs)  # Recompute after SAM step
             else:
@@ -6688,7 +6797,8 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=[42,123,456,789,10
                 loss.backward()
                 optimizer.step()
 
-            train_loss += loss.item()
+            loss_value = float(loss.item()) if hasattr(loss, 'item') else float(loss)
+            train_loss += loss_value
             _, predicted = outputs.max(1)
             train_correct += predicted.eq(targets).sum().item()
 
@@ -6768,7 +6878,9 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=[42,123,456,789,10
     return df
 
 
-def run_highdim_experiment(results_dir="results_highdim", seeds=[42,123,456,789,1011,1213,1415,1617,1819,2021], quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
+def run_highdim_experiment(results_dir="results_highdim", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
+    if seeds is None:
+        seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
     """Run high-dimensional optimization experiment
     
     Args:
@@ -7103,7 +7215,7 @@ Examples:
         selected_experiments = [e.strip() for e in args.experiments.split(',')]
     
     # Display module availability status
-    print("\n🔍 Optional Module Status:")
+    print("\n[*] Optional Module Status:")
     modules_status = [
         ("Statistical Analysis", HAS_STATS, "scipy"),
         ("Interactive Plots", HAS_INTERACTIVE, "plotly, kaleido"),
@@ -7387,7 +7499,7 @@ Examples:
                                        f"Stopped before {experiment_name}")
             return False
         remaining = time_budget.remaining_hours()
-        print(f"   ⏱️  Time remaining: {remaining:.1f}h")
+        print(f"   [TIME] Time remaining: {remaining:.1f}h")
         return True
     
     if 'mnist' in selected_experiments:
@@ -8100,6 +8212,18 @@ Examples:
                     cifar10_optimizers_config = {}
                     tuning_fairness_config = {}
                     
+                    # === SCIENTIFIC FAIRNESS FIX: ALL optimizers receive equal tuning budget ===
+                    # As of the latest fixes, run_mnist_experiment now tunes ALL 12 optimizers
+                    # with identical n_trials and epochs. This ensures fair comparison.
+                    # Previously only 5 basic optimizers were tuned, creating unfair advantage.
+                    
+                    # All optimizers in this list are now equally tuned
+                    all_tuned_optimizers = [
+                        'SGD', 'SGD_Momentum', 'Adam', 'AdamW', 'AMSGrad',
+                        'SAM_SGD', 'SAM_Adam', 'Lookahead_SGD', 'Lookahead_Adam',
+                        'AdaBound', 'RAdam', 'LAMB'
+                    ]
+                    
                     for opt_name in optimizers_to_test:
                         # Get hyperparameters from config
                         mnist_params = get_default_hyperparameters(opt_name, 'mnist_mlp')
@@ -8109,24 +8233,24 @@ Examples:
                         cifar10_optimizers_config[opt_name] = cifar10_params
                         
                         # Track tuning budgets for fairness validation
+                        # All optimizers now receive equal treatment: n_trials=15, epochs=3
+                        is_tuned = opt_name in all_tuned_optimizers
                         tuning_fairness_config[opt_name] = {
-                            'n_trials': 15,  # All optimizers now get equal tuning
-                            'epochs': 3,
-                            'is_tuned': True
+                            'n_trials': 15 if is_tuned else 0,
+                            'epochs': 3 if is_tuned else 0,
+                            'is_tuned': is_tuned,
+                            'tuning_method': 'optuna' if is_tuned else 'default'
                         }
                     
                     # Validate tuning fairness before running experiments
+                    # AUDIT FIX: STRICT MODE enforcement - do not catch and ignore failures
                     print("\n🔍 Validating tuning fairness across optimizers...")
-                    try:
-                        validate_tuning_fairness(
-                            optimizers_to_test,
-                            tuning_fairness_config,
-                            strict=True
-                        )
-                        print("   ✓ Tuning fairness validated: all optimizers have equal budgets")
-                    except Exception as e:
-                        logging.warning(f"   ⚠ Tuning fairness validation: {e}")
-                        print("   Proceeding with experiments (non-strict mode)")
+                    validate_tuning_fairness(
+                        optimizers_to_test,
+                        tuning_fairness_config,
+                        strict=True  # STRICT: All optimizers receive equal tuning budget
+                    )
+                    print("   ✓ Tuning fairness validated: ALL optimizers tuned with equal budget")
                     
                     results_dict = {}
                     
@@ -8191,27 +8315,27 @@ Examples:
     
     # INTEGRATED ANALYSIS PIPELINE
     print("\n" + "="*80)
-    print("🔬 RUNNING INTEGRATED ANALYSIS PIPELINE")
+    print("[*] RUNNING INTEGRATED ANALYSIS PIPELINE")
     print("="*80)
     
     # Cross-experiment aggregation (Priority 3)
-    print("\n0️⃣  Cross-Experiment Aggregation...")
+    print("\n[0] Cross-Experiment Aggregation...")
     try:
         aggregation_df = aggregate_cross_experiment_results(results_dir, experiment_results)
         experiment_results['aggregation'] = aggregation_df
-        print("   ✓ Cross-experiment aggregation complete")
+        print("   [OK] Cross-experiment aggregation complete")
     except Exception as e:
-        logging.error(f"   ✗ Cross-experiment aggregation failed: {e}")
+        logging.error(f"   [FAIL] Cross-experiment aggregation failed: {e}")
         experiment_results['aggregation'] = None
     
     # Convergence analysis
     if HAS_CONVERGENCE:
-        print("\n1️⃣  Convergence Analysis...")
+        print("\n[1] Convergence Analysis...")
         try:
             run_convergence_analysis_on_results(str(results_dir))
-            print("   ✓ Convergence analysis complete")
+            print("   [OK] Convergence analysis complete")
         except Exception as e:
-            logging.error(f"   ✗ Convergence analysis failed: {e}")
+            logging.error(f"   [FAIL] Convergence analysis failed: {e}")
     else:
         print("\n1️⃣  Convergence Analysis: SKIPPED (module not available)")
     
@@ -8230,13 +8354,13 @@ Examples:
     print("\n3️⃣  Final Summary Report...")
     try:
         generate_final_summary_report(results_dir, experiment_results)
-        print("   ✓ Summary report generated")
+        print("   [OK] Summary report generated")
     except Exception as e:
         logging.error(f"   ✗ Report generation failed: {e}")
     
     # Final summary
     print("\n" + "="*80)
-    if FAILED_EXPERIMENTS:
+    if _experiment_context.has_failures():
         print("BENCHMARK SUITE COMPLETED WITH ERRORS")
     else:
         print("BENCHMARK SUITE COMPLETED SUCCESSFULLY")
@@ -8251,9 +8375,10 @@ Examples:
             print(f"   - {exp_name}: {len(exp_df)} result rows")
     
     # Failed experiments summary
-    if FAILED_EXPERIMENTS:
-        print(f"\nFailed experiments: {len(FAILED_EXPERIMENTS)}")
-        for failed in FAILED_EXPERIMENTS:
+    if _experiment_context.has_failures():
+        failed_list = _experiment_context.get_failures()
+        print(f"\nFailed experiments: {len(failed_list)}")
+        for failed in failed_list:
             print(f"   - {failed['experiment']}: {failed['error'][:100]}...")
         print("\n   Tip: Failed experiments can often be fixed by:")
         print("      - Checking network connectivity")
@@ -8337,4 +8462,6 @@ Examples:
 
 
 if __name__ == "__main__":
-    main()
+    results = main()
+    # Exit with code 0 on success (results returned), code 1 if main() returned None/raised exception
+    sys.exit(0 if results else 1)

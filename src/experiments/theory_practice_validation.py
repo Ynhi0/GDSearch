@@ -316,7 +316,7 @@ def generate_summary_report(df_results: pd.DataFrame, output_dir: str):
     """Generate summary report with key findings"""
     report_path = os.path.join(output_dir, "theory_practice_summary.txt")
     
-    with open(report_path, 'w') as f:
+    with open(report_path, 'w', encoding='utf-8') as f:
         f.write("="*80 + "\n")
         f.write("THEORY-PRACTICE CONVERGENCE VALIDATION SUMMARY\n")
         f.write("="*80 + "\n\n")

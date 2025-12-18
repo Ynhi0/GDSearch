@@ -18,6 +18,7 @@ from optuna.pruners import MedianPruner, PercentilePruner
 from optuna.samplers import TPESampler, RandomSampler, GridSampler
 import torch
 import numpy as np
+import logging
 from typing import Dict, Any, Callable, Optional, List, Tuple
 import json
 from pathlib import Path
@@ -65,8 +66,9 @@ class OptunaHyperparameterTuner:
         elif sampler == "random":
             self.sampler = RandomSampler(seed=seed)
         elif sampler == "grid":
-            # Grid sampler requires search space upfront
-            self.sampler = None  # Will be set when search space is defined
+            # Grid sampler requires search space upfront - use TPE as fallback
+            logging.warning("GridSampler requires predefined search space. Using TPE sampler instead.")
+            self.sampler = TPESampler(seed=seed, n_startup_trials=n_startup_trials)
         else:
             raise ValueError(f"Unknown sampler: {sampler}")
         
@@ -112,7 +114,7 @@ class OptunaHyperparameterTuner:
         print(f"Starting Optuna optimization: {self.study_name}")
         print(f"Direction: {self.direction}")
         print(f"Trials: {n_trials}")
-        print(f"Sampler: {self.sampler.__class__.__name__}")
+        print(f"Sampler: {self.sampler.__class__.__name__ if self.sampler else 'None'}")
         print(f"Pruner: {self.pruner.__class__.__name__ if self.pruner else 'None'}")
         print("-" * 80)
         
@@ -179,7 +181,7 @@ class OptunaHyperparameterTuner:
             ]
         }
         
-        with open(filepath, 'w') as f:
+        with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(results, f, indent=2)
         
         print(f"Saved results to {filepath}")
@@ -238,13 +240,21 @@ def suggest_lr_scheduler_params(trial: optuna.Trial, scheduler_name: str, max_ep
     params = {'scheduler': scheduler_name}
     
     if scheduler_name == 'step':
-        params['step_size'] = trial.suggest_int('step_size', max_epochs // 10, max_epochs // 2)
+        # 🐛 AUDIT FIX: Guard against invalid ranges when max_epochs is too small
+        step_min = max(1, max_epochs // 10)
+        step_max = max(step_min + 1, max_epochs // 2)
+        params['step_size'] = trial.suggest_int('step_size', step_min, step_max)
         params['gamma'] = trial.suggest_float('gamma', 0.05, 0.5)
     
     elif scheduler_name == 'multistep':
-        n_milestones = trial.suggest_int('n_milestones', 2, 4)
+        # 🐛 AUDIT FIX: Guard against invalid milestone ranges
+        n_milestones = trial.suggest_int('n_milestones', 2, min(4, max_epochs - 1))
+        milestone_min = max(1, max_epochs // 10)
+        milestone_max = max(milestone_min + 1, max_epochs - 5)
+        if milestone_max <= milestone_min:
+            milestone_max = max_epochs - 1
         milestones = sorted([
-            trial.suggest_int(f'milestone_{i}', max_epochs // 10, max_epochs - 5)
+            trial.suggest_int(f'milestone_{i}', milestone_min, milestone_max)
             for i in range(n_milestones)
         ])
         params['milestones'] = milestones

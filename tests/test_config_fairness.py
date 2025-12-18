@@ -15,7 +15,7 @@ from pathlib import Path
 
 def load_config(config_path):
     """Load JSON configuration file."""
-    with open(config_path, 'r') as f:
+    with open(config_path, 'r', encoding='utf-8') as f:
         return json.load(f)
 
 

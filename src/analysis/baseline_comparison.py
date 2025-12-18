@@ -6,6 +6,7 @@ This script compares our custom optimizer implementations with:
 2. Published benchmarks from papers (if available)
 """
 
+import logging
 import os
 import json
 import numpy as np
@@ -167,11 +168,11 @@ def run_baseline_comparison(
     os.makedirs(results_dir, exist_ok=True)
     
     print("="*70)
-    print("BASELINE COMPARISON: Custom vs PyTorch Optimizers")
+    logging.info("BASELINE COMPARISON: Custom vs PyTorch Optimizers")
     print("="*70)
-    print(f"Dataset: {base_config.get('dataset')}")
-    print(f"Model: {base_config.get('model')}")
-    print(f"Seeds: {seeds}")
+    logging.info(f"Dataset: {base_config.get('dataset')}")
+    logging.info(f"Model: {base_config.get('model')}")
+    logging.info(f"Seeds: {seeds}")
     print("="*70)
     
     # Optimizers to compare
@@ -185,9 +186,9 @@ def run_baseline_comparison(
     results = {}
     
     for custom_opt, pytorch_opt in optimizer_pairs:
-        print(f"\n{'='*70}")
-        print(f"Comparing: {custom_opt} vs {pytorch_opt}")
-        print(f"{'='*70}")
+        logging.info(f"\n{'='*70}")
+        logging.info(f"Comparing: {custom_opt} vs {pytorch_opt}")
+        logging.info(f"{'='*70}")
         
         results[custom_opt] = {'custom': [], 'pytorch': []}
         
@@ -218,9 +219,9 @@ def run_baseline_comparison(
             eval_df = df_custom[df_custom['phase'] == 'eval']
             if not eval_df.empty:
                 final_acc = eval_df['test_accuracy'].iloc[-1]
-                print(f"Acc: {final_acc:.4f}")
+                logging.info(f"Acc: {final_acc:.4f}")
             else:
-                print("Done")
+                logging.info("Done")
             
             # PyTorch optimizer
             print(f"  [{pytorch_opt}] Seed {seed}... ", end='', flush=True)
@@ -248,12 +249,12 @@ def run_baseline_comparison(
             eval_df = df_pytorch[df_pytorch['phase'] == 'eval']
             if not eval_df.empty:
                 final_acc = eval_df['test_accuracy'].iloc[-1]
-                print(f"Acc: {final_acc:.4f}")
+                logging.info(f"Acc: {final_acc:.4f}")
             else:
-                print("Done")
+                logging.info("Done")
     
     print("\n" + "="*70)
-    print("Baseline comparison completed!")
+    logging.info("Baseline comparison completed!")
     print("="*70)
     
     return results
@@ -287,13 +288,13 @@ def analyze_baseline_comparison(results: Dict) -> pd.DataFrame:
 def print_baseline_summary(summary_df: pd.DataFrame):
     """Print formatted baseline comparison summary."""
     print("\n" + "="*70)
-    print("BASELINE COMPARISON RESULTS")
+    logging.info("BASELINE COMPARISON RESULTS")
     print("="*70)
     
     optimizers = summary_df['Optimizer'].unique()
     
     for opt in optimizers:
-        print(f"\n{opt}:")
+        logging.info(f"\n{opt}:")
         print("─"*70)
         
         opt_df = summary_df[summary_df['Optimizer'] == opt]
@@ -301,8 +302,8 @@ def print_baseline_summary(summary_df: pd.DataFrame):
         custom_row = opt_df[opt_df['Implementation'] == 'Custom'].iloc[0]
         pytorch_row = opt_df[opt_df['Implementation'] == 'Pytorch'].iloc[0]
         
-        print(f"  Custom:  {custom_row['Mean Accuracy']:.4f} ± {custom_row['Std Accuracy']:.4f}")
-        print(f"  PyTorch: {pytorch_row['Mean Accuracy']:.4f} ± {pytorch_row['Std Accuracy']:.4f}")
+        logging.info(f"  Custom:  {custom_row['Mean Accuracy']:.4f} ± {custom_row['Std Accuracy']:.4f}")
+        logging.info(f"  PyTorch: {pytorch_row['Mean Accuracy']:.4f} ± {pytorch_row['Std Accuracy']:.4f}")
         
         diff = custom_row['Mean Accuracy'] - pytorch_row['Mean Accuracy']
         diff_pct = (diff / pytorch_row['Mean Accuracy']) * 100
@@ -314,7 +315,7 @@ def print_baseline_summary(summary_df: pd.DataFrame):
         else:
             status = f"PYTORCH BETTER ({diff:.4f}, {diff_pct:+.2f}%)"
         
-        print(f"  → {status}")
+        logging.info(f"  → {status}")
     
     print("\n" + "="*70)
 
@@ -362,7 +363,7 @@ def plot_baseline_comparison(summary_df: pd.DataFrame, save_path: str = None):
     
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        print(f"Baseline comparison plot saved to: {save_path}")
+        logging.info(f"Baseline comparison plot saved to: {save_path}")
         plt.close()
     else:
         plt.show()
@@ -371,7 +372,7 @@ def plot_baseline_comparison(summary_df: pd.DataFrame, save_path: str = None):
 def perform_statistical_tests(results: Dict):
     """Perform statistical tests between custom and PyTorch implementations."""
     print("\n" + "="*70)
-    print("STATISTICAL TESTS (Custom vs PyTorch)")
+    logging.info("STATISTICAL TESTS (Custom vs PyTorch)")
     print("="*70)
     
     for optimizer_name, impl_dict in results.items():
@@ -442,7 +443,7 @@ def main():
     perform_statistical_tests(results)
     
     print("\n" + "="*70)
-    print("BASELINE COMPARISON COMPLETE!")
+    logging.info("BASELINE COMPARISON COMPLETE!")
     print("="*70)
 
 

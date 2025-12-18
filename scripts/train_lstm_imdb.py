@@ -16,6 +16,19 @@ from src.core.nlp_models import SimpleLSTM, BiLSTM, TextCNN
 from src.core.pytorch_optimizers import AdamWrapper, SGDMomentumWrapper
 import argparse
 from tqdm import tqdm
+import random
+import numpy as np
+
+
+def set_seed(seed: int):
+    """Set random seed for reproducibility across all libraries."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
 def train_epoch(model, train_loader, optimizer, criterion, device):
@@ -109,9 +122,9 @@ def main():
     
     args = parser.parse_args()
     
-    # Set device and seeds
+    # Set device and seeds for full reproducibility
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    torch.manual_seed(args.seed)
+    set_seed(args.seed)
     print(f"Using device: {device}")
     
     # Load data

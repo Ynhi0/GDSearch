@@ -300,10 +300,11 @@ class Adam(Optimizer):
             self.v_y = self.beta2 * self.v_y + (1 - self.beta2) * grad_y**2
             
             # Compute bias-corrected moment estimates
-            m_x_hat = self.m_x / (1 - self.beta1**self.t)
-            m_y_hat = self.m_y / (1 - self.beta1**self.t)
-            v_x_hat = self.v_x / (1 - self.beta2**self.t)
-            v_y_hat = self.v_y / (1 - self.beta2**self.t)
+            # 🐛 BUG FIX: Add epsilon guard for numerical stability when t is large
+            m_x_hat = self.m_x / max(1 - self.beta1**self.t, 1e-8)
+            m_y_hat = self.m_y / max(1 - self.beta1**self.t, 1e-8)
+            v_x_hat = self.v_x / max(1 - self.beta2**self.t, 1e-8)
+            v_y_hat = self.v_y / max(1 - self.beta2**self.t, 1e-8)
             
             # Update parameters
             new_x = x - self.lr * m_x_hat / (np.sqrt(v_x_hat) + self.epsilon)
@@ -380,10 +381,11 @@ class AdamW(Optimizer):
             self.v_x = self.beta2 * self.v_x + (1 - self.beta2) * (grad_x ** 2)
             self.v_y = self.beta2 * self.v_y + (1 - self.beta2) * (grad_y ** 2)
 
-            m_x_hat = self.m_x / (1 - self.beta1 ** self.t)
-            m_y_hat = self.m_y / (1 - self.beta1 ** self.t)
-            v_x_hat = self.v_x / (1 - self.beta2 ** self.t)
-            v_y_hat = self.v_y / (1 - self.beta2 ** self.t)
+            # 🐛 BUG FIX: Add epsilon guard for numerical stability
+            m_x_hat = self.m_x / max(1 - self.beta1 ** self.t, 1e-8)
+            m_y_hat = self.m_y / max(1 - self.beta1 ** self.t, 1e-8)
+            v_x_hat = self.v_x / max(1 - self.beta2 ** self.t, 1e-8)
+            v_y_hat = self.v_y / max(1 - self.beta2 ** self.t, 1e-8)
 
             # Adam step
             step_x = self.lr * m_x_hat / (np.sqrt(v_x_hat) + self.epsilon)
@@ -460,10 +462,11 @@ class AMSGrad(Optimizer):
             self.v_x = self.beta2 * self.v_x + (1 - self.beta2) * (grad_x ** 2)
             self.v_y = self.beta2 * self.v_y + (1 - self.beta2) * (grad_y ** 2)
 
-            m_x_hat = self.m_x / (1 - self.beta1 ** self.t)
-            m_y_hat = self.m_y / (1 - self.beta1 ** self.t)
-            v_x_hat = self.v_x / (1 - self.beta2 ** self.t)
-            v_y_hat = self.v_y / (1 - self.beta2 ** self.t)
+            # 🐛 BUG FIX: Add epsilon guard for numerical stability
+            m_x_hat = self.m_x / max(1 - self.beta1 ** self.t, 1e-8)
+            m_y_hat = self.m_y / max(1 - self.beta1 ** self.t, 1e-8)
+            v_x_hat = self.v_x / max(1 - self.beta2 ** self.t, 1e-8)
+            v_y_hat = self.v_y / max(1 - self.beta2 ** self.t, 1e-8)
 
             # Update running max of v_hat
             self.vhat_max_x = max(self.vhat_max_x, v_x_hat)
@@ -480,8 +483,9 @@ class AMSGrad(Optimizer):
                 self.vhat_max = np.zeros_like(params)
             self.m = self.beta1 * self.m + (1 - self.beta1) * gradients
             self.v = self.beta2 * self.v + (1 - self.beta2) * (gradients ** 2)
-            m_hat = self.m / (1 - self.beta1 ** self.t)
-            v_hat = self.v / (1 - self.beta2 ** self.t)
+            # 🐛 BUG FIX: Add epsilon guard for numerical stability
+            m_hat = self.m / max(1 - self.beta1 ** self.t, 1e-8)
+            v_hat = self.v / max(1 - self.beta2 ** self.t, 1e-8)
             self.vhat_max = np.maximum(self.vhat_max, v_hat)
             step = self.lr * m_hat / (np.sqrt(self.vhat_max) + self.epsilon)
             return params - step

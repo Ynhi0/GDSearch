@@ -191,19 +191,58 @@ class FinalDeliverablesGenerator:
         try:
             from src.visualization.interactive_plots import plot_multi_optimizer_comparison
             
-            # Read first CSV file as example
-            df = pd.read_csv(csv_files[0])
+            # AUDIT FIX: Aggregate data into correct format for plot_multi_optimizer_comparison
+            # Expected: Dict[str, Dict[str, np.ndarray]] with keys: loss_history, grad_norm_history, final_loss, iterations
+            results_dict = {}
             
-            if 'epoch' in df.columns and 'test_acc' in df.columns:
+            for csv_file in csv_files:
+                try:
+                    df = pd.read_csv(csv_file)
+                    
+                    # 🐛 AUDIT FIX: Extract optimizer name robustly (metadata JSON first, then column, then filename)
+                    opt_name = 'Unknown'
+                    
+                    # Try metadata JSON first
+                    meta_path = csv_file.with_suffix('').as_posix() + '_meta.json'
+                    if Path(meta_path).exists():
+                        try:
+                            with open(meta_path, 'r') as mf:
+                                meta = json.load(mf)
+                                opt_name = meta.get('optimizer', 'Unknown')
+                        except (json.JSONDecodeError, IOError):
+                            pass
+                    
+                    # Fallback to column in CSV
+                    if opt_name == 'Unknown' and 'optimizer' in df.columns:
+                        opt_name = df['optimizer'].iloc[0] if not df.empty else 'Unknown'
+                    
+                    # Last resort: parse from filename
+                    if opt_name == 'Unknown':
+                        filename = csv_file.stem
+                        parts = filename.split('_')
+                        opt_name = parts[3] if len(parts) > 3 else 'Unknown'
+                    
+                    # Extract training data
+                    train_df = df[df['phase'] == 'train']
+                    if train_df.empty:
+                        continue
+                    
+                    # Build data structure
+                    results_dict[opt_name] = {
+                        'loss_history': train_df['train_loss'].values if 'train_loss' in train_df.columns else np.array([]),
+                        'grad_norm_history': train_df['grad_norm'].values if 'grad_norm' in train_df.columns else np.array([]),
+                        'final_loss': train_df['train_loss'].iloc[-1] if 'train_loss' in train_df.columns and not train_df.empty else 0.0,
+                        'iterations': len(train_df)
+                    }
+                except Exception as e:
+                    print(f"   ✗ Failed to process {csv_file.name}: {e}")
+                    continue
+            
+            if results_dict:
                 output_path = self.output_dir / "interactive_plots" / "optimizer_comparison.html"
                 try:
-                    plot_multi_optimizer_comparison(
-                        df,
-                        optimizer_col='optimizer',
-                        epoch_col='epoch',
-                        metric_cols=['train_loss', 'test_loss', 'train_acc', 'test_acc'],
-                        save_path=str(output_path)
-                    )
+                    fig = plot_multi_optimizer_comparison(results_dict, title="Optimizer Comparison")
+                    fig.write_html(str(output_path))
                     outputs.append(str(output_path))
                     print(f"   ✓ Generated: {output_path.name}")
                 except Exception as e:
@@ -269,7 +308,7 @@ class FinalDeliverablesGenerator:
                 
                 # Generate summary
                 summary_path = self.output_dir / "reports" / "convergence_summary.txt"
-                with open(summary_path, 'w') as f:
+                with open(summary_path, 'w', encoding='utf-8') as f:
                     f.write("CONVERGENCE ANALYSIS SUMMARY\n")
                     f.write("="*80 + "\n\n")
                     f.write(comparison_df.to_string())
@@ -289,7 +328,7 @@ class FinalDeliverablesGenerator:
         # For now, create placeholder
         try:
             output_path = self.output_dir / "analysis" / "ablation_study.txt"
-            with open(output_path, 'w') as f:
+            with open(output_path, 'w', encoding='utf-8') as f:
                 f.write("ABLATION STUDY\n")
                 f.write("="*80 + "\n\n")
                 f.write("Component isolation analysis:\n")
@@ -311,7 +350,7 @@ class FinalDeliverablesGenerator:
         
         try:
             output_path = self.output_dir / "analysis" / "sensitivity_analysis.txt"
-            with open(output_path, 'w') as f:
+            with open(output_path, 'w', encoding='utf-8') as f:
                 f.write("SENSITIVITY ANALYSIS\n")
                 f.write("="*80 + "\n\n")
                 f.write("Hyperparameter sensitivity:\n")
@@ -332,7 +371,7 @@ class FinalDeliverablesGenerator:
         
         try:
             output_path = self.output_dir / "analysis" / "baseline_comparison.txt"
-            with open(output_path, 'w') as f:
+            with open(output_path, 'w', encoding='utf-8') as f:
                 f.write("BASELINE COMPARISON\n")
                 f.write("="*80 + "\n\n")
                 f.write("Custom vs PyTorch built-in optimizers:\n")
@@ -380,7 +419,7 @@ class FinalDeliverablesGenerator:
                 # Generate statistical comparison
                 output_path = self.output_dir / "reports" / "statistical_analysis.txt"
                 
-                with open(output_path, 'w') as f:
+                with open(output_path, 'w', encoding='utf-8') as f:
                     f.write("STATISTICAL ANALYSIS REPORT\n")
                     f.write("="*80 + "\n\n")
                     

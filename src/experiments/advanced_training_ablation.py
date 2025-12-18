@@ -232,7 +232,11 @@ def run_single_experiment(
     
     # Final metrics
     end_time = time.time()
-    end_memory = torch.cuda.memory_allocated(device) if torch.cuda.is_available() else 0
+    # Only query CUDA memory if device is actually a CUDA device
+    if torch.cuda.is_available() and device.type == 'cuda':
+        end_memory = torch.cuda.memory_allocated(device)
+    else:
+        end_memory = 0
     
     final_test_acc = history[-1]['test_acc']
     final_ema_acc = history[-1]['ema_test_acc']
@@ -308,7 +312,7 @@ def run_ablation_study(
         test_dataset = torch.utils.data.Subset(test_dataset, range(1000))
     
     # Use make_dataloader for consistent settings
-    from run_all_kaggle import make_dataloader
+    from src.core.dataloader_utils import make_dataloader
     train_loader = make_dataloader(train_dataset, batch_size=128, shuffle=True, seed=seeds[0] if seeds else None, num_workers=2, pin_memory=True)
     test_loader = make_dataloader(test_dataset, batch_size=256, shuffle=False, num_workers=2, pin_memory=True)
     

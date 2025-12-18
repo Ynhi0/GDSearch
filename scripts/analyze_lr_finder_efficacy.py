@@ -169,12 +169,14 @@ def find_optimal_lr_wrapper(device, seed=42):
         return 0.001
 
 
-def compare_lr_finder_vs_default(epochs=20, seeds=[1, 2, 3], output_dir='results/lr_finder_efficacy'):
+def compare_lr_finder_vs_default(epochs=20, seeds=None, output_dir='results/lr_finder_efficacy'):
     """
     Compare convergence with default LR (0.001) vs Auto-Tuned LR.
     
     This is the CRITICAL function addressing Phase 4.1 recommendation.
     """
+    if seeds is None:
+        seeds = [1, 2, 3]
     logging.info("="*80)
     logging.info("LR FINDER EFFICACY STUDY")
     logging.info("="*80)

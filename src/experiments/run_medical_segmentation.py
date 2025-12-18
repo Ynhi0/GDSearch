@@ -73,7 +73,7 @@ def medical_image_segmentation(data_dicts: List[Dict[str, str]] | None = None, e
     val_ds = CacheDataset(data=val_data, transform=train_transforms)
     
     # Use make_dataloader for consistent settings
-    from run_all_kaggle import make_dataloader
+    from src.core.dataloader_utils import make_dataloader
     train_loader = make_dataloader(train_ds, batch_size=batch_size, shuffle=True, seed=42, num_workers=0, pin_memory=True)
     val_loader = make_dataloader(val_ds, batch_size=1, shuffle=False, num_workers=0, pin_memory=True)
 

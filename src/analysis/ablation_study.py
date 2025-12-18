@@ -5,6 +5,7 @@ This script tests each optimizer component in isolation to quantify
 their individual contributions to performance.
 """
 
+import logging
 import os
 import json
 import numpy as np
@@ -127,19 +128,19 @@ def run_ablation_study(
     ablation_configs = create_ablation_configs(base_config)
     
     print("="*70)
-    print("ABLATION STUDY: Component-wise Analysis")
+    logging.info("ABLATION STUDY: Component-wise Analysis")
     print("="*70)
-    print(f"Base config: {base_config.get('dataset')} - {base_config.get('model')}")
-    print(f"Seeds: {seeds}")
-    print(f"Configurations: {len(ablation_configs)}")
+    logging.info(f"Base config: {base_config.get('dataset')} - {base_config.get('model')}")
+    logging.info(f"Seeds: {seeds}")
+    logging.info(f"Configurations: {len(ablation_configs)}")
     print("="*70)
     
     results = {}
     
     for config_name, config in ablation_configs.items():
-        print(f"\n{'─'*70}")
-        print(f"Running: {config_name}")
-        print(f"{'─'*70}")
+        logging.info(f"\n{'─'*70}")
+        logging.info(f"Running: {config_name}")
+        logging.info(f"{'─'*70}")
         
         results[config_name] = []
         
@@ -163,12 +164,12 @@ def run_ablation_study(
             eval_df = df[df['phase'] == 'eval']
             if not eval_df.empty:
                 final_acc = eval_df['test_accuracy'].iloc[-1]
-                print(f"Test Acc: {final_acc:.4f}")
+                logging.info(f"Test Acc: {final_acc:.4f}")
             else:
-                print("Done")
+                logging.info("Done")
     
     print("\n" + "="*70)
-    print("Ablation study completed!")
+    logging.info("Ablation study completed!")
     print("="*70)
     
     return results
@@ -210,24 +211,24 @@ def analyze_ablation_results(results: Dict[str, List[pd.DataFrame]]) -> pd.DataF
 def print_ablation_summary(summary_df: pd.DataFrame):
     """Print formatted ablation study summary."""
     print("\n" + "="*70)
-    print("ABLATION STUDY RESULTS")
+    logging.info("ABLATION STUDY RESULTS")
     print("="*70)
-    print()
+    
     
     for idx, row in summary_df.iterrows():
-        print(f"{row['Configuration']}")
-        print(f"  Mean: {row['Mean Accuracy']:.4f} ± {row['Std Accuracy']:.4f}")
-        print(f"  Range: [{row['Min Accuracy']:.4f}, {row['Max Accuracy']:.4f}]")
-        print(f"  N: {int(row['N Seeds'])}")
-        print()
+        logging.info(f"{row['Configuration']}")
+        logging.info(f"  Mean: {row['Mean Accuracy']:.4f} ± {row['Std Accuracy']:.4f}")
+        logging.info(f"  Range: [{row['Min Accuracy']:.4f}, {row['Max Accuracy']:.4f}]")
+        logging.info(f"  N: {int(row['N Seeds'])}")
+        
     
     print("="*70)
-    print()
+    
     
     # Compute improvements over baseline
     baseline_acc = summary_df[summary_df['Configuration'].str.contains('SGD baseline')]['Mean Accuracy'].iloc[0]
     
-    print("IMPROVEMENT OVER BASELINE (SGD):")
+    logging.info("IMPROVEMENT OVER BASELINE (SGD):")
     print("="*70)
     
     for idx, row in summary_df.iterrows():
@@ -237,8 +238,8 @@ def print_ablation_summary(summary_df: pd.DataFrame):
         improvement = row['Mean Accuracy'] - baseline_acc
         improvement_pct = (improvement / baseline_acc) * 100
         
-        print(f"{row['Configuration']}")
-        print(f"  Δ Accuracy: +{improvement:.4f} ({improvement_pct:+.2f}%)")
+        logging.info(f"{row['Configuration']}")
+        logging.info(f"  Δ Accuracy: +{improvement:.4f} ({improvement_pct:+.2f}%)")
     
     print("="*70)
 
@@ -299,7 +300,7 @@ def plot_ablation_results(summary_df: pd.DataFrame, save_path: str = None):
     
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        print(f"Ablation plot saved to: {save_path}")
+        logging.info(f"Ablation plot saved to: {save_path}")
         plt.close()
     else:
         plt.show()
@@ -308,7 +309,7 @@ def plot_ablation_results(summary_df: pd.DataFrame, save_path: str = None):
 def perform_statistical_comparisons(results: Dict[str, List[pd.DataFrame]]):
     """Perform pairwise statistical comparisons."""
     print("\n" + "="*70)
-    print("STATISTICAL COMPARISONS (T-TESTS)")
+    logging.info("STATISTICAL COMPARISONS (T-TESTS)")
     print("="*70)
     
     # Extract final accuracies for each config
@@ -367,7 +368,7 @@ def main():
     # Save summary
     os.makedirs('results/ablation', exist_ok=True)
     summary_df.to_csv('results/ablation/ablation_summary.csv', index=False)
-    print("Summary saved to: results/ablation/ablation_summary.csv\n")
+    logging.info("Summary saved to: results/ablation/ablation_summary.csv\n")
     
     # Plot results
     os.makedirs('plots', exist_ok=True)
@@ -377,7 +378,7 @@ def main():
     perform_statistical_comparisons(results)
     
     print("\n" + "="*70)
-    print("ABLATION STUDY COMPLETE!")
+    logging.info("ABLATION STUDY COMPLETE!")
     print("="*70)
 
 

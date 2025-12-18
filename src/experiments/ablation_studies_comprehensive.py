@@ -170,7 +170,7 @@ def ablation_momentum_effect(
     )
     
     # Use make_dataloader for consistent num_workers and pin_memory settings
-    from run_all_kaggle import make_dataloader
+    from src.core.dataloader_utils import make_dataloader
     train_loader = make_dataloader(train_dataset, batch_size=128, shuffle=True, seed=seeds[0] if seeds else None, num_workers=2, pin_memory=True)
     test_loader = make_dataloader(test_dataset, batch_size=1000, shuffle=False, num_workers=2, pin_memory=True)
     
@@ -273,7 +273,7 @@ def ablation_adaptive_lr(
     )
     
     # Use make_dataloader for consistent settings
-    from run_all_kaggle import make_dataloader
+    from src.core.dataloader_utils import make_dataloader
     train_loader = make_dataloader(train_dataset, batch_size=128, shuffle=True, seed=seeds[0] if seeds else None, num_workers=2, pin_memory=True)
     test_loader = make_dataloader(test_dataset, batch_size=1000, shuffle=False, num_workers=2, pin_memory=True)
     
@@ -375,7 +375,7 @@ def ablation_weight_decay(
     )
     
     # Use make_dataloader for consistent settings
-    from run_all_kaggle import make_dataloader
+    from src.core.dataloader_utils import make_dataloader
     train_loader = make_dataloader(train_dataset, batch_size=128, shuffle=True, seed=seeds[0] if seeds else None, num_workers=2, pin_memory=True)
     test_loader = make_dataloader(test_dataset, batch_size=1000, shuffle=False, num_workers=2, pin_memory=True)
     
@@ -486,7 +486,7 @@ def run_all_ablation_studies(output_dir='results/ablation_studies'):
         }
     }
     
-    with open(Path(output_dir) / 'ablation_summary.json', 'w') as f:
+    with open(Path(output_dir) / 'ablation_summary.json', 'w', encoding='utf-8') as f:
         json.dump(summary, f, indent=2)
     
     print("\n" + "="*70)

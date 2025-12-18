@@ -21,6 +21,7 @@ from tqdm import tqdm
 from src.core.models import ResNet18
 from src.core.data_utils import get_cifar10_loaders
 from src.core.pytorch_optimizers import SGDWrapper, SGDMomentumWrapper, AdamWrapper, RMSPropWrapper
+from src.core.training_utils import set_seed
 
 
 def train_epoch(model, train_loader, optimizer, criterion, device):
@@ -93,8 +94,8 @@ def main():
     parser.add_argument('--num-workers', type=int, default=2, help='DataLoader workers')
     args = parser.parse_args()
     
-    # Set random seed
-    torch.manual_seed(args.seed)
+    # Set random seed for reproducibility
+    set_seed(args.seed)
     
     # Device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -131,7 +132,7 @@ def main():
     if args.optimizer == 'sgd':
         optimizer = SGDWrapper(model.parameters(), lr=args.lr)
     elif args.optimizer == 'sgd_momentum':
-        optimizer = SGDMomentumWrapper(model.parameters(), lr=args.lr, beta=0.9)
+        optimizer = SGDMomentumWrapper(model.parameters(), lr=args.lr, momentum=0.9)
     elif args.optimizer == 'adam':
         optimizer = AdamWrapper(model.parameters(), lr=args.lr)
     elif args.optimizer == 'rmsprop':
@@ -165,7 +166,7 @@ def main():
         
         if test_acc > best_acc:
             best_acc = test_acc
-            print(f"✓ New best test accuracy!")
+            print(f"✓ New best test accuracy: {best_acc:.2f}%")
         
         print()
     

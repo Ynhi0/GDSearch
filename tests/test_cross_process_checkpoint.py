@@ -290,7 +290,7 @@ with open(r'{result_path}', 'w') as f:
             assert result.returncode == 0, f"Subprocess failed:\n{result.stderr}"
             
             # Load subprocess results
-            with open(result_path, 'r') as f:
+            with open(result_path, 'r', encoding='utf-8') as f:
                 subprocess_result = json.load(f)
             
             params_subprocess = subprocess_result['params']

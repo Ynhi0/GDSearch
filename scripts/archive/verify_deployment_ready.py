@@ -107,7 +107,7 @@ def main():
     
     # Check multi-seed configuration (should be 10)
     try:
-        with open(project_root / 'run_all_kaggle.py') as f:
+        with open(project_root / 'run_all_kaggle.py', encoding='utf-8') as f:
             content = f.read()
             # Look for SEEDS definition
             if 'SEEDS' in content and '10' in content:
@@ -125,7 +125,7 @@ def main():
     # Check VRAM cleanup integration
     cleanup_count = 0
     try:
-        with open(project_root / 'run_all_kaggle.py') as f:
+        with open(project_root / 'run_all_kaggle.py', encoding='utf-8') as f:
             content = f.read()
             cleanup_count = content.count('clear_gpu_memory')
             vram_ok = cleanup_count >= 10  # Should have 10+ cleanup calls

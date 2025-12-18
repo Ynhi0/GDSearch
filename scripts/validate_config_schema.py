@@ -36,7 +36,7 @@ def validate_config(config_path, schema_path):
         Tuple of (is_valid, error_message)
     """
     try:
-        with open(schema_path) as f:
+        with open(schema_path, encoding='utf-8') as f:
             schema = json.load(f)
     except FileNotFoundError:
         return False, f"Schema file not found: {schema_path}"
@@ -44,7 +44,7 @@ def validate_config(config_path, schema_path):
         return False, f"Invalid JSON in schema: {e}"
     
     try:
-        with open(config_path) as f:
+        with open(config_path, encoding='utf-8') as f:
             config = json.load(f)
     except FileNotFoundError:
         return False, f"Config file not found: {config_path}"

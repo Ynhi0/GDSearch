@@ -541,12 +541,28 @@ def generate_summary_statistics(results_dir: str = 'results'):
             eval_df = df[df['phase'] == 'eval']
             if not eval_df.empty:
                 final_acc = eval_df['test_accuracy'].iloc[-1]
-                # Extract optimizer name
-                import os
-                basename = os.path.basename(f)
-                parts = basename.split('_')
-                if len(parts) >= 4:
-                    opt_name = parts[3]
+                # 🐛 AUDIT FIX: Extract optimizer name robustly (metadata JSON first, then parse)
+                opt_name = 'Unknown'
+                
+                # Try metadata JSON first
+                meta_path = f.replace('.csv', '_meta.json')
+                if os.path.exists(meta_path):
+                    try:
+                        with open(meta_path, 'r') as mf:
+                            import json
+                            meta = json.load(mf)
+                            opt_name = meta.get('optimizer', 'Unknown')
+                    except (json.JSONDecodeError, IOError):
+                        pass
+                
+                # Fallback to filename parsing
+                if opt_name == 'Unknown':
+                    basename = os.path.basename(f)
+                    parts = basename.split('_')
+                    if len(parts) >= 4:
+                        opt_name = parts[3]
+                
+                if opt_name != 'Unknown':
                     by_optimizer[opt_name].append(final_acc)
         
         print(f"\n   Results by optimizer (Test Accuracy):")

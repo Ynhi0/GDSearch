@@ -75,7 +75,7 @@ def check_search_budget_parity(config_path, threshold=5.0):
     Returns:
         dict: Analysis results
     """
-    with open(config_path) as f:
+    with open(config_path, encoding='utf-8') as f:
         config = json.load(f)
     
     grid_sizes = {}

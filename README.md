@@ -4,7 +4,7 @@ A comprehensive Python framework for comparing gradient descent algorithms on 2D
 
 ### Core Capabilities
 
-- **9 Optimization Algorithms:** SGD, SGD+Momentum, SGD+Nesterov, RMSProp, Adam, AdamW, AMSGrad, **SAM** (Sharpness-Aware Minimization), **Lookahead**
+- **11+ Optimization Algorithms:** SGD, SGD+Momentum, SGD+Nesterov, RMSProp, Adam, AdamW, AMSGrad, **SAM** (Sharpness-Aware Minimization), **Lookahead**, AdaBound, RAdam, and more
 - **7 Test Functions:** Rosenbrock, Ill-Conditioned Quadratic, Saddle Point, Ackley2D, Rastrigin, Ackley, Sphere, Schwefel
 - **High-Dimensional Benchmarks:** Rastrigin, Ackley, Sphere, Schwefel (N-dimensional, tested up to 100D)
 - **Neural Networks:** SimpleMLP (MNIST), SimpleCNN/ConvNet (CIFAR-10), **ResNet-18** (CIFAR-10), NLP models (IMDB)
@@ -91,7 +91,7 @@ GDSearch/
 │       ├── interactive_plots.py    # Interactive Plotly visualizations
 │       ├── create_separate_plots.py # Separate plot generation
 │       └── run_loss_landscape.py   # Loss landscape runner
-├── tests/                      # Unit tests (183 tests, 100% passing)
+├── tests/                      # Unit tests (200+ tests covering all components)
 │   ├── test_gradients.py       # Numerical gradient verification
 │   ├── test_optimizers.py      # Optimizer correctness tests
 │   ├── test_lr_schedulers.py   # LR scheduler tests
@@ -182,7 +182,7 @@ pip install -r requirements.txt
 # Run all tests (gradients + optimizers)
 pytest tests/ -v
 
-# Expected: 183 tests passed 
+# Expected: 200+ tests covering all components 
 ```
 
 ### Running Experiments
@@ -297,14 +297,14 @@ python src/visualization/plot_eigenvalues.py
 
 ```bash
 # Run short MNIST demo (2 epochs)
-python scripts/demo_resnet18_training.py --epochs 2
+python scripts/train_resnet18_cifar10.py --epochs 2
 ```
 
 #### Option 8: NLP Experiments
 
 ```bash
 # Train sentiment classifier on IMDB dataset
-python scripts/demo_imdb_training.py \
+python scripts/train_lstm_imdb.py \
     --model lstm \
     --optimizer adam \
     --epochs 5 \
@@ -315,7 +315,7 @@ python scripts/demo_imdb_training.py \
 # Available optimizers: sgd, sgd_momentum, adam, rmsprop
 
 # Quick test with small dataset
-python scripts/demo_imdb_training.py \
+python scripts/train_lstm_imdb.py \
     --epochs 2 \
     --train-size 1000 \
     --test-size 200

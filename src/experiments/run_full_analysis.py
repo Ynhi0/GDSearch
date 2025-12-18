@@ -56,7 +56,7 @@ def run_full_pipeline(
     os.makedirs(plots_dir, exist_ok=True)
     
     # Load base config
-    with open(config_path, 'r') as f:
+    with open(config_path, 'r', encoding='utf-8') as f:
         base_config = json.load(f)
     
     print("="*70)
@@ -268,15 +268,23 @@ def run_full_pipeline(
                 'p_value': p_value,
                 'Significant (raw)': bool(test_result.get('significant', p_value < 0.05)),
             }
-            # Effect sizes (standardized columns)
-            if 'cohens_d' in test_result:
-                row['Effect size'] = float(test_result['cohens_d'])
-                row['Effect size type'] = 'Cohen_d'
-                row['Effect size (Cohen_d)'] = float(test_result['cohens_d'])  # backward-compatible
+            # AUDIT FIX: Handle new field structure (effect_size, effect_size_type)
+            # Use effect_size field which works for both parametric and non-parametric
+            effect_size_val = test_result.get('effect_size', test_result.get('cohens_d'))
+            effect_size_type = test_result.get('effect_size_type', 'unknown')
+            
+            if effect_size_val is not None:
+                row['Effect size'] = float(effect_size_val)
+                row['Effect size type'] = effect_size_type
+                
+            # Backward compatibility: keep cohens_d column if present
+            if test_result.get('cohens_d') is not None:
+                row['Effect size (Cohen_d)'] = float(test_result['cohens_d'])
+            
+            # Legacy field for rank-biserial (if present)
             if 'effect_size_r' in test_result:
-                row['Effect size'] = float(test_result['effect_size_r'])
-                row['Effect size type'] = 'rank_biserial_r'
-                row['Effect size (r)'] = float(test_result['effect_size_r'])  # backward-compatible
+                row['Effect size (r)'] = float(test_result['effect_size_r'])
+            
             # Means (if available)
             for k in ('mean_A','std_A','n_A','mean_B','std_B','n_B'):
                 if k in test_result:
@@ -351,15 +359,29 @@ def run_full_pipeline(
     optimizer_results = {}
     
     for result_file in result_files:
-        # Extract optimizer name from filename
+        # 🐛 AUDIT FIX: Extract optimizer name from metadata JSON (robust) or fallback to filename parsing
         filename = os.path.basename(result_file)
-        parts = filename.split('_')
-        # NN results: NN_<model>_<dataset>_<optimizer>_...
-        if filename.startswith('NN_') and len(parts) >= 4:
-            opt_name = parts[3]
-        else:
-            # 2D results often start with OptimizerName_...
-            opt_name = parts[0]
+        opt_name = None
+        
+        # Try metadata JSON first (most reliable)
+        meta_path = result_file.replace('.csv', '_meta.json')
+        if os.path.exists(meta_path):
+            try:
+                with open(meta_path, 'r') as f:
+                    meta = json.load(f)
+                    opt_name = meta.get('optimizer')
+            except (json.JSONDecodeError, IOError):
+                pass
+        
+        # Fallback to filename parsing if no metadata
+        if opt_name is None:
+            parts = filename.split('_')
+            # NN results: NN_<model>_<dataset>_<optimizer>_...
+            if filename.startswith('NN_') and len(parts) >= 4:
+                opt_name = parts[3]
+            else:
+                # 2D results often start with OptimizerName_...
+                opt_name = parts[0]
 
         if opt_name not in optimizer_results:
             optimizer_results[opt_name] = []
@@ -432,7 +454,7 @@ def main():
     
     # Before running, perform a quick schema check for config expectations
     try:
-        with open(args.config, 'r') as f:
+        with open(args.config, 'r', encoding='utf-8') as f:
             base_cfg_preview = json.load(f)
         # If the config looks like a tuning config (has 'sweeps'/'final') but no top-level 'optimizer',
         # provide a helpful message instead of failing deep inside.

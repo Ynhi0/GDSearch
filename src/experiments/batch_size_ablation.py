@@ -376,10 +376,16 @@ def perform_batch_size_comparisons(
                     metric='test_accuracy'
                 )
                 
+                # AUDIT FIX: Use effect_size field which handles both parametric and non-parametric
+                effect_size_val = result.get('effect_size', result.get('cohens_d', 0.0))
+                if effect_size_val is None:
+                    effect_size_val = 0.0
+                effect_size_type = result.get('effect_size_type', 'unknown')
+                
                 print(f"\n  Batch {batch_size} vs Batch {baseline_batch}:")
                 print(f"    Mean diff: {result['mean_diff']:+.4f}")
                 print(f"    p-value: {result['p_value']:.4e}")
-                print(f"    Cohen's d: {result['cohens_d']:.3f}")
+                print(f"    Effect size ({effect_size_type}): {effect_size_val:.3f}")
                 print(f"    Significant: {'✓' if result['is_significant'] else '✗'}")
 
 

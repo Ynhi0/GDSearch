@@ -150,7 +150,7 @@ def run_single_imdb(optimizer_name: str, seed: int, lr: float, epochs: int, batc
 
     # Use num_workers=0 to avoid tokenizer parallelism issues
     # Use make_dataloader for consistent settings
-    from run_all_kaggle import make_dataloader
+    from src.core.dataloader_utils import make_dataloader
     train_loader = make_dataloader(train_dataset, batch_size=batch_size, shuffle=True, seed=42, collate_fn=collate_fn, num_workers=0, pin_memory=True)
     test_loader = make_dataloader(test_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn, num_workers=0, pin_memory=True)
 

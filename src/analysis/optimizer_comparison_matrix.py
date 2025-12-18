@@ -10,6 +10,7 @@ Performs all-vs-all pairwise comparisons of optimizers with:
 5. Comprehensive summary report
 """
 
+import logging
 import os
 import sys
 import numpy as np
@@ -51,7 +52,7 @@ def load_optimizer_results(
         files = list(results_path.glob(pattern))
         
         if not files:
-            print(f"No results found for {optimizer}")
+            logging.info(f"No results found for {optimizer}")
             continue
         
         metrics = []
@@ -63,11 +64,11 @@ def load_optimizer_results(
                     final_value = eval_df[metric].iloc[-1]
                     metrics.append(final_value)
             except Exception as e:
-                print(f"  Error reading {file.name}: {e}")
+                logging.info(f"  Error reading {file.name}: {e}")
         
         if metrics:
             optimizer_results[optimizer] = np.array(metrics)
-            print(f"{optimizer}: {len(metrics)} runs loaded")
+            logging.info(f"{optimizer}: {len(metrics)} runs loaded")
     
     return optimizer_results
 
@@ -175,7 +176,7 @@ def plot_comparison_heatmaps(
     
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        print(f"Comparison heatmaps saved to: {save_path}")
+        logging.info(f"Comparison heatmaps saved to: {save_path}")
         plt.close()
     else:
         plt.show()
@@ -268,9 +269,9 @@ def generate_comparison_report(
     report_text = "\n".join(report)
     
     if save_path:
-        with open(save_path, 'w') as f:
+        with open(save_path, 'w', encoding='utf-8') as f:
             f.write(report_text)
-        print(f"Comparison report saved to: {save_path}")
+        logging.info(f"Comparison report saved to: {save_path}")
     
     print(report_text)
     return report_text
@@ -296,24 +297,24 @@ def run_optimizer_comparison_matrix(
     os.makedirs(output_dir, exist_ok=True)
     
     print("="*80)
-    print("OPTIMIZER COMPARISON MATRIX ANALYSIS")
+    logging.info("OPTIMIZER COMPARISON MATRIX ANALYSIS")
     print("="*80)
-    print(f"Results directory: {results_dir}")
-    print(f"Optimizers: {optimizers}")
-    print(f"Metric: {metric}")
-    print(f"Significance level: {alpha}")
+    logging.info(f"Results directory: {results_dir}")
+    logging.info(f"Optimizers: {optimizers}")
+    logging.info(f"Metric: {metric}")
+    logging.info(f"Significance level: {alpha}")
     print("="*80)
     
     # Load results
-    print("\n📂 Loading optimizer results...")
+    logging.info("\n📂 Loading optimizer results...")
     optimizer_results = load_optimizer_results(results_dir, optimizers, metric)
     
     if len(optimizer_results) < 2:
-        print("Need at least 2 optimizers with results!")
+        logging.info("Need at least 2 optimizers with results!")
         return
     
     # Create comparison matrices
-    print("\n🔬 Computing pairwise comparisons...")
+    logging.info("\n🔬 Computing pairwise comparisons...")
     p_value_df, effect_size_df, win_loss_df = create_comparison_matrix(
         optimizer_results, alpha
     )
@@ -322,17 +323,17 @@ def run_optimizer_comparison_matrix(
     p_value_df.to_csv(f"{output_dir}/p_values.csv")
     effect_size_df.to_csv(f"{output_dir}/effect_sizes.csv")
     win_loss_df.to_csv(f"{output_dir}/win_loss_matrix.csv")
-    print(f"Matrices saved to {output_dir}/")
+    logging.info(f"Matrices saved to {output_dir}/")
     
     # Create visualizations
-    print("\nCreating visualizations...")
+    logging.info("\nCreating visualizations...")
     plot_comparison_heatmaps(
         p_value_df, effect_size_df, win_loss_df,
         save_path=f"{output_dir}/comparison_heatmaps.png"
     )
     
     # Generate report
-    print("\nGenerating comprehensive report...")
+    logging.info("\nGenerating comprehensive report...")
     generate_comparison_report(
         optimizer_results,
         p_value_df,
@@ -342,7 +343,7 @@ def run_optimizer_comparison_matrix(
     )
     
     print("\n" + "="*80)
-    print("OPTIMIZER COMPARISON MATRIX COMPLETE!")
+    logging.info("OPTIMIZER COMPARISON MATRIX COMPLETE!")
     print("="*80)
 
 

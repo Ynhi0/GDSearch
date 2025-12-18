@@ -17,14 +17,13 @@ import torch.nn as nn
 import torch.optim as optim
 from pathlib import Path
 import tempfile
-import shutil
 
-# Import from run_all_kaggle.py where RobustCheckpointManager is defined
+# Import from modular utilities
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from run_all_kaggle import RobustCheckpointManager
+from src.core.checkpoint_manager import RobustCheckpointManager
 from src.core.pytorch_optimizers import AdamWrapper, SGDMomentumWrapper
-from run_all_kaggle import make_dataloader
+from src.core.dataloader_utils import make_dataloader
 
 
 class TinyNet(nn.Module):
@@ -49,7 +48,7 @@ def train_n_epochs(model, optimizer, dataloader, epochs, scheduler=None):
     criterion = nn.CrossEntropyLoss()
     model.train()
     
-    for epoch in range(epochs):
+    for _ in range(epochs):
         for x, y in dataloader:
             optimizer.zero_grad()
             output = model(x)
@@ -166,7 +165,7 @@ class TestRobustCheckpointManager:
             opt_cont = optim.Adam(model_cont.parameters(), lr=0.001)
             
             criterion = nn.CrossEntropyLoss()
-            for epoch in range(10):
+            for _ in range(10):
                 for x, y in dataloader_cont:
                     opt_cont.zero_grad()
                     loss = criterion(model_cont(x), y)
@@ -188,7 +187,7 @@ class TestRobustCheckpointManager:
             )
             
             # Train 5 epochs and checkpoint
-            for epoch in range(5):
+            for _ in range(5):
                 for x, y in dataloader_resume:
                     opt_resume.zero_grad()
                     loss = criterion(model_resume(x), y)
@@ -210,7 +209,7 @@ class TestRobustCheckpointManager:
             opt_resume.load_state_dict(loaded_data['optimizer'])
             
             # Continue 5 more epochs
-            for epoch in range(5):
+            for _ in range(5):
                 for x, y in dataloader_resume:
                     opt_resume.zero_grad()
                     loss = criterion(model_resume(x), y)
@@ -240,7 +239,7 @@ class TestRobustCheckpointManager:
             
             # Save checkpoints at epochs 1, 3, 5
             for target_epoch in [1, 3, 5]:
-                for epoch in range(target_epoch):
+                for _ in range(target_epoch):
                     for x, y in dataloader:
                         opt.zero_grad()
                         loss = criterion(model(x), y)

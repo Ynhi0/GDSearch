@@ -5,8 +5,9 @@ Wraps our custom optimizers (SGD, Adam, etc.) to work with PyTorch nn.Module par
 """
 
 import torch
+import logging
 from torch.optim.optimizer import Optimizer
-import numpy as np
+from collections import OrderedDict
 
 # Import custom optimizers - handle path properly
 try:
@@ -17,8 +18,6 @@ try:
         Adam as CustomAdam,
         AdamW as CustomAdamW,
         RMSProp as CustomRMSProp,
-        SAM as CustomSAM,
-        Lookahead as CustomLookahead,
         AdaBound as CustomAdaBound,
         RAdam as CustomRAdam,
         LAMB as CustomLAMB,
@@ -35,8 +34,6 @@ except ModuleNotFoundError:
         Adam as CustomAdam,
         AdamW as CustomAdamW,
         RMSProp as CustomRMSProp,
-        SAM as CustomSAM,
-        Lookahead as CustomLookahead,
         AdaBound as CustomAdaBound,
         RAdam as CustomRAdam,
         LAMB as CustomLAMB,
@@ -68,8 +65,9 @@ class SGDWrapper(Optimizer):
                 # Compute update
                 updated_param = self.custom_opt.step(param_np.flatten(), grad.flatten())
                 
-                # Reshape and update parameter
-                p.data = torch.from_numpy(updated_param.reshape(param_np.shape)).to(p.device)
+                # Reshape and update parameter preserving dtype/device
+                updated_tensor = torch.from_numpy(updated_param.reshape(param_np.shape))
+                p.data.copy_(updated_tensor.to(p.data.dtype).to(p.device))
         
         return loss
 
@@ -111,8 +109,9 @@ class SGDMomentumWrapper(Optimizer):
                 # Compute update
                 updated_param = self.custom_opts[key].step(param_np.flatten(), grad.flatten())
                 
-                # Reshape and update parameter
-                p.data = torch.from_numpy(updated_param.reshape(param_np.shape)).to(p.device)
+                # Reshape and update parameter preserving dtype/device
+                updated_tensor = torch.from_numpy(updated_param.reshape(param_np.shape))
+                p.data.copy_(updated_tensor.to(p.data.dtype).to(p.device))
         
         return loss
     
@@ -190,8 +189,9 @@ class AdamWrapper(Optimizer):
                 # Compute update
                 updated_param = self.custom_opts[key].step(param_np.flatten(), grad.flatten())
                 
-                # Reshape and update parameter
-                p.data = torch.from_numpy(updated_param.reshape(param_np.shape)).to(p.device)
+                # Reshape and update parameter preserving dtype/device
+                updated_tensor = torch.from_numpy(updated_param.reshape(param_np.shape))
+                p.data.copy_(updated_tensor.to(p.data.dtype).to(p.device))
         
         return loss
     
@@ -265,7 +265,8 @@ class SGDNesterovWrapper(Optimizer):
                 grad = p.grad.data.cpu().numpy()
                 param_np = p.data.cpu().numpy()
                 updated_param = self.custom_opts[key].step(param_np.flatten(), grad.flatten())
-                p.data = torch.from_numpy(updated_param.reshape(param_np.shape)).to(p.device)
+                updated_tensor = torch.from_numpy(updated_param.reshape(param_np.shape))
+                p.data.copy_(updated_tensor.to(p.data.dtype).to(p.device))
 
         return loss
     
@@ -341,8 +342,9 @@ class RMSPropWrapper(Optimizer):
                 # Compute update
                 updated_param = self.custom_opts[key].step(param_np.flatten(), grad.flatten())
                 
-                # Reshape and update parameter
-                p.data = torch.from_numpy(updated_param.reshape(param_np.shape)).to(p.device)
+                # Reshape and update parameter preserving dtype/device
+                updated_tensor = torch.from_numpy(updated_param.reshape(param_np.shape))
+                p.data.copy_(updated_tensor.to(p.data.dtype).to(p.device))
         
         return loss
     
@@ -393,7 +395,6 @@ class AdamWWrapper(Optimizer):
     """PyTorch wrapper for custom AdamW optimizer (decoupled weight decay)."""
 
     def __init__(self, params, lr=0.001, betas=(0.9, 0.999), eps=1e-8, weight_decay=0.0):
-        beta1, beta2 = betas
         defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
         super().__init__(params, defaults)
         self.custom_opts = {}
@@ -423,7 +424,8 @@ class AdamWWrapper(Optimizer):
                 grad = p.grad.data.cpu().numpy()
                 param_np = p.data.cpu().numpy()
                 updated_param = self.custom_opts[key].step(param_np.flatten(), grad.flatten())
-                p.data = torch.from_numpy(updated_param.reshape(param_np.shape)).to(p.device)
+                updated_tensor = torch.from_numpy(updated_param.reshape(param_np.shape))
+                p.data.copy_(updated_tensor.to(p.data.dtype).to(p.device))
 
         return loss
     
@@ -509,15 +511,24 @@ class SAMWrapper(Optimizer):
         self.rho = rho
         self.adaptive = adaptive
         
-        # Inherit param_groups from base optimizer
+        # Inherit param_groups and state from base optimizer (reference, not copy)
         self.param_groups = base_optimizer.param_groups
         self.state = base_optimizer.state
+        self.defaults = base_optimizer.defaults
         
-        # Not a true Optimizer subclass - we delegate to base_optimizer
-        # But we maintain compatibility with the Optimizer interface
+        # Initialize Optimizer parent without calling __init__ to avoid empty param error
+        # We manually set the required attributes that Optimizer expects
+        self._optimizer_step_pre_hooks = OrderedDict()
+        self._optimizer_step_post_hooks = OrderedDict()
+        self._optimizer_state_dict_pre_hooks = OrderedDict()
+        self._optimizer_state_dict_post_hooks = OrderedDict()
+        self._optimizer_load_state_dict_pre_hooks = OrderedDict()
+        self._optimizer_load_state_dict_post_hooks = OrderedDict()
+        
         # Local container for adversarial perturbations to avoid mutating
         # base_optimizer.state entries, which can interfere with lazy
         # initialization of base optimizers (e.g., Adam's 'exp_avg').
+        # 🐛 AUDIT FIX: Use id(p) as key instead of tensor p (tensors are unhashable)
         self._perturbations = {}
         
         # 🐛 BUG FIX #11: Track sharpness metric for telemetry
@@ -527,36 +538,57 @@ class SAMWrapper(Optimizer):
     @torch.no_grad()
     def _get_grad_norm(self):
         """Compute gradient norm across all parameters."""
-        shared_device = self.param_groups[0]["params"][0].device
-        norm = torch.norm(
-            torch.stack([
-                ((torch.abs(p) if self.adaptive else 1.0) * p.grad).norm(p=2).to(shared_device)
-                for group in self.param_groups for p in group["params"]
-                if p.grad is not None
-            ]),
-            p=2
-        )
+        # Collect per-parameter gradient norms
+        grads = []
+        shared_device = None
+        
+        for group in self.param_groups:
+            for p in group["params"]:
+                if p.grad is not None:
+                    if shared_device is None:
+                        shared_device = p.device
+                    grads.append(p.grad.detach().view(-1))
+        
+        # 🐛 FIX #12: Guard against empty list (no gradients present)
+        if not grads:
+            return torch.tensor(0.0, device=shared_device if shared_device else torch.device('cpu'), dtype=torch.float32)
+        
+        # Concatenate all gradients and compute overall norm
+        all_grads = torch.cat(grads)
+        norm = torch.linalg.norm(all_grads, ord=2)
+        
         return norm
     
     @torch.no_grad()
     def _ascent_step(self):
         """Take adversarial step in direction of gradient."""
         grad_norm = self._get_grad_norm()
+        
+        # 🐛 FIX #13: Properly handle scale tensor with correct device/dtype
+        # Avoid division by zero with small epsilon
         scale = self.rho / (grad_norm + 1e-12)
         
         for group in self.param_groups:
             for p in group["params"]:
                 if p.grad is None:
                     continue
-                # Compute and apply perturbation
+                
+                # 🐛 FIX #13: Ensure scale matches parameter device/dtype
+                scale_p = scale.to(device=p.device, dtype=p.dtype)
+                
+                # Compute perturbation with proper dtype handling
                 if self.adaptive:
-                    e_w = (torch.pow(p, 2) if self.adaptive else 1.0) * p.grad * scale.to(p)
+                    # Adaptive SAM: weight perturbations by parameter magnitude
+                    e_w = (torch.abs(p).pow(2)) * p.grad * scale_p
                 else:
-                    e_w = p.grad * scale.to(p)
+                    # Standard SAM: uniform perturbation direction
+                    e_w = p.grad * scale_p
+                
                 p.add_(e_w)  # Move to adversarial point
                 # Store perturbation for later restoration in local map
                 # (do NOT write into base optimizer state dict)
-                self._perturbations[p] = e_w
+                # 🐛 AUDIT FIX: Use id(p) as key (tensors are unhashable)
+                self._perturbations[id(p)] = e_w
     
     @torch.no_grad()
     def _descent_step(self):
@@ -566,7 +598,8 @@ class SAMWrapper(Optimizer):
                 if p.grad is None:
                     continue
                 # Restore original parameters using locally stored perturbations
-                e_w = self._perturbations.pop(p, None)
+                # 🐛 AUDIT FIX: Use id(p) as key (tensors are unhashable)
+                e_w = self._perturbations.pop(id(p), None)
                 if e_w is not None:
                     p.sub_(e_w)
         
@@ -611,9 +644,9 @@ class SAMWrapper(Optimizer):
         
         return loss
     
-    def zero_grad(self):
+    def zero_grad(self, set_to_none: bool = False):
         """Delegate to base optimizer."""
-        self.base_optimizer.zero_grad()
+        self.base_optimizer.zero_grad(set_to_none=set_to_none)
     
     def get_sharpness_history(self):
         """🐛 BUG FIX #11: Get sharpness tracking history for analysis.
@@ -763,8 +796,7 @@ class LookaheadWrapper(Optimizer):
 
 def test_sam_and_lookahead():
     """Test SAM and Lookahead optimizers."""
-    print("Testing SAM and Lookahead optimizers...")
-    
+    logging.info("Testing SAM and Lookahead optimizers...")    
     # Create a simple model
     model = torch.nn.Linear(10, 1)
     criterion = torch.nn.MSELoss()
@@ -774,9 +806,9 @@ def test_sam_and_lookahead():
     y = torch.randn(32, 1)
     
     # Test SAM
-    print("  Testing SAM...")
-    sam_opt = SAMWrapper(model.parameters(), lr=0.01, rho=0.05, base_optimizer='SGD')
-    sam_opt.set_model_and_criterion(model, criterion)
+    logging.info("  Testing SAM...")
+    base_optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+    sam_opt = SAMWrapper(base_optimizer, rho=0.05)
     
     def closure():
         sam_opt.zero_grad()
@@ -787,12 +819,12 @@ def test_sam_and_lookahead():
     
     try:
         loss = sam_opt.step(closure)
-        print(f"  ✓ SAM step completed successfully, loss: {loss.item():.4f}")
+        logging.info(f"  ✓ SAM step completed successfully, loss: {loss.item():.4f}")
     except Exception as e:
-        print(f"  ✗ SAM failed: {e}")
+        logging.info(f"  ✗ SAM failed: {e}")
     
     # Test Lookahead
-    print("  Testing Lookahead...")
+    logging.info("  Testing Lookahead...")
     base_opt = torch.optim.SGD(model.parameters(), lr=0.01)
     lookahead_opt = LookaheadWrapper(base_opt, k=3, alpha=0.5)
     
@@ -805,12 +837,11 @@ def test_sam_and_lookahead():
             return loss
         
         loss = lookahead_opt.step(lookahead_closure)
-        print(f"  ✓ Lookahead step completed successfully, loss: {loss.item():.4f}")
+        logging.info(f"  ✓ Lookahead step completed successfully, loss: {loss.item():.4f}")
     except Exception as e:
-        print(f"  ✗ Lookahead failed: {e}")
+        logging.info(f"  ✗ Lookahead failed: {e}")
     
-    print("\n✓ SAM and Lookahead optimizer wrappers tested!")
-
+    logging.info("\n✓ SAM and Lookahead optimizer wrappers tested!")
 
 class AdaBoundWrapper(Optimizer):
     """PyTorch wrapper for custom AdaBound optimizer."""
@@ -961,8 +992,7 @@ class LAMBWrapper(Optimizer):
 
 if __name__ == '__main__':
     # Test the wrappers
-    print("Testing PyTorch optimizer wrappers...")
-    
+    logging.info("Testing PyTorch optimizer wrappers...")    
     # Create a simple model
     model = torch.nn.Linear(10, 2)
     
@@ -977,8 +1007,7 @@ if __name__ == '__main__':
     }
     
     for name, optimizer in optimizers.items():
-        print(f"\nTesting {name}:")
-        
+        logging.info(f"\nTesting {name}:")        
         # Reset model
         model = torch.nn.Linear(10, 2)
         
@@ -993,12 +1022,12 @@ if __name__ == '__main__':
         # Optimizer step
         optimizer.step()
         
-    print("\n✓ All optimizer wrappers work correctly!")
+    logging.info("\n✓ All optimizer wrappers work correctly!")
     
     # Test new optimizers
-    print("\n" + "="*60)
-    print("Testing new optimizer wrappers (AdaBound, RAdam, LAMB)...")
-    print("="*60)
+    logging.info("\n" + "="*60)
+    logging.info("Testing new optimizer wrappers (AdaBound, RAdam, LAMB)...")
+    logging.info("="*60)
     
     model = torch.nn.Linear(10, 2)
     x = torch.randn(5, 10)
@@ -1011,7 +1040,7 @@ if __name__ == '__main__':
     }
     
     for name, optimizer in new_optimizers.items():
-        print(f"\n  Testing {name}...")
+        logging.info(f"\n  Testing {name}...")
         model_test = torch.nn.Linear(10, 2)
         opt_test = new_optimizers[name].__class__(model_test.parameters(), lr=0.001)
         
@@ -1021,12 +1050,13 @@ if __name__ == '__main__':
             loss = torch.nn.functional.cross_entropy(output, y)
             loss.backward()
             opt_test.step()
-            print(f"    ✓ {name} step completed successfully, loss: {loss.item():.4f}")
+            logging.info(f"    ✓ {name} step completed successfully, loss: {loss.item():.4f}")
         except Exception as e:
-            print(f"    ✗ {name} failed: {e}")
+            logging.info(f"    ✗ {name} failed: {e}")
     
-    print("\n✓ New optimizer wrappers tested!")
-    print("\n✓ All optimizer wrappers working!")
+    logging.info("\n✓ New optimizer wrappers tested!")
+    logging.info("\n✓ All optimizer wrappers working!")
+    
     test_sam_and_lookahead()
 
 

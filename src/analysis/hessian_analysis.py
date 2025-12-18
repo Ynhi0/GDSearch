@@ -436,6 +436,6 @@ if __name__ == '__main__':
     analyzer = HessianAnalyzer(model, criterion)
     results = analyzer.analyze_optimizer_quality(dataloader, optimizer_name="SGD")
     
-    print("\nResults:")
+    logging.info("\nResults:")
     for key, value in results.items():
-        print(f"  {key}: {value}")
+        logging.info(f"  {key}: {value}")

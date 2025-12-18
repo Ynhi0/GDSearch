@@ -104,7 +104,8 @@ def create_box_plot(
     groups = df[group_col].unique()
     box_data = [df[df[group_col] == group][value_col].values for group in groups]
     
-    bp = ax.boxplot(box_data, labels=groups, patch_artist=True,
+    # CRITICAL FIX: Use tick_labels instead of deprecated labels parameter (Matplotlib 3.9+)
+    bp = ax.boxplot(box_data, tick_labels=groups, patch_artist=True,
                    showmeans=True, meanline=True)
     
     # Style boxes

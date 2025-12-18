@@ -208,7 +208,7 @@ class TestInteractivePlots(unittest.TestCase):
             assert os.path.getsize(temp_path) > 0
             
             # Check it's HTML
-            with open(temp_path, 'r') as f:
+            with open(temp_path, 'r', encoding='utf-8') as f:
                 content = f.read()
                 assert '<html>' in content or '<!DOCTYPE html>' in content
         finally:

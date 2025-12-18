@@ -58,7 +58,7 @@ class PublicationReadinessChecker:
         self.log_pass("requirements.txt exists")
         
         # Check for critical packages
-        with open(req_path) as f:
+        with open(req_path, encoding='utf-8') as f:
             content = f.read()
         
         critical_packages = ['torch', 'numpy', 'pandas', 'matplotlib', 'scipy']
@@ -276,7 +276,7 @@ class PublicationReadinessChecker:
         logging.info("="*80)
         
         run_all_path = Path('run_all_kaggle.py')
-        with open(run_all_path) as f:
+        with open(run_all_path, encoding='utf-8') as f:
             content = f.read()
         
         # Check for OOM warnings
@@ -291,7 +291,7 @@ class PublicationReadinessChecker:
         # Check SelfHealingTrainer docstring
         enhancements_path = Path('src/core/training_enhancements.py')
         if enhancements_path.exists():
-            with open(enhancements_path) as f:
+            with open(enhancements_path, encoding='utf-8') as f:
                 enhancements_content = f.read()
             
             if 'SCIENTIFIC INTEGRITY WARNING' in enhancements_content:

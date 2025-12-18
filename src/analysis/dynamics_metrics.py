@@ -10,6 +10,7 @@ Required by research proposal:
 tốc độ tức thời - instantaneous rate/update magnitude, dao động - oscillations/fluctuations)"
 """
 
+import logging
 import numpy as np
 from typing import List, Dict, Tuple, Optional
 import pandas as pd
@@ -278,7 +279,7 @@ def compare_dynamics(results_dict: Dict[str, Dict]) -> pd.DataFrame:
 
 if __name__ == "__main__":
     # Example usage
-    print("Dynamics Metrics Module - Example Usage")
+    logging.info("Dynamics Metrics Module - Example Usage")
     print("=" * 60)
     
     # Simulate trajectories
@@ -303,8 +304,8 @@ if __name__ == "__main__":
         'Oscillatory (SGD-like)': osc_metrics
     })
     
-    print("\nDynamics Comparison:")
+    logging.info("\nDynamics Comparison:")
     print(comparison[['smoothness_index', 'path_efficiency', 'mean_loss_oscillation']])
-    print("\n✓ Lower smoothness_index = smoother trajectory")
-    print("✓ Higher path_efficiency = more direct path")
-    print("✓ Lower loss_oscillation = more stable convergence")
+    logging.info("\n✓ Lower smoothness_index = smoother trajectory")
+    logging.info("✓ Higher path_efficiency = more direct path")
+    logging.info("✓ Lower loss_oscillation = more stable convergence")

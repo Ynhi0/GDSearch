@@ -70,7 +70,7 @@ class DataSplitManager:
         indices = np.arange(n_total)
         
         # Set seed for reproducibility
-        rng = np.random.RandomState(self.seed)
+        rng = np.random.default_rng(self.seed)
         
         if stratify_labels is not None:
             # Stratified split (maintains class distribution)
@@ -89,7 +89,7 @@ class DataSplitManager:
         return train_idx, val_idx, test_idx
     
     def _stratified_split(self, indices: np.ndarray, labels: np.ndarray, 
-                         rng: np.random.RandomState) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+                         rng: np.random.Generator) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Perform stratified split to maintain class distribution."""
         unique_labels = np.unique(labels)
         train_idx_list, val_idx_list, test_idx_list = [], [], []

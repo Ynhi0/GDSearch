@@ -6,7 +6,7 @@ scientific validity of results. Tainted runs (with reduced batch sizes due to OO
 are marked and should be excluded from statistical analysis.
 """
 import os
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
 import time
 import json
 import uuid
@@ -30,27 +30,9 @@ from src.core.pytorch_optimizers import (
     AdamWWrapper
 )
 
-# AUDIT FIX: Import OOM-safe training function for taint tracking
-try:
-    # Try to import from run_all_kaggle (will work when run from repo root)
-    import sys
-    from pathlib import Path
-    repo_root = Path(__file__).parent.parent.parent
-    if str(repo_root) not in sys.path:
-        sys.path.insert(0, str(repo_root))
-    from run_all_kaggle import oom_safe_train_step
-    HAS_OOM_SAFE = True
-except ImportError:
-    HAS_OOM_SAFE = False
-    # Fallback: define a simple wrapper that doesn't handle OOM
-    def oom_safe_train_step(model, optimizer, criterion, inputs, targets, device, opt_name="", max_retries=3, min_batch_size=1):
-        """Fallback OOM-safe wrapper without actual OOM handling."""
-        optimizer.zero_grad()
-        outputs = model(inputs.to(device))
-        loss = criterion(outputs, targets.to(device))
-        loss.backward()
-        optimizer.step()
-        return loss.item(), inputs.size(0), outputs, False  # tainted=False
+# AUDIT FIX: Import OOM-safe training function from modular src.core.oom_handler
+from src.core.oom_handler import oom_safe_train_step
+HAS_OOM_SAFE = True
 
 
 # Removed duplicate set_seed - using from src.core.training_utils
@@ -87,15 +69,29 @@ def _update_norm(model: torch.nn.Module, before: Tuple[torch.Tensor, ...]) -> fl
         return float(np.sqrt(sq))
 
 
-def build_model_and_data(dataset: str, model_name: str, batch_size: int, device: torch.device, seed: int):
+def build_model_and_data(dataset: str, model_name: str, batch_size: int, device: torch.device, seed: int, val_split: Optional[float] = None):
+    """Build model and data loaders with optional validation split.
+    
+    Args:
+        dataset: Dataset name (MNIST/CIFAR-10)
+        model_name: Model architecture name
+        batch_size: Batch size for loaders
+        device: Device to place model on
+        seed: Random seed for reproducibility
+        val_split: Optional validation split fraction (e.g., 0.1 for 10%)
+    
+    Returns:
+        If val_split is None: (model, train_loader, test_loader)
+        If val_split is provided: (model, train_loader, val_loader, test_loader)
+    """
     if dataset.upper() == 'MNIST':
-        train_loader, test_loader = get_mnist_loaders(batch_size=batch_size, seed=seed)
+        loaders = get_mnist_loaders(batch_size=batch_size, seed=seed, val_split=val_split)
         if model_name == 'SimpleMLP':
             model = SimpleMLP()
         else:
             raise ValueError(f"Unsupported model '{model_name}' for MNIST")
     elif dataset.upper() == 'CIFAR-10' or dataset.upper() == 'CIFAR10':
-        train_loader, test_loader = get_cifar10_loaders(batch_size=batch_size, seed=seed)
+        loaders = get_cifar10_loaders(batch_size=batch_size, seed=seed, val_split=val_split)
         if model_name == 'SimpleCNN':
             model = SimpleCNN()
         elif model_name == 'ConvNet':
@@ -106,7 +102,13 @@ def build_model_and_data(dataset: str, model_name: str, batch_size: int, device:
         raise ValueError(f"Unsupported dataset '{dataset}'")
 
     model.to(device)
-    return model, train_loader, test_loader
+    
+    if val_split is not None:
+        train_loader, val_loader, test_loader = loaders
+        return model, train_loader, val_loader, test_loader
+    else:
+        train_loader, test_loader = loaders
+        return model, train_loader, test_loader
 
 
 def build_optimizer(optimizer_name: str, model: torch.nn.Module, lr: float, weight_decay: float = 0.0, momentum: float = 0.0):
@@ -163,9 +165,10 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
       - seed: int
       - momentum: float (for SGD_Momentum)
       - weight_decay: float (optional)
-    - use_delay_wrapper: bool (optional)
-    - delay_steps: int (if wrapper is used)
-    - capture_layer_grad_epochs: List[int] (optional) -> capture per-layer grad norms on these epochs
+      - use_delay_wrapper: bool (optional)
+      - delay_steps: int (if wrapper is used)
+      - capture_layer_grad_epochs: List[int] (optional) -> capture per-layer grad norms on these epochs
+      - val_split: float (optional) -> fraction of training data to use for validation (e.g., 0.1)
     """
     seed = int(config.get('seed', 42))
     set_seed(seed)
@@ -176,8 +179,19 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
     dataset = config['dataset']
     batch_size = int(config.get('batch_size', 128))
     epochs = int(config.get('epochs', 5))
+    val_split = config.get('val_split', None)
 
-    model, train_loader, test_loader = build_model_and_data(dataset, model_name, batch_size, device, seed)
+    # AUDIT FIX: Support validation split for hyperparameter tuning
+    if val_split is not None:
+        model, train_loader, val_loader, test_loader = build_model_and_data(
+            dataset, model_name, batch_size, device, seed, val_split=val_split
+        )
+    else:
+        model, train_loader, test_loader = build_model_and_data(
+            dataset, model_name, batch_size, device, seed
+        )
+        val_loader = None
+    
     criterion = nn.CrossEntropyLoss()
     optimizer = build_optimizer(
         optimizer_name=config['optimizer'],
@@ -343,7 +357,22 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
                             'layer_grad_norm': ln,
                         })
 
-        # evaluation after each epoch
+        # AUDIT FIX: Add validation phase if val_loader is provided
+        if val_loader is not None:
+            val_loss, val_acc = evaluate(model, val_loader, criterion, device)
+            history.append({
+                'phase': 'val',
+                'epoch': epoch,
+                'global_step': global_step,
+                'val_loss': val_loss,
+                'val_accuracy': val_acc,
+                'time_sec': time.time() - start_time,
+                'tainted': run_tainted,
+                'effective_batch_size': effective_batch_size,
+                'original_batch_size': original_batch_size
+            })
+        
+        # evaluation after each epoch (test set - only for final reporting)
         test_loss, test_acc = evaluate(model, test_loader, criterion, device)
         # AUDIT FIX: Include tainted status in eval phase
         history.append({
@@ -400,7 +429,7 @@ def main():
     config_path = 'configs/nn_tuning.json'
     if os.path.exists(config_path):
         print(f"Loading experiments from {config_path}")
-        with open(config_path, 'r') as f:
+        with open(config_path, 'r', encoding='utf-8') as f:
             config_data = json.load(f)
         
         # Parse config into experiment list

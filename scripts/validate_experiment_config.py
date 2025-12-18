@@ -268,7 +268,7 @@ class ExperimentValidator:
         if config_dir.exists():
             for config_file in config_dir.glob("*.json"):
                 try:
-                    with open(config_file) as f:
+                    with open(config_file, encoding='utf-8') as f:
                         config = json.load(f)
                     
                     # Check final epochs

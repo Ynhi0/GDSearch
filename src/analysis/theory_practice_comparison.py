@@ -10,6 +10,7 @@ Required by research proposal:
 "đối chiếu tốc độ hội tụ quan sát được với các dự đoán lý thuyết"
 """
 
+import logging
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -237,7 +238,7 @@ def fit_empirical_rate(iterations: np.ndarray, values: np.ndarray,
         return rate, fitted, r_squared
         
     except Exception as e:
-        print(f"Warning: Curve fitting failed: {e}")
+        logging.info(f"Warning: Curve fitting failed: {e}")
         return 0.0, np.zeros_like(iterations), 0.0
 
 
@@ -266,7 +267,7 @@ def compare_theory_practice(training_csv: str, optimizer_name: str,
     
     # Ensure required columns exist
     if 'iteration' not in df.columns or 'loss' not in df.columns:
-        print(f"Warning: CSV must have 'iteration' and 'loss' columns")
+        logging.info(f"Warning: CSV must have 'iteration' and 'loss' columns")
         return {}
     
     iterations = df['iteration'].values
@@ -278,7 +279,7 @@ def compare_theory_practice(training_csv: str, optimizer_name: str,
     losses = losses[valid]
     
     if len(losses) < 10:
-        print("Warning: Not enough data points for comparison")
+        logging.info("Warning: Not enough data points for comparison")
         return {}
     
     # Fit empirical rate
@@ -332,7 +333,7 @@ def compare_theory_practice(training_csv: str, optimizer_name: str,
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
     plt.close()
     
-    print(f"✓ Theory-practice comparison saved to {plot_path}")
+    logging.info(f"✓ Theory-practice comparison saved to {plot_path}")
     
     # Compute deviation statistics
     # Normalize by theoretical values to get relative error
@@ -375,7 +376,7 @@ def batch_compare_optimizers(results_dir: str, output_dir: str,
         csv_files = list(Path(results_dir).glob(csv_pattern))
         
         if len(csv_files) == 0:
-            print(f"Warning: No CSV found for {opt}")
+            logging.info(f"Warning: No CSV found for {opt}")
             continue
         
         # Use first matching file
@@ -396,15 +397,15 @@ def batch_compare_optimizers(results_dir: str, output_dir: str,
         table_path = Path(output_dir) / 'theory_practice_comparison.csv'
         comparison_df.to_csv(table_path, index=False)
         
-        print(f"\n✓ Comparison table saved to {table_path}")
-        print("\nTheory-Practice Fit Quality (R²):")
+        logging.info(f"\n✓ Comparison table saved to {table_path}")
+        logging.info("\nTheory-Practice Fit Quality (R²):")
         print(comparison_df[['optimizer', 'fit_r_squared', 'mean_relative_error']])
     
     return comparison_df if all_stats else None
 
 
 if __name__ == "__main__":
-    print("Theory vs Practice Comparison Module")
+    logging.info("Theory vs Practice Comparison Module")
     print("=" * 60)
-    print("This module compares observed convergence with theoretical bounds.")
-    print("See experiments for integration examples.")
+    logging.info("This module compares observed convergence with theoretical bounds.")
+    logging.info("See experiments for integration examples.")

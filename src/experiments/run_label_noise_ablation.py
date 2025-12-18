@@ -79,7 +79,7 @@ class NoisyLabelDataset(Dataset):
         
     def _generate_noisy_labels(self) -> np.ndarray:
         """Generate corrupted labels with reproducible randomness."""
-        rng = np.random.RandomState(self.seed)
+        rng = np.random.default_rng(self.seed)
         labels = np.array([self.dataset[i][1] for i in range(len(self.dataset))])
         
         if self.noise_rate == 0.0:
@@ -173,7 +173,6 @@ def create_noisy_dataloaders(
     
     # Create validation split (10% of training data)
     train_size = int(0.9 * len(train_dataset))
-    val_size = len(train_dataset) - train_size
     train_indices = list(range(train_size))
     val_indices = list(range(train_size, len(train_dataset)))
     
@@ -377,7 +376,7 @@ def run_label_noise_ablation(
                 set_seed(seed)
                 if model_name.lower() == 'mlp':
                     input_dim = 784 if dataset_name.lower() == 'mnist' else 3072
-                    model = SimpleMLP(input_dim=input_dim, num_classes=num_classes)
+                    model = SimpleMLP(input_size=input_dim, num_classes=num_classes)
                 elif model_name.lower() == 'resnet18':
                     model = ResNet18(num_classes=num_classes)
                 else:
@@ -536,10 +535,10 @@ if __name__ == "__main__":
         output_dir='results/label_noise'
     )
     
-    print("\nFinal summary statistics:")
+    logging.info("\nFinal summary statistics:")
     summary = create_label_noise_summary(results)
-    print(summary)
+    logging.info(summary)
     
-    print("\nRobustness analysis:")
+    logging.info("\nRobustness analysis:")
     robustness = analyze_robustness_to_noise(summary)
-    print(robustness)
+    logging.info(robustness)

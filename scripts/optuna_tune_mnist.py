@@ -6,6 +6,7 @@ Tunes optimizer hyperparameters (lr, momentum, betas) for best test accuracy.
 """
 
 import sys
+import logging
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -14,9 +15,21 @@ import torch.nn as nn
 import optuna
 from src.core.data_utils import get_mnist_loaders
 from src.core.models import SimpleMLP
-from src.core.optimizers import SGDMomentum, Adam
 from src.core.optuna_tuner import OptunaHyperparameterTuner, suggest_optimizer_params
 import argparse
+import random
+import numpy as np
+
+
+def set_seed(seed: int):
+    """Set random seed for reproducibility across all libraries."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
 def create_objective_function(optimizer_name='Adam', epochs=10, device='cpu'):
@@ -50,16 +63,17 @@ def create_objective_function(optimizer_name='Adam', epochs=10, device='cpu'):
         # Create model
         model = SimpleMLP(input_size=784, hidden_size=256, output_size=10).to(device)
         
-        # Create optimizer
+        # Create optimizer using PyTorch optimizers (not custom numpy-based ones)
         if optimizer_name.lower() == 'adam':
-            optimizer = Adam(
+            optimizer = torch.optim.Adam(
+                model.parameters(),
                 lr=params['lr'],
-                beta1=params['beta1'],
-                beta2=params['beta2'],
-                epsilon=params['epsilon']
+                betas=(params['beta1'], params['beta2']),
+                eps=params['epsilon']
             )
         elif optimizer_name.lower() == 'sgdmomentum':
-            optimizer = SGDMomentum(
+            optimizer = torch.optim.SGD(
+                model.parameters(),
                 lr=params['lr'],
                 momentum=params['momentum']
             )
@@ -81,14 +95,11 @@ def create_objective_function(optimizer_name='Adam', epochs=10, device='cpu'):
                 loss = criterion(output, target)
                 
                 # Backward pass
-                model.zero_grad()
+                optimizer.zero_grad()
                 loss.backward()
                 
-                # Update weights
-                for param in model.parameters():
-                    if param.grad is not None:
-                        update = optimizer.step(param.grad.data.cpu().numpy())
-                        param.data.add_(torch.from_numpy(update).to(device))
+                # Update weights using PyTorch optimizer
+                optimizer.step()
                 
                 epoch_loss += loss.item()
             
@@ -147,10 +158,9 @@ def main():
     
     # Set device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Using device: {device}")
-    
-    # Set random seeds
-    torch.manual_seed(args.seed)
+    logging.info(f"Using device: {device}")    
+    # Set random seeds for full reproducibility
+    set_seed(args.seed)
     
     # Create objective function
     objective_fn = create_objective_function(
@@ -181,24 +191,23 @@ def main():
     tuner.save_results(args.save_results)
     
     # Print parameter importance
-    print("\n" + "="*80)
-    print("Parameter Importance:")
-    print("="*80)
+    logging.info("\n" + "="*80)
+    logging.info("Parameter Importance:")
+    logging.info("="*80)
     importance = tuner.get_importance()
     for param, score in sorted(importance.items(), key=lambda x: x[1], reverse=True):
-        print(f"{param:20s}: {score:.4f}")
+        logging.info(f"{param:20s}: {score:.4f}")
     
-    print("\n" + "="*80)
-    print("Best Configuration:")
-    print("="*80)
-    print(f"Optimizer: {args.optimizer}")
+    logging.info("\n" + "="*80)
+    logging.info("Best Configuration:")
+    logging.info("="*80)
+    logging.info(f"Optimizer: {args.optimizer}")
     for param, value in results['best_params'].items():
-        print(f"  {param}: {value}")
-    print(f"\nValidation Accuracy: {results['best_value']:.2f}%")
-    print("="*80)
-    print("\nNOTE: This is VALIDATION accuracy (used for tuning).")
-    print("Final TEST accuracy should be reported separately after retraining.")
-
+        logging.info(f"  {param}: {value}")
+    logging.info(f"\nValidation Accuracy: {results['best_value']:.2f}%")
+    logging.info("="*80)
+    logging.info("\nNOTE: This is VALIDATION accuracy (used for tuning).")
+    logging.info("Final TEST accuracy should be reported separately after retraining.")
 
 if __name__ == '__main__':
     main()

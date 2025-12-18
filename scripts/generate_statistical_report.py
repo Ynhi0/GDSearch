@@ -12,9 +12,14 @@ Outputs:
 """
 
 from __future__ import annotations
+import logging
+import sys
+from pathlib import Path
+
+# Add src to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import glob
-from pathlib import Path
 from typing import Dict, List, Tuple
 
 import numpy as np
@@ -25,16 +30,23 @@ from src.analysis.statistical_analysis import power_analysis_report
 
 
 OPTIMIZER_PATTERNS = {
-    'SGD': 'NN_SimpleMLP_MNIST_SGD_*_benchmark.csv',
-    'SGD_Momentum': 'NN_SimpleMLP_MNIST_SGD_Momentum_*_benchmark.csv',
-    'Adam': 'NN_SimpleMLP_MNIST_Adam_*_benchmark.csv',
-    'AdamW': 'NN_SimpleMLP_MNIST_AdamW_*_benchmark.csv',
-    'AMSGrad': 'NN_SimpleMLP_MNIST_AMSGrad_*_benchmark.csv',
+    'SGD': 'MNIST_SimpleMLP_SGD_seed*.csv',
+    'SGD_Momentum': 'MNIST_SimpleMLP_SGD_Momentum_seed*.csv',
+    'Adam': 'MNIST_SimpleMLP_Adam_seed*.csv',
+    'AdamW': 'MNIST_SimpleMLP_AdamW_seed*.csv',
+    'AMSGrad': 'MNIST_SimpleMLP_AMSGrad_seed*.csv',
+    'SAM_SGD': 'MNIST_SimpleMLP_SAM_SGD_seed*.csv',
+    'SAM_Adam': 'MNIST_SimpleMLP_SAM_Adam_seed*.csv',
+    'Lookahead_SGD': 'MNIST_SimpleMLP_Lookahead_SGD_seed*.csv',
+    'Lookahead_Adam': 'MNIST_SimpleMLP_Lookahead_Adam_seed*.csv',
+    'AdaBound': 'MNIST_SimpleMLP_AdaBound_seed*.csv',
+    'RAdam': 'MNIST_SimpleMLP_RAdam_seed*.csv',
+    'LAMB': 'MNIST_SimpleMLP_LAMB_seed*.csv',
 }
 
 
 def _load_final_metric(results_dir: str, optimizer: str, col: str) -> Dict[int, float]:
-    pattern = str(Path(results_dir) / OPTIMIZER_PATTERNS[optimizer])
+    pattern = str(Path(results_dir) / "experiments" / "mnist" / "experiments" / "mnist" / OPTIMIZER_PATTERNS[optimizer])
     data: Dict[int, float] = {}
     for f in glob.glob(pattern):
         try:
@@ -117,22 +129,14 @@ def main():
         for opt in OPTIMIZER_PATTERNS.keys()
     }
 
-    # Define comparison pairs
-    pairs = [
-        ('Adam', 'SGD'),
-        ('SGD_Momentum', 'SGD'),
-        ('RMSProp', 'SGD') if 'RMSProp' in finals else None,
-        ('AdamW', 'Adam'),
-        ('AMSGrad', 'Adam'),
-        ('AdamW', 'SGD'),
-        ('AMSGrad', 'AdamW'),
-    ]
-    pairs = [p for p in pairs if p is not None]
+    # Define comparison pairs - all pairwise comparisons
+    optimizers = list(OPTIMIZER_PATTERNS.keys())
+    pairs = [(a, b) for i, a in enumerate(optimizers) for b in optimizers[i+1:]]
 
     results = []
     for a, b in pairs:
         common = sorted(set(finals.get(a, {}).keys()) & set(finals.get(b, {}).keys()))
-        if len(common) < 3:
+        if len(common) < 2:
             continue
         a_vals = np.array([finals[a][s] for s in common], dtype=float)
         b_vals = np.array([finals[b][s] for s in common], dtype=float)
@@ -154,17 +158,16 @@ def main():
         results.append(row)
 
     if not results:
-        print('No valid comparisons found (need >=3 common seeds per pair).')
+        logging.info("No valid comparisons found (need >=3 common seeds per pair).")
         return 1
 
     df = pd.DataFrame(results)
     # Holm-Bonferroni
     df['significant_holm'] = holm_bonferroni(df['p_value'].tolist())
 
-    out_csv = Path(args.results_dir) / 'nn_statistical_comparisons.csv'
+    out_csv = Path(args.results_dir) / 'analysis' / 'nn_statistical_comparisons.csv'
     df.to_csv(out_csv, index=False)
-    print(f"Saved: {out_csv}")
-
+    logging.info(f"Saved: {out_csv}")
     # Markdown report
     lines = [
         "# MNIST Statistical Report",
@@ -178,9 +181,9 @@ def main():
         lines.append(
             f"| {r['name_A']} | {r['name_B']} | {int(r['n'])} | {r['mean_A']:.4f} | {r['mean_B']:.4f} | {r['test']} | {r['p_value']:.3g} | {'✅' if r['significant_holm'] else '—'} | {r['effect_size_name']}={r['effect_size']:.3f} | {r.get('power_achieved', np.nan):.2f} |"
         )
-    report_path = Path(args.results_dir) / 'nn_statistical_report.md'
+    report_path = Path(args.results_dir) / 'analysis' / 'nn_statistical_report.md'
     Path(report_path).write_text("\n".join(lines), encoding='utf-8')
-    print(f"Saved: {report_path}")
+    logging.info(f"Saved: {report_path}")
     return 0
 
 

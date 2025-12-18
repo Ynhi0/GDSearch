@@ -5,6 +5,7 @@ Multi-seed experiment runner for statistical analysis.
 import os
 import sys
 import json
+import copy
 from typing import List, Dict, Any
 import pandas as pd
 import numpy as np
@@ -35,7 +36,8 @@ def run_multi_seed_experiment(base_config: Dict[str, Any], seeds: List[int], res
     print(f"{'='*60}\n")
     
     for seed in tqdm(seeds, desc="Seeds"):
-        config = base_config.copy()
+        # AUDIT FIX: Use deepcopy to prevent mutation of nested config structures
+        config = copy.deepcopy(base_config)
         config['seed'] = seed
         config['tag'] = f'seed{seed}'
         
@@ -78,6 +80,18 @@ def aggregate_results(result_files: List[str], metric: str = 'test_accuracy', ex
     
     values = np.array(values)
     
+    # CRITICAL FIX: Check for empty array before computing statistics
+    # This can occur when all runs are tainted or no valid data exists
+    if len(values) == 0:
+        return {
+            'mean': np.nan,
+            'std': np.nan,
+            'min': np.nan,
+            'max': np.nan,
+            'values': [],
+            'n': 0
+        }
+    
     return {
         'mean': values.mean(),
         'std': values.std(),
@@ -105,7 +119,7 @@ def print_aggregated_results(results: Dict[str, Any], metric_name: str = "Test A
 
 def save_aggregated_results(results: Dict[str, Any], filepath: str):
     """Save aggregated results to JSON."""
-    with open(filepath, 'w') as f:
+    with open(filepath, 'w', encoding='utf-8') as f:
         json.dump(results, f, indent=2)
     print(f"Aggregated results saved to: {filepath}")
 

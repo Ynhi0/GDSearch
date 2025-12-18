@@ -54,7 +54,7 @@ def get_loaders(batch_size: int = 128):
     testset = torchvision.datasets.CIFAR10(root=root, train=False, download=True, transform=transform_test)
 
     # Use make_dataloader for consistent settings
-    from run_all_kaggle import make_dataloader
+    from src.core.dataloader_utils import make_dataloader
     trainloader = make_dataloader(trainset, batch_size=batch_size, shuffle=True, seed=42, num_workers=2, pin_memory=True)
     testloader = make_dataloader(testset, batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=True)
     return trainloader, testloader

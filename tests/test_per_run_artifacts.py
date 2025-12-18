@@ -19,12 +19,12 @@ def test_save_run_artifacts_creates_files(tmp_path):
     assert os.path.exists(meta_path)
 
     # Validate CSV content (simple check)
-    with open(csv_path, 'r') as f:
+    with open(csv_path, 'r', encoding='utf-8') as f:
         txt = f.read()
     assert 'epoch' in txt and 'train_loss' in txt
 
     # Validate metadata
-    with open(meta_path, 'r') as f:
+    with open(meta_path, 'r', encoding='utf-8') as f:
         meta = json.load(f)
 
     assert meta['dataset'] == 'MNIST'

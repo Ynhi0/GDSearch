@@ -16,6 +16,7 @@ from typing import Optional, Dict, Any
 import copy
 import numpy as np
 import random
+import os
 
 
 def set_seed(seed: int):
@@ -50,6 +51,10 @@ def set_seed(seed: int):
     
     try:
         torch.use_deterministic_algorithms(True)
+        # Set CUBLAS environment variable for deterministic CUDA operations
+        # Required for CUDA >= 10.2 when using deterministic algorithms
+        if torch.cuda.is_available() and 'CUBLAS_WORKSPACE_CONFIG' not in os.environ:
+            os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
     except Exception:
         # Older PyTorch versions may not support this
         pass
@@ -196,7 +201,7 @@ class ModelEMA:
         """
         # This requires storing original weights before apply_shadow
         # For simplicity, we recommend using the shadow model directly for evaluation
-        pass
+        ...
 
 
 class AMPWrapper:
@@ -235,7 +240,7 @@ class AMPWrapper:
         self.dtype = dtype
         
         if self.enabled:
-            self.scaler = torch.cuda.amp.GradScaler()
+            self.scaler = torch.amp.GradScaler('cuda')
         else:
             self.scaler = None
     

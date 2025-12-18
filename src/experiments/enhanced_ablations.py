@@ -104,7 +104,7 @@ def create_data_fraction_subset(
     if fraction >= 1.0:
         return dataset
     
-    rng = np.random.RandomState(seed)
+    rng = np.random.default_rng(seed)
     n_samples = len(dataset)
     n_subset = int(n_samples * fraction)
     
@@ -141,7 +141,7 @@ def run_data_efficiency_ablation(
     results = []
     device = torch.device(device if torch.cuda.is_available() else 'cpu')
     
-    # Get base loaders
+    # Get base loaders ONCE - more efficient than recreating for each fraction
     if dataset_name == 'mnist':
         train_base, val_loader, test_loader = get_mnist_loaders(batch_size=128)
         input_channels = 1
@@ -151,15 +151,15 @@ def run_data_efficiency_ablation(
         input_channels = 3
         num_classes = 10
     
-    # Extract dataset from loader
-    train_dataset = train_base.dataset
+    # Cache full dataset to avoid reloading - more efficient than creating subset from loader each time
+    full_dataset = train_base.dataset
     
     for fraction in data_fractions:
         for seed in seeds:
             set_seed(seed)
             
-            # Create data subset
-            subset = create_data_fraction_subset(train_dataset, fraction, seed)
+            # Create data subset from cached dataset (efficient)
+            subset = create_data_fraction_subset(full_dataset, fraction, seed)
             train_loader = DataLoader(
                 subset,
                 batch_size=128,

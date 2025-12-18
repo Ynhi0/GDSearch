@@ -249,7 +249,14 @@ def run_statistical_analysis(results_dir: str = 'results', plots_dir: str = 'plo
             'Significant (α=0.05)': p_value < 0.05,
         }
         
-        if 'cohens_d' in test_result:
+        # AUDIT FIX: Handle new field structure with proper None checks
+        effect_size_val = test_result.get('effect_size', test_result.get('cohens_d'))
+        if effect_size_val is not None:
+            row['Effect size'] = effect_size_val
+            row['Effect size type'] = test_result.get('effect_size_type', 'unknown')
+        
+        # Backward compatibility
+        if test_result.get('cohens_d') is not None:
             row['Cohen\'s d'] = test_result['cohens_d']
         if 'effect_size_r' in test_result:
             row['Effect size (r)'] = test_result['effect_size_r']

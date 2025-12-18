@@ -95,7 +95,7 @@ def run_cifar10_experiments(quick=False):
     """Run CIFAR-10 experiments."""
     log("=" * 60)
     log("PHASE 3: CIFAR-10 Experiments")
-    cmd = "python src/experiments/run_cifar10.py"
+    cmd = "src/experiments/run_cifar10.py"
     if quick:
         cmd += " --quick"
     run_python_script(cmd, "CIFAR-10 Experiments")

@@ -1,0 +1,103 @@
+"""
+DataLoader utilities for creating reproducible, deterministic data loaders.
+
+This module provides a centralized implementation of make_dataloader that ensures
+consistent behavior across all experiments.
+"""
+import functools
+import random
+from typing import Optional, Callable, Any
+
+import numpy as np
+import torch
+from torch.utils.data import DataLoader, Dataset, Sampler
+
+
+def _worker_init(worker_id: int, seed: int):
+    """Initialize worker with deterministic seed."""
+    worker_seed = int(seed) + worker_id + 1
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+    try:
+        torch.manual_seed(worker_seed)
+    except Exception:
+        pass
+
+
+def make_dataloader(
+    dataset: Dataset,
+    batch_size: int = 64,
+    shuffle: bool = False,
+    seed: Optional[int] = None,
+    num_workers: int = 0,
+    pin_memory: bool = False,
+    collate_fn: Optional[Callable] = None,
+    sampler: Optional[Sampler] = None,
+    drop_last: bool = False,
+    persistent_workers: bool = False
+) -> DataLoader:
+    """
+    Create a DataLoader with deterministic worker seeding when `seed` is provided.
+    
+    - If `seed` is not None, a `torch.Generator` is created and `worker_init_fn` 
+      seeds python, numpy and torch RNGs for each worker deterministically.
+    - If `sampler` is provided, it will be used and `shuffle` will be ignored.
+    - `persistent_workers` requires PyTorch >= 1.7.0 and num_workers > 0
+    
+    Args:
+        dataset: PyTorch Dataset
+        batch_size: Batch size for DataLoader
+        shuffle: Whether to shuffle data (ignored if sampler provided)
+        seed: Random seed for reproducibility
+        num_workers: Number of worker processes
+        pin_memory: Pin memory for faster GPU transfer
+        collate_fn: Custom collate function
+        sampler: Custom sampler (overrides shuffle)
+        drop_last: Drop last incomplete batch
+        persistent_workers: Keep workers alive between epochs
+        
+    Returns:
+        DataLoader with configured settings
+    """
+    generator = None
+    worker_init_fn = None
+
+    if seed is not None:
+        try:
+            generator = torch.Generator()
+            generator.manual_seed(int(seed))
+            worker_init_fn = functools.partial(_worker_init, seed=seed)
+        except Exception:
+            generator = None
+            worker_init_fn = None
+
+    dl_kwargs = dict(
+        batch_size=batch_size,
+        shuffle=shuffle if sampler is None else False,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        drop_last=drop_last,
+    )
+
+    if collate_fn is not None:
+        dl_kwargs['collate_fn'] = collate_fn
+
+    if sampler is not None:
+        dl_kwargs['sampler'] = sampler
+
+    if worker_init_fn is not None:
+        dl_kwargs['worker_init_fn'] = worker_init_fn
+
+    if generator is not None and sampler is None:
+        dl_kwargs['generator'] = generator
+
+    # Add persistent_workers only if PyTorch supports it and num_workers > 0
+    if persistent_workers and num_workers > 0:
+        try:
+            pytorch_version = tuple(int(x) for x in torch.__version__.split('.')[:2])
+            if pytorch_version >= (1, 7):
+                dl_kwargs['persistent_workers'] = True
+        except Exception:
+            pass  # Skip if version parsing fails
+
+    return DataLoader(dataset, **dl_kwargs)

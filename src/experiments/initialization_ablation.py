@@ -61,7 +61,7 @@ matplotlib.use('Agg')  # Non-interactive backend
 import matplotlib.pyplot as plt
 
 # Import make_dataloader
-from run_all_kaggle import make_dataloader
+from src.core.dataloader_utils import make_dataloader
 
 try:
     from src.visualization.ablation_plots import generate_all_ablation_plots

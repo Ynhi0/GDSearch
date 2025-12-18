@@ -8,6 +8,7 @@ in a neighborhood of good hyperparameters.
 Detective Question: "Is the 'best' hyperparameter value robust, or just lucky?"
 """
 
+import logging
 import os
 import json
 import sys
@@ -80,9 +81,9 @@ def run_sensitivity_experiment(
     results = []
     
     for i, value in enumerate(param_values):
-        print(f"\n{'='*60}")
-        print(f"Sensitivity test {i+1}/{len(param_values)}: {param_name}={value:.6f}")
-        print(f"{'='*60}")
+        logging.info(f"\n{'='*60}")
+        logging.info(f"Sensitivity test {i+1}/{len(param_values)}: {param_name}={value:.6f}")
+        logging.info(f"{'='*60}")
         
         # Create config for this run
         config = base_config.copy()
@@ -117,8 +118,8 @@ def run_sensitivity_experiment(
                 fname = result_filename(config).replace('.csv', f'_sensitivity_{param_name}_{i}.csv')
                 out_path = os.path.join(output_dir, fname)
                 df.to_csv(out_path, index=False)
-                print(f"Saved: {out_path}")
-                print(f"Final test accuracy: {final_test_acc:.4f}")
+                logging.info(f"Saved: {out_path}")
+                logging.info(f"Final test accuracy: {final_test_acc:.4f}")
             else:
                 results.append({
                     'param_name': param_name,
@@ -129,7 +130,7 @@ def run_sensitivity_experiment(
                     'status': 'failed_no_eval'
                 })
         except Exception as e:
-            print(f"Failed: {e}")
+            logging.info(f"Failed: {e}")
             results.append({
                 'param_name': param_name,
                 'param_value': value,
@@ -144,7 +145,7 @@ def run_sensitivity_experiment(
     # Save summary
     summary_path = os.path.join(output_dir, f'sensitivity_{param_name}_summary.csv')
     results_df.to_csv(summary_path, index=False)
-    print(f"\nSensitivity analysis complete: {summary_path}")
+    logging.info(f"\nSensitivity analysis complete: {summary_path}")
     
     return results_df
 
@@ -170,7 +171,7 @@ def plot_sensitivity(
     success_df = results_df[results_df['status'] == 'success'].copy()
     
     if success_df.empty:
-        print("No successful runs to plot")
+        logging.info("No successful runs to plot")
         return
     
     # Plot 1: Test Accuracy
@@ -222,7 +223,7 @@ def plot_sensitivity(
     
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        print(f"Saved sensitivity plot: {save_path}")
+        logging.info(f"Saved sensitivity plot: {save_path}")
     else:
         plt.show()
     
@@ -294,7 +295,7 @@ def main():
     """
     # Load best config from tuning results
     print("=" * 60)
-    print("Sensitivity Analysis - AdamW Learning Rate")
+    logging.info("Sensitivity Analysis - AdamW Learning Rate")
     print("=" * 60)
     
     # Best config from our tuning
@@ -316,8 +317,8 @@ def main():
         num_points=5
     )
     
-    print(f"\nTesting learning rates: {lr_values}")
-    print(f"Center (best) value: {base_config['lr']}")
+    logging.info(f"\nTesting learning rates: {lr_values}")
+    logging.info(f"Center (best) value: {base_config['lr']}")
     
     # Run sensitivity experiment
     results_df = run_sensitivity_experiment(
@@ -329,22 +330,22 @@ def main():
     
     # Analyze robustness
     print("\n" + "=" * 60)
-    print("ROBUSTNESS ANALYSIS")
+    logging.info("ROBUSTNESS ANALYSIS")
     print("=" * 60)
     
     robustness = analyze_robustness(results_df, threshold=0.01)
     
     if robustness['status'] == 'success':
-        print(f"\nResults:")
-        print(f"  Best Accuracy:        {robustness['best_accuracy']:.4f}")
-        print(f"  Mean Accuracy:        {robustness['mean_accuracy']:.4f}")
-        print(f"  Std Accuracy:         {robustness['std_accuracy']:.4f}")
-        print(f"  Coeff. of Variation:  {robustness['coefficient_of_variation']:.4f}")
-        print(f"  Within ±1% ratio:     {robustness['within_threshold_ratio']:.2%}")
-        print(f"\nClassification: {robustness['classification']}")
-        print(f"\nInterpretation:\n{robustness['interpretation']}")
+        logging.info(f"\nResults:")
+        logging.info(f"  Best Accuracy:        {robustness['best_accuracy']:.4f}")
+        logging.info(f"  Mean Accuracy:        {robustness['mean_accuracy']:.4f}")
+        logging.info(f"  Std Accuracy:         {robustness['std_accuracy']:.4f}")
+        logging.info(f"  Coeff. of Variation:  {robustness['coefficient_of_variation']:.4f}")
+        logging.info(f"  Within ±1% ratio:     {robustness['within_threshold_ratio']:.2%}")
+        logging.info(f"\nClassification: {robustness['classification']}")
+        logging.info(f"\nInterpretation:\n{robustness['interpretation']}")
     else:
-        print(f"{robustness['message']}")
+        logging.info(f"{robustness['message']}")
     
     # Plot results
     plot_sensitivity(
@@ -354,9 +355,9 @@ def main():
         save_path='plots/sensitivity_lr.png'
     )
     
-    print("\nSensitivity analysis complete!")
-    print("Check: results/sensitivity/ for detailed CSVs")
-    print("Check: plots/sensitivity_lr.png for visualization")
+    logging.info("\nSensitivity analysis complete!")
+    logging.info("Check: results/sensitivity/ for detailed CSVs")
+    logging.info("Check: plots/sensitivity_lr.png for visualization")
 
 
 if __name__ == '__main__':

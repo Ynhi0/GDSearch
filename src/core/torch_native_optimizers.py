@@ -379,10 +379,11 @@ class TorchLookahead(Optimizer):
         self.step_counter = 0
         
         # Cache for slow weights
+        # 🐛 AUDIT FIX: Use id(p) as key instead of tensor p (tensors are unhashable)
         self.slow_weights = {}
         for group in self.param_groups:
             for p in group['params']:
-                self.slow_weights[p] = p.data.clone()
+                self.slow_weights[id(p)] = p.data.clone()
     
     def __getstate__(self):
         return {
@@ -418,11 +419,13 @@ class TorchLookahead(Optimizer):
         if self.step_counter % self.k == 0:
             for group in self.param_groups:
                 for p in group['params']:
-                    if p in self.slow_weights:
+                    # 🐛 AUDIT FIX: Use id(p) as key
+                    p_id = id(p)
+                    if p_id in self.slow_weights:
                         # Interpolate: slow = slow + alpha * (fast - slow)
-                        self.slow_weights[p].add_(p.data - self.slow_weights[p], alpha=self.alpha)
+                        self.slow_weights[p_id].add_(p.data - self.slow_weights[p_id], alpha=self.alpha)
                         # Copy slow weights to fast weights
-                        p.data.copy_(self.slow_weights[p])
+                        p.data.copy_(self.slow_weights[p_id])
         
         return loss
     

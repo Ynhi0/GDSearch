@@ -57,7 +57,7 @@ def validate_config_keys(config_path: str, strict: bool = False) -> Dict[str, Li
     Returns:
         Dictionary with 'warnings' and 'errors' lists
     """
-    with open(config_path, 'r') as f:
+    with open(config_path, 'r', encoding='utf-8') as f:
         config = json.load(f)
     
     issues = {'warnings': [], 'errors': [], 'zombies': []}
@@ -136,7 +136,7 @@ def normalize_config(config_path: str, output_path: str = None) -> Dict[str, Any
     Returns:
         Normalized config dictionary
     """
-    with open(config_path, 'r') as f:
+    with open(config_path, 'r', encoding='utf-8') as f:
         config = json.load(f)
     
     # Normalize keys
@@ -150,7 +150,7 @@ def normalize_config(config_path: str, output_path: str = None) -> Dict[str, Any
     if output_path is None:
         output_path = config_path
     
-    with open(output_path, 'w') as f:
+    with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(config, f, indent=2)
     
     return config
@@ -203,7 +203,7 @@ def validate_all_configs(config_dir: str = 'configs', strict: bool = False) -> b
     return all_valid
 
 
-def load_tracked_config(config_path: str) -> TrackedConfig:
+def load_tracked_config(config_path: str) -> 'TrackedConfig':
     """
     Load config as TrackedConfig to detect zombie keys during execution.
     
@@ -213,7 +213,7 @@ def load_tracked_config(config_path: str) -> TrackedConfig:
     Returns:
         TrackedConfig instance that monitors key access
     """
-    with open(config_path, 'r') as f:
+    with open(config_path, 'r', encoding='utf-8') as f:
         config = json.load(f)
     
     return TrackedConfig(config)

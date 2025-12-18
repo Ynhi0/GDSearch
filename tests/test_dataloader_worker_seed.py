@@ -1,6 +1,6 @@
 import torch
 import pytest
-from run_all_kaggle import make_dataloader
+from src.core.dataloader_utils import make_dataloader
 
 
 @pytest.mark.skip(reason="Dataloader worker pickling issue on Windows - non-critical for Kaggle")
