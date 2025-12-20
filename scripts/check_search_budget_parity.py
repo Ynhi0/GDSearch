@@ -5,7 +5,7 @@ Search Budget Parity Checker
 Ensures equal hyperparameter search budgets across optimizers to prevent
 strawman comparisons where one method gets unfairly more tuning trials.
 
-This is HIGH-2 fix from the Research Validity Audit.
+This is HIGH-2 fix from the Research Validity Review.
 
 Usage:
     python scripts/check_search_budget_parity.py

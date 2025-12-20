@@ -107,7 +107,7 @@ def load_mnist_with_augmentation(augmentation=False, batch_size=128, quick=False
     return train_loader, test_loader
 
 
-def train_and_evaluate(
+def train_and_evaluate_with_clipping(
     model,
     train_loader,
     test_loader,
@@ -117,7 +117,7 @@ def train_and_evaluate(
     device,
     gradient_clip=None
 ):
-    """Train model and return final metrics"""
+    """Train model with optional gradient clipping and return final metrics"""
     model.to(device)
     
     for epoch in range(epochs):
@@ -216,7 +216,7 @@ def run_gradient_clipping_ablation(
             criterion = nn.CrossEntropyLoss()
             
             # Train
-            metrics = train_and_evaluate(
+            metrics = train_and_evaluate_with_clipping(
                 model, train_loader, test_loader, optimizer, criterion,
                 epochs, device, gradient_clip=clip_val
             )
@@ -293,7 +293,7 @@ def run_label_smoothing_ablation(
                 criterion = nn.CrossEntropyLoss()
             
             # Train
-            metrics = train_and_evaluate(
+            metrics = train_and_evaluate_with_clipping(
                 model, train_loader, test_loader, optimizer, criterion,
                 epochs, device, gradient_clip=None
             )
@@ -367,7 +367,7 @@ def run_data_augmentation_ablation(
             criterion = nn.CrossEntropyLoss()
             
             # Train
-            metrics = train_and_evaluate(
+            metrics = train_and_evaluate_with_clipping(
                 model, train_loader, test_loader, optimizer, criterion,
                 epochs, device, gradient_clip=None
             )
@@ -441,7 +441,7 @@ def run_model_architecture_ablation(
             num_params = sum(p.numel() for p in model.parameters())
             
             # Train
-            metrics = train_and_evaluate(
+            metrics = train_and_evaluate_with_clipping(
                 model, train_loader, test_loader, optimizer, criterion,
                 epochs, device, gradient_clip=None
             )
@@ -513,7 +513,7 @@ def run_dropout_ablation(
             criterion = nn.CrossEntropyLoss()
             
             # Train
-            metrics = train_and_evaluate(
+            metrics = train_and_evaluate_with_clipping(
                 model, train_loader, test_loader, optimizer, criterion,
                 epochs, device, gradient_clip=None
             )

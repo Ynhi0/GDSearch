@@ -9,7 +9,7 @@ Usage:
     python scripts/validate_configs.py
     python scripts/validate_configs.py --config configs/nn_tuning.json
 
-Author: GDSearch Audit Remediation Team
+Author: GDSearch Remediation Team
 Date: December 9, 2025
 """
 

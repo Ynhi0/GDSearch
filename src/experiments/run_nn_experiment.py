@@ -1,12 +1,9 @@
 """
 Run neural network experiments on MNIST and CIFAR-10 with detailed logging.
-
-AUDIT FIX (Dec 2025): Added OOM-safe training with taint tracking to ensure
-scientific validity of results. Tainted runs (with reduced batch sizes due to OOM)
-are marked and should be excluded from statistical analysis.
 """
 import os
-from typing import Dict, Any, Tuple, Optional
+import logging
+from typing import Dict, Any, Tuple, Optional, Union
 import time
 import json
 import uuid
@@ -22,15 +19,21 @@ import torch.optim as optim
 from src.core.models import SimpleMLP, SimpleCNN, ConvNet
 from src.core.data_utils import get_mnist_loaders, get_cifar10_loaders
 from src.core.optimizer_wrappers import DelayedOptimizer
-from src.core.training_utils import set_seed
+from src.core.training_utils import set_seed, validate_pytorch_version
 from src.core.pytorch_optimizers import (
     SGDWrapper,
     SGDMomentumWrapper,
     AdamWrapper,
-    AdamWWrapper
+    AdamWWrapper,
+    RMSPropWrapper,
+    SAMWrapper,
+    LookaheadWrapper,
+    AdaBoundWrapper,
+    RAdamWrapper,
+    LAMBWrapper
 )
 
-# AUDIT FIX: Import OOM-safe training function from modular src.core.oom_handler
+# Import OOM-safe training function from modular src.core.oom_handler
 from src.core.oom_handler import oom_safe_train_step
 HAS_OOM_SAFE = True
 
@@ -48,7 +51,7 @@ def _flattened_grad_norm(model: torch.nn.Module) -> float:
         if not grads:
             return 0.0
         g = torch.cat(grads)
-        return torch.linalg.norm(g, ord=2).item()
+        return float(torch.norm(g, p=2).item())
 
 
 def _params_clone(model: torch.nn.Module) -> Tuple[torch.Tensor, ...]:
@@ -69,7 +72,15 @@ def _update_norm(model: torch.nn.Module, before: Tuple[torch.Tensor, ...]) -> fl
         return float(np.sqrt(sq))
 
 
-def build_model_and_data(dataset: str, model_name: str, batch_size: int, device: torch.device, seed: int, val_split: Optional[float] = None):
+def build_model_and_data(
+    dataset: str, 
+    model_name: str, 
+    batch_size: int, 
+    device: torch.device, 
+    seed: int, 
+    val_split: Optional[float] = None
+) -> Union[Tuple[torch.nn.Module, torch.utils.data.DataLoader, torch.utils.data.DataLoader],
+           Tuple[torch.nn.Module, torch.utils.data.DataLoader, torch.utils.data.DataLoader, torch.utils.data.DataLoader]]:
     """Build model and data loaders with optional validation split.
     
     Args:
@@ -83,6 +94,14 @@ def build_model_and_data(dataset: str, model_name: str, batch_size: int, device:
     Returns:
         If val_split is None: (model, train_loader, test_loader)
         If val_split is provided: (model, train_loader, val_loader, test_loader)
+    
+    Note:
+        Callers MUST handle both return patterns explicitly to avoid tuple unpacking errors.
+        Recommended pattern:
+            if val_split:
+                model, train_loader, val_loader, test_loader = build_model_and_data(...)
+            else:
+                model, train_loader, test_loader = build_model_and_data(...)
     """
     if dataset.upper() == 'MNIST':
         loaders = get_mnist_loaders(batch_size=batch_size, seed=seed, val_split=val_split)
@@ -116,19 +135,40 @@ def build_optimizer(optimizer_name: str, model: torch.nn.Module, lr: float, weig
     
     Uses custom wrappers from pytorch_optimizers.py to test our implementations.
     """
-    name = optimizer_name.upper()
+    name = optimizer_name.upper().replace('-', '_')  # Normalize names
+    
     if name == 'SGD':
         return SGDWrapper(model.parameters(), lr=lr)
-    if name in ('SGD_MOMENTUM', 'SGD-MOMENTUM'):
+    elif name in ('SGD_MOMENTUM', 'SGDMOMENTUM', 'MOMENTUM'):
         return SGDMomentumWrapper(model.parameters(), lr=lr, momentum=momentum)
-    if name == 'ADAM':
+    elif name == 'ADAM':
         return AdamWrapper(model.parameters(), lr=lr)
-    if name in ('AMSGRAD', 'ADAM_AMSGRAD', 'ADAM_AMS'):
+    elif name in ('AMSGRAD', 'ADAM_AMSGRAD', 'ADAM_AMS'):
         # Fallback to PyTorch for AMSGrad (not in custom impl)
         return optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay, amsgrad=True)
-    if name == 'ADAMW':
-        return AdamWWrapper(model.parameters(), lr=lr)
-    raise ValueError(f"Unsupported optimizer '{optimizer_name}'")
+    elif name == 'ADAMW':
+        return AdamWWrapper(model.parameters(), lr=lr, weight_decay=weight_decay)
+    elif name == 'RMSPROP':
+        return RMSPropWrapper(model.parameters(), lr=lr)
+    elif name == 'SAM':
+        # SAM requires base optimizer
+        if momentum > 0:
+            base_opt = SGDMomentumWrapper(model.parameters(), lr=lr, momentum=momentum)
+        else:
+            base_opt = SGDWrapper(model.parameters(), lr=lr)
+        return SAMWrapper(base_opt, rho=0.05)
+    elif name == 'LOOKAHEAD':
+        # Lookahead requires base optimizer
+        base_opt = AdamWrapper(model.parameters(), lr=lr)
+        return LookaheadWrapper(base_opt, k=5, alpha=0.5)
+    elif name == 'ADABOUND':
+        return AdaBoundWrapper(model.parameters(), lr=lr)
+    elif name == 'RADAM':
+        return RAdamWrapper(model.parameters(), lr=lr)
+    elif name == 'LAMB':
+        return LAMBWrapper(model.parameters(), lr=lr, weight_decay=weight_decay)
+    else:
+        raise ValueError(f"Unsupported optimizer '{optimizer_name}'. Available: SGD, SGD_MOMENTUM, ADAM, ADAMW, RMSPROP, SAM, LOOKAHEAD, ADABOUND, RADAM, LAMB")
 
 
 def evaluate(model: torch.nn.Module, loader: torch.utils.data.DataLoader, criterion: nn.Module, device: torch.device):
@@ -146,8 +186,12 @@ def evaluate(model: torch.nn.Module, loader: torch.utils.data.DataLoader, criter
             preds = torch.argmax(logits, dim=1)
             total_correct += (preds == targets).sum().item()
             total_samples += inputs.size(0)
-    avg_loss = total_loss / max(1, total_samples)
-    acc = total_correct / max(1, total_samples)
+    if total_samples == 0:
+        logging.warning("evaluate(): No samples processed, returning NaN")
+        return float('nan'), float('nan')
+    
+    avg_loss = total_loss / total_samples
+    acc = total_correct / total_samples
     return avg_loss, acc
 
 
@@ -181,7 +225,6 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
     epochs = int(config.get('epochs', 5))
     val_split = config.get('val_split', None)
 
-    # AUDIT FIX: Support validation split for hyperparameter tuning
     if val_split is not None:
         model, train_loader, val_loader, test_loader = build_model_and_data(
             dataset, model_name, batch_size, device, seed, val_split=val_split
@@ -212,7 +255,6 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
     named_params = list(model.named_parameters())
     start_time = time.time()
     
-    # AUDIT FIX: Track tainted status for OOM recovery
     run_tainted = False
     original_batch_size = batch_size
     effective_batch_size = batch_size
@@ -246,7 +288,6 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
         pbar = tqdm(train_loader, desc=f"Train epoch {epoch}/{epochs}")
         num_batches = len(train_loader)
         for batch_idx, (inputs, targets) in enumerate(pbar, start=1):
-            # AUDIT FIX: Use OOM-safe training step with taint tracking
             if HAS_OOM_SAFE:
                 # Get optimizer name for SAM handling
                 opt_name = config.get('optimizer', 'Unknown')
@@ -258,7 +299,7 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
                 params_before = _params_clone(model)
                 
                 try:
-                    loss_value, actual_batch_size, outputs, batch_tainted = oom_safe_train_step(
+                    loss_value, actual_batch_size, _outputs, batch_tainted = oom_safe_train_step(
                         model=model,
                         optimizer=optimizer,
                         criterion=criterion,
@@ -294,7 +335,9 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
                 loss = criterion(logits, targets)
                 loss.backward()
 
-                # grad norm before step (based on current grads)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
+                # grad norm after clipping (based on current grads)
                 grad_norm = _flattened_grad_norm(model)
 
                 # capture params before update to compute update_norm
@@ -309,7 +352,6 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
             global_step += 1
 
             elapsed = time.time() - start_time
-            # AUDIT FIX: Add tainted tracking to history
             history.append({
                 'phase': 'train',
                 'epoch': epoch,
@@ -348,7 +390,7 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
                         if p.grad is None:
                             ln = 0.0
                         else:
-                            ln = torch.linalg.norm(p.grad.view(-1), ord=2).item()
+                            ln = float(torch.norm(p.grad.view(-1), p=2).item())
                         history.append({
                             'phase': 'layer_grad',
                             'epoch': epoch,
@@ -357,7 +399,6 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
                             'layer_grad_norm': ln,
                         })
 
-        # AUDIT FIX: Add validation phase if val_loader is provided
         if val_loader is not None:
             val_loss, val_acc = evaluate(model, val_loader, criterion, device)
             history.append({
@@ -374,7 +415,6 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
         
         # evaluation after each epoch (test set - only for final reporting)
         test_loss, test_acc = evaluate(model, test_loader, criterion, device)
-        # AUDIT FIX: Include tainted status in eval phase
         history.append({
             'phase': 'eval',
             'epoch': epoch,
@@ -422,25 +462,21 @@ def result_filename(config: Dict[str, Any]) -> str:
     return "_".join(parts) + ".csv"
 
 
-def main():
-    os.makedirs('results', exist_ok=True)
+def parse_experiments_from_config(cfg: dict):
+    """Parse experiments from config data (supports multiple formats).
 
-    # Load experiments from JSON config file
-    config_path = 'configs/nn_tuning.json'
-    if os.path.exists(config_path):
-        print(f"Loading experiments from {config_path}")
-        with open(config_path, 'r', encoding='utf-8') as f:
-            config_data = json.load(f)
-        
-        # Parse config into experiment list
-        experiments = []
-        for sweep in config_data.get('sweeps', []):
-            model = sweep.get('model')
-            dataset = sweep.get('dataset')
+    Backwards-compatible: supports both an `optimizers` list per sweep and
+    the older singular `optimizer` with `lr_values`/`weight_decay_values`.
+    """
+    exps = []
+    for sweep in cfg.get('sweeps', []):
+        model = sweep.get('model')
+        dataset = sweep.get('dataset')
+
+        if 'optimizers' in sweep and isinstance(sweep.get('optimizers'), list):
             for opt_config in sweep.get('optimizers', []):
                 optimizer = opt_config.get('name')
-                # AUDIT FIX: Support both lr_values and learning_rates for backward compatibility
-                lr_list = opt_config.get('lr_values', opt_config.get('learning_rates', []))
+                lr_list = opt_config.get('lr_values', opt_config.get('learning_rates', [])) or []
                 for lr in lr_list:
                     exp = {
                         'model': model,
@@ -451,12 +487,68 @@ def main():
                         'batch_size': sweep.get('batch_size', 128),
                         'seed': sweep.get('seed', 42)
                     }
-                    # Add optional parameters
                     if 'momentum' in opt_config:
                         exp['momentum'] = opt_config['momentum']
                     if 'weight_decay' in opt_config:
                         exp['weight_decay'] = opt_config['weight_decay']
-                    experiments.append(exp)
+                    exps.append(exp)
+        elif 'optimizer' in sweep:
+            optimizer = sweep.get('optimizer')
+            lr_list = sweep.get('lr_values', sweep.get('learning_rates', [])) or []
+            weight_decays = sweep.get('weight_decay_values', sweep.get('weight_decay', [])) or []
+            momentums = sweep.get('momentum_values', sweep.get('momentum', [])) or []
+
+            if not lr_list and 'lr' in sweep:
+                lr_list = [sweep.get('lr')]
+
+            if not weight_decays:
+                weight_decays = [None]
+            if not momentums:
+                momentums = [None]
+
+            for lr in lr_list:
+                for wd in weight_decays:
+                    for mom in momentums:
+                        exp = {
+                            'model': model,
+                            'dataset': dataset,
+                            'optimizer': optimizer,
+                            'lr': lr,
+                            'epochs': sweep.get('epochs', 10),
+                            'batch_size': sweep.get('batch_size', 128),
+                            'seed': sweep.get('seed', 42)
+                        }
+                        if wd is not None:
+                            exp['weight_decay'] = wd
+                        if mom is not None:
+                            exp['momentum'] = mom
+                        exps.append(exp)
+        else:
+            raise ValueError(f"Sweep misconfigured, missing optimizer(s): {sweep}")
+
+    return exps
+
+
+def main():
+    validate_pytorch_version(expected_version="2.6.0", strict=False)
+    
+    os.makedirs('results', exist_ok=True)
+
+    # Load experiments from JSON config file
+    config_path = 'configs/nn_tuning.json'
+    if os.path.exists(config_path):
+        print(f"Loading experiments from {config_path}")
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config_data = json.load(f)
+        
+        # Parse config into experiment list (backwards-compatible)
+        experiments = parse_experiments_from_config(config_data)
+
+        # Fail fast if parsing produced no experiments — avoids silent no-op runs
+        if not experiments:
+            raise RuntimeError(
+                "No experiments parsed from config file. Check 'sweeps' format in configs/nn_tuning.json or use the 'optimizers' list format."
+            )
     else:
         # Fallback to hardcoded experiments if config doesn't exist
         print(f"Config file {config_path} not found. Using defaults.")

@@ -51,7 +51,7 @@ def main():
     repo_root = script_dir.parent
     sys.path.insert(0, str(repo_root))
     
-    print("🔍 GDSearch Import Diagnostic Tool")
+    print("GDSearch Import Diagnostic Tool")
     print(f"Repository root: {repo_root}")
     print(f"Python path: {sys.path[:3]}")
     

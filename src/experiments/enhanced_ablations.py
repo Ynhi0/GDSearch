@@ -1,7 +1,7 @@
 """
 Enhanced Ablation Studies with Data Efficiency and Model Scaling
 
-AUDIT FIX: Addresses critical gaps identified in Phase 2 audit:
+Addresses critical gaps identified in Phase 2 review:
 1. Data efficiency: Tests performance on 10%, 25%, 50%, 100% of training data
 2. Model scaling: Systematic variation of model depth/width
 3. Ceteris paribus: Ensures only one variable changes per experiment
@@ -10,10 +10,9 @@ This enables stronger generalization claims and cross-domain validation.
 """
 
 import argparse
-import json
 import logging
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
+from typing import List
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -115,8 +114,8 @@ def create_data_fraction_subset(
 def run_data_efficiency_ablation(
     dataset_name: str = 'mnist',
     optimizer_name: str = 'Adam',
-    data_fractions: List[float] = [0.1, 0.25, 0.5, 1.0],
-    seeds: List[int] = [42, 123, 456],
+    data_fractions: List[float] = None,
+    seeds: List[int] = None,
     epochs: int = 10,
     device: str = 'cuda'
 ) -> pd.DataFrame:
@@ -136,6 +135,11 @@ def run_data_efficiency_ablation(
     Returns:
         DataFrame with results
     """
+    if data_fractions is None:
+        data_fractions = [0.1, 0.25, 0.5, 1.0]
+    if seeds is None:
+        seeds = [42, 123, 456]
+    
     logging.info(f"Running data efficiency ablation: {optimizer_name} on {dataset_name}")
     
     results = []
@@ -143,11 +147,11 @@ def run_data_efficiency_ablation(
     
     # Get base loaders ONCE - more efficient than recreating for each fraction
     if dataset_name == 'mnist':
-        train_base, val_loader, test_loader = get_mnist_loaders(batch_size=128)
+        train_base, _val_loader, test_loader = get_mnist_loaders(batch_size=128, val_split=0.1)
         input_channels = 1
         num_classes = 10
     else:  # cifar10
-        train_base, val_loader, test_loader = get_cifar10_loaders(batch_size=128)
+        train_base, _val_loader, test_loader = get_cifar10_loaders(batch_size=128, val_split=0.1)
         input_channels = 3
         num_classes = 10
     
@@ -177,6 +181,9 @@ def run_data_efficiency_ablation(
             ).to(device)
             
             # Create optimizer
+            # NOTE: Baseline hyperparameters chosen as reasonable defaults for fair comparison.
+            # For publication-quality results, these should be tuned using the protocol
+            # documented in docs/TUNING_PROTOCOL.md to ensure baseline fairness.
             if optimizer_name == 'SGD':
                 optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
             elif optimizer_name == 'Adam':
@@ -189,6 +196,8 @@ def run_data_efficiency_ablation(
             # Train
             criterion = nn.CrossEntropyLoss()
             train_losses = []
+            diverged = False
+            divergence_reason = None
             
             for epoch in range(epochs):
                 model.train()
@@ -198,10 +207,32 @@ def run_data_efficiency_ablation(
                     optimizer.zero_grad()
                     outputs = model(inputs)
                     loss = criterion(outputs, targets)
+                    
+                    # Check for NaN/Inf loss before backward
+                    if not torch.isfinite(loss):
+                        diverged = True
+                        divergence_reason = f"Non-finite loss at epoch {epoch}"
+                        logging.warning(f"Training diverged: {divergence_reason}")
+                        break
+                    
                     loss.backward()
+                    
+                    # Gradient clipping for stability
+                    grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                    
+                    # Check for exploding gradients
+                    if not torch.isfinite(grad_norm):
+                        diverged = True
+                        divergence_reason = f"Non-finite gradients at epoch {epoch}"
+                        logging.warning(f"Training diverged: {divergence_reason}")
+                        break
+                    
                     optimizer.step()
                     epoch_loss += loss.item()
                 
+                if diverged:
+                    break
+                    
                 train_losses.append(epoch_loss / len(train_loader))
             
             # Evaluate
@@ -217,7 +248,7 @@ def run_data_efficiency_ablation(
                     total += targets.size(0)
             
             test_acc = 100.0 * correct / total
-            final_train_loss = train_losses[-1]
+            final_train_loss = train_losses[-1] if train_losses else np.nan
             
             results.append({
                 'optimizer': optimizer_name,
@@ -226,7 +257,9 @@ def run_data_efficiency_ablation(
                 'seed': seed,
                 'test_accuracy': test_acc,
                 'final_train_loss': final_train_loss,
-                'dataset': dataset_name
+                'dataset': dataset_name,
+                'diverged': diverged,
+                'divergence_reason': divergence_reason if divergence_reason else 'None'
             })
             
             logging.info(
@@ -240,9 +273,9 @@ def run_data_efficiency_ablation(
 def run_model_scaling_ablation(
     dataset_name: str = 'mnist',
     optimizer_name: str = 'Adam',
-    width_mults: List[float] = [0.5, 1.0, 2.0],
-    depth_layers: List[int] = [2, 3, 4],
-    seeds: List[int] = [42, 123],
+    width_mults: List[float] = None,
+    depth_layers: List[int] = None,
+    seeds: List[int] = None,
     epochs: int = 10,
     device: str = 'cuda'
 ) -> pd.DataFrame:
@@ -263,6 +296,13 @@ def run_model_scaling_ablation(
     Returns:
         DataFrame with results
     """
+    if width_mults is None:
+        width_mults = [0.5, 1.0, 2.0]
+    if depth_layers is None:
+        depth_layers = [2, 3, 4]
+    if seeds is None:
+        seeds = [42, 123]
+    
     logging.info(f"Running model scaling ablation: {optimizer_name} on {dataset_name}")
     
     results = []
@@ -270,11 +310,11 @@ def run_model_scaling_ablation(
     
     # Get loaders
     if dataset_name == 'mnist':
-        train_loader, val_loader, test_loader = get_mnist_loaders(batch_size=128)
+        train_loader, _val_loader, test_loader = get_mnist_loaders(batch_size=128, val_split=0.1)
         input_channels = 1
         num_classes = 10
     else:
-        train_loader, val_loader, test_loader = get_cifar10_loaders(batch_size=128)
+        train_loader, _val_loader, test_loader = get_cifar10_loaders(batch_size=128, val_split=0.1)
         input_channels = 3
         num_classes = 10
     
@@ -295,6 +335,8 @@ def run_model_scaling_ablation(
                 n_params = sum(p.numel() for p in model.parameters())
                 
                 # Create optimizer (same hyperparams for fair comparison)
+                # NOTE: Baseline hyperparameters chosen as reasonable defaults.
+                # For publication-quality results, tune per docs/TUNING_PROTOCOL.md
                 if optimizer_name == 'SGD':
                     optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
                 elif optimizer_name == 'Adam':
@@ -306,6 +348,8 @@ def run_model_scaling_ablation(
                 
                 # Train
                 criterion = nn.CrossEntropyLoss()
+                diverged = False
+                divergence_reason = None
                 
                 for epoch in range(epochs):
                     model.train()
@@ -314,8 +358,30 @@ def run_model_scaling_ablation(
                         optimizer.zero_grad()
                         outputs = model(inputs)
                         loss = criterion(outputs, targets)
+                        
+                        # Check for NaN/Inf loss
+                        if not torch.isfinite(loss):
+                            diverged = True
+                            divergence_reason = f"Non-finite loss at epoch {epoch}"
+                            logging.warning(f"Training diverged: {divergence_reason}")
+                            break
+                        
                         loss.backward()
+                        
+                        # Gradient clipping for stability
+                        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                        
+                        # Check for exploding gradients
+                        if not torch.isfinite(grad_norm):
+                            diverged = True
+                            divergence_reason = f"Non-finite gradients at epoch {epoch}"
+                            logging.warning(f"Training diverged: {divergence_reason}")
+                            break
+                        
                         optimizer.step()
+                    
+                    if diverged:
+                        break
                 
                 # Evaluate
                 model.eval()
@@ -338,7 +404,9 @@ def run_model_scaling_ablation(
                     'n_parameters': n_params,
                     'seed': seed,
                     'test_accuracy': test_acc,
-                    'dataset': dataset_name
+                    'dataset': dataset_name,
+                    'diverged': diverged,
+                    'divergence_reason': divergence_reason if divergence_reason else 'None'
                 })
                 
                 logging.info(

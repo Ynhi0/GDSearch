@@ -21,7 +21,6 @@ class DatasetSplit:
 def validate_loader_for_tuning(
     loader: DataLoader,
     expected_split: str = DatasetSplit.VALIDATION,
-    train_dataset: Optional[torch.utils.data.Dataset] = None,
     test_dataset: Optional[torch.utils.data.Dataset] = None
 ) -> None:
     """
@@ -33,7 +32,6 @@ def validate_loader_for_tuning(
     Args:
         loader: DataLoader to validate
         expected_split: Expected split type ('train', 'validation', 'test')
-        train_dataset: Reference to training dataset (for validation)
         test_dataset: Reference to test dataset (for validation)
         
     Raises:
@@ -42,7 +40,6 @@ def validate_loader_for_tuning(
     Example:
         >>> train_ds, val_ds, test_ds = get_mnist_loaders(val_split=0.2)
         >>> validate_loader_for_tuning(val_loader, 'validation', 
-        ...                            train_dataset=train_ds.dataset,
         ...                            test_dataset=test_ds.dataset)
     """
     # Check 1: Explicit name attribute (if set by user)
@@ -81,7 +78,7 @@ def validate_loader_for_tuning(
     if hasattr(loader, 'dataset'):
         dataset_len = len(loader.dataset)
         if dataset_len == 0:
-            raise ValueError(f"Loader dataset is empty (length=0)")
+            raise ValueError("Loader dataset is empty (length=0)")
         
         # Log for transparency
         logging.debug(
@@ -129,7 +126,7 @@ def create_validated_loaders(
     setattr(test_loader, '_split_type', DatasetSplit.TEST)
     
     # Store cross-references for identity checks
-    val_loader._test_dataset_ref = test_loader.dataset
+    setattr(val_loader, '_test_dataset_ref', test_loader.dataset)
     
     return train_loader, val_loader, test_loader
 
@@ -194,7 +191,6 @@ if __name__ == '__main__':
     
     try:
         validate_loader_for_tuning(val_loader, 'validation', 
-                                   train_dataset=train_data,
                                    test_dataset=test_data)
         print("✓ Test 1 passed: Validation loader correctly accepted")
     except ValueError as e:
@@ -204,7 +200,6 @@ if __name__ == '__main__':
     test_loader.name = 'test'
     try:
         validate_loader_for_tuning(test_loader, 'validation',
-                                   train_dataset=train_data,
                                    test_dataset=test_data)
         print("✗ Test 2 failed: Test loader should have been rejected!")
     except ValueError as e:

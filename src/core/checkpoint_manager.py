@@ -119,11 +119,21 @@ class RobustCheckpointManager:
             try:
                 # Use binary write file handle to ensure fsync works
                 with open(tmp_path, 'wb') as f:
-                    torch.save(
-                        checkpoint_data,
-                        f,
-                        _use_new_zipfile_serialization=True
-                    )
+                    # CRITICAL FIX: Version-aware save with fallback
+                    try:
+                        # Try new zipfile serialization (PyTorch >= 1.6)
+                        torch.save(
+                            checkpoint_data,
+                            f,
+                            _use_new_zipfile_serialization=True
+                        )
+                    except TypeError:
+                        # Fallback for older PyTorch versions
+                        logging.warning(
+                            "_use_new_zipfile_serialization not supported, "
+                            "using default serialization"
+                        )
+                        torch.save(checkpoint_data, f)
                     f.flush()
                     os.fsync(f.fileno())
 
@@ -168,11 +178,20 @@ class RobustCheckpointManager:
         # Try primary checkpoint first
         if ckpt_path.exists():
             try:
-                checkpoint = torch.load(
-                    ckpt_path,
-                    map_location='cpu',
-                    weights_only=False
-                )
+                # CRITICAL FIX: Version-aware load with fallback
+                try:
+                    checkpoint = torch.load(
+                        ckpt_path,
+                        map_location='cpu',
+                        weights_only=False
+                    )
+                except TypeError:
+                    # Fallback for PyTorch versions without weights_only parameter
+                    logging.warning(
+                        "weights_only parameter not supported, "
+                        "using default torch.load behavior"
+                    )
+                    checkpoint = torch.load(ckpt_path, map_location='cpu')
                 logging.info("Loaded checkpoint: %s", ckpt_path)
                 return checkpoint
             except (FileNotFoundError, OSError, RuntimeError) as e:
@@ -183,11 +202,15 @@ class RobustCheckpointManager:
             backup_path = self.base_dir / f"{filename}.backup_{i}"
             if backup_path.exists():
                 try:
-                    checkpoint = torch.load(
-                        backup_path,
-                        map_location='cpu',
-                        weights_only=False
-                    )
+                    # Version-aware load with fallback
+                    try:
+                        checkpoint = torch.load(
+                            backup_path,
+                            map_location='cpu',
+                            weights_only=False
+                        )
+                    except TypeError:
+                        checkpoint = torch.load(backup_path, map_location='cpu')
                     logging.info("Loaded backup checkpoint: %s", backup_path)
                     return checkpoint
                 except (FileNotFoundError, OSError, RuntimeError) as e:
@@ -264,7 +287,11 @@ class RobustCheckpointManager:
             True if checkpoint is valid
         """
         try:
-            loaded = torch.load(ckpt_path, map_location='cpu', weights_only=False)
+            # Version-aware load with fallback
+            try:
+                loaded = torch.load(ckpt_path, map_location='cpu', weights_only=False)
+            except TypeError:
+                loaded = torch.load(ckpt_path, map_location='cpu')
             # Basic validation: check that it's a dict and has some keys
             if not isinstance(loaded, dict):
                 return False

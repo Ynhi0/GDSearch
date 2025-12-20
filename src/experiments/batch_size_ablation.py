@@ -376,7 +376,7 @@ def perform_batch_size_comparisons(
                     metric='test_accuracy'
                 )
                 
-                # AUDIT FIX: Use effect_size field which handles both parametric and non-parametric
+                # Use effect_size field which handles both parametric and non-parametric
                 effect_size_val = result.get('effect_size', result.get('cohens_d', 0.0))
                 if effect_size_val is None:
                     effect_size_val = 0.0

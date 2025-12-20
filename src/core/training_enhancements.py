@@ -139,7 +139,7 @@ class LRFinder:
         iterator = iter(train_loader)
         
         if verbose:
-            print(f"🔍 LR Range Test: {start_lr:.2e} → {end_lr:.2e} ({num_iter} steps)")
+            print(f"LR Range Test: {start_lr:.2e} → {end_lr:.2e} ({num_iter} steps)")
         
         for i in range(num_iter):
             # Get batch (cycle through data if needed)
@@ -167,7 +167,7 @@ class LRFinder:
             loss.backward()
             self.optimizer.step()
             
-            # 🐛 BUG FIX #7: Clean up memory to prevent leaks
+            # Clean up memory to prevent leaks
             # Detach tensors and clear cache periodically
             loss_val = loss.item()
             del outputs, loss  # Explicitly delete large tensors
@@ -213,7 +213,7 @@ class LRFinder:
         # Restore model and optimizer state
         self._restore_state()
         
-        # 🐛 BUG FIX #7: Final memory cleanup
+        # Final memory cleanup
         del iterator, inputs, targets
         torch.cuda.empty_cache() if torch.cuda.is_available() else None
         
@@ -420,8 +420,7 @@ class MemoryAwareBatchSizer:
         # PHASE 2.2 FIX: Log hardware-specific metadata
         gpu_name = self._gpu_info.get('name', 'CPU')
         memory_gb = self._gpu_info.get('memory_total_gb', 0)
-        logging.info(f"🔧 Adaptive Batch Size: {batch_size} "
-                    f"(GPU: {gpu_name}, VRAM: {memory_gb:.1f}GB, Tier: {tier})")
+        logging.info(f"Adaptive Batch Size: {batch_size} (GPU: {gpu_name}, VRAM: {memory_gb:.1f}GB, Tier: {tier})")
         
         return batch_size
     
@@ -466,7 +465,7 @@ class MemoryAwareBatchSizer:
         low, high = min_batch_size, max_batch_size
         optimal = min_batch_size
         
-        logging.info(f"🔍 Probing batch sizes {low} to {high}...")
+        logging.info(f"Probing batch sizes {low} to {high}...")
         
         while low <= high:
             mid = (low + high) // 2
@@ -1171,7 +1170,7 @@ def auto_tune_training_config(
     device = next(model.parameters()).device
     
     if verbose:
-        print("\n🔧 Auto-Tuning Training Configuration...")
+        print("\nAuto-Tuning Training Configuration...")
         print("=" * 50)
     
     # Memory-aware batch sizing

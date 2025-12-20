@@ -180,7 +180,7 @@ def _export_to_excel_mnist(df: pd.DataFrame, excel_path: str):
                 if len(str(cell.value)) > max_length:
                     max_length = len(str(cell.value))
             except (TypeError, AttributeError):
-                # 🐛 BUG FIX #15: Handle None or non-stringable cell values
+                # Handle None or non-stringable cell values
                 pass
         adjusted_width = min(max_length + 2, 50)
         ws.column_dimensions[column_letter].width = adjusted_width
@@ -275,7 +275,7 @@ def _export_to_excel_ablation(df: pd.DataFrame, excel_path: str):
                 if len(str(cell.value)) > max_length:
                     max_length = len(str(cell.value))
             except (TypeError, AttributeError):
-                # 🐛 BUG FIX #16: Handle None or non-stringable cell values
+                # Handle None or non-stringable cell values
                 pass
         adjusted_width = min(max_length + 2, 50)
         ws.column_dimensions[column_letter].width = adjusted_width
@@ -541,7 +541,7 @@ def generate_summary_statistics(results_dir: str = 'results'):
             eval_df = df[df['phase'] == 'eval']
             if not eval_df.empty:
                 final_acc = eval_df['test_accuracy'].iloc[-1]
-                # 🐛 AUDIT FIX: Extract optimizer name robustly (metadata JSON first, then parse)
+                # Extract optimizer name robustly (metadata JSON first, then parse)
                 opt_name = 'Unknown'
                 
                 # Try metadata JSON first

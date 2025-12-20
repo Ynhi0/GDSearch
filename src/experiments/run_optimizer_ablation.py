@@ -11,7 +11,8 @@ import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from typing import List, Dict
+# typing imports removed - not used
+import logging
 
 from src.core.test_functions import Rosenbrock
 from src.core.optimizers import SGD, SGDMomentum, RMSProp, Adam, AdamW, AMSGrad
@@ -42,7 +43,7 @@ def run_optimizer_ablation(
     
     # Define optimizer sequence (progressive improvements)
     optimizers = [
-        ('SGD', SGD(lr=0.001)),
+        ('SGD', SGD(lr=0.01)),
         ('SGD+Momentum', SGDMomentum(lr=0.01, beta=0.9)),
         ('RMSProp', RMSProp(lr=0.01, decay_rate=0.9)),
         ('Adam', Adam(lr=0.01, beta1=0.9, beta2=0.999)),
@@ -72,55 +73,79 @@ def run_optimizer_ablation(
             'y': []
         }
         
-        for i in range(max_iterations):
-            try:
-                loss = test_function.compute(x, y)
-                grad_x, grad_y = test_function.gradient(x, y)
+        # Set numpy to raise on warnings for proper exception handling
+        old_settings = np.seterr(all='raise')
+        
+        try:
+            for i in range(max_iterations):
+                try:
+                    loss = test_function.compute(x, y)
+                    grad_x, grad_y = test_function.gradient(x, y)
+                    
+                    # Overflow protection
+                    if not np.isfinite(loss) or not np.isfinite(grad_x) or not np.isfinite(grad_y):
+                        raise OverflowError("Non-finite gradient or loss")
+                    
+                    grad_norm = np.sqrt(grad_x**2 + grad_y**2)
+                    
+                    if not np.isfinite(grad_norm):
+                        raise OverflowError("Non-finite grad_norm")
+                    
+                    history['iteration'].append(i)
+                    history['loss'].append(loss)
+                    history['grad_norm'].append(grad_norm)
+                    history['x'].append(x)
+                    history['y'].append(y)
+                    
+                    x, y = optimizer.step((x, y), (grad_x, grad_y))
+                    
+                    # Check if step produced non-finite values
+                    if not np.isfinite(x) or not np.isfinite(y):
+                        raise OverflowError("Non-finite parameters after step")
                 
-                # Overflow protection
-                if not np.isfinite(loss) or not np.isfinite(grad_x) or not np.isfinite(grad_y):
-                    raise OverflowError("Non-finite gradient or loss")
-                
-                grad_norm = np.sqrt(grad_x**2 + grad_y**2)
-                
-                if not np.isfinite(grad_norm):
-                    raise OverflowError("Non-finite grad_norm")
-                
-                history['iteration'].append(i)
-                history['loss'].append(loss)
-                history['grad_norm'].append(grad_norm)
-                history['x'].append(x)
-                history['y'].append(y)
-                
-                x, y = optimizer.step((x, y), (grad_x, grad_y))
-                
-                # Check if step produced non-finite values
-                if not np.isfinite(x) or not np.isfinite(y):
-                    raise OverflowError("Non-finite parameters after step")
-            
-            except (OverflowError, FloatingPointError, RuntimeWarning):
-                # Divergence detected; fill remaining with NaN
-                for j in range(i, max_iterations):
-                    history['iteration'].append(j)
-                    history['loss'].append(np.nan)
-                    history['grad_norm'].append(np.nan)
-                    history['x'].append(np.nan)
-                    history['y'].append(np.nan)
-                break
+                except (OverflowError, FloatingPointError) as e:
+                    # Log exception details for debugging
+                    logging.warning(f"{opt_name} diverged at iteration {i}: {e}")
+                    # Divergence detected; fill remaining with NaN
+                    for j in range(i, max_iterations):
+                        history['iteration'].append(j)
+                        history['loss'].append(np.nan)
+                        history['grad_norm'].append(np.nan)
+                        history['x'].append(np.nan)
+                        history['y'].append(np.nan)
+                    break
+        finally:
+            # Restore numpy error settings
+            np.seterr(**old_settings)
         
         trajectories[opt_name] = history
+        
+        if len(history['loss']) == 0 or len(history['grad_norm']) == 0:
+            logging.error(f"{opt_name}: Optimization failed - no history recorded")
+            continue
         
         # Summary statistics
         final_loss = history['loss'][-1]
         final_grad = history['grad_norm'][-1]
         
+        # Check for divergence
+        diverged = not np.isfinite(final_loss)
+        divergence_reason = None
+        
         # Handle NaN (divergence)
-        if not np.isfinite(final_loss):
+        if diverged:
             final_loss = np.inf
             final_grad = np.inf
             min_loss = np.inf
             converged_iter = None
             precise_converged_iter = None
+            # Find divergence reason from history
+            for i, loss_val in enumerate(history['loss']):
+                if not np.isfinite(loss_val):
+                    divergence_reason = f"Non-finite loss at iteration {i}"
+                    break
+            if divergence_reason is None:
+                divergence_reason = "Overflow/NaN in parameters"
         else:
             min_loss = min([l for l in history['loss'] if np.isfinite(l)], default=np.inf)
             
@@ -143,14 +168,16 @@ def run_optimizer_ablation(
             'Final Loss': final_loss,
             'Final Grad Norm': final_grad,
             'Min Loss': min_loss,
-            'Iterations to Loss<1e-3': converged_iter if converged_iter else max_iterations,
-            'Iterations to GradNorm<1e-6': precise_converged_iter if precise_converged_iter else max_iterations,
+            'Iterations to Loss<1e-3': converged_iter if converged_iter is not None else max_iterations,
+            'Iterations to GradNorm<1e-6': precise_converged_iter if precise_converged_iter is not None else max_iterations,
             'Converged (loss<1e-3)': converged_iter is not None,
-            'Converged (grad<1e-6)': precise_converged_iter is not None
+            'Converged (grad<1e-6)': precise_converged_iter is not None,
+            'Diverged': diverged,
+            'Divergence Reason': divergence_reason if divergence_reason else 'None'
         })
         
         print(f"{opt_name:20s} | Final Loss: {final_loss:12.6e} | "
-              f"Converged (loss<1e-3): {'YES' if converged_iter else 'NO':3s} at iter {converged_iter if converged_iter else ('DIV' if np.isinf(final_loss) else '>10k')}")
+              f"Converged (loss<1e-3): {'YES' if converged_iter is not None else 'NO':3s} at iter {converged_iter if converged_iter is not None else ('DIV' if np.isinf(final_loss) else '>10k')}")
     
     # Save summary CSV
     df_summary = pd.DataFrame(summary_metrics)
@@ -159,10 +186,10 @@ def run_optimizer_ablation(
     print(f"\nSummary saved to: {summary_path}")
     
     # Create figure with subplots
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    _fig, axes = plt.subplots(2, 2, figsize=(14, 10))
     
     # Define color map for consistent coloring
-    colors = plt.cm.viridis(np.linspace(0, 0.9, len(optimizers)))
+    colors = plt.get_cmap('viridis')(np.linspace(0, 0.9, len(optimizers)))
     
     # Plot 1: Loss curves (log scale)
     ax = axes[0, 0]
@@ -211,7 +238,7 @@ def run_optimizer_ablation(
     final_losses = [m['Final Loss'] for m in summary_metrics]
     # Replace inf with a large value for visualization
     final_losses_plot = [fl if np.isfinite(fl) else 1e3 for fl in final_losses]
-    bars = ax.bar(range(len(opt_names)), final_losses_plot, color=colors, alpha=0.8)
+    _bars = ax.bar(range(len(opt_names)), final_losses_plot, color=colors, alpha=0.8)
     ax.set_xticks(range(len(opt_names)))
     ax.set_xticklabels(opt_names, rotation=45, ha='right', fontsize=10)
     ax.set_ylabel('Final Loss (log scale)', fontsize=11)
@@ -220,14 +247,14 @@ def run_optimizer_ablation(
     ax.grid(axis='y', alpha=0.3)
     
     # Annotate bars
-    for i, (name, loss, loss_plot) in enumerate(zip(opt_names, final_losses, final_losses_plot)):
+    for i, (_name, loss, loss_plot) in enumerate(zip(opt_names, final_losses, final_losses_plot)):
         label = f'{loss:.2e}' if np.isfinite(loss) else 'DIV'
         ax.text(i, loss_plot * 1.5, label, ha='center', va='bottom', fontsize=8, rotation=0)
     
     # Plot 4: Convergence speed (iterations to loss < 1e-3)
     ax = axes[1, 1]
     iters_to_converge = [m['Iterations to Loss<1e-3'] for m in summary_metrics]
-    bars = ax.bar(range(len(opt_names)), iters_to_converge, color=colors, alpha=0.8)
+    _ = ax.bar(range(len(opt_names)), iters_to_converge, color=colors, alpha=0.8)  # bars unused but kept for plot
     ax.set_xticks(range(len(opt_names)))
     ax.set_xticklabels(opt_names, rotation=45, ha='right', fontsize=10)
     ax.set_ylabel('Iterations to Loss < 1e-3', fontsize=11)
@@ -236,7 +263,7 @@ def run_optimizer_ablation(
     ax.set_ylim([0, max_iterations * 1.1])
     
     # Annotate bars
-    for i, (name, it) in enumerate(zip(opt_names, iters_to_converge)):
+    for i, (_name, it) in enumerate(zip(opt_names, iters_to_converge)):
         label = f'{it}' if it < max_iterations else '>10k'
         ax.text(i, it + max_iterations * 0.02, label, ha='center', va='bottom', fontsize=8)
     
@@ -273,7 +300,7 @@ def main():
     rosenbrock = Rosenbrock(a=1, b=100)
     
     # Run ablation
-    df_summary = run_optimizer_ablation(
+    _df_summary = run_optimizer_ablation(
         test_function=rosenbrock,
         initial_point=initial_point,
         max_iterations=10000,

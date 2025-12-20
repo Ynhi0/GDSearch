@@ -55,6 +55,48 @@ def oom_safe_train_step(
     Raises:
         RuntimeError: If OOM recovery fails after max_retries or batch too small
     """
+    # CRITICAL FIX: Prevent SAM state corruption
+    # SAM moves weights during the step. If OOM occurs mid-step, weights are corrupted.
+    # We must disable retry for SAM - better to crash than train on corrupted weights.
+    if "SAM" in optimizer.__class__.__name__:
+        logging.warning(
+            "CRITICAL: SAM optimizer detected. OOM retry disabled to prevent state corruption. "
+            "If OOM occurs, the run will fail immediately. Reduce batch size manually."
+        )
+        # Bypass retry logic - execute SAM step directly
+        inputs_device = inputs.to(device)
+        targets_device = targets.to(device)
+        
+        def closure():
+            optimizer.zero_grad()
+            outputs = model(inputs_device)
+            loss = criterion(outputs, targets_device)
+            loss.backward()
+            return loss
+        
+        loss = optimizer.step(closure)
+        
+        if loss is None:
+            raise RuntimeError(
+                f"SAM optimizer step returned None. Expected loss tensor. "
+                f"Check SAM implementation: {type(optimizer).__name__}"
+            )
+        
+        with torch.no_grad():
+            outputs = model(inputs_device)
+        
+        if isinstance(loss, torch.Tensor):
+            loss_value = float(loss.item())
+        elif isinstance(loss, (int, float)):
+            loss_value = float(loss)
+        else:
+            raise TypeError(
+                f"SAM step returned unexpected type: {type(loss)}. "
+                f"Expected torch.Tensor or numeric scalar."
+            )
+        
+        return loss_value, inputs.size(0), outputs, False
+    
     current_inputs = inputs
     current_targets = targets
     retries = 0
@@ -78,8 +120,29 @@ def oom_safe_train_step(
                 # CRITICAL FIX: SAM requires the actual closure, not a dummy lambda
                 # SAM will call closure() internally to compute adversarial gradients
                 loss = optimizer.step(closure)
-                outputs = model(current_inputs)
-                loss_value = float(loss.item()) if hasattr(loss, 'item') else float(loss)
+                
+                # Validate closure return type
+                if loss is None:
+                    raise RuntimeError(
+                        f"SAM optimizer step returned None. Expected loss tensor. "
+                        f"Check SAM implementation: {type(optimizer).__name__}"
+                    )
+                
+                # Get outputs after SAM step (parameters have been updated)
+                with torch.no_grad():
+                    outputs = model(current_inputs)
+                
+                # Extract scalar loss value with proper type handling
+                if isinstance(loss, torch.Tensor):
+                    loss_value = float(loss.item())
+                elif isinstance(loss, (int, float)):
+                    loss_value = float(loss)
+                else:
+                    raise TypeError(
+                        f"SAM step returned unexpected type: {type(loss)}. "
+                        f"Expected torch.Tensor or numeric scalar."
+                    )
+                
                 return loss_value, current_inputs.size(0), outputs, tainted
             
             else:
@@ -110,14 +173,58 @@ def oom_safe_train_step(
                 new_size = max(min_batch_size, old_size // 2)
                 
                 # Check BatchNorm compatibility BEFORE reduction
+                # CRITICAL FIX: Provide more graceful handling for BatchNorm constraints
                 if new_size < 2:
-                    logging.error(
-                        "Cannot reduce batch to %d (BatchNorm requires >= 2)",
-                        new_size
-                    )
-                    raise RuntimeError(
-                        "Batch size too small for BatchNorm layers"
-                    ) from e
+                    # Try to switch model to eval mode as last resort
+                    # BatchNorm in eval mode uses running stats and doesn't require batch size >= 2
+                    try:
+                        was_training = model.training
+                        model.eval()
+                        logging.warning(
+                            "CRITICAL: Batch size %d too small for BatchNorm in training mode. "
+                            "Temporarily switching to eval mode to avoid crash. "
+                            "This run is TAINTED and should be excluded from analysis.",
+                            new_size
+                        )
+                        # Set tainted flag since we're mixing train/eval modes
+                        tainted = True
+                        
+                        # Process the batch in eval mode, then restore
+                        current_inputs_small = inputs[:new_size]
+                        current_targets_small = targets[:new_size]
+                        
+                        optimizer.zero_grad(set_to_none=True)
+                        current_inputs_small = current_inputs_small.to(device)
+                        current_targets_small = current_targets_small.to(device)
+                        
+                        outputs = model(current_inputs_small)
+                        loss = criterion(outputs, current_targets_small)
+                        loss.backward()
+                        optimizer.step()
+                        
+                        # Restore training mode before returning
+                        if was_training:
+                            model.train()
+                        
+                        # Check for loss divergence
+                        if torch.isnan(loss) or torch.isinf(loss):
+                            logging.warning("Loss divergence detected: %f", loss.item())
+                            return float('inf'), new_size, outputs, tainted
+                        
+                        return loss.item(), new_size, outputs, tainted
+                        
+                    except Exception as eval_error:
+                        # Restore training mode before raising
+                        if was_training:
+                            model.train()
+                        logging.error(
+                            "Cannot reduce batch to %d (BatchNorm requires >= 2) "
+                            "and failed to process in eval mode: %s",
+                            new_size, eval_error
+                        )
+                        raise RuntimeError(
+                            "Batch size too small for BatchNorm layers and eval mode fallback failed"
+                        ) from e
                 
                 if new_size < min_batch_size:
                     logging.error(

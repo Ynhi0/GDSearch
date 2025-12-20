@@ -20,7 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import glob
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 import numpy as np
 import pandas as pd
@@ -144,10 +144,12 @@ def main():
 
         # Power analysis (two-sided, alpha=0.05)
         try:
+            # power_analysis_report expects results arrays, not pre-computed effect sizes
             power = power_analysis_report(
-                observed_effect_size=abs(row['effect_size']) if row['effect_size_name'] != "Cohen's d" else abs(row['effect_size']),
-                n_samples=row['n'],
-                name_A=a, name_B=b,
+                results_A=a_vals,
+                results_B=b_vals,
+                name_A=a,
+                name_B=b,
             )
             row['power_achieved'] = float(power['achieved_power'])
             row['n_for_80_power(d=obs)'] = int(power['n_required_for_80_power']) if power.get('n_required_for_80_power') else np.nan

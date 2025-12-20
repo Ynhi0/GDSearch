@@ -1,20 +1,17 @@
 """
 Script to plot and visualize experiment results.
-
-AUDIT FIX: Enhanced warning handling for matplotlib/pandas deprecations
-and edge cases (empty data, missing columns, etc.)
 """
 
 import os
+import logging
 import warnings
 import numpy as np
 from typing import Optional
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib import cm
-from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+# Removed unused imports: Axes3D, mcolors
 
-# AUDIT FIX: Suppress matplotlib/seaborn FutureWarnings for cleaner output
 warnings.filterwarnings('ignore', category=FutureWarning, module='matplotlib')
 warnings.filterwarnings('ignore', category=FutureWarning, module='seaborn')
 
@@ -24,7 +21,7 @@ from src.experiments.run_experiment import run_single_experiment
 
 def _validate_dataframe(df: pd.DataFrame, required_columns: list, func_name: str):
     """
-    AUDIT FIX: Validate DataFrame has required columns before plotting.
+    Validate DataFrame has required columns before plotting.
     
     Args:
         df: DataFrame to validate
@@ -56,9 +53,8 @@ def plot_generalization_curves(df, title, save_path=None):
     Expects df with rows labeled by 'phase' ('train' or 'eval'),
     and columns: 'epoch', 'train_loss' (train rows), 'test_loss', 'test_accuracy' (eval rows).
     
-    AUDIT FIX: Added validation for empty/missing data.
+    Added validation for empty/missing data.
     """
-    # AUDIT FIX: Validate input
     if df is None or df.empty:
         warnings.warn(
             "plot_generalization_curves: Received empty DataFrame, skipping plot",
@@ -72,8 +68,6 @@ def plot_generalization_curves(df, title, save_path=None):
     train_epoch_loss = train_df.groupby('epoch')['train_loss'].mean() if not train_df.empty else pd.Series(dtype=float)
     eval_epoch_loss = eval_df.set_index('epoch')['test_loss'] if not eval_df.empty else pd.Series(dtype=float)
     eval_epoch_acc = eval_df.set_index('epoch')['test_accuracy'] if not eval_df.empty else pd.Series(dtype=float)
-
-    epochs = sorted(set(train_epoch_loss.index).union(set(eval_epoch_loss.index)).union(set(eval_epoch_acc.index)))
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
 
@@ -107,12 +101,12 @@ def plot_generalization_curves(df, title, save_path=None):
 
 def plot_generalization_gap(nn_df: pd.DataFrame, title: str = "Generalization Gap & Test Accuracy", save_path: Optional[str] = None):
     """
-    Plot two lines over epochs:
-    - Line 1 (left y-axis): Generalization Gap = Test Loss - Train Loss (per epoch)
-    - Line 2 (right y-axis): Test Accuracy (per epoch)
+    Plot two lines over epochs.
+    Line 1 (left y-axis): Generalization Gap = Test Loss - Train Loss (per epoch)
+    Line 2 (right y-axis): Test Accuracy (per epoch)
 
-    Expects a DataFrame with rows where phase in {'train','eval'} and columns:
-    - 'epoch', 'train_loss' (train), 'test_loss', 'test_accuracy' (eval)
+    Expects a DataFrame with rows where phase in train or eval and columns:
+    epoch, train_loss (train), test_loss, test_accuracy (eval)
     """
     if nn_df is None or len(nn_df) == 0:
         print("[plot_generalization_gap] Empty DataFrame, nothing to plot.")
@@ -159,7 +153,7 @@ def plot_generalization_gap(nn_df: pd.DataFrame, title: str = "Generalization Ga
 def plot_layer_grad_norms(nn_df: pd.DataFrame, epochs: Optional[list] = None, title: str = "Per-layer Gradient Norms", save_path: Optional[str] = None):
     """
     Bar chart of per-layer L2 gradient norms captured at specific epochs.
-    Expects DataFrame rows with phase == 'layer_grad' and columns: ['epoch','layer','layer_grad_norm']
+    Expects DataFrame rows with phase layer_grad and columns: epoch, layer, layer_grad_norm
     If epochs is None, use all available in ascending order.
     """
     layer_df = nn_df[nn_df['phase'] == 'layer_grad'].copy()
@@ -218,11 +212,11 @@ def plot_trajectory(df, test_function, title, save_path=None):
             Z[i, j] = test_function.compute(X[i, j], Y[i, j])
     
     # Create figure
-    fig, ax = plt.subplots(figsize=(10, 8))
+    _fig, ax = plt.subplots(figsize=(10, 8))
     
     # Draw contour lines with log scale
     levels = np.logspace(np.log10(Z.min() + 1e-10), np.log10(Z.max() + 1), 30)
-    contour = ax.contour(X, Y, Z, levels=levels, cmap='viridis', alpha=0.6, linewidths=0.5)
+    _contour = ax.contour(X, Y, Z, levels=levels, cmap='viridis', alpha=0.6, linewidths=0.5)
     contourf = ax.contourf(X, Y, Z, levels=levels, cmap='viridis', alpha=0.3)
     
     # Add colorbar
@@ -232,6 +226,10 @@ def plot_trajectory(df, test_function, title, save_path=None):
     # Draw trajectory
     x_traj = df['x'].values
     y_traj = df['y'].values
+    
+    if len(x_traj) == 0 or len(y_traj) == 0:
+        logging.warning("Empty trajectory data, skipping plot")
+        return
     
     # Draw trajectory line
     ax.plot(x_traj, y_traj, 'r-', linewidth=2, alpha=0.7, label='Trajectory')
@@ -334,6 +332,10 @@ def plot_trajectory_3d(df, test_function, title, save_path=None):
     x_traj = df['x'].values
     y_traj = df['y'].values
     z_traj = np.array([test_function.compute(x, y) for x, y in zip(x_traj, y_traj)])
+
+    if len(x_traj) == 0 or len(y_traj) == 0 or len(z_traj) == 0:
+        logging.warning("Empty trajectory data in 3D plot, skipping")
+        return
 
     fig = plt.figure(figsize=(12, 9))
     ax = fig.add_subplot(111, projection='3d')
@@ -543,8 +545,8 @@ def plot_metrics(df, title, save_path=None):
     Plot optimization metrics over time.
 
     Supports both data types:
-      - Test function results (GD) with columns 'iteration', 'loss', 'grad_norm', 'update_norm'
-      - Neural network results (NN) with columns 'phase'='train' and 'global_step', 'train_loss', 'grad_norm', 'update_norm'
+      Test function results with columns iteration, loss, grad_norm, update_norm
+      Neural network results with columns phase train and global_step, train_loss, grad_norm, update_norm
     """
     fig, axes = plt.subplots(3, 1, figsize=(12, 10))
 
@@ -605,15 +607,15 @@ def plot_comparison(list_of_dfs, labels, metric, title, save_path=None):
     Args:
         list_of_dfs: List of DataFrames containing optimization history
         labels: List of labels corresponding to each DataFrame
-        metric: Column name of metric to compare ('loss', 'grad_norm', 'update_norm')
+        metric: Column name of metric to compare
         title: Title for the plot
         save_path: Path to save figure (if None then only display)
     """
     # Create figure
-    fig, ax = plt.subplots(figsize=(12, 8))
+    _fig, ax = plt.subplots(figsize=(12, 8))
     
     # Define colors
-    colors = plt.cm.tab10(np.linspace(0, 1, len(list_of_dfs)))
+    colors = plt.get_cmap('tab10')(np.linspace(0, 1, len(list_of_dfs)))
 
     # Determine x-axis based on metric type (NN vs GD)
     is_eval_metric = metric in ('test_accuracy', 'test_loss')
@@ -799,84 +801,7 @@ def main():
     print("\nComplete! All plots saved in 'plots/' directory")
 
 
-def plot_generalization_gap(nn_df: pd.DataFrame, title: str = "Generalization Gap & Test Accuracy", save_path: Optional[str] = None):
-    """
-    Plot two lines over epochs:
-    - Line 1 (left y-axis): Generalization Gap = Test Loss - Train Loss (per epoch)
-    - Line 2 (right y-axis): Test Accuracy (per epoch)
-
-    Expects a DataFrame with rows where phase in {'train','eval'} and columns:
-    - 'epoch', 'train_loss' (train), 'test_loss', 'test_accuracy' (eval)
-    """
-    if nn_df is None or len(nn_df) == 0:
-        print("[plot_generalization_gap] Empty DataFrame, nothing to plot.")
-        return
-
-    eval_df = nn_df[nn_df['phase'] == 'eval'].copy()
-    # Train loss per epoch: average over training batches
-    train_df = nn_df[nn_df['phase'] == 'train'].copy()
-    train_epoch = train_df.groupby('epoch', as_index=False)['train_loss'].mean().rename(columns={'train_loss': 'train_loss_epoch'})
-    merged = pd.merge(eval_df, train_epoch, on='epoch', how='left')
-    merged['gen_gap'] = merged['test_loss'] - merged['train_loss_epoch']
-
-    fig, ax1 = plt.subplots(figsize=(7, 4.5))
-    ax2 = ax1.twinx()
-
-    ax1.plot(merged['epoch'], merged['gen_gap'], marker='o', color='tab:red', label='Generalization Gap (loss)')
-    ax1.set_xlabel('Epoch')
-    ax1.set_ylabel('Test Loss - Train Loss', color='tab:red')
-    ax1.tick_params(axis='y', labelcolor='tab:red')
-
-    ax2.plot(merged['epoch'], merged['test_accuracy'] * 100.0, marker='s', color='tab:blue', label='Test Accuracy')
-    ax2.set_ylabel('Test Accuracy (%)', color='tab:blue')
-    ax2.tick_params(axis='y', labelcolor='tab:blue')
-
-    lines = [ax1.get_lines()[0], ax2.get_lines()[0]]
-    labels = [l.get_label() for l in lines]
-    ax1.legend(lines, labels, loc='best')
-    ax1.set_title(title)
-    fig.tight_layout()
-
-    if save_path:
-        plt.savefig(save_path, dpi=150)
-    plt.close(fig)
-
-
-def plot_layer_grad_norms(nn_df: pd.DataFrame, epochs: Optional[list] = None, title: str = "Per-layer Gradient Norms", save_path: Optional[str] = None):
-    """
-    Bar chart of per-layer L2 gradient norms captured at specific epochs.
-    Expects DataFrame rows with phase == 'layer_grad' and columns: ['epoch','layer','layer_grad_norm']
-    If epochs is None, use all available in ascending order.
-    """
-    layer_df = nn_df[nn_df['phase'] == 'layer_grad'].copy()
-    if len(layer_df) == 0:
-        print("[plot_layer_grad_norms] No per-layer gradient entries found. Ensure capture_layer_grad_epochs was set.")
-        return
-
-    if epochs is None:
-        epochs = sorted(layer_df['epoch'].unique().tolist())
-
-    pivoted = layer_df[layer_df['epoch'].isin(epochs)].pivot_table(index='layer', columns='epoch', values='layer_grad_norm', aggfunc='mean')
-    pivoted = pivoted.fillna(0.0)
-
-    layers = list(pivoted.index)
-    ep_cols = list(pivoted.columns)
-    x = np.arange(len(layers))
-    width = 0.8 / max(1, len(ep_cols))
-
-    fig, ax = plt.subplots(figsize=(max(8, len(layers) * 0.8), 5))
-    for i, ep in enumerate(ep_cols):
-        ax.bar(x + i * width, pivoted[ep].values, width=width, label=f'Epoch {int(ep)}')
-
-    ax.set_xticks(x + width * (len(ep_cols) - 1) / 2)
-    ax.set_xticklabels(layers, rotation=45, ha='right')
-    ax.set_ylabel('L2 Grad Norm')
-    ax.set_title(title)
-    ax.legend()
-    fig.tight_layout()
-    if save_path:
-        plt.savefig(save_path, dpi=150)
-    plt.close(fig)
+# Note: plot_generalization_gap and plot_layer_grad_norms already defined above
 
 
 def plot_multiseed_comparison(
@@ -901,8 +826,9 @@ def plot_multiseed_comparison(
             'SGD+Momentum': [df_seed1, df_seed2, df_seed3]
         }
     """
-    fig, ax = plt.subplots(figsize=(12, 8))
-    colors = plt.cm.tab10(np.linspace(0, 1, len(results_dict)))
+    _fig, ax = plt.subplots(figsize=(12, 8))
+    cmap = cm.get_cmap('tab10')
+    colors = cmap(np.linspace(0, 1, len(results_dict)))
     
     # Determine if this is an eval metric (per-epoch) or train metric (per-step)
     is_eval = metric in ('test_accuracy', 'test_loss')
@@ -1001,8 +927,10 @@ def plot_final_metric_comparison(
         title: Plot title
         save_path: Path to save figure
     """
-    fig, ax = plt.subplots(figsize=(10, 6))
+
+    _fig, ax = plt.subplots(figsize=(10, 6))
     
+    cmap = cm.get_cmap('tab10')
     opt_names = list(results_dict.keys())
     means = []
     stds = []
@@ -1017,14 +945,28 @@ def plot_final_metric_comparison(
                 continue
             if metric in ('test_accuracy', 'test_loss') and 'phase' in df.columns:
                 eval_df = df[df['phase'] == 'eval']
-                if not eval_df.empty:
+                if not eval_df.empty and len(eval_df[metric]) > 0:
                     finals.append(eval_df[metric].iloc[-1])
+                else:
+                    logging.debug(f"No eval data for {opt_name}, skipping run")
+                    continue
             elif 'global_step' in df.columns:
                 train_df = df[df['phase'] == 'train']
-                if not train_df.empty:
+                if not train_df.empty and metric in train_df.columns and len(train_df[metric]) > 0:
                     finals.append(train_df.get(metric, train_df['train_loss']).iloc[-1])
+                else:
+                    logging.debug(f"No train data for {opt_name}, skipping run")
+                    continue
             else:
-                finals.append(df[metric].iloc[-1])
+                if metric in df.columns and len(df[metric]) > 0:
+                    finals.append(df[metric].iloc[-1])
+                else:
+                    logging.debug(f"No {metric} data for {opt_name}, skipping run")
+                    continue
+        
+        if not finals:
+            logging.warning(f"No valid data for {opt_name}, skipping from plot")
+            continue
         
         means.append(np.mean(finals))
         stds.append(np.std(finals))
@@ -1032,8 +974,8 @@ def plot_final_metric_comparison(
     
     # Bar plot
     x = np.arange(len(opt_names))
-    bars = ax.bar(x, means, yerr=stds, capsize=10, alpha=0.7, 
-                  color=plt.cm.tab10(np.linspace(0, 1, len(opt_names))))
+    _bars = ax.bar(x, means, yerr=stds, capsize=10, alpha=0.7, 
+                   color=cmap(np.linspace(0, 1, len(opt_names))))
     
     # Scatter individual points
     np.random.seed(42)

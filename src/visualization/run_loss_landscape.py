@@ -1,6 +1,5 @@
 import os
 import sys
-import time
 import argparse
 import numpy as np
 import torch
@@ -8,9 +7,9 @@ import torch.nn as nn
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-# AUDIT FIX: Robust imports that work from any location
+# Robust imports that work from any location
 try:
-    from run_nn_experiment import build_model_and_data, build_optimizer, set_seed
+    from src.experiments.run_nn_experiment import build_model_and_data, build_optimizer, set_seed
     from loss_landscape import _random_direction_like, probe_loss_1d, probe_loss_2d
 except ImportError:
     # Try absolute imports
@@ -38,13 +37,28 @@ def train_quick(config):
     fully trained model checkpoint.
     """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    set_seed(config.get('seed', 42))
-    model, train_loader, test_loader = build_model_and_data(
-        dataset=config['dataset'],
-        model_name='SimpleMLP' if config['model'].lower() in ('mlp', 'simplemlp') else config['model'],
-        batch_size=config.get('batch_size', 128),
-        device=device,
-    )
+    seed = config.get('seed', 42)
+    set_seed(seed)
+    
+    # Build model and data - handle potential val_split
+    val_split = config.get('val_split', None)
+    if val_split is not None:
+        model, train_loader, val_loader, test_loader = build_model_and_data(
+            dataset=config['dataset'],
+            model_name='SimpleMLP' if config['model'].lower() in ('mlp', 'simplemlp') else config['model'],
+            batch_size=config.get('batch_size', 128),
+            device=device,
+            seed=seed,
+            val_split=val_split
+        )
+    else:
+        model, train_loader, test_loader = build_model_and_data(
+            dataset=config['dataset'],
+            model_name='SimpleMLP' if config['model'].lower() in ('mlp', 'simplemlp') else config['model'],
+            batch_size=config.get('batch_size', 128),
+            device=device,
+            seed=seed
+        )
 
     criterion = nn.CrossEntropyLoss()
     optimizer = build_optimizer(
@@ -58,8 +72,8 @@ def train_quick(config):
     model.train()
     epochs = config.get('epochs', 2)
     print(f"Training quick snapshot model for {epochs} epochs...")
-    for epoch in range(1, epochs + 1):
-        for batch_idx, (x, y) in enumerate(train_loader, start=1):
+    for _epoch in range(1, epochs + 1):
+        for _batch_idx, (x, y) in enumerate(train_loader, start=1):
             x = x.to(device)
             y = y.to(device)
             optimizer.zero_grad(set_to_none=True)
@@ -82,18 +96,34 @@ def load_checkpoint_model(checkpoint_path, config):
         model, loader, criterion, device
     """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    seed = config.get('seed', 42)
     
-    # Build model architecture
-    model, train_loader, test_loader = build_model_and_data(
-        dataset=config['dataset'],
-        model_name='SimpleMLP' if config['model'].lower() in ('mlp', 'simplemlp') else config['model'],
-        batch_size=config.get('batch_size', 128),
-        device=device,
-    )
+    # Build model architecture - handle potential val_split
+    val_split = config.get('val_split', None)
+    if val_split is not None:
+        model, _train_loader, _val_loader, test_loader = build_model_and_data(
+            dataset=config['dataset'],
+            model_name='SimpleMLP' if config['model'].lower() in ('mlp', 'simplemlp') else config['model'],
+            batch_size=config.get('batch_size', 128),
+            device=device,
+            seed=seed,
+            val_split=val_split
+        )
+    else:
+        model, _train_loader, test_loader = build_model_and_data(
+            dataset=config['dataset'],
+            model_name='SimpleMLP' if config['model'].lower() in ('mlp', 'simplemlp') else config['model'],
+            batch_size=config.get('batch_size', 128),
+            device=device,
+            seed=seed
+        )
     
     # Load checkpoint
     print(f"Loading checkpoint from {checkpoint_path}...")
-    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    try:
+        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    except TypeError:
+        checkpoint = torch.load(checkpoint_path, map_location=device)
     
     if 'model' in checkpoint:
         model.load_state_dict(checkpoint['model'])

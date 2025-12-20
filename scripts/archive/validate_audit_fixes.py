@@ -1,5 +1,5 @@
 """
-Quick validation script to demonstrate audit fixes.
+Quick validation script to demonstrate remediation fixes.
 
 Tests:
 1. Custom optimizers are used (not torch.optim)
@@ -160,9 +160,9 @@ def test_imports():
 
 
 def main():
-    print("\n" + "🔍 GDSearch Audit Fix Validation" + "\n")
+    print("\n" + "GDSearch Fix Validation" + "\n")
     print("This script validates the fixes applied in response to the")
-    print("Research Validity Audit (December 2025)\n")
+    print("Research Validity Review (December 2025)\n")
     
     tests = [
         ("Custom Optimizer Routing", test_custom_optimizer_routing),
@@ -194,7 +194,7 @@ def main():
     print(f"\nTotal: {passed}/{total} tests passed")
     
     if passed == total:
-        print("\n🎉 All audit fixes validated successfully!")
+        print("\nAll remediation fixes validated successfully!")
         print("   The codebase now tests custom optimizer implementations.")
         return 0
     else:

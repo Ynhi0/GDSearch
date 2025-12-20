@@ -128,9 +128,18 @@ def create_separate_plots(
     # ============= PLOT 3: Convergence Success Rate =============
     plt.figure(figsize=(10, 6))
     
-    # Parse convergence rate from string "X/5"
-    conv_rates = [int(conv.split('/')[0])/int(conv.split('/')[1])*100 
-                  for conv in summary_df['Converged'].values]
+    conv_rates = []
+    for conv in summary_df['Converged'].values:
+        try:
+            parts = str(conv).split('/')
+            if len(parts) == 2:
+                conv_rates.append(int(parts[0]) / int(parts[1]) * 100)
+            else:
+                logging.warning(f"Malformed convergence data: {conv}, using 0%")
+                conv_rates.append(0)
+        except (ValueError, ZeroDivisionError, IndexError) as e:
+            logging.warning(f"Failed to parse convergence '{conv}': {e}, using 0%")
+            conv_rates.append(0)
     
     bars = plt.bar(range(len(optimizers)), conv_rates, 
                    alpha=0.7, edgecolor='black', linewidth=1.5)

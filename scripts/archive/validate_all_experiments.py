@@ -148,7 +148,7 @@ def validate_imports() -> Tuple[int, int]:
 
 def validate_function_signatures() -> Tuple[int, int]:
     """Validate all experiment functions have expected signatures"""
-    print_section("🔍 FUNCTION SIGNATURE VALIDATION")
+    print_section("FUNCTION SIGNATURE VALIDATION")
     
     success_count = 0
     fail_count = 0

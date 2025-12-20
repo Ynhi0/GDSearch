@@ -379,7 +379,6 @@ class TorchLookahead(Optimizer):
         self.step_counter = 0
         
         # Cache for slow weights
-        # 🐛 AUDIT FIX: Use id(p) as key instead of tensor p (tensors are unhashable)
         self.slow_weights = {}
         for group in self.param_groups:
             for p in group['params']:
@@ -419,7 +418,6 @@ class TorchLookahead(Optimizer):
         if self.step_counter % self.k == 0:
             for group in self.param_groups:
                 for p in group['params']:
-                    # 🐛 AUDIT FIX: Use id(p) as key
                     p_id = id(p)
                     if p_id in self.slow_weights:
                         # Interpolate: slow = slow + alpha * (fast - slow)

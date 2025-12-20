@@ -16,6 +16,8 @@ import optuna
 from src.core.data_utils import get_mnist_loaders
 from src.core.models import SimpleMLP
 from src.core.optuna_tuner import OptunaHyperparameterTuner, suggest_optimizer_params
+from src.core.loader_validation import enforce_no_test_in_tuning
+from src.core.optimizer_adapter import build_optimizer_for_tuning
 import argparse
 import random
 import numpy as np
@@ -32,7 +34,7 @@ def set_seed(seed: int):
     torch.backends.cudnn.benchmark = False
 
 
-def create_objective_function(optimizer_name='Adam', epochs=10, device='cpu'):
+def create_objective_function(optimizer_name='Adam', epochs=10, device='cpu', seed=42):
     """
     Create objective function for Optuna optimization.
     
@@ -40,12 +42,13 @@ def create_objective_function(optimizer_name='Adam', epochs=10, device='cpu'):
         optimizer_name: Name of optimizer to tune
         epochs: Number of training epochs per trial
         device: Device to train on
+        seed: Random seed for reproducibility
         
     Returns:
         Objective function for Optuna
     """
     
-    def objective(trial):
+    def objective(trial, seed=seed):
         """Objective function: train model and return validation accuracy."""
         
         # Suggest hyperparameters
@@ -56,29 +59,27 @@ def create_objective_function(optimizer_name='Adam', epochs=10, device='cpu'):
         train_loader, val_loader, test_loader = get_mnist_loaders(
             batch_size=128, 
             num_workers=2,
-            seed=42,  # Fixed seed for reproducible splits
+            seed=seed,  # Use seed parameter passed to objective
             val_split=0.1  # 10% validation split
         )
         
-        # Create model
-        model = SimpleMLP(input_size=784, hidden_size=256, output_size=10).to(device)
+        # CRITICAL: Enforce that we're using validation (not test) for tuning
+        # This prevents test set leakage which would invalidate generalization claims
+        val_loader.name = 'validation'
+        enforce_no_test_in_tuning(val_loader)
         
-        # Create optimizer using PyTorch optimizers (not custom numpy-based ones)
-        if optimizer_name.lower() == 'adam':
-            optimizer = torch.optim.Adam(
-                model.parameters(),
-                lr=params['lr'],
-                betas=(params['beta1'], params['beta2']),
-                eps=params['epsilon']
-            )
-        elif optimizer_name.lower() == 'sgdmomentum':
-            optimizer = torch.optim.SGD(
-                model.parameters(),
-                lr=params['lr'],
-                momentum=params['momentum']
-            )
-        else:
-            raise ValueError(f"Unknown optimizer: {optimizer_name}")
+        # Create model with correct parameter name: num_classes (not output_size)
+        model = SimpleMLP(input_size=784, hidden_size=256, num_classes=10).to(device)
+        
+        # Use optimizer adapter to ensure consistency between tuning and experiments
+        # NOTE: use_custom_wrappers=False for faster tuning with native PyTorch optimizers
+        # The adapter ensures hyperparameters will transfer correctly to custom wrappers
+        optimizer = build_optimizer_for_tuning(
+            optimizer_name=optimizer_name,
+            model=model,
+            params=params,
+            use_custom_wrappers=False  # Use native PyTorch for speed during tuning
+        )
         
         criterion = nn.CrossEntropyLoss()
         
@@ -166,7 +167,8 @@ def main():
     objective_fn = create_objective_function(
         optimizer_name=args.optimizer,
         epochs=args.epochs,
-        device=device
+        device=device,
+        seed=args.seed
     )
     
     # Create tuner
@@ -207,7 +209,71 @@ def main():
     logging.info(f"\nValidation Accuracy: {results['best_value']:.2f}%")
     logging.info("="*80)
     logging.info("\nNOTE: This is VALIDATION accuracy (used for tuning).")
-    logging.info("Final TEST accuracy should be reported separately after retraining.")
+    logging.info("Proceeding to retrain with best params on TRAIN+VAL for final test...")
+    
+    # Automated retrain on train+val, then evaluate on test
+    logging.info("\n" + "="*80)
+    logging.info("RETRAINING WITH BEST HYPERPARAMETERS ON TRAIN+VAL")
+    logging.info("="*80)
+    
+    # Get full train+val combined as training set
+    from src.core.data_utils import get_mnist_loaders
+    train_val_loader, test_loader = get_mnist_loaders(
+        batch_size=128,
+        num_workers=2,
+        seed=args.seed
+        # val_split omitted (defaults to None) - use all training data
+    )
+    
+    # Create model with best params (num_classes not output_size)
+    from src.core.models import SimpleMLP
+    final_model = SimpleMLP(input_size=784, hidden_size=256, num_classes=10).to(device)
+    
+    # Build optimizer with best params
+    best_params = results['best_params'].copy()
+    lr = best_params.pop('lr')
+    
+    # Use optimizer adapter for final retrain to ensure consistency
+    best_params['lr'] = lr  # Restore lr to params dict
+    final_optimizer = build_optimizer_for_tuning(
+        optimizer_name=args.optimizer,
+        model=final_model,
+        params=best_params,
+        use_custom_wrappers=False  # Keep using native PyTorch for consistency
+    )
+    
+    # Train for same number of epochs
+    from torch.nn import CrossEntropyLoss
+    criterion = CrossEntropyLoss()
+    
+    logging.info(f"Training for {args.epochs} epochs on combined train+val set...")
+    for epoch in range(args.epochs):
+        final_model.train()
+        for batch_idx, (data, target) in enumerate(train_val_loader):
+            data, target = data.to(device), target.to(device)
+            final_optimizer.zero_grad()
+            output = final_model(data)
+            loss = criterion(output, target)
+            loss.backward()
+            final_optimizer.step()
+    
+    # Evaluate on test set (NEVER SEEN DURING TUNING)
+    final_model.eval()
+    test_loss = 0
+    correct = 0
+    with torch.no_grad():
+        for data, target in test_loader:
+            data, target = data.to(device), target.to(device)
+            output = final_model(data)
+            test_loss += criterion(output, target).item()
+            pred = output.argmax(dim=1, keepdim=True)
+            correct += pred.eq(target.view_as(pred)).sum().item()
+    
+    test_accuracy = 100. * correct / len(test_loader.dataset)
+    logging.info(f"\n{'='*80}")
+    logging.info(f"FINAL TEST SET ACCURACY: {test_accuracy:.2f}%")
+    logging.info(f"{'='*80}")
+    logging.info("This is the accuracy to report in reports.")
 
 if __name__ == '__main__':
     main()

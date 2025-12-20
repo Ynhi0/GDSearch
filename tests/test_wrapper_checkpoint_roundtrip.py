@@ -342,7 +342,7 @@ class TestCheckpointFileIO:
 
 
 # ============================================================================
-# AUDIT FIX: Tests for custom optimizer wrappers and DelayedOptimizer
+# Tests for custom optimizer wrappers and DelayedOptimizer
 # ============================================================================
 
 from src.core.optimizer_wrappers import DelayedOptimizer
@@ -353,7 +353,7 @@ from src.core.pytorch_optimizers import (
 
 
 class TestDelayedOptimizerCheckpoint:
-    """AUDIT FIX: Test DelayedOptimizer state persistence."""
+    """Test DelayedOptimizer state persistence."""
     
     def test_grad_queue_roundtrip(self):
         """Grad queue must survive save/load cycle."""
@@ -397,7 +397,7 @@ class TestDelayedOptimizerCheckpoint:
 
 
 class TestCustomWrapperCheckpoints:
-    """AUDIT FIX: Test all custom optimizer wrappers."""
+    """Test all custom optimizer wrappers."""
     
     @pytest.mark.parametrize("wrapper_cls,kwargs", [
         (SGDMomentumWrapper, {'lr': 0.01, 'momentum': 0.9}),

@@ -3,7 +3,7 @@ Medical image segmentation (3D U-Net, MONAI) with Dice metric logging and CSV ou
 
 DEMO/PROOF-OF-CONCEPT SCRIPT
 
-CRITICAL LIMITATION (AUDIT FLAG):
+CRITICAL LIMITATION (REVIEW FLAG):
 This is a SCAFFOLD with PLACEHOLDER data paths and supports ONLY the Adam optimizer.
 It is NOT a complete medical imaging experiment and should NOT be used for 
 cross-domain generalization claims without:
@@ -16,7 +16,7 @@ For SOTA research claims:
 1. Replace placeholder data_dicts with real medical imaging data
 2. Extend to support all optimizers from the benchmark suite
 3. Add multi-seed experiments and statistical analysis
-4. Clearly document limitations in publications
+4. Clearly document limitations in reports
 
 This is a scaffold that expects user-provided data dicts or a dataset loader.
 Imports MONAI lazily to avoid hard dependency during CI or environments without MONAI.

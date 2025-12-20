@@ -11,8 +11,11 @@ import sys
 # Force UTF-8 encoding for Windows console (must be FIRST, before any prints)
 if sys.platform == 'win32':
     import io
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    # Only wrap if stdout/stderr have buffer attribute (not in test contexts)
+    if hasattr(sys.stdout, 'buffer'):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    if hasattr(sys.stderr, 'buffer'):
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
     # Also set environment variables for subprocess compatibility
     os.environ['PYTHONIOENCODING'] = 'utf-8'
     os.environ['PYTHONUTF8'] = '1'
@@ -47,13 +50,13 @@ import json
 import psutil
 from contextlib import contextmanager
 
-# AUDIT FIX 4: Import retry utilities for robust error handling
+# Import retry utilities for robust error handling
 from src.core.retry import retry_with_backoff
 # Import centralized set_seed for consistency
 from src.core.training_utils import set_seed
 
 # =============================================================================
-# PUBLICATION-QUALITY PLOT SETTINGS
+# Plot settings
 # =============================================================================
 # Enforce DPI=300, Font Size=12, Seaborn Style for all plots
 plt.rcParams.update({
@@ -104,7 +107,7 @@ try:
     from src.core.pytorch_optimizers import SGDWrapper, AdamWrapper, SAMWrapper
     from src.core.models import ResNet18, BasicBlock
     print(f"Successfully imported core modules from {project_root / 'src'}")
-    print("AUDIT FIX 1: Using canonical ResNet18, BasicBlock, SAM from src/core/")
+    print("Using canonical ResNet18, BasicBlock, SAM from src/core/")
 except ImportError as e:
     print(f"CRITICAL: Failed to import core modules from {project_root / 'src'}")
     print(f"Error: {e}")
@@ -139,7 +142,7 @@ def check_gradient_health_quick(model, epoch=None, threshold=1e3, context=""):
         if has_bad_grad:
             return float('inf')
         
-        # 🐛 BUG FIX (Dec 2025): Use efficient PyTorch built-in for gradient norm
+        # Use efficient PyTorch built-in for gradient norm
         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), float('inf'))
         
         if grad_norm > threshold:
@@ -355,7 +358,7 @@ class PerformanceProfiler:
         if not self.metrics:
             return {}
         
-        # AUDIT FIX: Robust transformers/datasets import with auto-install for all environments
+        # Robust transformers/datasets import with auto-install for all environments
         try:
             from transformers import AutoTokenizer, AutoModelForSequenceClassification
             from datasets import load_dataset
@@ -418,7 +421,7 @@ class ExperimentTracker:
                 try:
                     self.current_run = mlflow.start_run(run_name=run_name, nested=True)
                 except (mlflow.MlflowException, RuntimeError):
-                    # 🐛 BUG FIX (Dec 2025): Restore stack on failure to prevent corruption
+                    # Restore stack on failure to prevent corruption
                     # Narrow to MLflow exceptions + RuntimeError for state issues
                     self.run_stack.pop()
                     raise
@@ -441,12 +444,12 @@ class ExperimentTracker:
     def log_params(self, params: Dict[str, Any]):
         """Log parameters
         
-        🐛 BUG FIX #13: Ensure consistent hyperparameter serialization.
+        Ensure consistent hyperparameter serialization.
         Convert all values to JSON-serializable types for proper MLflow tracking.
         """
         if HAS_MLFLOW and self.current_run:
             for k, v in params.items():
-                # 🐛 BUG FIX (Dec 2025): Handle numpy/torch types explicitly
+                # Handle numpy/torch types explicitly
                 if isinstance(v, (np.ndarray, torch.Tensor)):
                     if hasattr(v, 'numel') and v.numel() <= 100:
                         v = v.tolist()
@@ -727,7 +730,7 @@ class RobustCheckpointManager:
             if torch.cuda.is_available() and 'torch_cuda_rng_state_all' in rng_states:
                 if rng_states['torch_cuda_rng_state_all'] is not None:
                     try:
-                        # 🐛 BUG FIX #5: Validate device count matches
+                        # Validate device count matches
                         saved_device_count = len(rng_states['torch_cuda_rng_state_all'])
                         current_device_count = torch.cuda.device_count()
                         if saved_device_count != current_device_count:
@@ -791,7 +794,7 @@ def error_context(context: str, continue_on_error: bool = False):
         # Print a condensed error message
         print(f"\nFAILED: {context} - {str(e)[:200]}")
         
-        # AUDIT FIX: Track failed experiments using context object instead of global
+        # Track failed experiments using context object instead of global
         _experiment_context.record_failure(
             experiment_name=context,
             error=str(e)[:500],
@@ -815,7 +818,7 @@ def error_context(context: str, continue_on_error: bool = False):
 # Import centralized OOM handler
 from src.core.oom_handler import oom_safe_train_step
 
-# AUDIT FIX: OOM handling centralized to src.core.oom_handler
+# OOM handling centralized to src.core.oom_handler
 # All OOM logic uses oom_safe_train_step from the centralized module
 
 
@@ -1022,7 +1025,7 @@ def is_experiment_completed(results_dir: str, dataset: str, model_name: str, opt
 def load_experiment_config(config_path: str = None) -> Dict[str, Any]:
     """Load experiment configuration from JSON file.
     
-    AUDIT FIX 3: ZOMBIE CONFIGURATION FIX
+    ZOMBIE CONFIGURATION FIX
     Now defaults to loading configs/benchmark_hyperparameters.json if no path specified.
     This ensures experiments use authoritative hyperparameters instead of hardcoded values.
     
@@ -1057,12 +1060,12 @@ def load_experiment_config(config_path: str = None) -> Dict[str, Any]:
         }
     }
     
-    # AUDIT FIX 3: Default to benchmark_hyperparameters.json if no config specified
+    # Default to benchmark_hyperparameters.json if no config specified
     if config_path is None:
         benchmark_config_path = Path(__file__).parent / 'configs' / 'benchmark_hyperparameters.json'
         if benchmark_config_path.exists():
             config_path = str(benchmark_config_path)
-            logging.info("AUDIT FIX 3: Loaded authoritative config from %s", config_path)
+            logging.info("Loaded authoritative config from %s", config_path)
         else:
             logging.warning("Benchmark config not found: %s, using hardcoded defaults", benchmark_config_path)
             return default_config
@@ -1082,7 +1085,7 @@ def load_experiment_config(config_path: str = None) -> Dict[str, Any]:
             logging.info("Loaded authoritative config from %s", config_path)
             return merged_config
         else:
-            # AUDIT FIX (Dec 2025): Fail loudly on missing config for transparency
+            # Fail loudly on missing config for transparency
             raise FileNotFoundError(
                 f"CRITICAL: Config file not found: {config_path}\n"
                 f"   Expected config at specified path but file does not exist.\n"
@@ -1091,7 +1094,7 @@ def load_experiment_config(config_path: str = None) -> Dict[str, Any]:
     except FileNotFoundError:
         raise  # Re-raise to fail loudly
     except Exception as e:
-        # AUDIT FIX (Dec 2025): Fail loudly on config errors
+        # Fail loudly on config errors
         raise RuntimeError(
             f"CRITICAL: Error loading config from {config_path}: {e}\n"
             f"   Config file exists but cannot be parsed. Fix the config file or use None for defaults."
@@ -1175,7 +1178,7 @@ def save_run_artifacts(base_results_dir: str, dataset: str, model_name: str, opt
     Filename pattern: <dataset>_<model>_<optimizer>_seed<seed>.csv
     Sidecar metadata: same name + .meta.json
     
-    AUDIT FIX 11: Optionally save final model weights to results/models/
+    Optionally save final model weights to results/models/
     
     Args:
         model: PyTorch model to save (optional)
@@ -1199,7 +1202,7 @@ def save_run_artifacts(base_results_dir: str, dataset: str, model_name: str, opt
 
         df_hist.to_csv(csv_path, index=False)
 
-        # AUDIT FIX 11: Save final model weights for loss landscape visualization
+        # Save final model weights for loss landscape visualization
         model_path = None
         if save_model and model is not None:
             models_dir = Path(base_results_dir) / "models"
@@ -1280,7 +1283,7 @@ def make_dataloader(dataset, batch_size=64, shuffle=False, seed: Optional[int] =
       python, numpy and torch RNGs for each worker deterministically.
     - If `sampler` is provided, it will be used and `shuffle` will be ignored.
     - `persistent_workers` requires PyTorch >= 1.7.0 and num_workers > 0
-    - 🐛 FIX #15: Optional split_type parameter to tag loaders as 'train', 'validation', or 'test'
+    - Optional split_type parameter to tag loaders as 'train', 'validation', or 'test'
     """
     generator = None
     worker_init_fn = None
@@ -1325,7 +1328,7 @@ def make_dataloader(dataset, batch_size=64, shuffle=False, seed: Optional[int] =
 
     loader = DataLoader(dataset, **dl_kwargs)
     
-    # 🐛 FIX #15: Add metadata tags for safety checks in tuning pipeline
+    # Add metadata tags for safety checks in tuning pipeline
     if split_type is not None:
         setattr(loader, '_split_type', split_type)
         if split_type == 'train':
@@ -1612,6 +1615,13 @@ def run_batch_ablation(dataset_name='MNIST', results_dir='results/batch_ablation
                     output = model(data)
                     loss = criterion(output, target)
                     loss.backward()
+                    
+                    # Check gradient health before optimizer step
+                    grad_norm = check_gradient_health_quick(model, epoch=epoch, context=f"MNIST-{opt_name}")
+                    if not torch.isfinite(torch.tensor(grad_norm)):
+                        logging.warning(f"Skipping update due to bad gradients ({opt_name})")
+                        continue
+                    
                     optimizer.step()
                     total_loss += loss.item()
                 
@@ -1880,13 +1890,13 @@ class SimpleMLP(nn.Module):
         return self.network(x)
 
 # ============================================================================
-# AUDIT FIX 1: Removed duplicated BasicBlock and ResNet18 classes
+# Removed duplicated BasicBlock and ResNet18 classes
 # Now using canonical imports from src.core.models (imported at top of file)
 # This ensures checkpoint compatibility and eliminates version drift.
 # ============================================================================
 
 # ============================================================================
-# AUDIT FIX 1: Removed duplicated SAM optimizer class
+# Removed duplicated SAM optimizer class
 # Now using canonical SAMWrapper from src.core.pytorch_optimizers
 # This ensures checkpoint compatibility and consistent behavior across codebase.
 # ============================================================================
@@ -1896,43 +1906,8 @@ class SimpleMLP(nn.Module):
 # UTILITY CLASSES AND FUNCTIONS
 # ==============================================================================
 
-class SyntheticMedicalDataset(Dataset):
-    """Synthetic medical imaging dataset for segmentation"""
-    def __init__(self, num_samples=1000, img_size=128, seed=42):
-        self.num_samples = num_samples
-        self.img_size = img_size
-        np.random.seed(seed)
-
-    def __len__(self):
-        return self.num_samples
-
-    def __getitem__(self, idx):
-        # Generate synthetic medical-like images and masks
-        # Create base image with noise
-        image = np.random.normal(0.5, 0.2, (self.img_size, self.img_size)).astype(np.float32)
-        image = np.clip(image, 0, 1)
-
-        # Create synthetic anatomical structures (ellipses, circles)
-        mask = np.zeros((self.img_size, self.img_size), dtype=np.float32)
-
-        # Add 1-3 random structures
-        for _ in range(np.random.randint(1, 4)):
-            center_x = np.random.randint(20, self.img_size-20)
-            center_y = np.random.randint(20, self.img_size-20)
-            radius_x = np.random.randint(10, 30)
-            radius_y = np.random.randint(10, 30)
-
-            y, x = np.ogrid[:self.img_size, :self.img_size]
-            dist_from_center = ((x - center_x)**2 / radius_x**2) + \
-                               ((y - center_y)**2 / radius_y**2)
-            structure = (dist_from_center <= 1).astype(np.float32)
-            mask = np.maximum(mask, structure)
-
-        # Convert to tensors
-        image = torch.from_numpy(image).unsqueeze(0)  # Add channel dimension
-        mask = torch.from_numpy(mask).unsqueeze(0)    # Add channel dimension
-
-        return image, mask
+# Note: SyntheticMedicalDataset moved to src.core.medical_data_utils for reusability
+# Import it when needed: from src.core.medical_data_utils import SyntheticMedicalDataset, get_medical_datasets
 
 class UNet2D(nn.Module):
     """Simple U-Net implementation for 2D medical image segmentation"""
@@ -1960,7 +1935,7 @@ class UNet2D(nn.Module):
             in_channels = feature
 
         # Decoder
-        # 🐛 BUG FIX #2: First decoder layer receives bottleneck output (features[-1]*2),
+        # First decoder layer receives bottleneck output (features[-1]*2),
         # subsequent layers receive previous decoder output (feature)
         for idx, feature in enumerate(reversed(features)):
             if idx == 0:
@@ -2024,7 +1999,7 @@ class UNet2D(nn.Module):
 def dice_coefficient(pred, target, smooth=1e-6):
     """Calculate Dice coefficient for segmentation
     
-    🐛 BUG FIX #12: Compute per-sample Dice to avoid smoothing artifacts.
+    Compute per-sample Dice to avoid smoothing artifacts.
     The smoothing factor should be applied at the sample level, not batch level,
     to prevent artificial inflation of scores for small/empty predictions.
     """
@@ -2081,7 +2056,7 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader
         logging.warning("Optuna not available, using default hyperparameters")
         return get_default_hyperparameters(optimizer_name)
     
-    # AUDIT FIX: Robust validation to prevent test set leakage
+    # Robust validation to prevent test set leakage
     # Uses multiple validation strategies instead of unreliable name check
     try:
         from src.core.loader_validation import enforce_no_test_in_tuning
@@ -2195,7 +2170,7 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader
         
         criterion = nn.CrossEntropyLoss()
         
-        # 🐛 FIX #16: Detect if optimizer requires closure (SAM, etc)
+        # Detect if optimizer requires closure (SAM, etc)
         from src.core.pytorch_optimizers import SAMWrapper
         requires_closure = isinstance(optimizer, SAMWrapper)
         
@@ -2366,7 +2341,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
             opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ssl_context))
             urllib.request.install_opener(opener)
             
-            # AUDIT FIX 4: Use exponential backoff for dataset downloads
+            # Use exponential backoff for dataset downloads
             @retry_with_backoff(max_retries=3, initial_backoff=1.0, backoff_factor=2.0, 
                               exceptions=(Exception,), log_prefix="MNIST download")
             def download_mnist():
@@ -2383,13 +2358,13 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                 logging.info("\nHYPERPARAMETER TUNING PHASE")
                 logging.info("-" * 80)
                 
-                # AUDIT FIX: Create validation split from TRAINING data (not test set)
+                # Create validation split from TRAINING data (not test set)
                 # This prevents adaptive overfitting / test-set leakage during tuning
                 # Reference: Agarwal et al. (2021) on overtuning in hyperparameter selection
                 tune_size = min(5000, len(train_dataset))
                 val_size = min(1000, len(train_dataset) - tune_size)
                 
-                # 🐛 FIX #14: Randomize indices instead of using contiguous ranges
+                # Randomize indices instead of using contiguous ranges
                 # Prevents selection bias if dataset is ordered by class or other characteristics
                 all_indices = torch.randperm(len(train_dataset), generator=None).tolist()
                 tune_indices = all_indices[:tune_size]
@@ -2401,7 +2376,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                 train_bs, test_bs = get_batch_size('mnist', 128, 256)
                 dl_kwargs = get_dataloader_kwargs()
                 
-                # 🐛 FIX #15: Tag loaders with split_type for validation enforcement
+                # Tag loaders with split_type for validation enforcement
                 tune_loader = make_dataloader(tune_subset, batch_size=train_bs, shuffle=True, 
                                              split_type='train', **dl_kwargs)
                 val_loader = make_dataloader(val_subset, batch_size=test_bs, shuffle=False, 
@@ -2414,7 +2389,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                 tune_epochs = 1 if ULTRA_QUICK_MODE else (2 if quick else 3)
                 
                 # METHODOLOGICAL NOTE: Tuning uses validation subset from training data
-                # This is acceptable for benchmarking but may introduce bias for publication
+                # This is acceptable for benchmarking but may introduce bias in reporting
                 # Recommendation: For strict reproducibility, use separate tuning dataset
                 
                 # === CRITICAL FIX: Tune ALL optimizers with equal budget ===
@@ -2440,7 +2415,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
             
             results = []
 
-            # 🐛 FIX #17: Import ALL custom optimizer wrappers including SAMWrapper
+            # Import all custom optimizer wrappers including SAMWrapper
             from src.core.pytorch_optimizers import (
                 AdaBoundWrapper, RAdamWrapper, LAMBWrapper, 
                 LookaheadWrapper, SAMWrapper
@@ -2661,7 +2636,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                                 if checkpoint_manager.validate_optimizer_compatibility(checkpoint, opt_name):
                                     model.load_state_dict(checkpoint['model'], strict=False)
                                     try:
-                                        # AUDIT FIX-7: Use unified optimizer.load_state_dict for all wrappers
+                                        # Use unified optimizer.load_state_dict for all wrappers
                                         # SAMWrapper and other wrappers implement their own state dict handling.
                                         optimizer.load_state_dict(checkpoint['optimizer'])
                                         
@@ -2721,7 +2696,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                         patience = 10
                         patience_counter = 0
                         
-                        # AUDIT FIX 3: Restore scheduler state if resuming from checkpoint
+                        # Restore scheduler state if resuming from checkpoint
                         # This ensures that learning rate scheduling continues correctly from the saved state
                         if checkpoint and 'scheduler' in checkpoint:
                             try:
@@ -2730,7 +2705,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                             except Exception as e:
                                 logging.warning(f"Could not restore scheduler state: {e}. Using fresh scheduler.")
                         
-                        # AUDIT FIX 2: Track OOM taint status and effective batch size
+                        # Track OOM taint status and effective batch size
                         run_tainted = False
                         effective_batch_size = 128  # Will be updated if OOM recovery occurs
                         original_batch_size = 128
@@ -2751,7 +2726,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                                 train_loss, train_correct = 0, 0
 
                                 for inputs, targets in train_loader:
-                                    # AUDIT FIX 6: Use unified OOM-safe training step
+                                    # Use unified OOM-safe training step
                                     try:
                                         loss_value, actual_batch_size, outputs, batch_tainted = oom_safe_train_step(
                                             model=model,
@@ -2808,7 +2783,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                                 test_acc = 100. * test_correct / len(test_dataset)
                                 
                                 # Learning rate scheduling (called after full training epoch)
-                                # AUDIT FIX: Verified scheduler.step() is after optimizer.step() in training loop
+                                # Verified scheduler.step() is after optimizer.step() in training loop
                                 scheduler.step()
                                 current_lr = optimizer.param_groups[0]['lr']
                                 
@@ -2829,7 +2804,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                                         model.load_state_dict(best_model_state)
                                     break
 
-                                # AUDIT FIX: Add tainted and effective_batch_size to per-epoch history
+                                # Add tainted and effective_batch_size to per-epoch history
                                 history.append({
                                     'epoch': epoch,
                                     'train_loss': train_loss,
@@ -2854,7 +2829,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                                       f"Train Acc={train_acc:.1f}%, Test Loss={test_loss:.4f}, "
                                       f"Test Acc={test_acc:.1f}%")
 
-                                # 🐛 BUG FIX #3: Save checkpoint AFTER metrics update for accurate state
+                                # Save checkpoint AFTER metrics update for accurate state
                                 # Enhanced checkpointing with COMPLETE training state (BLOCKER-2 fix)
                                 if checkpoint_manager:
                                     checkpoint_data = {
@@ -2883,9 +2858,9 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                         
                         except RuntimeError as e:
                             if "out of memory" in str(e).lower():
-                                # AUDIT FIX 2: Mark as tainted when OOM occurs
+                                # Mark as tainted when OOM occurs
                                 run_tainted = True
-                                logging.error(f"AUDIT WARNING: Run Tainted for {opt_name} seed {seed}")
+                                logging.error(f"VERIFICATION WARNING: Run Tainted for {opt_name} seed {seed}")
                                 logging.error(f"OOM Error detected for {opt_name}: {e}")
                                 logging.info("Self-Healing: Reducing batch size - skipping this config")
                                 logging.warning("SCIENTIFIC INTEGRITY: This run is INVALID for strict convergence analysis.")
@@ -2898,7 +2873,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                         training_time = time.time() - start_time
 
                         # Save per-run artifacts (CSV history + metadata)
-                        # AUDIT FIX: Include tainted status in params
+                        # Include tainted status in params
                         params = {
                             'batch_size_train': original_batch_size,
                             'batch_size_test': 256,
@@ -2911,7 +2886,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
 
                         save_run_artifacts(results_dir, 'MNIST', 'SimpleMLP', opt_name,
                                            seed, history, params, device=device, tracker=tracker,
-                                           model=model, save_model=True)  # AUDIT FIX 11: Save model weights
+                                           model=model, save_model=True)  # Save model weights
 
                         results.append({
                             'optimizer': opt_name,
@@ -2922,7 +2897,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                             'test_acc': test_acc,
                             'training_time': training_time,
                             'epochs_completed': len(history),
-                            # AUDIT FIX 2: Add taint tracking columns
+                            # Add taint tracking columns
                             'effective_batch_size': effective_batch_size,
                             'tainted': run_tainted
                         })
@@ -3033,7 +3008,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
     urllib.request.install_opener(opener)
     
     max_retries = 3
-    # AUDIT FIX 4: Use exponential backoff for dataset downloads
+    # Use exponential backoff for dataset downloads
     @retry_with_backoff(max_retries=3, initial_backoff=1.0, backoff_factor=2.0,
                        exceptions=(Exception,), log_prefix="CIFAR-10 download")
     def download_cifar10():
@@ -3149,7 +3124,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
             # Create learning rate scheduler
             scheduler = CosineAnnealingLR(optimizer, T_max=epochs, eta_min=lr*0.01)
             
-            # AUDIT FIX 2: Restore scheduler state if resuming from checkpoint
+            # Restore scheduler state if resuming from checkpoint
             # This ensures that learning rate scheduling continues correctly from the saved state
             if checkpoint and 'scheduler' in checkpoint:
                 try:
@@ -3164,7 +3139,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
             patience = 10
             patience_counter = 0
             
-            # AUDIT FIX 5: Track OOM taint status and effective batch size for CIFAR
+            # Track OOM taint status and effective batch size for CIFAR
             # This ensures scientific validity - tainted runs can be identified and excluded from comparisons
             run_tainted = False
             effective_batch_size = 128  # Will be updated if OOM recovery occurs
@@ -3180,7 +3155,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
                     train_loss, train_correct = 0, 0
 
                     for inputs, targets in tqdm(train_loader, desc=f"{opt_name} Epoch {epoch}/{epochs}"):
-                        # AUDIT FIX 7: Use unified OOM-safe training step
+                        # Use unified OOM-safe training step
                         try:
                             loss_value, actual_batch_size, outputs, batch_tainted = oom_safe_train_step(
                                 model=model,
@@ -3237,7 +3212,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
                     test_acc = 100. * test_correct / len(test_dataset)
                     
                     # Learning rate scheduling (called after full training epoch)
-                    # AUDIT FIX: Verified scheduler.step() is after optimizer.step() in training loop
+                    # Verified scheduler.step() is after optimizer.step() in training loop
                     scheduler.step()
                     
                     # Best model tracking
@@ -3309,7 +3284,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
                     logging.warning("SCIENTIFIC INTEGRITY: This run is TAINTED for strict convergence analysis.")
                     logging.warning("    Re-run with smaller fixed batch size for high-quality results.")
                     
-                    # AUDIT FIX 5b: Mark as tainted instead of skipping
+                    # Mark as tainted instead of skipping
                     run_tainted = True
                     # Set default metrics for failed run
                     train_acc = 0.0
@@ -3327,7 +3302,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
             csv_path = results_dir / f"CIFAR10_ResNet18_{opt_name}_seed{seed}.csv"
             df_history.to_csv(csv_path, index=False)
             
-            # AUDIT FIX 5c: Include tainted and effective_batch_size in results
+            # Include tainted and effective_batch_size in results
             all_results.append({
                 'optimizer': opt_name,
                 'seed': seed,
@@ -3625,7 +3600,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
             from src.core.lr_schedulers import CosineAnnealingLR
             scheduler = CosineAnnealingLR(optimizer, T_max=epochs, eta_min=lr*0.01)
             
-            # AUDIT FIX 4: Restore scheduler state if resuming from checkpoint
+            # Restore scheduler state if resuming from checkpoint
             # This ensures that learning rate scheduling continues correctly from the saved state
             if 'checkpoint' in locals() and checkpoint and 'scheduler' in checkpoint:
                 try:
@@ -3741,7 +3716,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                     test_acc = 100.0 * test_correct / max(1, test_total)
                     
                     # LR scheduling (called after full training epoch)
-                    # AUDIT FIX: Verified scheduler.step() is after optimizer.step() in training loop
+                    # Verified scheduler.step() is after optimizer.step() in training loop
                     scheduler.step()
                     
                     # Best model tracking
@@ -3887,6 +3862,13 @@ def run_nlp_experiment_simple(results_dir="results_nlp", seeds=None, epochs=10, 
         print("\n   Attempting to load IMDB dataset...")
         from datasets import load_dataset
         import os
+        import sys
+        
+        # Warn about Python 3.13 compatibility issue
+        if sys.version_info >= (3, 13):
+            print("   WARNING: Python 3.13 has known IMDB loading issues (fsspec glob patterns)")
+            print("   Attempting load anyway, but will fall back to synthetic data if it fails")
+            print("   For production: Use Python 3.10-3.12 or run on Kaggle (Python 3.10)")
         
         # Set environment variables to avoid download issues and warnings
         os.environ['HF_HUB_DISABLE_TELEMETRY'] = '1'
@@ -4205,6 +4187,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
 
     # Import new optimizers
     from src.core.pytorch_optimizers import AdaBoundWrapper, RAdamWrapper, LAMBWrapper
+    from src.core.medical_data_utils import get_medical_datasets
     
     # Configuration
     train_bs, test_bs = get_batch_size('medical', default_train=4, default_test=4)
@@ -4218,6 +4201,22 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
 
     results_dir = Path(results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Determine which dataset to use (env var or default to MedMNIST)
+    # Set MEDICAL_DATASET_TYPE='synthetic' or 'kaggle' to override
+    import os
+    dataset_type = os.environ.get('MEDICAL_DATASET_TYPE', 'medmnist')
+    medmnist_name = os.environ.get('MEDMNIST_NAME', 'pathmnist')
+    kaggle_path = os.environ.get('KAGGLE_MEDICAL_PATH', './data/medical')
+    
+    logging.info(f"Medical dataset type: {dataset_type}")
+    if dataset_type == 'medmnist':
+        logging.info(f"  MedMNIST dataset: {medmnist_name} (default)")
+    elif dataset_type == 'kaggle':
+        logging.info(f"  Kaggle dataset path: {kaggle_path}")
+    elif dataset_type == 'synthetic':
+        logging.warning("  Using synthetic data - NOT RECOMMENDED for research")
+
 
     # Optimizers to test - expanded to include all new optimizers
     configs = [
@@ -4243,10 +4242,17 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
             
             set_seed(seed)
 
-            # Create synthetic medical dataset (since real medical datasets require special access)
-            logging.info("Creating synthetic medical dataset...")
-            train_ds = SyntheticMedicalDataset(num_samples=200 if quick else 500, img_size=img_size, seed=seed)
-            test_ds = SyntheticMedicalDataset(num_samples=50 if quick else 100, img_size=img_size, seed=seed+1000)
+            # Load medical datasets (real or synthetic)
+            logging.info(f"Loading medical datasets for seed {seed}...")
+            train_ds, test_ds = get_medical_datasets(
+                dataset_type=dataset_type,
+                num_train=200 if quick else 500,
+                num_test=50 if quick else 100,
+                img_size=img_size,
+                seed=seed,
+                medmnist_name=medmnist_name,
+                kaggle_path=kaggle_path
+            )
 
             train_loader = make_dataloader(train_ds, batch_size=train_bs, shuffle=True,
                                            seed=seed, **dl_kwargs)
@@ -4277,7 +4283,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
             from src.core.lr_schedulers import CosineAnnealingLR
             scheduler = CosineAnnealingLR(optimizer, T_max=epochs, eta_min=lr*0.01)
             
-            # AUDIT FIX 4b: Restore scheduler state if resuming from checkpoint
+            # Restore scheduler state if resuming from checkpoint
             # This ensures that learning rate scheduling continues correctly from the saved state
             if 'checkpoint' in locals() and checkpoint and 'scheduler' in checkpoint:
                 try:
@@ -4361,7 +4367,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                         
                         optimizer.step()
 
-                    # AUDIT FIX 3: Safely extract loss value (works for both Tensor and float)
+                    # Safely extract loss value (works for both Tensor and float)
                     loss_value = float(loss.item()) if hasattr(loss, 'item') else float(loss)
                     train_loss += loss_value * images.size(0)
                     train_dice += dice_coefficient(torch.sigmoid(outputs), masks).item() * images.size(0)
@@ -4392,7 +4398,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                 test_dice /= max(1, test_total)
                 
                 # LR scheduling (called after full training epoch)
-                # AUDIT FIX: Verified scheduler.step() is after optimizer.step() in training loop
+                # Verified scheduler.step() is after optimizer.step() in training loop
                 scheduler.step()
                 
                 # Best model tracking (based on dice score)
@@ -4530,13 +4536,13 @@ def run_statistical_analysis(results_dir="results", plots_dir="plots"):
             if dfs:
                 mnist_df = pd.concat(dfs, ignore_index=True)
                 
-                # AUDIT FIX (Dec 2025): Filter tainted runs to prevent statistical contamination
+                # Filter tainted runs to prevent statistical contamination
                 if 'tainted' in mnist_df.columns:
                     tainted_count = mnist_df['tainted'].sum() if pd.api.types.is_bool_dtype(mnist_df['tainted']) else (mnist_df['tainted'] == True).sum()
                     if tainted_count > 0:
-                        logging.warning(f"AUDIT: Filtering {tainted_count} tainted runs (OOM-affected) from statistical analysis")
+                        logging.warning(f"VERIFICATION: Filtering {tainted_count} tainted runs (OOM-affected) from statistical analysis")
                         mnist_df = mnist_df[mnist_df['tainted'] == False].copy()
-                        logging.info(f"AUDIT: Retained {len(mnist_df)} clean runs for analysis")
+                        logging.info(f"VERIFICATION: Retained {len(mnist_df)} clean runs for analysis")
     
     if mnist_df is not None and len(mnist_df) > 0:
         # Use integrated statistical analysis if available
@@ -5100,13 +5106,13 @@ def aggregate_cross_experiment_results(results_dir: Path, experiment_results: Di
         if exp_df is None or not hasattr(exp_df, 'columns'):
             continue
         
-        # AUDIT FIX (Dec 2025): Filter tainted runs before aggregation
+        # Filter tainted runs before aggregation
         if 'tainted' in exp_df.columns:
             tainted_count = exp_df['tainted'].sum() if pd.api.types.is_bool_dtype(exp_df['tainted']) else (exp_df['tainted'] == True).sum()
             if tainted_count > 0:
-                logging.warning(f"AUDIT ({exp_name}): Filtering {tainted_count} tainted runs from aggregation")
+                logging.warning(f"VERIFICATION ({exp_name}): Filtering {tainted_count} tainted runs from aggregation")
                 exp_df = exp_df[exp_df['tainted'] == False].copy()
-                logging.info(f"AUDIT ({exp_name}): Retained {len(exp_df)} clean runs")
+                logging.info(f"VERIFICATION ({exp_name}): Retained {len(exp_df)} clean runs")
         
         try:
             # Different experiments have different column names
@@ -5130,11 +5136,11 @@ def aggregate_cross_experiment_results(results_dir: Path, experiment_results: Di
             for opt in exp_df[opt_col].unique():
                 opt_data = exp_df[exp_df[opt_col] == opt]
                 
-                # AUDIT FIX: Filter out tainted runs before computing statistics
+                # Filter out tainted runs before computing statistics
                 if 'tainted' in opt_data.columns:
                     tainted_count = opt_data['tainted'].sum() if pd.api.types.is_bool_dtype(opt_data['tainted']) else (opt_data['tainted'] == True).sum()
                     if tainted_count > 0:
-                        logging.warning(f"AUDIT: Excluding {tainted_count} tainted runs for {opt} in {exp_name}")
+                        logging.warning(f"VERIFICATION: Excluding {tainted_count} tainted runs for {opt} in {exp_name}")
                         opt_data = opt_data[opt_data['tainted'] == False].copy()
                 
                 entry = {
@@ -5378,7 +5384,7 @@ def generate_final_summary_report(results_dir, experiment_results):
     return str(report_path)
 
 
-# NOTE: Deprecated functions have been cleaned up in previous audit sessions.
+# NOTE: Deprecated functions have been cleaned up in previous review sessions.
 # Use run_statistical_analysis() for all statistical analysis needs.
 
 
@@ -5704,7 +5710,7 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=None, resum
     urllib.request.install_opener(opener)
     
     max_retries = 3
-    # AUDIT FIX 4: Use exponential backoff for dataset downloads
+    # Use exponential backoff for dataset downloads
     @retry_with_backoff(max_retries=3, initial_backoff=1.0, backoff_factor=2.0,
                        exceptions=(Exception,), log_prefix="MNIST download")
     def download_mnist():
@@ -6132,7 +6138,7 @@ def run_distributed_experiment(results_dir="results_distributed", world_size=2, 
 
 def distributed_training_worker(rank, world_size, backend, results_dir):
     """Worker function for distributed training"""
-    # AUDIT FIX: Use finally block to ensure safe cleanup even if initialization fails
+    # Use finally block to ensure safe cleanup even if initialization fails
     try:
         # Initialize process group
         os.environ['MASTER_ADDR'] = 'localhost'
@@ -6161,7 +6167,7 @@ def distributed_training_worker(rank, world_size, backend, results_dir):
         train_dataset = torchvision.datasets.CIFAR10('./data', train=True, download=True, transform=transform)
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset, num_replicas=world_size, rank=rank)
         
-        # AUDIT FIX: Track per-device batch size for effective batch size computation
+        # Track per-device batch size for effective batch size computation
         per_device_batch_size = 128
         train_loader = DataLoader(train_dataset, batch_size=per_device_batch_size, sampler=train_sampler)
 
@@ -6169,7 +6175,7 @@ def distributed_training_worker(rank, world_size, backend, results_dir):
         optimizer = optim.Adam(model.parameters(), lr=0.001)
         criterion = nn.CrossEntropyLoss()
 
-        # AUDIT FIX: Compute global effective batch size for DDP
+        # Compute global effective batch size for DDP
         # This is critical for fair comparison with single-GPU experiments
         effective_batch_size = per_device_batch_size * world_size
 
@@ -6195,7 +6201,7 @@ def distributed_training_worker(rank, world_size, backend, results_dir):
         if rank == 0:
             os.makedirs(results_dir, exist_ok=True)
             # FIXED: Use new zipfile serialization for large models
-            # AUDIT FIX: Include effective_batch_size in saved metadata
+            # Include effective_batch_size in saved metadata
             torch.save({
                 'model_state_dict': model.module.state_dict(),
                 'world_size': world_size,
@@ -6210,7 +6216,7 @@ def distributed_training_worker(rank, world_size, backend, results_dir):
         traceback.print_exc()
         raise
     finally:
-        # AUDIT FIX: Safe cleanup with is_initialized() guard
+        # Safe cleanup with is_initialized() guard
         # This prevents crashes if process group initialization failed
         if dist.is_initialized():
             try:
@@ -6237,7 +6243,7 @@ def run_advanced_architecture_experiment(results_dir="results_advanced_arch", ep
         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
     ])
 
-    # AUDIT FIX 4: Use exponential backoff for dataset downloads
+    # Use exponential backoff for dataset downloads
     @retry_with_backoff(max_retries=3, initial_backoff=1.0, backoff_factor=2.0,
                        exceptions=(Exception,), log_prefix="CIFAR-10 download (ViT)")
     def download_cifar10_vit():
@@ -6384,7 +6390,7 @@ def run_code_quality_checks():
                 print(f"Could not install {tool}")
 
         # Run linting
-        print("🔍 Running flake8 linting...")
+        print("Running flake8 linting...")
         try:
             result = subprocess.run([sys.executable, "-m", "flake8", "src/", "--count", "--select=E9,F63,F7,F82", "--show-source", "--statistics"],
                                   capture_output=True, text=True)
@@ -6745,7 +6751,7 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
     opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ssl_context))
     urllib.request.install_opener(opener)
     
-    # AUDIT FIX 4: Use exponential backoff for dataset downloads
+    # Use exponential backoff for dataset downloads
     @retry_with_backoff(max_retries=3, initial_backoff=1.0, backoff_factor=2.0,
                        exceptions=(Exception,), log_prefix="CIFAR-10 download (ResNet)")
     def download_cifar10_resnet():
@@ -7163,9 +7169,9 @@ Examples:
     parser.add_argument('--run-all-ablations', action='store_true',
                         help='Run all ablation studies including batch_size, lr, wd, scheduler ablations')
     parser.add_argument('--strict-config', action='store_true',
-                        help='AUDIT MODE: Treat config warnings and zombie keys as errors (fails fast on config issues)')
+                        help='VERIFICATION MODE: Treat config warnings and zombie keys as errors (fails fast on config issues)')
     
-    # AUDIT FIX 10: Add CLI flags for advanced training features
+    # Add CLI flags for advanced training features
     parser.add_argument('--use-amp', action='store_true',
                         help='Enable Automatic Mixed Precision (AMP) training for faster training on GPUs')
     parser.add_argument('--use-ema', action='store_true',
@@ -7175,7 +7181,7 @@ Examples:
     
     args = parser.parse_args()
     
-    # AUDIT FIX 1: Load experiment configuration from JSON if provided
+    # Load experiment configuration from JSON if provided
     # This ensures that --config CLI argument is actually used and config authority is enforced
     experiment_config = None
     if args.config:
@@ -7199,6 +7205,12 @@ Examples:
     
     # Parse seeds
     seeds = [int(s.strip()) for s in args.seeds.split(',')]
+    
+    # Set global seed FIRST before any operations
+    # Use first seed for reproducibility of all subsequent operations
+    primary_seed = seeds[0]
+    set_seed(primary_seed)
+    logging.info(f"Global seed set to {primary_seed} for reproducibility")
     
     # Parse experiment selection
     if args.experiments == 'all':
@@ -7239,7 +7251,7 @@ Examples:
     ADAPTIVE_BATCH_ENABLED = args.adaptive_batch or args.auto_tune
     ULTRA_QUICK_MODE = args.ultra_quick
     
-    # AUDIT FIX 10b: Wire advanced training features to global flags
+    # Wire advanced training features to global flags
     USE_AMP = args.use_amp or (args.kaggle_t4 if hasattr(args, 'kaggle_t4') else False)
     USE_EMA = args.use_ema
     LABEL_SMOOTHING = args.label_smoothing
@@ -7255,7 +7267,7 @@ Examples:
     if ADAPTIVE_BATCH_ENABLED:
         print("📦 Adaptive batch sizing enabled: will auto-detect optimal batch size")
     
-    # AUDIT FIX 10c: Display advanced training features status
+    # Display advanced training features status
     if USE_AMP:
         print("Automatic Mixed Precision (AMP) enabled: faster training with reduced memory")
     if USE_EMA:
@@ -7295,7 +7307,7 @@ Examples:
     profiler = PerformanceProfiler() if args.profile else None
     tracker = None if args.no_mlflow else (ExperimentTracker() if HAS_MLFLOW else None)
     
-    # AUDIT FIX 4: Checkpoint manager ALWAYS initialized (enabled by default)
+    # Checkpoint manager ALWAYS initialized (enabled by default)
     # This ensures model weights are saved for post-hoc loss landscape visualization
     # and reproducibility. Checkpoints include model, optimizer, scheduler, RNG states.
     checkpoint_manager = RobustCheckpointManager(
@@ -8243,8 +8255,8 @@ Examples:
                         }
                     
                     # Validate tuning fairness before running experiments
-                    # AUDIT FIX: STRICT MODE enforcement - do not catch and ignore failures
-                    print("\n🔍 Validating tuning fairness across optimizers...")
+                    # STRICT MODE enforcement - do not catch and ignore failures
+                    print("\nValidating tuning fairness across optimizers...")
                     validate_tuning_fairness(
                         optimizers_to_test,
                         tuning_fairness_config,

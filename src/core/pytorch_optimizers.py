@@ -61,13 +61,29 @@ class SGDWrapper(Optimizer):
                 # Get gradient as numpy
                 grad = p.grad.data.cpu().numpy()
                 param_np = p.data.cpu().numpy()
+                original_shape = param_np.shape
+                original_dtype = p.data.dtype
                 
                 # Compute update
                 updated_param = self.custom_opt.step(param_np.flatten(), grad.flatten())
                 
+                # CRITICAL FIX: Validate shape before reshaping
+                if updated_param.size != param_np.size:
+                    raise ValueError(
+                        f"Custom optimizer returned wrong size: "
+                        f"expected {param_np.size}, got {updated_param.size}. "
+                        f"Original shape: {original_shape}"
+                    )
+                
                 # Reshape and update parameter preserving dtype/device
-                updated_tensor = torch.from_numpy(updated_param.reshape(param_np.shape))
-                p.data.copy_(updated_tensor.to(p.data.dtype).to(p.device))
+                try:
+                    updated_tensor = torch.from_numpy(updated_param.reshape(original_shape))
+                    p.data.copy_(updated_tensor.to(original_dtype).to(p.device))
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Failed to update parameter with shape {original_shape}, "
+                        f"dtype {original_dtype}: {e}"
+                    ) from e
         
         return loss
 
@@ -116,7 +132,7 @@ class SGDMomentumWrapper(Optimizer):
         return loss
     
     def state_dict(self):
-        """AUDIT FIX: Save custom optimizer states with index-based keys for cross-process safety."""
+        """Save custom optimizer states with index-based keys for cross-process safety."""
         base_state = super().state_dict()
         # Serialize custom_opts: map (group_idx, param_idx) to optimizer state (v=velocity, not m)
         custom_state = {}
@@ -130,7 +146,7 @@ class SGDMomentumWrapper(Optimizer):
         return base_state
     
     def load_state_dict(self, state_dict):
-        """AUDIT FIX: Restore custom optimizer states from checkpoint using index mapping."""
+        """Restore custom optimizer states from checkpoint using index mapping."""
         import numpy as np
         custom_state = state_dict.pop('custom_opts', {})
         super().load_state_dict(state_dict)
@@ -196,7 +212,7 @@ class AdamWrapper(Optimizer):
         return loss
     
     def state_dict(self):
-        """AUDIT FIX: Save custom Adam optimizer states with index-based keys."""
+        """Save custom Adam optimizer states with index-based keys."""
         base_state = super().state_dict()
         custom_state = {}
         for key, opt in self.custom_opts.items():
@@ -211,7 +227,7 @@ class AdamWrapper(Optimizer):
         return base_state
     
     def load_state_dict(self, state_dict):
-        """AUDIT FIX: Restore custom Adam states using index mapping."""
+        """Restore custom Adam states using index mapping."""
         import numpy as np
         custom_state = state_dict.pop('custom_opts', {})
         super().load_state_dict(state_dict)
@@ -264,14 +280,29 @@ class SGDNesterovWrapper(Optimizer):
                     )
                 grad = p.grad.data.cpu().numpy()
                 param_np = p.data.cpu().numpy()
+                original_shape = param_np.shape
+                original_dtype = p.data.dtype
+                
                 updated_param = self.custom_opts[key].step(param_np.flatten(), grad.flatten())
-                updated_tensor = torch.from_numpy(updated_param.reshape(param_np.shape))
-                p.data.copy_(updated_tensor.to(p.data.dtype).to(p.device))
+                
+                # Validate shape before reshaping
+                if updated_param.size != param_np.size:
+                    raise ValueError(
+                        f"SGDNesterov optimizer returned wrong size: "
+                        f"expected {param_np.size}, got {updated_param.size}"
+                    )
+                
+                # Reshape and update parameter preserving dtype/device
+                try:
+                    updated_tensor = torch.from_numpy(updated_param.reshape(original_shape))
+                    p.data.copy_(updated_tensor.to(original_dtype).to(p.device))
+                except Exception as e:
+                    raise RuntimeError(f"Failed to update parameter: {e}") from e
 
         return loss
     
     def state_dict(self):
-        """AUDIT FIX: Save Nesterov momentum states with index-based keys."""
+        """Save Nesterov momentum states with index-based keys."""
         base_state = super().state_dict()
         custom_state = {}
         for key, opt in self.custom_opts.items():
@@ -284,7 +315,7 @@ class SGDNesterovWrapper(Optimizer):
         return base_state
     
     def load_state_dict(self, state_dict):
-        """AUDIT FIX: Restore Nesterov states using index mapping."""
+        """Restore Nesterov states using index mapping."""
         import numpy as np
         custom_state = state_dict.pop('custom_opts', {})
         super().load_state_dict(state_dict)
@@ -338,24 +369,35 @@ class RMSPropWrapper(Optimizer):
                 # Get gradient as numpy
                 grad = p.grad.data.cpu().numpy()
                 param_np = p.data.cpu().numpy()
+                original_shape = param_np.shape
+                original_dtype = p.data.dtype
                 
                 # Compute update
                 updated_param = self.custom_opts[key].step(param_np.flatten(), grad.flatten())
                 
+                # Validate shape before reshaping
+                if updated_param.size != param_np.size:
+                    raise ValueError(
+                        f"RMSProp optimizer returned wrong size: "
+                        f"expected {param_np.size}, got {updated_param.size}"
+                    )
+                
                 # Reshape and update parameter preserving dtype/device
-                updated_tensor = torch.from_numpy(updated_param.reshape(param_np.shape))
-                p.data.copy_(updated_tensor.to(p.data.dtype).to(p.device))
+                try:
+                    updated_tensor = torch.from_numpy(updated_param.reshape(original_shape))
+                    p.data.copy_(updated_tensor.to(original_dtype).to(p.device))
+                except Exception as e:
+                    raise RuntimeError(f"Failed to update parameter: {e}") from e
         
         return loss
     
     def state_dict(self):
-        """AUDIT FIX: Save RMSProp states with index-based keys."""
+        """Save RMSProp states with index-based keys."""
         base_state = super().state_dict()
         custom_state = {}
         for key, opt in self.custom_opts.items():
             # Convert tuple key to string for JSON serialization
             key_str = f"{key[0]},{key[1]}"
-            # 🐛 BUG FIX #1: RMSProp only has 's' attribute, not 't'
             custom_state[key_str] = {
                 's': opt.s.tolist() if opt.s is not None else None
             }
@@ -363,7 +405,7 @@ class RMSPropWrapper(Optimizer):
         return base_state
     
     def load_state_dict(self, state_dict):
-        """AUDIT FIX: Restore RMSProp states using index mapping."""
+        """Restore RMSProp states using index mapping."""
         import numpy as np
         custom_state = state_dict.pop('custom_opts', {})
         super().load_state_dict(state_dict)
@@ -383,10 +425,8 @@ class RMSPropWrapper(Optimizer):
                         epsilon=group['epsilon']
                     )
                     opt.s = np.array(opt_state['s'], dtype=np.float32) if opt_state['s'] is not None else None
-                    # 🐛 BUG FIX #1: RMSProp doesn't have 't' attribute
                     self.custom_opts[key] = opt
             else:
-                # 🐛 BUG FIX #4: Log warning when indices are invalid
                 import logging
                 logging.warning(f"Skipping invalid optimizer state for key {key_str} (indices out of bounds)")
 
@@ -423,14 +463,29 @@ class AdamWWrapper(Optimizer):
                     )
                 grad = p.grad.data.cpu().numpy()
                 param_np = p.data.cpu().numpy()
+                original_shape = param_np.shape
+                original_dtype = p.data.dtype
+                
                 updated_param = self.custom_opts[key].step(param_np.flatten(), grad.flatten())
-                updated_tensor = torch.from_numpy(updated_param.reshape(param_np.shape))
-                p.data.copy_(updated_tensor.to(p.data.dtype).to(p.device))
+                
+                # Validate shape before reshaping
+                if updated_param.size != param_np.size:
+                    raise ValueError(
+                        f"AdamW optimizer returned wrong size: "
+                        f"expected {param_np.size}, got {updated_param.size}"
+                    )
+                
+                # Reshape and update parameter preserving dtype/device
+                try:
+                    updated_tensor = torch.from_numpy(updated_param.reshape(original_shape))
+                    p.data.copy_(updated_tensor.to(original_dtype).to(p.device))
+                except Exception as e:
+                    raise RuntimeError(f"Failed to update parameter: {e}") from e
 
         return loss
     
     def state_dict(self):
-        """AUDIT FIX: Save AdamW states with index-based keys."""
+        """Save AdamW states with index-based keys."""
         base_state = super().state_dict()
         custom_state = {}
         for key, opt in self.custom_opts.items():
@@ -445,7 +500,7 @@ class AdamWWrapper(Optimizer):
         return base_state
     
     def load_state_dict(self, state_dict):
-        """AUDIT FIX: Restore AdamW states using index mapping."""
+        """Restore AdamW states using index mapping."""
         import numpy as np
         custom_state = state_dict.pop('custom_opts', {})
         super().load_state_dict(state_dict)
@@ -497,7 +552,7 @@ class SAMWrapper(Optimizer):
                Improving Generalization", ICLR 2021
     """
     
-    def __init__(self, base_optimizer, rho=0.05, adaptive=False):
+    def __init__(self, base_optimizer, rho=0.05, adaptive=False):  # pylint: disable=super-init-not-called
         """
         Initialize SAM optimizer wrapper.
         
@@ -505,8 +560,13 @@ class SAMWrapper(Optimizer):
             base_optimizer: Any PyTorch optimizer instance (SGD, Adam, etc.)
             rho: Neighborhood size for sharpness (default: 0.05)
             adaptive: Use adaptive SAM variant (default: False)
+        
+        Note:
+            Does not call super().__init__() because SAM is a wrapper that 
+            delegates all optimization to base_optimizer. param_groups and 
+            state are inherited by reference from the base optimizer.
         """
-        # SAM wraps an existing optimizer
+        # SAM wraps an existing optimizer - no super().__init__() needed
         self.base_optimizer = base_optimizer
         self.rho = rho
         self.adaptive = adaptive
@@ -528,10 +588,9 @@ class SAMWrapper(Optimizer):
         # Local container for adversarial perturbations to avoid mutating
         # base_optimizer.state entries, which can interfere with lazy
         # initialization of base optimizers (e.g., Adam's 'exp_avg').
-        # 🐛 AUDIT FIX: Use id(p) as key instead of tensor p (tensors are unhashable)
         self._perturbations = {}
         
-        # 🐛 BUG FIX #11: Track sharpness metric for telemetry
+        # Track sharpness metric for telemetry
         self.sharpness_history = []  # List of (step, sharpness) tuples
         self._step_count = 0
     
@@ -549,13 +608,13 @@ class SAMWrapper(Optimizer):
                         shared_device = p.device
                     grads.append(p.grad.detach().view(-1))
         
-        # 🐛 FIX #12: Guard against empty list (no gradients present)
+        # Guard against empty list (no gradients present)
         if not grads:
             return torch.tensor(0.0, device=shared_device if shared_device else torch.device('cpu'), dtype=torch.float32)
         
         # Concatenate all gradients and compute overall norm
         all_grads = torch.cat(grads)
-        norm = torch.linalg.norm(all_grads, ord=2)
+        norm = torch.norm(all_grads, p=2)
         
         return norm
     
@@ -564,7 +623,7 @@ class SAMWrapper(Optimizer):
         """Take adversarial step in direction of gradient."""
         grad_norm = self._get_grad_norm()
         
-        # 🐛 FIX #13: Properly handle scale tensor with correct device/dtype
+        # Properly handle scale tensor with correct device/dtype
         # Avoid division by zero with small epsilon
         scale = self.rho / (grad_norm + 1e-12)
         
@@ -573,7 +632,7 @@ class SAMWrapper(Optimizer):
                 if p.grad is None:
                     continue
                 
-                # 🐛 FIX #13: Ensure scale matches parameter device/dtype
+                # Ensure scale matches parameter device/dtype
                 scale_p = scale.to(device=p.device, dtype=p.dtype)
                 
                 # Compute perturbation with proper dtype handling
@@ -587,7 +646,6 @@ class SAMWrapper(Optimizer):
                 p.add_(e_w)  # Move to adversarial point
                 # Store perturbation for later restoration in local map
                 # (do NOT write into base optimizer state dict)
-                # 🐛 AUDIT FIX: Use id(p) as key (tensors are unhashable)
                 self._perturbations[id(p)] = e_w
     
     @torch.no_grad()
@@ -598,7 +656,6 @@ class SAMWrapper(Optimizer):
                 if p.grad is None:
                     continue
                 # Restore original parameters using locally stored perturbations
-                # 🐛 AUDIT FIX: Use id(p) as key (tensors are unhashable)
                 e_w = self._perturbations.pop(id(p), None)
                 if e_w is not None:
                     p.sub_(e_w)
@@ -634,7 +691,7 @@ class SAMWrapper(Optimizer):
         loss_adv = closure()  # Recompute loss and gradients at perturbed parameters
         loss_at_adversarial = loss_adv.item() if hasattr(loss_adv, 'item') else float(loss_adv)
         
-        # 🐛 BUG FIX #11: Track sharpness (loss difference between adversarial and current point)
+        # Track sharpness (loss difference between adversarial and current point)
         sharpness = abs(loss_at_adversarial - loss_at_current)
         self._step_count += 1
         self.sharpness_history.append((self._step_count, sharpness))
@@ -649,7 +706,7 @@ class SAMWrapper(Optimizer):
         self.base_optimizer.zero_grad(set_to_none=set_to_none)
     
     def get_sharpness_history(self):
-        """🐛 BUG FIX #11: Get sharpness tracking history for analysis.
+        """Get sharpness tracking history for analysis.
         
         Returns:
             List of (step, sharpness) tuples tracking loss landscape sharpness
@@ -657,7 +714,7 @@ class SAMWrapper(Optimizer):
         return self.sharpness_history.copy()
     
     def get_average_sharpness(self, last_n_steps=None):
-        """🐛 BUG FIX #11: Get average sharpness over recent steps.
+        """Get average sharpness over recent steps.
         
         Args:
             last_n_steps: Number of recent steps to average (None = all steps)
@@ -880,15 +937,29 @@ class AdaBoundWrapper(Optimizer):
                 
                 # Flatten for optimizer
                 original_shape = param_np.shape
+                original_dtype = p.data.dtype
                 param_flat = param_np.flatten()
                 grad_flat = grad.flatten()
                 
                 # Update using custom optimizer
                 new_param_flat = opt.step(param_flat, grad_flat)
                 
+                # Validate size before reshape
+                if new_param_flat.size != param_flat.size:
+                    raise ValueError(
+                        f"AdaBound optimizer returned wrong size: expected {param_flat.size}, "
+                        f"got {new_param_flat.size}. Original shape: {original_shape}"
+                    )
+                
                 # Reshape and copy back
-                new_param = new_param_flat.reshape(original_shape)
-                p.data.copy_(torch.from_numpy(new_param).to(p.device))
+                try:
+                    new_param = new_param_flat.reshape(original_shape)
+                    p.data.copy_(torch.from_numpy(new_param).to(p.device, dtype=original_dtype))
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Failed to reshape AdaBound output: {e}. "
+                        f"Original shape: {original_shape}, flat size: {new_param_flat.size}"
+                    )
         
         return loss
 
@@ -928,15 +999,29 @@ class RAdamWrapper(Optimizer):
                 
                 # Flatten for optimizer
                 original_shape = param_np.shape
+                original_dtype = p.data.dtype
                 param_flat = param_np.flatten()
                 grad_flat = grad.flatten()
                 
                 # Update using custom optimizer
                 new_param_flat = opt.step(param_flat, grad_flat)
                 
+                # Validate size before reshape
+                if new_param_flat.size != param_flat.size:
+                    raise ValueError(
+                        f"RAdam optimizer returned wrong size: expected {param_flat.size}, "
+                        f"got {new_param_flat.size}. Original shape: {original_shape}"
+                    )
+                
                 # Reshape and copy back
-                new_param = new_param_flat.reshape(original_shape)
-                p.data.copy_(torch.from_numpy(new_param).to(p.device))
+                try:
+                    new_param = new_param_flat.reshape(original_shape)
+                    p.data.copy_(torch.from_numpy(new_param).to(p.device, dtype=original_dtype))
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Failed to reshape RAdam output: {e}. "
+                        f"Original shape: {original_shape}, flat size: {new_param_flat.size}"
+                    )
         
         return loss
 
@@ -977,15 +1062,29 @@ class LAMBWrapper(Optimizer):
                 
                 # Flatten for optimizer
                 original_shape = param_np.shape
+                original_dtype = p.data.dtype
                 param_flat = param_np.flatten()
                 grad_flat = grad.flatten()
                 
                 # Update using custom optimizer
                 new_param_flat = opt.step(param_flat, grad_flat)
                 
+                # Validate size before reshape
+                if new_param_flat.size != param_flat.size:
+                    raise ValueError(
+                        f"LAMB optimizer returned wrong size: expected {param_flat.size}, "
+                        f"got {new_param_flat.size}. Original shape: {original_shape}"
+                    )
+                
                 # Reshape and copy back
-                new_param = new_param_flat.reshape(original_shape)
-                p.data.copy_(torch.from_numpy(new_param).to(p.device))
+                try:
+                    new_param = new_param_flat.reshape(original_shape)
+                    p.data.copy_(torch.from_numpy(new_param).to(p.device, dtype=original_dtype))
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Failed to reshape LAMB output: {e}. "
+                        f"Original shape: {original_shape}, flat size: {new_param_flat.size}"
+                    )
         
         return loss
 

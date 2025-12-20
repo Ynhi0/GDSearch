@@ -4,7 +4,7 @@ Test configuration fairness to ensure unbiased optimizer comparisons.
 This test suite validates that all optimizers get equal hyperparameter search ranges,
 preventing biased comparisons that could invalidate experimental conclusions.
 
-Per audit requirement: "Baseline Fairness - Are the search spaces symmetric?"
+Per review requirement: "Baseline Fairness - Are the search spaces symmetric?"
 """
 
 import json
@@ -31,7 +31,7 @@ class TestConfigFairness:
         """
         Test that all optimizers in nn_tuning.json have equal LR search ranges.
         
-        AUDIT REQUIREMENT: Prevent bias where one optimizer gets extensive tuning
+        REVIEW REQUIREMENT: Prevent bias where one optimizer gets extensive tuning
         while another gets a single fixed learning rate.
         """
         config = load_config(config_dir / 'nn_tuning.json')

@@ -133,8 +133,9 @@ class TestAblationStudyRigor:
             torch.randn(128, 1, 28, 28),
             torch.randint(0, 10, (128,))
         )
-        train_loader = torch.utils.data.DataLoader(dataset, batch_size=16)
-        test_loader = torch.utils.data.DataLoader(dataset, batch_size=16)
+        # Pass dataset, not loader
+        train_dataset = dataset
+        test_dataset = dataset
         
         config = {
             'use_amp': False,
@@ -143,7 +144,7 @@ class TestAblationStudyRigor:
         }
         
         result = run_single_experiment(
-            config, train_loader, test_loader, device, epochs=2, seed=42
+            config, train_dataset, test_dataset, device, epochs=2, seed=42
         )
         
         # Validate result structure
@@ -165,12 +166,14 @@ class TestAblationStudyRigor:
         device = torch.device('cuda')
         
         # Create small dataset
-        dataset = torch.utils.data.TensorDataset(
+        train_dataset = torch.utils.data.TensorDataset(
             torch.randn(128, 1, 28, 28),
             torch.randint(0, 10, (128,))
         )
-        train_loader = torch.utils.data.DataLoader(dataset, batch_size=16)
-        test_loader = torch.utils.data.DataLoader(dataset, batch_size=16)
+        test_dataset = torch.utils.data.TensorDataset(
+            torch.randn(32, 1, 28, 28),
+            torch.randint(0, 10, (32,))
+        )
         
         config = {
             'use_amp': True,
@@ -179,7 +182,7 @@ class TestAblationStudyRigor:
         }
         
         result = run_single_experiment(
-            config, train_loader, test_loader, device, epochs=2, seed=42
+            config, train_dataset, test_dataset, device, epochs=2, seed=42
         )
         
         assert 'final_test_acc' in result

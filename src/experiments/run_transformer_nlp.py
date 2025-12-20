@@ -3,7 +3,7 @@ Fine-tune a Transformer (BERT) on IMDB with optimizer comparisons and gradient d
 
 DEMO/PROOF-OF-CONCEPT SCRIPT
 
-CRITICAL LIMITATION (AUDIT FLAG):
+CRITICAL LIMITATION (REVIEW FLAG):
 This script uses a LIMITED subset of IMDB (2000 train, 1000 test) and supports
 only a SUBSET of optimizers (AdamW, SGD). It is a proof-of-concept for NLP
 domain applicability and should NOT be used for strong cross-domain generalization
@@ -13,7 +13,7 @@ claims without extension to:
 - Multiple NLP tasks (not just sentiment classification)
 
 For SOTA research claims, extend this script or clearly state its limitations
-in publications.
+in reports.
 
 Outputs per-run CSVs compatible with the repository's result conventions.
 This script guards optional dependencies (transformers, datasets) so import errors won't break CI.

@@ -268,7 +268,7 @@ def run_full_pipeline(
                 'p_value': p_value,
                 'Significant (raw)': bool(test_result.get('significant', p_value < 0.05)),
             }
-            # AUDIT FIX: Handle new field structure (effect_size, effect_size_type)
+            # Handle new field structure (effect_size, effect_size_type)
             # Use effect_size field which works for both parametric and non-parametric
             effect_size_val = test_result.get('effect_size', test_result.get('cohens_d'))
             effect_size_type = test_result.get('effect_size_type', 'unknown')
@@ -359,7 +359,7 @@ def run_full_pipeline(
     optimizer_results = {}
     
     for result_file in result_files:
-        # 🐛 AUDIT FIX: Extract optimizer name from metadata JSON (robust) or fallback to filename parsing
+        # Extract optimizer name from metadata JSON (robust) or fallback to filename parsing
         filename = os.path.basename(result_file)
         opt_name = None
         

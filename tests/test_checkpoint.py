@@ -214,9 +214,15 @@ class TestInterruptResume:
         optimizer = optim.SGD(model.parameters(), lr=1.0)
         scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
         
-        # Train for 5 epochs
+        # Train for 5 epochs (simulate optimizer steps before scheduler steps)
         lrs = []
         for epoch in range(5):
+            # Simulate training batch (required for scheduler.step() to work correctly)
+            optimizer.zero_grad()
+            dummy_loss = model(torch.randn(5, 10)).sum()
+            dummy_loss.backward()
+            optimizer.step()
+            
             lrs.append(optimizer.param_groups[0]['lr'])
             scheduler.step()
         
@@ -234,6 +240,12 @@ class TestInterruptResume:
         # Continue for 5 more epochs
         resumed_lrs = []
         for epoch in range(5, 10):
+            # Simulate training batch
+            new_optimizer.zero_grad()
+            dummy_loss = model(torch.randn(5, 10)).sum()
+            dummy_loss.backward()
+            new_optimizer.step()
+            
             resumed_lrs.append(new_optimizer.param_groups[0]['lr'])
             new_scheduler.step()
         

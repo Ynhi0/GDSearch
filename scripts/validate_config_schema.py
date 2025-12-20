@@ -5,7 +5,7 @@ JSON Schema Validator for Experiment Configs
 Validates all experiment configuration files against the JSON schema
 to ensure proper structure and catch typos/zombie keys.
 
-This is BLOCKER-3 fix from the Research Validity Audit.
+This is BLOCKER-3 fix from the Research Validity Review.
 
 Usage:
     python scripts/validate_config_schema.py

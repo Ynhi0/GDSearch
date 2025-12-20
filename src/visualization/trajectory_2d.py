@@ -156,16 +156,17 @@ def plot_contour_with_trajectories(
 def compare_momentum_beta_trajectories(
     test_function: str = 'rosenbrock',
     beta_values: List[float] = None,
-    output_dir: str = 'results/trajectory_visualization'
+    save_dir: str = 'results/trajectory_visualization'
 ):
-    if beta_values is None:
-        beta_values = [0.0, 0.5, 0.9, 0.99]
     """
     Visualize effect of momentum β on trajectories.
     
     Key research question: How does β shape the trajectory smoothness?
     """
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    if beta_values is None:
+        beta_values = [0.0, 0.5, 0.9, 0.99]
+    
+    Path(save_dir).mkdir(parents=True, exist_ok=True)
     
     # Select test function
     if test_function == 'rosenbrock':
@@ -201,7 +202,7 @@ def compare_momentum_beta_trajectories(
             optimizer = SGDMomentum(lr=0.01, beta=beta)
         optimizers_config.append((opt_name, optimizer, grad_func))
     
-    output_path = Path(output_dir) / f'momentum_beta_trajectories_{test_function}.png'
+    output_path = Path(save_dir) / f'momentum_beta_trajectories_{test_function}.png'
     
     plot_contour_with_trajectories(
         func, optimizers_config, x0, xlim, ylim, title, output_path
@@ -211,16 +212,17 @@ def compare_momentum_beta_trajectories(
 def compare_adam_beta_trajectories(
     test_function: str = 'rosenbrock',
     beta_configs: List[Tuple[float, float]] = None,
-    output_dir: str = 'results/trajectory_visualization'
+    save_dir: str = 'results/trajectory_visualization'
 ):
-    if beta_configs is None:
-        beta_configs = [(0.9, 0.999), (0.5, 0.99), (0.95, 0.9999)]
     """
     Visualize effect of Adam β1, β2 on trajectories.
     
     Key research question: How do β1, β2 shape the optimization dynamics?
     """
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    if beta_configs is None:
+        beta_configs = [(0.9, 0.999), (0.5, 0.99), (0.95, 0.9999)]
+    
+    Path(save_dir).mkdir(parents=True, exist_ok=True)
     
     # Select test function
     if test_function == 'rosenbrock':
@@ -245,7 +247,7 @@ def compare_adam_beta_trajectories(
         optimizer = Adam(lr=0.01, beta1=beta1, beta2=beta2)
         optimizers_config.append((opt_name, optimizer, grad_func))
     
-    output_path = Path(output_dir) / f'adam_beta_trajectories_{test_function}.png'
+    output_path = Path(save_dir) / f'adam_beta_trajectories_{test_function}.png'
     
     plot_contour_with_trajectories(
         func, optimizers_config, x0, xlim, ylim, title, output_path
@@ -254,14 +256,14 @@ def compare_adam_beta_trajectories(
 
 def compare_optimizer_families(
     test_function: str = 'rosenbrock',
-    output_dir: str = 'results/trajectory_visualization'
+    save_dir: str = 'results/trajectory_visualization'
 ):
     """
     Compare SGD, Momentum, Nesterov, Adam on same 2D function.
     
     Provides side-by-side visual comparison for research presentation.
     """
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    Path(save_dir).mkdir(parents=True, exist_ok=True)
     
     # Select test function
     if test_function == 'rosenbrock':
@@ -294,7 +296,7 @@ def compare_optimizer_families(
         ('Adam', Adam(lr=0.01), grad_func)
     ]
     
-    output_path = Path(output_dir) / f'optimizer_comparison_{test_function}.png'
+    output_path = Path(save_dir) / f'optimizer_comparison_{test_function}.png'
     
     plot_contour_with_trajectories(
         func, optimizers_config, x0, xlim, ylim, title, output_path
@@ -308,25 +310,25 @@ if __name__ == '__main__':
     print("2D Trajectory Visualization")
     print("="*60)
     
-    output_dir = 'results/trajectory_visualization'
+    viz_output_dir = 'results/trajectory_visualization'
     
     # Study 1: Momentum β effect
     print("\n1. Generating Momentum β trajectories...")
-    compare_momentum_beta_trajectories('rosenbrock', output_dir=output_dir)
-    compare_momentum_beta_trajectories('ackley', output_dir=output_dir)
+    compare_momentum_beta_trajectories('rosenbrock', save_dir=viz_output_dir)
+    compare_momentum_beta_trajectories('ackley', save_dir=viz_output_dir)
     
     # Study 2: Adam β1, β2 effect
     print("\n2. Generating Adam β1,β2 trajectories...")
-    compare_adam_beta_trajectories('rosenbrock', output_dir=output_dir)
-    compare_adam_beta_trajectories('ackley', output_dir=output_dir)
+    compare_adam_beta_trajectories('rosenbrock', save_dir=viz_output_dir)
+    compare_adam_beta_trajectories('ackley', save_dir=viz_output_dir)
     
     # Study 3: Optimizer family comparison
     print("\n3. Generating optimizer family comparisons...")
-    compare_optimizer_families('rosenbrock', output_dir=output_dir)
-    compare_optimizer_families('saddle', output_dir=output_dir)
-    compare_optimizer_families('ill_conditioned', output_dir=output_dir)
+    compare_optimizer_families('rosenbrock', save_dir=viz_output_dir)
+    compare_optimizer_families('saddle', save_dir=viz_output_dir)
+    compare_optimizer_families('ill_conditioned', save_dir=viz_output_dir)
     
-    print(f"\nAll visualizations saved to {output_dir}/")
+    print(f"\nAll visualizations saved to {viz_output_dir}/")
     print("\nGenerated plots show:")
     print("  - Trajectory smoothness differences")
     print("  - Effect of hyperparameters (β, β1, β2)")

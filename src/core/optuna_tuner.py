@@ -89,7 +89,7 @@ class OptunaHyperparameterTuner:
             sampler=self.sampler,
             pruner=self.pruner,
             storage=storage,
-            load_if_exists=True
+            load_if_exists=False  # Changed to False to prevent contamination
         )
         
     def optimize(
@@ -240,25 +240,35 @@ def suggest_lr_scheduler_params(trial: optuna.Trial, scheduler_name: str, max_ep
     params = {'scheduler': scheduler_name}
     
     if scheduler_name == 'step':
-        # 🐛 AUDIT FIX: Guard against invalid ranges when max_epochs is too small
-        step_min = max(1, max_epochs // 10)
-        step_max = max(step_min + 1, max_epochs // 2)
-        params['step_size'] = trial.suggest_int('step_size', step_min, step_max)
-        params['gamma'] = trial.suggest_float('gamma', 0.05, 0.5)
+        # Guard against invalid ranges when max_epochs is too small
+        if max_epochs < 3:
+            # Too few epochs for meaningful stepping
+            params['step_size'] = 1
+            params['gamma'] = 0.1
+        else:
+            step_min = max(1, max_epochs // 10)
+            step_max = max(step_min + 1, max_epochs // 2)
+            params['step_size'] = trial.suggest_int('step_size', step_min, step_max)
+            params['gamma'] = trial.suggest_float('gamma', 0.05, 0.5)
     
     elif scheduler_name == 'multistep':
-        # 🐛 AUDIT FIX: Guard against invalid milestone ranges
-        n_milestones = trial.suggest_int('n_milestones', 2, min(4, max_epochs - 1))
-        milestone_min = max(1, max_epochs // 10)
-        milestone_max = max(milestone_min + 1, max_epochs - 5)
-        if milestone_max <= milestone_min:
-            milestone_max = max_epochs - 1
-        milestones = sorted([
-            trial.suggest_int(f'milestone_{i}', milestone_min, milestone_max)
-            for i in range(n_milestones)
-        ])
-        params['milestones'] = milestones
-        params['gamma'] = trial.suggest_float('gamma', 0.05, 0.5)
+        # Guard against invalid milestone ranges
+        if max_epochs < 10:
+            # Too few epochs for milestones - use simple defaults
+            params['milestones'] = [max_epochs // 2] if max_epochs >= 2 else [1]
+            params['gamma'] = 0.1
+        else:
+            n_milestones = trial.suggest_int('n_milestones', 2, min(4, max_epochs - 1))
+            milestone_min = max(1, max_epochs // 10)
+            milestone_max = max(milestone_min + n_milestones, max_epochs - 5)
+            if milestone_max <= milestone_min:
+                milestone_max = max_epochs - 1
+            milestones = sorted([
+                trial.suggest_int(f'milestone_{i}', milestone_min, milestone_max)
+                for i in range(n_milestones)
+            ])
+            params['milestones'] = milestones
+            params['gamma'] = trial.suggest_float('gamma', 0.05, 0.5)
     
     elif scheduler_name == 'cosine':
         params['T_max'] = max_epochs

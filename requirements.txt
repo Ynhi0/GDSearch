@@ -2,6 +2,11 @@
 # CRITICAL: All major dependencies are PINNED to ensure reproducibility
 # Last verified: December 2025 with PyTorch 2.6.0
 #
+# PYTHON VERSION COMPATIBILITY:
+# - Recommended: Python 3.11 or 3.12 (full dataset support)
+# - Python 3.13: Partial support (IMDB dataset loading fails due to fsspec glob issues)
+# - Kaggle: Python 3.10 (fully supported)
+#
 # For Kaggle execution, use requirements_kaggle.txt which adapts to pre-installed packages
 
 # ============================================================================
@@ -42,10 +47,14 @@ rich>=12.4.4,<14.0
 # ============================================================================
 # DATA PROCESSING - VERSION CONSTRAINED
 # ============================================================================
-fsspec==2025.3.0  # Exact version for Kaggle gcsfs compatibility
-pyarrow>=14.0.0,<20.0.0  # Compatible with cudf-cu12 (Kaggle GPU DataFrames)
-datasets>=2.14.0,<3.0.0  # CRITICAL: >4.4.0 breaks pyarrow compatibility
-huggingface-hub>=0.30.0,<1.0
+# NOTE: Python 3.13 has known glob pattern issues with HuggingFace datasets
+# For Python 3.13: IMDB dataset loading will fail - code falls back to synthetic data
+# For Python 3.11/3.12: All datasets work correctly
+# Kaggle uses Python 3.10, so this is not an issue in production
+fsspec>=2023.6.0,<2024.10.0  # Compatible with HuggingFace Hub glob patterns
+pyarrow>=14.0.0,<20.0.0  # Compatible with cudf-cu12 (Kaggle GPU DataFrames)  
+datasets>=2.14.0,<3.0.0  # CRITICAL: HuggingFace datasets library
+huggingface-hub>=0.20.0,<0.25.0  # Compatible with fsspec glob patterns
 transformers>=4.34.0,<5.0
 
 # ============================================================================
@@ -53,6 +62,16 @@ transformers>=4.34.0,<5.0
 # ============================================================================
 portalocker>=2.0.0
 medpy>=0.4.0,<1.0  # Medical image processing
+
+# ============================================================================
+# MEDICAL DATASET SUPPORT (REQUIRED)
+# ============================================================================
+medmnist>=3.0.0  # REQUIRED: Lightweight medical imaging datasets (default for medical experiments)
+
+# ============================================================================
+# OPTIONAL: ADDITIONAL MEDICAL DATASET SOURCES
+# ============================================================================
+kaggle>=1.5.0  # OPTIONAL: Kaggle API for downloading additional medical datasets (requires credentials)
 
 # ============================================================================
 # SECURITY & COMPATIBILITY

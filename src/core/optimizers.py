@@ -12,7 +12,7 @@ class Optimizer:
     
     def __init__(self):
         """Initialize optimizer."""
-        pass
+        # Base implementation does nothing
     
     def step(self, params, gradients):
         """
@@ -29,7 +29,7 @@ class Optimizer:
     
     def reset(self):
         """Reset internal optimizer state."""
-        pass
+        # Default: no state to reset
 
 
 class SGD(Optimizer):
@@ -65,7 +65,7 @@ class SGD(Optimizer):
     
     def reset(self):
         """SGD has no internal state."""
-        pass
+        # Stateless optimizer
 
 
 class SGDMomentum(Optimizer):
@@ -300,7 +300,6 @@ class Adam(Optimizer):
             self.v_y = self.beta2 * self.v_y + (1 - self.beta2) * grad_y**2
             
             # Compute bias-corrected moment estimates
-            # 🐛 BUG FIX: Add epsilon guard for numerical stability when t is large
             m_x_hat = self.m_x / max(1 - self.beta1**self.t, 1e-8)
             m_y_hat = self.m_y / max(1 - self.beta1**self.t, 1e-8)
             v_x_hat = self.v_x / max(1 - self.beta2**self.t, 1e-8)
@@ -313,7 +312,6 @@ class Adam(Optimizer):
             return new_x, new_y
         else:
             # Handle array (for neural networks)
-            # 🐛 BUG FIX #8: Validate shape compatibility
             if self.m is None or self.m.shape != params.shape:
                 self.m = np.zeros_like(params)
                 self.v = np.zeros_like(params)
@@ -325,7 +323,6 @@ class Adam(Optimizer):
             self.v = self.beta2 * self.v + (1 - self.beta2) * gradients**2
             
             # Compute bias-corrected moment estimates
-            # 🐛 BUG FIX (Dec 2025): Add epsilon guard for numerical stability
             m_hat = self.m / max(1 - self.beta1**self.t, 1e-8)
             v_hat = self.v / max(1 - self.beta2**self.t, 1e-8)
             
@@ -381,7 +378,6 @@ class AdamW(Optimizer):
             self.v_x = self.beta2 * self.v_x + (1 - self.beta2) * (grad_x ** 2)
             self.v_y = self.beta2 * self.v_y + (1 - self.beta2) * (grad_y ** 2)
 
-            # 🐛 BUG FIX: Add epsilon guard for numerical stability
             m_x_hat = self.m_x / max(1 - self.beta1 ** self.t, 1e-8)
             m_y_hat = self.m_y / max(1 - self.beta1 ** self.t, 1e-8)
             v_x_hat = self.v_x / max(1 - self.beta2 ** self.t, 1e-8)
@@ -399,13 +395,11 @@ class AdamW(Optimizer):
             new_y = y - step_y
             return new_x, new_y
         else:
-            # 🐛 BUG FIX #8: Validate shape compatibility
             if self.m is None or self.m.shape != params.shape:
                 self.m = np.zeros_like(params)
                 self.v = np.zeros_like(params)
             self.m = self.beta1 * self.m + (1 - self.beta1) * gradients
             self.v = self.beta2 * self.v + (1 - self.beta2) * (gradients ** 2)
-            # 🐛 BUG FIX (Dec 2025): Add epsilon guard for numerical stability
             m_hat = self.m / max(1 - self.beta1 ** self.t, 1e-8)
             v_hat = self.v / max(1 - self.beta2 ** self.t, 1e-8)
             step = self.lr * m_hat / (np.sqrt(v_hat) + self.epsilon)
@@ -462,7 +456,6 @@ class AMSGrad(Optimizer):
             self.v_x = self.beta2 * self.v_x + (1 - self.beta2) * (grad_x ** 2)
             self.v_y = self.beta2 * self.v_y + (1 - self.beta2) * (grad_y ** 2)
 
-            # 🐛 BUG FIX: Add epsilon guard for numerical stability
             m_x_hat = self.m_x / max(1 - self.beta1 ** self.t, 1e-8)
             m_y_hat = self.m_y / max(1 - self.beta1 ** self.t, 1e-8)
             v_x_hat = self.v_x / max(1 - self.beta2 ** self.t, 1e-8)
@@ -476,14 +469,12 @@ class AMSGrad(Optimizer):
             new_y = y - self.lr * m_y_hat / (np.sqrt(self.vhat_max_y) + self.epsilon)
             return new_x, new_y
         else:
-            # 🐛 BUG FIX #8: Validate shape compatibility
             if self.m is None or self.m.shape != params.shape:
                 self.m = np.zeros_like(params)
                 self.v = np.zeros_like(params)
                 self.vhat_max = np.zeros_like(params)
             self.m = self.beta1 * self.m + (1 - self.beta1) * gradients
             self.v = self.beta2 * self.v + (1 - self.beta2) * (gradients ** 2)
-            # 🐛 BUG FIX: Add epsilon guard for numerical stability
             m_hat = self.m / max(1 - self.beta1 ** self.t, 1e-8)
             v_hat = self.v / max(1 - self.beta2 ** self.t, 1e-8)
             self.vhat_max = np.maximum(self.vhat_max, v_hat)
@@ -806,7 +797,7 @@ class AdaBound(Optimizer):
             self.v_y = self.beta2 * self.v_y + (1 - self.beta2) * grad_y ** 2
             
             # Compute bias-corrected moments
-            # 🐛 BUG FIX (Dec 2025): Add epsilon guard for numerical stability
+            # Add epsilon guard for numerical stability
             m_x_hat = self.m_x / max(1 - self.beta1 ** self.t, 1e-8)
             m_y_hat = self.m_y / max(1 - self.beta1 ** self.t, 1e-8)
             v_x_hat = self.v_x / max(1 - self.beta2 ** self.t, 1e-8)
@@ -902,9 +893,8 @@ class RAdam(Optimizer):
             self.v_y = self.beta2 * self.v_y + (1 - self.beta2) * grad_y ** 2
             
             # Bias correction for first moment
-            # 🐛 BUG FIX (Dec 2025): Add epsilon guard for numerical stability
             m_x_hat = self.m_x / max(1 - self.beta1 ** self.t, 1e-8)
-            m_y_hat = self.m_y / (1 - self.beta1 ** self.t)
+            m_y_hat = self.m_y / max(1 - self.beta1 ** self.t, 1e-8)
             
             # Compute length of the approximated SMA
             rho_t = self.rho_inf - 2.0 * self.t * (self.beta2 ** self.t) / (1.0 - self.beta2 ** self.t)
@@ -935,11 +925,11 @@ class RAdam(Optimizer):
             self.m = self.beta1 * self.m + (1 - self.beta1) * gradients
             self.v = self.beta2 * self.v + (1 - self.beta2) * gradients ** 2
             
-            m_hat = self.m / (1 - self.beta1 ** self.t)
-            rho_t = self.rho_inf - 2.0 * self.t * (self.beta2 ** self.t) / (1.0 - self.beta2 ** self.t)
+            m_hat = self.m / max(1 - self.beta1 ** self.t, 1e-8)
+            rho_t = self.rho_inf - 2.0 * self.t * (self.beta2 ** self.t) / max(1.0 - self.beta2 ** self.t, 1e-8)
             
             if rho_t > 4.0:
-                v_hat = self.v / (1 - self.beta2 ** self.t)
+                v_hat = self.v / max(1 - self.beta2 ** self.t, 1e-8)
                 r_t = np.sqrt(((rho_t - 4.0) * (rho_t - 2.0) * self.rho_inf) /
                              ((self.rho_inf - 4.0) * (self.rho_inf - 2.0) * rho_t))
                 return params - self.lr * r_t * m_hat / (np.sqrt(v_hat) + self.epsilon)
@@ -997,7 +987,7 @@ class LAMB(Optimizer):
             self.v_y = self.beta2 * self.v_y + (1 - self.beta2) * grad_y ** 2
             
             # Bias correction
-            # 🐛 BUG FIX (Dec 2025): Add epsilon guard for numerical stability
+            # Add epsilon guard for numerical stability
             m_x_hat = self.m_x / max(1 - self.beta1 ** self.t, 1e-8)
             m_y_hat = self.m_y / max(1 - self.beta1 ** self.t, 1e-8)
             v_x_hat = self.v_x / max(1 - self.beta2 ** self.t, 1e-8)
@@ -1008,7 +998,7 @@ class LAMB(Optimizer):
             update_y = m_y_hat / (np.sqrt(v_y_hat) + self.epsilon) + self.weight_decay * y
             
             # Compute trust ratio
-            # 🐛 BUG FIX #9: Add epsilon for numerical stability in edge cases
+            # Add epsilon for numerical stability in edge cases
             param_norm = np.sqrt(x**2 + y**2)
             update_norm = np.sqrt(update_x**2 + update_y**2)
             
@@ -1036,7 +1026,7 @@ class LAMB(Optimizer):
             
             update = m_hat / (np.sqrt(v_hat) + self.epsilon) + self.weight_decay * params
             
-            # 🐛 BUG FIX #9: Use epsilon for numerical stability in norm comparison
+            # Use epsilon for numerical stability in norm comparison
             param_norm = np.linalg.norm(params)
             update_norm = np.linalg.norm(update)
             

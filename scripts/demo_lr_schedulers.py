@@ -248,4 +248,4 @@ if __name__ == '__main__':
     # Print summary
     print_scheduler_summary()
     
-    print("\n🎉 Demo complete! Check plots/ directory for visualizations.")
+    print("\nDemo complete! Check plots/ directory for visualizations.")

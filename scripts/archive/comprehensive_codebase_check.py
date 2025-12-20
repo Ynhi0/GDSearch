@@ -32,7 +32,7 @@ class CodebaseHealthChecker:
         
     def check_all(self):
         """Run all health checks"""
-        logger.info("🔍 COMPREHENSIVE CODEBASE HEALTH CHECK")
+        logger.info("COMPREHENSIVE CODEBASE HEALTH CHECK")
         logger.info("=" * 80)
         
         # Check main experiment files
@@ -192,7 +192,7 @@ class CodebaseHealthChecker:
                     bare_except_count += 1
                     self.warnings.append(f"⚠️  Bare except in {py_file.name}")
             except (IOError, UnicodeDecodeError) as e:
-                # 🐛 BUG FIX #20: Handle file reading errors
+                # Handle file reading errors
                 logging.debug(f"Failed to read {py_file.name}: {e}")
                 pass
         

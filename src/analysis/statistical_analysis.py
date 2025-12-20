@@ -21,6 +21,57 @@ import matplotlib.pyplot as plt
 import warnings
 
 
+def safe_shapiro(data: np.ndarray, alpha: float = 0.05) -> Dict:
+    """
+    Safe Shapiro-Wilk test with zero-variance handling.
+    
+    Prevents scipy warnings when data has zero variance.
+    
+    Args:
+        data: Array of data to test
+        alpha: Significance level
+        
+    Returns:
+        Dictionary with test results
+    """
+    data_range = data.max() - data.min()
+    
+    if data_range < 1e-10:
+        # Zero variance: deterministic case, treat as non-normal
+        return {
+            'method': 'shapiro',
+            'statistic': 1.0,
+            'p_value': 1.0,
+            'normal': False,
+            'zero_variance': True,
+            'interpretation': "Data has zero variance (constant values). Treated as non-normal."
+        }
+    
+    if len(data) < 3:
+        # Shapiro-Wilk requires n >= 3
+        return {
+            'method': 'shapiro',
+            'statistic': None,
+            'p_value': None,
+            'normal': None,
+            'zero_variance': False,
+            'interpretation': f"Sample size {len(data)} too small for Shapiro-Wilk (requires n >= 3)."
+        }
+    
+    statistic, p_value = stats.shapiro(data)
+    normal = p_value > alpha
+    interpretation = f"Data {'appears' if normal else 'does not appear'} normally distributed (W={statistic:.4f}, p={p_value:.4f})"
+    
+    return {
+        'method': 'shapiro',
+        'statistic': statistic,
+        'p_value': p_value,
+        'normal': normal,
+        'zero_variance': False,
+        'interpretation': interpretation
+    }
+
+
 def load_multiseed_results(pattern: str, results_dir: str = 'results') -> List[pd.DataFrame]:
     """
     Load results from multiple seed runs.
@@ -37,30 +88,42 @@ def load_multiseed_results(pattern: str, results_dir: str = 'results') -> List[p
     return [pd.read_csv(f) for f in sorted(files)]
 
 
-def extract_final_metric(dfs: List[pd.DataFrame], metric: str = 'test_accuracy', exclude_tainted: bool = True) -> np.ndarray:
+def extract_final_metric(dfs: List[pd.DataFrame], metric: str = 'test_accuracy', exclude_tainted: bool = True, exclude_diverged: bool = True) -> np.ndarray:
     """Extract final metric value from each run.
 
     Args:
         dfs: List of DataFrames produced by runs
         metric: Name of the metric to extract from `eval` phase rows
         exclude_tainted: If True, skip runs (DataFrames) where any `tainted` flag is True.
+        exclude_diverged: If True, skip runs (DataFrames) where `diverged` column is True.
     """
     values = []
     for df in dfs:
+        if exclude_diverged and 'diverged' in df.columns:
+            try:
+                # Normalize to string, strip whitespace, lowercase
+                s = df['diverged'].astype(str).str.strip().str.lower()
+                # Map known true/false strings to bool
+                df['diverged'] = s.isin(['true', '1', 't', 'yes', 'y'])
+                if df['diverged'].any():
+                    logging.info(f"Excluding diverged run from statistical analysis")
+                    continue
+            except Exception:
+                # If parsing fails, default to False (assume not diverged)
+                df['diverged'] = False
+        
         # If requested, skip runs that are marked tainted (OOM recovery happened)
         if exclude_tainted and 'tainted' in df.columns:
-            # Some exported CSVs may have a single boolean per run; if so, use any(True) to decide
             try:
+                # Normalize to string, strip whitespace, lowercase
+                s = df['tainted'].astype(str).str.strip().str.lower()
+                # Map known true/false strings to bool
+                df['tainted'] = s.isin(['true', '1', 't', 'yes', 'y'])
                 if df['tainted'].any():
                     continue
             except Exception:
-                # If type mismatch or other problem, attempt element-wise check
-                try:
-                    if any(bool(x) for x in df['tainted'].values):
-                        continue
-                except Exception:
-                    # If inspection fails, fall back to include the run (don't silently drop)
-                    pass
+                # If parsing fails, default to False (assume not tainted)
+                df['tainted'] = False
 
         eval_df = df[df['phase'] == 'eval']
         if not eval_df.empty:
@@ -120,7 +183,7 @@ def compare_optimizers_ttest(
     """
     Perform independent t-test between two optimizers.
     
-    AUDIT FIX: Added automatic test selection based on normality.
+    Added automatic test selection based on normality.
     If auto_select_test=True, performs Shapiro-Wilk normality test and
     falls back to Mann-Whitney U test if normality is violated.
     
@@ -143,55 +206,35 @@ def compare_optimizers_ttest(
     std_B = results_B.std()
     n_B = len(results_B)
     
-    # AUDIT FIX: Automatic normality testing
     test_used = "welch_t_test"
     normality_check = {}
     
     if auto_select_test and n_A >= 3 and n_B >= 3:
         # Shapiro-Wilk test requires n >= 3
         try:
-            # CRITICAL FIX: Check for zero variance before calling Shapiro
-            # scipy.stats.shapiro warns when data has range zero
-            range_A = results_A.max() - results_A.min()
-            range_B = results_B.max() - results_B.min()
+            # CRITICAL FIX: Use safe_shapiro to handle zero variance without warnings
+            result_A = safe_shapiro(results_A)
+            result_B = safe_shapiro(results_B)
             
-            if range_A == 0 or range_B == 0:
-                # Constant data: treat as degenerate case
-                # For zero variance, we'll use special handling in parametric path
-                # (don't force Mann-Whitney - it's less appropriate for zero variance)
-                p_A = 1.0 if range_A == 0 else None
-                p_B = 1.0 if range_B == 0 else None
-                
-                if p_A is None:
-                    _, p_A = stats.shapiro(results_A)
-                if p_B is None:
-                    _, p_B = stats.shapiro(results_B)
-                    
-                normality_check = {
-                    'shapiro_p_A': p_A,
-                    'shapiro_p_B': p_B,
-                    'normal_A': True,  # Treat constant data as "normal" for test selection
-                    'normal_B': True,
-                    'zero_variance_A': range_A == 0,
-                    'zero_variance_B': range_B == 0
-                }
-                # Don't change test_used - let the zero-variance handler below deal with it
+            normality_check = {
+                'shapiro_p_A': result_A['p_value'],
+                'shapiro_p_B': result_B['p_value'],
+                'normal_A': result_A['normal'] if result_A['normal'] is not None else True,
+                'normal_B': result_B['normal'] if result_B['normal'] is not None else True,
+                'zero_variance_A': result_A['zero_variance'],
+                'zero_variance_B': result_B['zero_variance']
+            }
+            
+            if result_A['zero_variance'] or result_B['zero_variance']:
                 logging.info(
-                    f"Zero variance detected (range_A={range_A:.4e}, range_B={range_B:.4e}). "
+                    f"Zero variance detected (A: {result_A['zero_variance']}, B: {result_B['zero_variance']}). "
                     f"Using specialized zero-variance handling."
                 )
-            else:
-                # Normal case: data has variance, proceed with Shapiro
-                _, p_A = stats.shapiro(results_A)
-                _, p_B = stats.shapiro(results_B)
-                normality_check = {
-                    'shapiro_p_A': p_A,
-                    'shapiro_p_B': p_B,
-                    'normal_A': p_A > 0.05,
-                    'normal_B': p_B > 0.05
-                }
             
             # If either distribution fails normality, use non-parametric test
+            p_A = result_A['p_value'] if result_A['p_value'] is not None else 1.0
+            p_B = result_B['p_value'] if result_B['p_value'] is not None else 1.0
+            
             if p_A <= 0.05 or p_B <= 0.05:
                 test_used = "mann_whitney_u"
                 logging.info(
@@ -201,7 +244,6 @@ def compare_optimizers_ttest(
         except Exception as e:
             logging.warning(f"Normality test failed: {e}. Defaulting to Welch's t-test.")
     
-    # AUDIT FIX: Branch to non-parametric test if normality violated
     if test_used == "mann_whitney_u":
         # Use Mann-Whitney U test (non-parametric alternative)
         try:
@@ -268,7 +310,7 @@ def compare_optimizers_ttest(
         ci_A = (mean_A, mean_A)
         ci_B = (mean_B, mean_B)
     else:
-        # AUDIT FIX: Use Welch's t-test (equal_var=False) for robustness
+        # Use Welch's t-test (equal_var=False) for robustness
         # Welch's test does not assume equal variances and is more robust
         t_stat, p_value = stats.ttest_ind(results_A, results_B, equal_var=False)
         
@@ -321,8 +363,8 @@ def compare_optimizers_ttest(
         'effect_size': cohens_d,  # Alias for consistency with non-parametric
         'effect_size_type': 'cohens_d',
         'metric': metric,
-        'test_used': test_used,  # AUDIT FIX: Report which test was used
-        'normality_check': normality_check  # AUDIT FIX: Report normality test results
+        'test_used': test_used,
+        'normality_check': normality_check
     }
     
     return result
@@ -349,7 +391,6 @@ def print_ttest_results(result: Dict):
     
     logging.info(f"\n{'─'*70}")
     logging.info(f"Test Statistics:")
-    # AUDIT FIX: Report which test was used and appropriate statistics
     if 'test_used' in result:
         logging.info(f"  Test used: {result['test_used']}")
         if 'normality_check' in result and result['normality_check']:
@@ -1227,22 +1268,9 @@ def test_normality(
     
     if method == 'shapiro':
         # Shapiro-Wilk test (good for n < 5000)
-        # CRITICAL FIX: Check for zero variance before calling Shapiro
-        data_range = data.max() - data.min()
-        if data_range == 0:
-            # Constant data: treat as non-normal (degenerate case)
-            return {
-                'method': 'shapiro',
-                'statistic': 1.0,
-                'p_value': 1.0,
-                'normal': False,
-                'zero_variance': True,
-                'interpretation': f"Data has zero variance (constant values). Treated as non-normal."
-            }
-        
-        statistic, p_value = stats.shapiro(data)
-        normal = p_value > alpha
-        interpretation = f"Data {'appears' if normal else 'does not appear'} normally distributed (W={statistic:.4f}, p={p_value:.4f})"
+        # CRITICAL FIX: Use safe_shapiro helper to prevent warnings
+        result = safe_shapiro(data, alpha=alpha)
+        return result
         
     elif method == 'anderson':
         # Anderson-Darling test

@@ -3,7 +3,7 @@
 LR Finder Efficacy Study
 Compares convergence with default LR (0.001) vs Auto-Tuned LR from LRFinder.
 
-This addresses Phase 4.1 recommendation from the audit report.
+This addresses Phase 4.1 recommendation from the review report.
 """
 
 import os

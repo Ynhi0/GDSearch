@@ -117,8 +117,8 @@ class OptimizerRegistry:
         
         # === Advanced Optimizers (if available) ===
         try:
+            # Torch native optimizers for reference
             from src.core.torch_native_optimizers import (
-                TorchSGDMomentum, TorchAdam, TorchAdamW,
                 TorchSAM, TorchLookahead
             )
             

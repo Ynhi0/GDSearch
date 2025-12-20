@@ -16,7 +16,7 @@ import torch.nn as nn
 from typing import Dict, List
 import matplotlib.pyplot as plt
 
-from src.experiments.run_nn_experiment import run_nn_experiment, build_model_and_data
+from src.experiments.run_nn_experiment import train_and_evaluate, build_model_and_data
 from src.analysis.statistical_analysis import compare_optimizers_ttest, print_ttest_results
 from src.core.data_utils import get_mnist_loaders, get_cifar10_loaders
 
@@ -43,7 +43,8 @@ def run_pytorch_baseline(config: Dict) -> pd.DataFrame:
         dataset=config['dataset'],
         model_name=config['model'],
         batch_size=config.get('batch_size', 128),
-        device=device
+        device=device,
+        seed=seed
     )
     
     # Build PyTorch optimizer
@@ -209,7 +210,7 @@ def run_baseline_comparison(
             elif 'RMSProp' in custom_opt:
                 custom_config['alpha'] = 0.99
             
-            df_custom = run_nn_experiment(custom_config)
+            df_custom = train_and_evaluate(custom_config)
             results[custom_opt]['custom'].append(df_custom)
             
             # Save

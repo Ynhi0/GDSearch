@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """
-Publication Readiness Verification Script
+DEPRECATED: Legacy Readiness Verification Script
 
-This script performs comprehensive end-to-end checks to verify the codebase
-is ready for scientific publication and Kaggle deployment.
-
-Addresses Phase 7 recommendation from the audit report.
+This file has been retained for archival purposes. Use
+`scripts/archive/verify_readiness.py` instead (it replaces 'audit' wording
+with 'review' and provides the active readiness checks).
 """
 
 import os
@@ -21,8 +20,8 @@ from datetime import datetime
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
-class PublicationReadinessChecker:
-    """Comprehensive publication readiness checker."""
+class ReadinessChecker:
+    """Comprehensive readiness checker."""
     
     def __init__(self):
         self.checks_passed = []
@@ -304,7 +303,7 @@ class PublicationReadinessChecker:
     def generate_report(self):
         """Generate final report."""
         logging.info("\n" + "="*80)
-        logging.info("PUBLICATION READINESS REPORT")
+        logging.info("READINESS REPORT")
         logging.info("="*80)
         
         total_checks = len(self.checks_passed) + len(self.checks_failed)
@@ -326,7 +325,7 @@ class PublicationReadinessChecker:
                 logging.info(f"   - {check}: {reason}")
         
         # Save report
-        report_path = Path('results/publication_readiness_report.json')
+        report_path = Path('results/readiness_report.json')
         report_path.parent.mkdir(parents=True, exist_ok=True)
         
         report = {
@@ -346,17 +345,17 @@ class PublicationReadinessChecker:
         # Final verdict
         logging.info("\n" + "="*80)
         if len(self.checks_failed) == 0:
-            logging.info("VERDICT: PUBLICATION-READY")
+            logging.info("VERDICT: READY")
             logging.info("="*80)
             logging.info("Codebase is ready for:")
             logging.info("  Academic thesis defense")
-            logging.info("  Peer-reviewed journal publication")
+            logging.info("  Recommended: Peer-reviewed journals")
             logging.info("  Reproducible research benchmarks")
             logging.info("  Kaggle GPU deployment")
         else:
             logging.info("VERDICT: NOT READY")
             logging.info("="*80)
-            logging.info(f"Fix {len(self.checks_failed)} critical issues before publication")
+            logging.info(f"Fix {len(self.checks_failed)} critical issues before release")
         logging.info("="*80)
         
         return len(self.checks_failed) == 0
@@ -364,10 +363,10 @@ class PublicationReadinessChecker:
 
 def main():
     """Main entry point."""
-    checker = PublicationReadinessChecker()
+    checker = ReadinessChecker()
     
     logging.info("="*80)
-    logging.info("GDSEARCH PUBLICATION READINESS VERIFICATION")
+    logging.info("GDSEARCH READINESS VERIFICATION")
     logging.info("="*80)
     logging.info(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     logging.info(f"Working Directory: {Path.cwd()}")

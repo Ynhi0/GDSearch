@@ -4,14 +4,12 @@ Pytest configuration for GDSearch test suite.
 Configures warning filters to reduce noise from known deprecations
 and third-party library warnings while maintaining visibility of
 project-specific issues.
-
-AUDIT FIX (Dec 18, 2025): Added to reduce test warning noise from 216k to manageable levels.
 """
 import warnings
 import pytest
 
 
-def pytest_configure(config):
+def pytest_configure(_config):
     """Configure pytest with warning filters."""
     # Suppress specific deprecation warnings from third-party libraries
     

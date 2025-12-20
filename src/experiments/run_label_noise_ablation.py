@@ -20,7 +20,6 @@ References:
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader, Subset
 import torchvision
 import torchvision.transforms as transforms
@@ -30,7 +29,6 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any
 import logging
 from dataclasses import dataclass
-import json
 
 from src.core.training_utils import set_seed
 from src.core.models import SimpleMLP, ResNet18
@@ -239,7 +237,7 @@ def train_with_noisy_labels(
         train_correct = 0
         train_total = 0
         
-        for batch_idx, (inputs, targets) in enumerate(train_loader):
+        for (inputs, targets) in train_loader:
             inputs, targets = inputs.to(device), targets.to(device)
             
             optimizer.zero_grad()
@@ -512,14 +510,14 @@ def analyze_robustness_to_noise(summary_df: pd.DataFrame) -> pd.DataFrame:
 
 if __name__ == "__main__":
     # Example usage
-    config = LabelNoiseConfig(
+    main_config = LabelNoiseConfig(
         noise_rates=[0.0, 0.1, 0.2, 0.4],
         seeds=[42, 123, 456],
         epochs=30,
         batch_size=128
     )
     
-    optimizers_config = {
+    main_optimizers_config = {
         'SGD': {'lr': 0.01, 'momentum': 0.0},
         'SGD_Momentum': {'lr': 0.01, 'momentum': 0.9},
         'Adam': {'lr': 0.001, 'beta1': 0.9, 'beta2': 0.999},
@@ -530,15 +528,15 @@ if __name__ == "__main__":
     results = run_label_noise_ablation(
         dataset_name='mnist',
         model_name='mlp',
-        optimizers_config=optimizers_config,
-        config=config,
+        optimizers_config=main_optimizers_config,
+        config=main_config,
         output_dir='results/label_noise'
     )
     
     logging.info("\nFinal summary statistics:")
-    summary = create_label_noise_summary(results)
-    logging.info(summary)
+    main_summary = create_label_noise_summary(results)
+    logging.info(main_summary)
     
     logging.info("\nRobustness analysis:")
-    robustness = analyze_robustness_to_noise(summary)
+    robustness = analyze_robustness_to_noise(main_summary)
     logging.info(robustness)

@@ -1,5 +1,5 @@
 """
-AUDIT FIX: Config validation utilities for GDSearch experiments.
+Config validation utilities for GDSearch experiments.
 
 Ensures config files use consistent keys and valid values.
 Detects "zombie keys" (present but unused) and enforces schema compliance.
@@ -174,7 +174,7 @@ def validate_all_configs(config_dir: str = 'configs', strict: bool = False) -> b
         if config_file.name == 'config_schema.json':
             continue
         
-        print(f"\n🔍 Validating {config_file.name}...")
+        print(f"\nValidating {config_file.name}...")
         issues = validate_config_keys(str(config_file), strict=strict)
         
         if issues['errors']:

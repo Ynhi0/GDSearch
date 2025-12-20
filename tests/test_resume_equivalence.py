@@ -1,5 +1,5 @@
 """
-AUDIT FIX: Resume equivalence tests for full training pipeline.
+Resume equivalence tests for full training pipeline.
 
 Verifies that checkpointing and resuming produces identical results to
 continuous training. This is fundamental for scientific reproducibility.

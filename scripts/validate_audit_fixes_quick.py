@@ -1,33 +1,25 @@
-"""
-Quick validation script for audit fixes.
+"""DEPRECATED: legacy wrapper.
 
-This script performs rapid validation of all new features added to address
-the audit findings:
-1. Label noise ablation implementation
-2. Extended tuning parity
-3. Fairness validation utility
+This script has been moved to `scripts/legacy/validate_audit_fixes_quick.py`.
+Running this file will forward to that legacy location but prints a
+deprecation message. To run the legacy checks directly, execute:
 
-Run this script to verify the fixes are working correctly before running
-full experiments.
-
-Usage:
-    python scripts/validate_audit_fixes_quick.py
-    
-Expected runtime: 2-3 minutes
+  python scripts/legacy/validate_audit_fixes_quick.py
 """
 
+import runpy
+import os
 import sys
-import torch
-import numpy as np
-from pathlib import Path
 
-# Add project root to path
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
-
-print("="*80)
-print("🔍 QUICK VALIDATION OF AUDIT FIXES")
-print("="*80)
+print("WARNING: 'scripts/validate_audit_fixes_quick.py' is deprecated and has been moved to 'scripts/legacy/'.")
+print("This wrapper will execute the legacy script for backwards compatibility.")
+legacy_path = os.path.join(os.path.dirname(__file__), 'legacy', 'validate_audit_fixes_quick.py')
+if os.path.exists(legacy_path):
+    runpy.run_path(legacy_path, run_name='__main__')
+else:
+    print("Legacy script not found at:", legacy_path)
+    print("Please check the repository or run the new validation script: scripts/validate_remediation_fixes_quick.py")
+    sys.exit(1)
 
 # Test 1: Label Noise Ablation Import
 print("\n[1/5] Testing label noise ablation import...")
@@ -152,7 +144,7 @@ except Exception as e:
 print("\n" + "="*80)
 print("✅ ALL VALIDATION TESTS PASSED")
 print("="*80)
-print("\nAudit fixes are working correctly. Key features validated:")
+print("\nRemediation fixes are working correctly. Key features validated:")
 print("  ✓ Label noise ablation implementation")
 print("  ✓ NoisyLabelDataset with reproducible seeding")
 print("  ✓ Fairness validation utility")

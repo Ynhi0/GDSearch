@@ -13,8 +13,7 @@ All schedulers are compatible with our custom optimizers.
 """
 
 import math
-import numpy as np
-from typing import Optional, List, Callable
+from typing import Optional, List
 
 
 class LRScheduler:
@@ -516,7 +515,6 @@ def plot_scheduler(scheduler: LRScheduler, epochs: int, save_path: str = None):
 
 if __name__ == '__main__':
     # Demo: visualize different schedulers
-    from src.core.optimizers import Adam
     import matplotlib.pyplot as plt
     
     print("Demonstrating LR Schedulers...")

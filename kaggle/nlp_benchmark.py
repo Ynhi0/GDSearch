@@ -55,9 +55,19 @@ def yield_tokens(data_iter, tokenizer):
     for _, text in data_iter:
         yield tokenizer(text)
 
-def create_data_loaders(batch_size=64):
+def create_data_loaders(batch_size=64, device=None):
+    """
+    Create AG_NEWS data loaders with proper device handling.
+    
+    Args:
+        batch_size: Batch size for data loaders
+        device: torch.device to move tensors to (defaults to CPU if None)
+    """
+    if device is None:
+        device = torch.device("cpu")
+    
     print("📦 Downloading/Loading AG_NEWS dataset...")
-    train_iter = list(AG_NEWS(split='train'))
+    train_iter = list(AG_NEWS(root='./data', split='train'))
     tokenizer = get_tokenizer('basic_english')
     vocab = build_vocab_from_iterator(yield_tokens(train_iter, tokenizer), specials=["<unk>"])
     vocab.set_default_index(vocab["<unk>"])
@@ -102,13 +112,13 @@ def create_data_loaders(batch_size=64):
 # TRAINING
 # ============================================================================
 def train(dataloader, model, optimizer, criterion, epoch):
+    """Train model for one epoch."""
+    _ = epoch  # Epoch number tracked but not used in function logic
     model.train()
     total_acc, total_count = 0, 0
-    log_interval = 500
-    start_time = time.time()
     total_loss = 0.0
 
-    for idx, (label, text, offsets) in enumerate(dataloader):
+    for _idx, (label, text, offsets) in enumerate(dataloader):
         optimizer.zero_grad()
         predicted_label = model(text, offsets)
         loss = criterion(predicted_label, label)
@@ -128,7 +138,7 @@ def evaluate(dataloader, model, criterion):
     total_loss = 0.0
 
     with torch.no_grad():
-        for idx, (label, text, offsets) in enumerate(dataloader):
+        for _idx, (label, text, offsets) in enumerate(dataloader):
             predicted_label = model(text, offsets)
             loss = criterion(predicted_label, label)
             total_loss += loss.item()
@@ -139,8 +149,6 @@ def evaluate(dataloader, model, criterion):
 # ============================================================================
 # MAIN
 # ============================================================================
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 def main():
     parser = argparse.ArgumentParser(description='NLP Benchmark Adam vs AdamW')
     parser.add_argument('--epochs', type=int, default=10)
@@ -151,10 +159,13 @@ def main():
     args = parser.parse_args()
 
     os.makedirs(args.results_dir, exist_ok=True)
+    
+    # CRITICAL FIX: Define device before using it in create_data_loaders
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"NLP Benchmark using device: {device}")
 
     # Data
-    train_loader, valid_loader, vocab_size = create_data_loaders(args.batch_size)
+    train_loader, valid_loader, vocab_size = create_data_loaders(args.batch_size, device=device)
     num_class = 4
     embed_dim = 64
     hidden_dim = 64

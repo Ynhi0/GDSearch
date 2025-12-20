@@ -60,7 +60,7 @@ class DelayedOptimizer:
         # Enqueue current grads
         current_grads = self._capture_current_grads()
         
-        # 🐛 BUG FIX (Dec 2025): Validate gradient shapes
+        # Validate gradient shapes
         if len(current_grads) != len(self.params):
             raise ValueError(f"Gradient count mismatch: {len(current_grads)} vs {len(self.params)}")
         
@@ -88,7 +88,7 @@ class DelayedOptimizer:
     
     def state_dict(self):
         """
-        AUDIT FIX: Save complete wrapper state for checkpoint persistence.
+        Save complete wrapper state for checkpoint persistence.
         
         Returns dict containing:
         - optimizer: base optimizer state
@@ -116,7 +116,7 @@ class DelayedOptimizer:
     
     def load_state_dict(self, state_dict):
         """
-        AUDIT FIX: Restore complete wrapper state from checkpoint.
+        Restore complete wrapper state from checkpoint.
         
         Validates param_count matches and reconstructs grad_queue as tensors.
         """

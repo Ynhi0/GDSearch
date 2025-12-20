@@ -9,7 +9,7 @@ Systematically evaluates the contribution of each advanced feature:
 5. Lookahead meta-learning
 6. Advanced training features (Label Smoothing, EMA, AMP)
 
-AUDIT FIX (Dec 2025): Standardized Hyperparameters
+Standardized Hyperparameters
 All ablations use FIXED hyperparameters to ensure ceteris paribus:
 - Batch size: 128 (consistent across all optimizers)
 - Epochs: 10 (quick validation) or 20 (full study)
@@ -17,9 +17,6 @@ All ablations use FIXED hyperparameters to ensure ceteris paribus:
   - SGD family: lr=0.01 (standard for SGD without adaptive scaling)
   - Adam family: lr=0.001 (1/10 of SGD, standard Adam default)
 - All other settings identical across compared optimizers
-
-Addresses research proposal requirement for ablation studies with actual
-scientific value and academic rigor.
 """
 
 import numpy as np
@@ -62,7 +59,7 @@ class SimpleCNN(nn.Module):
         super(SimpleCNN, self).__init__()
         self.conv1 = nn.Conv2d(1, 32, 3, 1)
         self.conv2 = nn.Conv2d(32, 64, 3, 1)
-        self.fc1 = nn.Linear(9216, 128)
+        self.fc1 = nn.Linear(1600, 128)
         self.fc2 = nn.Linear(128, 10)
         
     def forward(self, x):
@@ -76,10 +73,10 @@ class SimpleCNN(nn.Module):
         return x
 
 
-def train_and_evaluate(model, optimizer, train_loader, test_loader, 
+def train_and_evaluate_model_with_loaders(model, optimizer, train_loader, test_loader, 
                        device, epochs=5, criterion=None):
     """
-    Train model and return final metrics.
+    Train model with provided loaders and return final metrics.
     
     Returns:
         metrics: Dict with train_loss, test_loss, test_accuracy, convergence_speed
@@ -89,6 +86,8 @@ def train_and_evaluate(model, optimizer, train_loader, test_loader,
     
     train_losses = []
     test_accuracies = []
+    diverged = False
+    divergence_reason = None
     
     for epoch in range(epochs):
         # Training
@@ -100,10 +99,25 @@ def train_and_evaluate(model, optimizer, train_loader, test_loader,
             optimizer.zero_grad()
             outputs = model(inputs)
             loss = criterion(outputs, targets)
+            
+            # Check for NaN/Inf loss
+            if not torch.isfinite(loss):
+                diverged = True
+                divergence_reason = f"Non-finite loss at epoch {epoch}"
+                logging.warning(f"Training diverged: {divergence_reason}")
+                break
+            
             loss.backward()
+            
+            # Gradient clipping for stability
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            
             optimizer.step()
             
             epoch_loss += loss.item()
+        
+        if diverged:
+            break
         
         train_losses.append(epoch_loss / len(train_loader))
         
@@ -123,7 +137,7 @@ def train_and_evaluate(model, optimizer, train_loader, test_loader,
         test_accuracies.append(test_acc)
     
     # Compute convergence speed (epochs to reach 95% of final accuracy)
-    final_acc = test_accuracies[-1]
+    final_acc = test_accuracies[-1] if test_accuracies else 0.0
     target_acc = 0.95 * final_acc
     convergence_epoch = epochs
     for i, acc in enumerate(test_accuracies):
@@ -132,11 +146,13 @@ def train_and_evaluate(model, optimizer, train_loader, test_loader,
             break
     
     return {
-        'final_train_loss': train_losses[-1],
-        'final_test_accuracy': test_accuracies[-1],
+        'final_train_loss': train_losses[-1] if train_losses else np.nan,
+        'final_test_accuracy': test_accuracies[-1] if test_accuracies else 0.0,
         'convergence_epoch': convergence_epoch,
         'train_loss_curve': train_losses,
-        'test_acc_curve': test_accuracies
+        'test_acc_curve': test_accuracies,
+        'diverged': diverged,
+        'divergence_reason': divergence_reason if divergence_reason else 'None'
     }
 
 
@@ -169,9 +185,7 @@ def ablation_momentum_effect(
         'data/', train=False, download=True, transform=transform
     )
     
-    # Use make_dataloader for consistent num_workers and pin_memory settings
     from src.core.dataloader_utils import make_dataloader
-    train_loader = make_dataloader(train_dataset, batch_size=128, shuffle=True, seed=seeds[0] if seeds else None, num_workers=2, pin_memory=True)
     test_loader = make_dataloader(test_dataset, batch_size=1000, shuffle=False, num_workers=2, pin_memory=True)
     
     results = []
@@ -179,10 +193,13 @@ def ablation_momentum_effect(
     for seed in seeds:
         set_seed(seed)
         
+        # This ensures worker RNG state and shuffle order vary across seeds
+        train_loader = make_dataloader(train_dataset, batch_size=128, shuffle=True, seed=seed, num_workers=2, pin_memory=True)
+        
         # Baseline: SGD without momentum
         model_sgd = SimpleCNN().to(device)
         optimizer_sgd = optim.SGD(model_sgd.parameters(), lr=0.01)
-        metrics_sgd = train_and_evaluate(
+        metrics_sgd = train_and_evaluate_model_with_loaders(
             model_sgd, optimizer_sgd, train_loader, test_loader, device, epochs
         )
         
@@ -194,10 +211,10 @@ def ablation_momentum_effect(
         })
         
         # With momentum β=0.9
-        set_seed(seed)
+        # Note: set_seed called at loop start already covers this
         model_mom = SimpleCNN().to(device)
         optimizer_mom = optim.SGD(model_mom.parameters(), lr=0.01, momentum=0.9)
-        metrics_mom = train_and_evaluate(
+        metrics_mom = train_and_evaluate_model_with_loaders(
             model_mom, optimizer_mom, train_loader, test_loader, device, epochs
         )
         
@@ -274,17 +291,18 @@ def ablation_adaptive_lr(
     
     # Use make_dataloader for consistent settings
     from src.core.dataloader_utils import make_dataloader
-    train_loader = make_dataloader(train_dataset, batch_size=128, shuffle=True, seed=seeds[0] if seeds else None, num_workers=2, pin_memory=True)
     test_loader = make_dataloader(test_dataset, batch_size=1000, shuffle=False, num_workers=2, pin_memory=True)
     
     results = []
     
     for seed in seeds:
+        train_loader = make_dataloader(train_dataset, batch_size=128, shuffle=True, seed=seed, num_workers=2, pin_memory=True)
+        
         # Baseline: SGD with momentum (best non-adaptive)
         set_seed(seed)
         model_sgd = SimpleCNN().to(device)
         optimizer_sgd = optim.SGD(model_sgd.parameters(), lr=0.01, momentum=0.9)
-        metrics_sgd = train_and_evaluate(
+        metrics_sgd = train_and_evaluate_model_with_loaders(
             model_sgd, optimizer_sgd, train_loader, test_loader, device, epochs
         )
         
@@ -299,7 +317,7 @@ def ablation_adaptive_lr(
         set_seed(seed)
         model_adam = SimpleCNN().to(device)
         optimizer_adam = optim.Adam(model_adam.parameters(), lr=0.001)
-        metrics_adam = train_and_evaluate(
+        metrics_adam = train_and_evaluate_model_with_loaders(
             model_adam, optimizer_adam, train_loader, test_loader, device, epochs
         )
         
@@ -376,17 +394,18 @@ def ablation_weight_decay(
     
     # Use make_dataloader for consistent settings
     from src.core.dataloader_utils import make_dataloader
-    train_loader = make_dataloader(train_dataset, batch_size=128, shuffle=True, seed=seeds[0] if seeds else None, num_workers=2, pin_memory=True)
     test_loader = make_dataloader(test_dataset, batch_size=1000, shuffle=False, num_workers=2, pin_memory=True)
     
     results = []
     
     for seed in seeds:
+        train_loader = make_dataloader(train_dataset, batch_size=128, shuffle=True, seed=seed, num_workers=2, pin_memory=True)
+        
         # Baseline: Adam (no weight decay)
         set_seed(seed)
         model_adam = SimpleCNN().to(device)
         optimizer_adam = optim.Adam(model_adam.parameters(), lr=0.001)
-        metrics_adam = train_and_evaluate(
+        metrics_adam = train_and_evaluate_model_with_loaders(
             model_adam, optimizer_adam, train_loader, test_loader, device, epochs
         )
         
@@ -401,7 +420,7 @@ def ablation_weight_decay(
         set_seed(seed)
         model_adamw = SimpleCNN().to(device)
         optimizer_adamw = optim.AdamW(model_adamw.parameters(), lr=0.001, weight_decay=0.01)
-        metrics_adamw = train_and_evaluate(
+        metrics_adamw = train_and_evaluate_model_with_loaders(
             model_adamw, optimizer_adamw, train_loader, test_loader, device, epochs
         )
         

@@ -36,7 +36,7 @@ def run_multi_seed_experiment(base_config: Dict[str, Any], seeds: List[int], res
     print(f"{'='*60}\n")
     
     for seed in tqdm(seeds, desc="Seeds"):
-        # AUDIT FIX: Use deepcopy to prevent mutation of nested config structures
+        # Use deepcopy to prevent mutation of nested config structures
         config = copy.deepcopy(base_config)
         config['seed'] = seed
         config['tag'] = f'seed{seed}'
@@ -62,6 +62,7 @@ def aggregate_results(result_files: List[str], metric: str = 'test_accuracy', ex
     Args:
         result_files: List of CSV file paths
         metric: Metric to aggregate ('test_accuracy', 'test_loss', etc.)
+        exclude_tainted: If True, skip runs marked as tainted (OOM recovery)
         
     Returns:
         Dictionary with mean, std, min, max, values
@@ -70,6 +71,16 @@ def aggregate_results(result_files: List[str], metric: str = 'test_accuracy', ex
     
     for filepath in result_files:
         df = pd.read_csv(filepath)
+        # Robustly parse tainted column to bool, handling string values
+        if 'tainted' in df.columns:
+            try:
+                # Normalize to string, strip whitespace, lowercase
+                s = df['tainted'].astype(str).str.strip().str.lower()
+                # Map known true/false strings to bool
+                df['tainted'] = s.isin(['true', '1', 't', 'yes', 'y'])
+            except Exception:
+                # If parsing fails, default to False (assume not tainted)
+                df['tainted'] = False
         # Skip tainted runs if requested
         if exclude_tainted and 'tainted' in df.columns and df['tainted'].any():
             continue
@@ -107,6 +118,14 @@ def print_aggregated_results(results: Dict[str, Any], metric_name: str = "Test A
     print(f"\n{'='*60}")
     print(f"Aggregated Results: {metric_name}")
     print(f"{'='*60}")
+    
+    # Check for NaN results (all runs tainted or no data)
+    if results['n'] == 0 or np.isnan(results['mean']):
+        print("ERROR: No valid results to aggregate (all runs tainted or no data)")
+        print(f"N: {results['n']}")
+        print(f"{'='*60}\n")
+        return
+    
     print(f"Mean:     {results['mean']:.4f}")
     print(f"Std:      {results['std']:.4f}")
     print(f"Min:      {results['min']:.4f}")

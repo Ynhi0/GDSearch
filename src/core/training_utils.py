@@ -17,6 +17,43 @@ import copy
 import numpy as np
 import random
 import os
+import warnings
+import logging
+
+
+def validate_pytorch_version(expected_version: str = "2.6.0", strict: bool = False):
+    """
+    Validate PyTorch version to prevent version-sensitive API failures.
+    
+    Args:
+        expected_version: Expected PyTorch version (from requirements.txt)
+        strict: If True, raise error on mismatch; if False, only warn
+        
+    Raises:
+        RuntimeError: If strict=True and version mismatch detected
+    """
+    try:
+        current_version = torch.__version__.split('+')[0]  # Remove cuda/cpu suffix
+        major_minor_current = '.'.join(current_version.split('.')[:2])
+        major_minor_expected = '.'.join(expected_version.split('.')[:2])
+        
+        if major_minor_current != major_minor_expected:
+            msg = (
+                f"PyTorch version mismatch detected!\n"
+                f"  Expected: {expected_version} (from requirements.txt)\n"
+                f"  Current:  {current_version}\n"
+                f"  This may cause checkpoint save/load failures and optimizer behavior changes.\n"
+                f"  Recommendation: pip install torch=={expected_version}"
+            )
+            if strict:
+                raise RuntimeError(msg)
+            else:
+                warnings.warn(msg, RuntimeWarning)
+                logging.warning(msg)
+        else:
+            logging.debug(f"PyTorch version OK: {current_version}")
+    except Exception as e:
+        logging.warning(f"Could not validate PyTorch version: {e}")
 
 
 def set_seed(seed: int):
@@ -131,7 +168,10 @@ class ModelEMA:
     
     def __init__(self, model: nn.Module, decay: float = 0.9999, device: Optional[torch.device] = None):
         self.decay = decay
-        self.device = device if device is not None else torch.device('cpu')
+        # Default to model's device if not specified
+        if device is None:
+            device = next(model.parameters()).device if len(list(model.parameters())) > 0 else torch.device('cpu')
+        self.device = device
         
         # Create shadow model
         self.shadow = copy.deepcopy(model).to(self.device)
@@ -198,10 +238,22 @@ class ModelEMA:
         
         Args:
             model: Model to restore (uses self.model if None)
+            
+        Note:
+            This method is not typically needed if you use the shadow model
+            directly for evaluation. If you need to restore, save model state
+            before calling apply_shadow().
         """
-        # This requires storing original weights before apply_shadow
-        # For simplicity, we recommend using the shadow model directly for evaluation
-        ...
+        if model is None:
+            model = self.model
+        
+        # Restore by copying from original model (which should be unchanged)
+        # If apply_shadow was called, you should have saved state beforehand
+        import warnings
+        warnings.warn(
+            "ModelEMA.restore() called but original weights may have been overwritten. "
+            "Save model state before apply_shadow() if you need to restore."
+        )
 
 
 class AMPWrapper:
@@ -238,9 +290,10 @@ class AMPWrapper:
         
         self.enabled = enabled
         self.dtype = dtype
+        self.device_type = 'cuda' if torch.cuda.is_available() and enabled else 'cpu'
         
-        if self.enabled:
-            self.scaler = torch.amp.GradScaler('cuda')
+        if self.enabled and torch.cuda.is_available():
+            self.scaler = torch.cuda.amp.GradScaler()
         else:
             self.scaler = None
     
@@ -251,11 +304,11 @@ class AMPWrapper:
         Returns:
             Autocast context manager
         """
-        if self.enabled:
-            return torch.amp.autocast('cuda', dtype=self.dtype)
+        if self.enabled and torch.cuda.is_available():
+            return torch.amp.autocast(self.device_type, dtype=self.dtype)
         else:
-            # Return no-op context manager
-            return torch.amp.autocast('cuda', enabled=False)
+            # Return no-op context manager for CPU
+            return torch.amp.autocast('cpu', enabled=False)
     
     def backward(self, loss: torch.Tensor, optimizer: torch.optim.Optimizer):
         """

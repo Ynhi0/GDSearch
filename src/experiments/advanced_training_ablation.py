@@ -149,8 +149,8 @@ def evaluate(model, loader, criterion, device):
 
 def run_single_experiment(
     config: Dict,
-    train_loader: DataLoader,
-    test_loader: DataLoader,
+    train_dataset,
+    test_dataset,
     device: torch.device,
     epochs: int = 10,
     seed: int = 42
@@ -163,8 +163,8 @@ def run_single_experiment(
             - use_amp: bool
             - use_label_smoothing: bool (smoothing factor if enabled)
             - use_ema: bool (decay rate if enabled)
-        train_loader: Training data loader
-        test_loader: Test data loader
+        train_dataset: Training dataset (not loader)
+        test_dataset: Test dataset (not loader)
         device: Device to use
         epochs: Number of training epochs
         seed: Random seed
@@ -173,6 +173,11 @@ def run_single_experiment(
         Dictionary with results
     """
     set_seed(seed)
+    
+    # Create DataLoaders with seed-specific RNG state
+    from src.core.dataloader_utils import make_dataloader
+    train_loader = make_dataloader(train_dataset, batch_size=128, shuffle=True, seed=seed, num_workers=2, pin_memory=True)
+    test_loader = make_dataloader(test_dataset, batch_size=256, shuffle=False, num_workers=2, pin_memory=True)
     
     # Create model
     model = SimpleCNN(num_classes=10).to(device)
@@ -311,11 +316,6 @@ def run_ablation_study(
         train_dataset = torch.utils.data.Subset(train_dataset, range(5000))
         test_dataset = torch.utils.data.Subset(test_dataset, range(1000))
     
-    # Use make_dataloader for consistent settings
-    from src.core.dataloader_utils import make_dataloader
-    train_loader = make_dataloader(train_dataset, batch_size=128, shuffle=True, seed=seeds[0] if seeds else None, num_workers=2, pin_memory=True)
-    test_loader = make_dataloader(test_dataset, batch_size=256, shuffle=False, num_workers=2, pin_memory=True)
-    
     # Define ablation configurations
     configurations = [
         {
@@ -389,7 +389,7 @@ def run_ablation_study(
         for seed in seeds:
             print(f"  Running seed {seed}...")
             result = run_single_experiment(
-                config, train_loader, test_loader, device, epochs, seed
+                config, train_dataset, test_dataset, device, epochs, seed
             )
             config_results.append(result)
             
@@ -409,10 +409,12 @@ def run_ablation_study(
             'use_ema': config['use_ema'],
             'mean_test_acc': np.mean(test_accs),
             'std_test_acc': np.std(test_accs),
+            'test_accuracy': np.mean(test_accs),  # Add for plotting compatibility
             'mean_ema_acc': np.mean(ema_accs),
             'std_ema_acc': np.std(ema_accs),
             'mean_training_time': np.mean(times),
             'std_training_time': np.std(times),
+            'training_time': np.mean(times),  # Add for plotting compatibility
             'n_seeds': len(seeds),
             'seeds': seeds
         })
@@ -493,7 +495,7 @@ def create_visualizations(df: pd.DataFrame, results_dir: str):
     colors = []
     for config in grouped.index:
         if config == 'Baseline':
-            colors.append('#gray')
+            colors.append('#808080')  # Gray
         elif '+' in config:
             colors.append('#2ecc71')  # Green for combinations
         else:

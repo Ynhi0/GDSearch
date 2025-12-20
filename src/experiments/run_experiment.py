@@ -426,7 +426,7 @@ def main():
             pass
     
     print("\nCompleted all experiments!")
-    print(f"Results saved in 'results/' directory")
+    print("Results saved in 'results/' directory")
     print(f"Total files: {len(configs)}")
 
 

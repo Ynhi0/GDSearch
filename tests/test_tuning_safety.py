@@ -6,7 +6,6 @@ adaptive overfitting via test set leakage.
 
 Author: GDSearch Remediation Team
 Date: December 9, 2025
-AUDIT FIX (Dec 18, 2025): Enhanced to enforce programmatic checks
 """
 
 import pytest
@@ -84,7 +83,6 @@ class TestTuningSafety:
     
     def test_optuna_objective_should_use_validation(self):
         """Integration test: Optuna objective must evaluate on validation, not test."""
-        # AUDIT FIX: Enforce programmatically that objectives use validation not test
         
         # Create mock objective function that violates safety
         def bad_objective_using_test(trial):

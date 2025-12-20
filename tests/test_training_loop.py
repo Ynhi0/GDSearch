@@ -4,7 +4,7 @@ Training Loop Tests
 
 Validates that training loops follow correct patterns and don't have
 common bugs like:
-- Batch loop outside epoch loop (CRITICAL BUG from audit)
+- Batch loop outside epoch loop (CRITICAL BUG from review)
 - Metrics calculated incorrectly
 - Division by zero errors
 - NaN/Inf gradient handling

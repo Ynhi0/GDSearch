@@ -57,7 +57,7 @@ try:
         np.array([0.75, 0.77, 0.76, 0.74, 0.78]),
         'OptA', 'OptB', 'accuracy'
     )
-    # AUDIT FIX: Use effect_size field which works for both parametric and non-parametric
+    # Use effect_size field which works for both parametric and non-parametric
     effect_size_val = result.get('effect_size', result.get('cohens_d', 0.0))
     effect_size_type = result.get('effect_size_type', 'unknown')
     

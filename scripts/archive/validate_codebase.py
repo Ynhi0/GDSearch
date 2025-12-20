@@ -291,7 +291,7 @@ def main():
     
     print("\n" + "="*80)
     if all_passed:
-        print("🎉 ALL VALIDATION CHECKS PASSED!")
+        print("ALL VALIDATION CHECKS PASSED!")
         print("Codebase is ready for production use.")
     else:
         print("⚠️  SOME VALIDATION CHECKS FAILED")

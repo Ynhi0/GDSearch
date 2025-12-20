@@ -1,7 +1,7 @@
 """
 DataLoader performance optimization utilities for fair benchmarking.
 
-AUDIT FIX: Ensures DataLoader settings don't introduce confounding variables
+Ensures DataLoader settings don't introduce confounding variables
 in time-to-convergence comparisons. Provides platform-specific optimizations.
 """
 

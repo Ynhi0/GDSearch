@@ -50,7 +50,7 @@ class ExperimentValidator:
         
     def validate_all(self):
         """Run all validation checks"""
-        print("🔍 Validating Experiment Configuration and Output Integrity")
+        print("Validating Experiment Configuration and Output Integrity")
         print("=" * 70)
         
         # 1. Check multi-seed configuration

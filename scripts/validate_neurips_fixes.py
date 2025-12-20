@@ -1,4 +1,4 @@
-"""Quick validation test for NeurIPS audit fixes."""
+"""Quick validation test for NeurIPS fixes."""
 import sys
 sys.path.insert(0, '.')
 
@@ -6,7 +6,7 @@ import numpy as np
 from src.core.optimizers import Adam, AdamW, AdaBound, RAdam, LAMB
 
 print("=" * 60)
-print("NEURIPS AUDIT FIX VALIDATION")
+print("NEURIPS FIX VALIDATION")
 print("=" * 60)
 
 # Test 1: Adam with epsilon guards (BUG #1, #2 fixes)
@@ -18,9 +18,9 @@ grads = np.array([0.1, 0.2])
 for i in range(100):
     params = opt.step(params, grads)
 
-print(f"   Adam ran 100 steps successfully")
+print("   Adam ran 100 steps successfully")
 print(f"   Final params: {params}")
-print(f"   No division by zero or NaN errors")
+print("   No division by zero or NaN errors")
 
 # Test 2: AdamW with epsilon guards
 print("\nPASS: Test 2: AdamW optimizer with epsilon guards")
@@ -28,7 +28,7 @@ opt_adamw = AdamW(lr=0.001, weight_decay=0.01)
 params2 = np.array([1.0, 2.0])
 for i in range(100):
     params2 = opt_adamw.step(params2, grads)
-print(f"   AdamW ran 100 steps successfully")
+print("   AdamW ran 100 steps successfully")
 
 # Test 3: All advanced optimizers
 print("\nPASS: Test 3: Advanced optimizers (AdaBound, RAdam, LAMB)")
@@ -50,8 +50,8 @@ opt_test = Adam(lr=0.001)
 params_init = np.array([5.0, 5.0])
 grads_init = np.array([0.5, 0.5])
 params_init = opt_test.step(params_init, grads_init)
-print(f"   First step executed correctly")
-print(f"   State variables initialized once")
+print("   First step executed correctly")
+print("   State variables initialized once")
 
 print("\n" + "=" * 60)
 print("ALL VALIDATION TESTS PASSED")

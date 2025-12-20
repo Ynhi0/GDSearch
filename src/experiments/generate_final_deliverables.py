@@ -191,7 +191,7 @@ class FinalDeliverablesGenerator:
         try:
             from src.visualization.interactive_plots import plot_multi_optimizer_comparison
             
-            # AUDIT FIX: Aggregate data into correct format for plot_multi_optimizer_comparison
+            # Aggregate data into correct format for plot_multi_optimizer_comparison
             # Expected: Dict[str, Dict[str, np.ndarray]] with keys: loss_history, grad_norm_history, final_loss, iterations
             results_dict = {}
             
@@ -199,7 +199,7 @@ class FinalDeliverablesGenerator:
                 try:
                     df = pd.read_csv(csv_file)
                     
-                    # 🐛 AUDIT FIX: Extract optimizer name robustly (metadata JSON first, then column, then filename)
+                    # Extract optimizer name robustly (metadata JSON first, then column, then filename)
                     opt_name = 'Unknown'
                     
                     # Try metadata JSON first

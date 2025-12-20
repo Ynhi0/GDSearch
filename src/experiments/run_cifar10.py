@@ -106,7 +106,7 @@ def run_single(optimizer_name: str, seed: int, lr: float, epochs: int, batch_siz
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     set_seed(seed)
     trainloader, testloader = get_loaders(batch_size)
-    model = SimpleCIFARNet().to(device)
+    model = ResNet18().to(device)  # ARCHITECTURE STANDARDIZATION: Use ResNet18 instead of SimpleCIFARNet
 
     if optimizer_name == 'SGD':
         optimizer = optim.SGD(model.parameters(), lr=lr)

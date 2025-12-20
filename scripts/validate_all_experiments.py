@@ -18,7 +18,6 @@ Date: December 11, 2025
 """
 
 import sys
-import os
 from pathlib import Path
 import argparse
 import subprocess
@@ -40,6 +39,9 @@ def check_imports() -> Tuple[bool, str]:
         from src.experiments.run_multi_seed import run_multi_seed_experiment
         from src.analysis.statistical_analysis import load_multiseed_results
         from src.visualization.plot_results import plot_trajectory
+        # Prevent unused import warnings
+        _ = (torch, np, pd, SGD, Adam, AdamW, SimpleMLP, ResNet18, 
+             run_multi_seed_experiment, load_multiseed_results, plot_trajectory)
         return True, "All imports successful"
     except Exception as e:
         return False, f"Import failed: {e}"
@@ -59,7 +61,7 @@ def check_configs() -> Tuple[bool, str]:
             return False, "No config files found"
         
         for config_file in config_files:
-            with open(config_file, 'r') as f:
+            with open(config_file, 'r', encoding='utf-8') as f:
                 json.load(f)  # Will raise if invalid JSON
         
         return True, f"All {len(config_files)} config files valid"
@@ -83,7 +85,8 @@ def run_quick_mnist_test() -> Tuple[bool, str]:
             ],
             capture_output=True,
             text=True,
-            timeout=600  # 10 minutes max
+            timeout=600,  # 10 minutes max
+            check=False
         )
         
         # Check for success indicators

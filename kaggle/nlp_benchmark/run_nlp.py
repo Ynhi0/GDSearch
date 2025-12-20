@@ -127,6 +127,12 @@ def run_single(opt_name: str, seed: int, lr: float, epochs: int, batch_size: int
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+    # Check Python version for compatibility warnings
+    import sys
+    if sys.version_info >= (3, 13):
+        print("WARNING: Python 3.13 has known IMDB loading issues (fsspec glob patterns)")
+        print("This will likely fail. For production: Use Python 3.10-3.12 or Kaggle environment")
+
     # Robust dataset loading with fallback for environment compatibility
     try:
         raw = load_dataset('imdb', cache_dir='/tmp/hf_cache')
@@ -137,7 +143,7 @@ def run_single(opt_name: str, seed: int, lr: float, epochs: int, batch_size: int
             raw = load_dataset('imdb', trust_remote_code=True)
         except Exception as e2:
             print(f"Error: Could not load IMDB dataset: {e2}")
-            raise RuntimeError("Failed to load IMDB dataset. Check HuggingFace/fsspec versions.") from e2
+            raise RuntimeError("Failed to load IMDB dataset. Check HuggingFace/fsspec versions. Python 3.13 not supported - use Python 3.10-3.12.") from e2
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
     def preprocess(examples):

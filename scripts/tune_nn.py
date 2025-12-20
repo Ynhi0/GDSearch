@@ -19,13 +19,13 @@ def ensure_dirs():
 def run_and_save(cfg: Dict[str, Any], tag: str) -> Tuple[str, pd.DataFrame]:
     cfg = dict(cfg)
     cfg['tag'] = tag
-    # AUDIT FIX: Add validation split to avoid test set leakage during hyperparameter tuning
+    # Add validation split to avoid test set leakage during hyperparameter tuning
     cfg['val_split'] = 0.1  # Use 10% of training data for validation
     df = train_and_evaluate(cfg)
     out = os.path.join(RESULTS_DIR, result_filename(cfg))
     df.to_csv(out, index=False)
     
-    # AUDIT FIX: Save structured metadata alongside CSV to avoid brittle filename parsing
+    # Save structured metadata alongside CSV to avoid brittle filename parsing
     meta_path = out.replace('.csv', '_meta.json')
     with open(meta_path, 'w') as f:
         # Save all config params as JSON for reliable reconstruction
@@ -38,7 +38,7 @@ def best_by_eval(csv_paths: List[str], prefer: str = 'accuracy') -> Tuple[str, f
     """
     Return best CSV path by final validation metric.
     
-    AUDIT FIX: Use 'val' phase (validation set) instead of 'eval' phase (test set)
+    Use 'val' phase (validation set) instead of 'eval' phase (test set)
     to prevent test set leakage during hyperparameter tuning.
     
     Scientific Rationale:
@@ -57,7 +57,7 @@ def best_by_eval(csv_paths: List[str], prefer: str = 'accuracy') -> Tuple[str, f
     best_score = None
     for p in csv_paths:
         df = pd.read_csv(p)
-        # AUDIT FIX: Use 'val' phase instead of 'eval' to avoid test set leakage
+        # Use 'val' phase instead of 'eval' to avoid test set leakage
         val_rows = df[df.get('phase', '') == 'val']
         if val_rows.empty:
             # Fallback to 'eval' with warning (should not happen with val_split enabled)
@@ -178,7 +178,7 @@ def tune_optimizer(base: Dict[str, Any], spec: Dict[str, Any]) -> Dict[str, Any]
             'epochs': spec.get('epochs', 3),
         }
     else:
-        # AUDIT FIX: Load config from structured metadata JSON instead of parsing CSV/filenames
+        # Load config from structured metadata JSON instead of parsing CSV/filenames
         meta_path = best_path.replace('.csv', '_meta.json')
         if os.path.exists(meta_path):
             with open(meta_path, 'r') as f:
