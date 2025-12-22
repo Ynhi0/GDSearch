@@ -83,21 +83,34 @@ class OptunaHyperparameterTuner:
             raise ValueError(f"Unknown pruner: {pruner}")
         
         # Create study
+        # AUDIT FIX: Changed default to load_if_exists=False to prevent contamination
+        # Users must explicitly set study_name with timestamp/UUID for shared storage
+        # or accept risk of reusing old trials
         self.study = optuna.create_study(
             study_name=study_name,
             direction=direction,
             sampler=self.sampler,
             pruner=self.pruner,
             storage=storage,
-            load_if_exists=False  # Changed to False to prevent contamination
+            load_if_exists=False  # AUDIT FIX: Prevents accidental trial contamination
         )
+        
+        if storage is not None:
+            logging.warning(
+                f"Using shared storage with study_name='{study_name}'. "
+                f"To prevent trial contamination, ensure study_name is unique (include timestamp/UUID). "
+                f"If you want to resume an existing study, manually set load_if_exists=True in create_study() call."
+            )
         
     def optimize(
         self,
         n_trials: int = 100,
         timeout: Optional[int] = None,
         show_progress_bar: bool = True,
-        callbacks: Optional[List[Callable]] = None
+        callbacks: Optional[List[Callable]] = None,
+        val_loader = None,  # CRITICAL: Validation loader parameter for test-leakage checks
+        test_dataset = None,  # CRITICAL FIX: Reference test dataset for identity check
+        enforce_validation: bool = True  # FIXED: New parameter to enforce validation loader requirement
     ) -> Dict[str, Any]:
         """
         Run hyperparameter optimization.
@@ -107,10 +120,70 @@ class OptunaHyperparameterTuner:
             timeout: Time limit in seconds (optional)
             show_progress_bar: Show progress bar during optimization
             callbacks: List of callback functions
+            val_loader: Validation DataLoader (required for test-leakage checks when enforce_validation=True)
+            test_dataset: Reference to test dataset for identity validation (RECOMMENDED)
+            enforce_validation: If True, raises error if val_loader is None (default: True for scientific rigor)
             
         Returns:
             Dictionary with best parameters and statistics
+            
+        Raises:
+            ValueError: If enforce_validation=True and val_loader is None or lacks proper metadata
+            RuntimeError: If validation loader fails test-leakage check
         """
+        # FIXED: Make validation loader mandatory by default to prevent test-leakage
+        if val_loader is None:
+            if enforce_validation:
+                raise ValueError(
+                    "SCIENTIFIC INTEGRITY ERROR: No validation loader provided to OptunaHyperparameterTuner.optimize().\n"
+                    "\nTest-leakage prevention requires a validation loader to verify that the test set is not used during tuning.\n"
+                    "\nREMEDIATION OPTIONS:\n"
+                    "  1. RECOMMENDED: Use create_validated_loaders() from src.core.loader_validation:\n"
+                    "     train_loader, val_loader, test_loader = create_validated_loaders(get_mnist_loaders, val_split=0.15, batch_size=128)\n"
+                    "  2. Tag your existing loader: setattr(your_val_loader, '_split_type', 'validation')\n"
+                    "  3. NOT RECOMMENDED: Set enforce_validation=False (invalidates research claims)\n"
+                    "\nSee docs: src/core/loader_validation.py for examples."
+                )
+            else:
+                logging.warning(
+                    "SCIENTIFIC INTEGRITY WARNING: No validation loader provided and enforce_validation=False. "
+                    "Cannot enforce test-leakage prevention. Ensure you are not using the test set for tuning."
+                )
+        else:
+            # CRITICAL FIX: Enforce test-leakage prevention with stricter checks
+            try:
+                from src.core.loader_validation import enforce_no_test_in_tuning, validate_loader_for_tuning
+                
+                # AUDIT FIX: Use validate_loader_for_tuning with test_dataset for stronger checks
+                if test_dataset is not None:
+                    validate_loader_for_tuning(val_loader, expected_split='validation', test_dataset=test_dataset)
+                    logging.info("PASSED: Validation loader test-leakage check (with dataset identity verification)")
+                else:
+                    # Fallback to metadata-only check, but require proper tagging
+                    split_type = getattr(val_loader, '_split_type', None)
+                    loader_name = getattr(val_loader, 'name', None)
+                    
+                    if split_type != 'validation' and 'val' not in str(loader_name).lower():
+                        raise ValueError(
+                            "SCIENTIFIC INTEGRITY ERROR: Validation loader lacks proper metadata. "
+                            f"Expected _split_type='validation' or name containing 'val', got split_type={split_type}, name={loader_name}. "
+                            "Either: (1) provide test_dataset parameter for identity check, or (2) ensure loader has proper metadata tags. "
+                            "This strict check prevents accidental test-set leakage during hyperparameter tuning."
+                        )
+                    
+                    enforce_no_test_in_tuning(val_loader)
+                    logging.warning("PASSED: Validation loader test-leakage check (metadata-only; consider providing test_dataset for stronger verification)")
+            except ImportError:
+                logging.error("Could not import validation utilities. Tuning cannot proceed safely.")
+                raise RuntimeError("Missing src.core.loader_validation module required for test-leakage prevention.")
+            except Exception as e:
+                logging.error(f"CRITICAL: Validation loader failed test-leakage check: {e}")
+                raise RuntimeError(
+                    f"Cannot start hyperparameter tuning: validation loader failed test-leakage check. "
+                    f"This indicates that the test set may be used during tuning, which would invalidate results. "
+                    f"Error: {e}"
+                ) from e
+        
         print(f"Starting Optuna optimization: {self.study_name}")
         print(f"Direction: {self.direction}")
         print(f"Trials: {n_trials}")

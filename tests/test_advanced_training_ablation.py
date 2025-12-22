@@ -193,13 +193,15 @@ class TestAblationStudyRigor:
         """Test experiment with label smoothing"""
         device = torch.device('cpu')
         
-        # Create small dataset
-        dataset = torch.utils.data.TensorDataset(
+        # Create small dataset (NOT DataLoader - function expects dataset)
+        train_dataset = torch.utils.data.TensorDataset(
             torch.randn(128, 1, 28, 28),
             torch.randint(0, 10, (128,))
         )
-        train_loader = torch.utils.data.DataLoader(dataset, batch_size=16)
-        test_loader = torch.utils.data.DataLoader(dataset, batch_size=16)
+        test_dataset = torch.utils.data.TensorDataset(
+            torch.randn(128, 1, 28, 28),
+            torch.randint(0, 10, (128,))
+        )
         
         config = {
             'use_amp': False,
@@ -209,7 +211,7 @@ class TestAblationStudyRigor:
         }
         
         result = run_single_experiment(
-            config, train_loader, test_loader, device, epochs=2, seed=42
+            config, train_dataset, test_dataset, device, epochs=2, seed=42
         )
         
         assert 'final_test_acc' in result
@@ -220,13 +222,15 @@ class TestAblationStudyRigor:
         """Test experiment with EMA"""
         device = torch.device('cpu')
         
-        # Create small dataset
-        dataset = torch.utils.data.TensorDataset(
+        # Create small dataset (NOT DataLoader - function expects dataset)
+        train_dataset = torch.utils.data.TensorDataset(
             torch.randn(128, 1, 28, 28),
             torch.randint(0, 10, (128,))
         )
-        train_loader = torch.utils.data.DataLoader(dataset, batch_size=16)
-        test_loader = torch.utils.data.DataLoader(dataset, batch_size=16)
+        test_dataset = torch.utils.data.TensorDataset(
+            torch.randn(128, 1, 28, 28),
+            torch.randint(0, 10, (128,))
+        )
         
         config = {
             'use_amp': False,
@@ -236,7 +240,7 @@ class TestAblationStudyRigor:
         }
         
         result = run_single_experiment(
-            config, train_loader, test_loader, device, epochs=2, seed=42
+            config, train_dataset, test_dataset, device, epochs=2, seed=42
         )
         
         assert 'final_ema_acc' in result
@@ -248,13 +252,15 @@ class TestAblationStudyRigor:
         """Test experiment with all features enabled"""
         device = torch.device('cpu')
         
-        # Create small dataset
-        dataset = torch.utils.data.TensorDataset(
+        # Create small dataset (NOT DataLoader - function expects dataset)
+        train_dataset = torch.utils.data.TensorDataset(
             torch.randn(128, 1, 28, 28),
             torch.randint(0, 10, (128,))
         )
-        train_loader = torch.utils.data.DataLoader(dataset, batch_size=16)
-        test_loader = torch.utils.data.DataLoader(dataset, batch_size=16)
+        test_dataset = torch.utils.data.TensorDataset(
+            torch.randn(128, 1, 28, 28),
+            torch.randint(0, 10, (128,))
+        )
         
         config = {
             'use_amp': False,  # CPU doesn't support AMP effectively
@@ -265,7 +271,7 @@ class TestAblationStudyRigor:
         }
         
         result = run_single_experiment(
-            config, train_loader, test_loader, device, epochs=2, seed=42
+            config, train_dataset, test_dataset, device, epochs=2, seed=42
         )
         
         assert 'final_test_acc' in result

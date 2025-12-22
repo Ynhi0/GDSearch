@@ -41,7 +41,6 @@ def test_config_parsing_workflow():
         assert 'model' in exp
     
     print("✓ All experiments have required fields")
-    return True
 
 
 def test_loader_validation_enforcement():
@@ -60,22 +59,15 @@ def test_loader_validation_enforcement():
     test_loader.name = 'test'
     
     # Validation loader should pass
-    try:
-        enforce_no_test_in_tuning(val_loader)
-        print("✓ Validation loader correctly allowed")
-    except ValueError:
-        print("✗ Validation loader incorrectly blocked!")
-        return False
+    enforce_no_test_in_tuning(val_loader)
+    print("✓ Validation loader correctly allowed")
     
     # Test loader should be blocked
     try:
         enforce_no_test_in_tuning(test_loader)
-        print("✗ Test loader was not blocked!")
-        return False
+        assert False, "Test loader was not blocked!"
     except ValueError:
         print("✓ Test loader correctly blocked")
-    
-    return True
 
 
 def test_reproducibility():
@@ -91,12 +83,8 @@ def test_reproducibility():
     batch2 = next(iter(train2))
     
     # Compare tensors
-    if torch.allclose(batch1[0], batch2[0]) and torch.equal(batch1[1], batch2[1]):
-        print("✓ Data loaders produce identical batches with same seed")
-        return True
-    else:
-        print("✗ Data loaders not reproducible!")
-        return False
+    assert torch.allclose(batch1[0], batch2[0]) and torch.equal(batch1[1], batch2[1]), "Data loaders not reproducible!"
+    print("✓ Data loaders produce identical batches with same seed")
 
 
 def test_backward_compatibility():
@@ -137,8 +125,6 @@ def test_backward_compatibility():
     # 2 LRs × 2 weight decays = 4 experiments
     assert len(exps_old) == 4, f"Expected 4 experiments, got {len(exps_old)}"
     print("✓ Old format (singular optimizer) works")
-    
-    return True
 
 
 def test_fail_fast_empty_config():
@@ -148,13 +134,9 @@ def test_fail_fast_empty_config():
     empty_config = {"sweeps": []}
     
     exps = parse_experiments_from_config(empty_config)
-    if len(exps) == 0:
-        print("✓ Empty config correctly produces zero experiments")
-        # In actual code, main() checks this and raises RuntimeError
-        return True
-    else:
-        print("✗ Empty config should produce zero experiments!")
-        return False
+    assert len(exps) == 0, "Empty config should produce zero experiments!"
+    print("✓ Empty config correctly produces zero experiments")
+    # In actual code, main() checks this and raises RuntimeError
 
 
 def run_all_smoke_tests():

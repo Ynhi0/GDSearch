@@ -29,7 +29,7 @@ def test_requirements():
             print(f"  ✓ {pkg} found in requirements.txt")
         else:
             print(f"  ✗ {pkg} MISSING from requirements.txt")
-            return False
+            assert False, f"{pkg} missing from requirements.txt"
     
     # Check Kaggle requirements
     with open('kaggle/requirements_kaggle.txt', 'r') as f:
@@ -42,10 +42,9 @@ def test_requirements():
             print(f"  ✓ {pkg} found in kaggle requirements")
         else:
             print(f"  ✗ {pkg} MISSING from kaggle requirements")
-            return False
+            assert False, f"{pkg} missing from kaggle requirements"
     
     print("\n✓ All requirements files are complete!")
-    return True
 
 
 def test_imports():
@@ -54,32 +53,25 @@ def test_imports():
     print("TEST 2: Critical Imports")
     print("="*60)
     
-    try:
-        from src.core.medical_data_utils import (
-            SyntheticMedicalDataset, get_medical_datasets,
-            load_medmnist_dataset, load_kaggle_medical_dataset
-        )
-        print("  ✓ Medical data utils import successful")
-        
-        from src.core.training_utils import set_seed
-        print("  ✓ Training utils import successful")
-        
-        from src.core.data_utils import get_mnist_loaders, get_cifar10_loaders
-        print("  ✓ Data utils import successful")
-        
-        from src.core.dataloader_utils import make_dataloader
-        print("  ✓ Dataloader utils import successful")
-        
-        from src.experiments.run_nn_experiment import build_model_and_data
-        print("  ✓ Run NN experiment import successful")
-        
-        print("\n✓ All critical imports successful!")
-        return True
-    except Exception as e:
-        print(f"\n✗ Import failed: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
+    from src.core.medical_data_utils import (
+        SyntheticMedicalDataset, get_medical_datasets,
+        load_medmnist_dataset, load_kaggle_medical_dataset
+    )
+    print("  ✓ Medical data utils import successful")
+    
+    from src.core.training_utils import set_seed
+    print("  ✓ Training utils import successful")
+    
+    from src.core.data_utils import get_mnist_loaders, get_cifar10_loaders
+    print("  ✓ Data utils import successful")
+    
+    from src.core.dataloader_utils import make_dataloader
+    print("  ✓ Dataloader utils import successful")
+    
+    from src.experiments.run_nn_experiment import build_model_and_data
+    print("  ✓ Run NN experiment import successful")
+    
+    print("\n✓ All critical imports successful!")
 
 
 def test_seed_consistency():
@@ -88,40 +80,29 @@ def test_seed_consistency():
     print("TEST 3: Seed Consistency")
     print("="*60)
     
-    try:
-        import torch
-        from src.core.training_utils import set_seed
-        
-        # Test 1: PyTorch determinism
-        set_seed(42)
-        t1 = torch.rand(100)
-        set_seed(42)
-        t2 = torch.rand(100)
-        
-        if torch.allclose(t1, t2):
-            print("  ✓ PyTorch seed is deterministic")
-        else:
-            print("  ✗ PyTorch seed is NOT deterministic")
-            return False
-        
-        # Test 2: NumPy determinism
-        import numpy as np
-        set_seed(42)
-        n1 = np.random.rand(100)
-        set_seed(42)
-        n2 = np.random.rand(100)
-        
-        if np.allclose(n1, n2):
-            print("  ✓ NumPy seed is deterministic")
-        else:
-            print("  ✗ NumPy seed is NOT deterministic")
-            return False
-        
-        print("\n✓ Seed consistency verified!")
-        return True
-    except Exception as e:
-        print(f"\n✗ Seed test failed: {e}")
-        return False
+    import torch
+    from src.core.training_utils import set_seed
+    
+    # Test 1: PyTorch determinism
+    set_seed(42)
+    t1 = torch.rand(100)
+    set_seed(42)
+    t2 = torch.rand(100)
+    
+    assert torch.allclose(t1, t2), "PyTorch seed is NOT deterministic"
+    print("  ✓ PyTorch seed is deterministic")
+    
+    # Test 2: NumPy determinism
+    import numpy as np
+    set_seed(42)
+    n1 = np.random.rand(100)
+    set_seed(42)
+    n2 = np.random.rand(100)
+    
+    assert np.allclose(n1, n2), "NumPy seed is NOT deterministic"
+    print("  ✓ NumPy seed is deterministic")
+    
+    print("\n✓ Seed consistency verified!")
 
 
 def test_medical_datasets():
@@ -130,52 +111,42 @@ def test_medical_datasets():
     print("TEST 4: Medical Dataset Utilities")
     print("="*60)
     
-    try:
-        from src.core.medical_data_utils import get_medical_datasets
-        
-        # Test synthetic dataset
-        train_ds, test_ds = get_medical_datasets(
-            dataset_type='synthetic',
-            num_train=50,
-            num_test=25,
-            img_size=128,
-            seed=42
-        )
-        
-        assert len(train_ds) == 50, f"Expected 50 train samples, got {len(train_ds)}"
-        assert len(test_ds) == 25, f"Expected 25 test samples, got {len(test_ds)}"
-        print(f"  ✓ Synthetic dataset correct size: {len(train_ds)} train, {len(test_ds)} test")
-        
-        # Test shapes
-        img, mask = train_ds[0]
-        assert img.shape == (1, 128, 128), f"Wrong image shape: {img.shape}"
-        assert mask.shape == (1, 128, 128), f"Wrong mask shape: {mask.shape}"
-        print(f"  ✓ Synthetic dataset correct shapes: {img.shape}")
-        
-        # Test determinism
-        train_ds2, test_ds2 = get_medical_datasets(
-            dataset_type='synthetic',
-            num_train=50,
-            num_test=25,
-            img_size=128,
-            seed=42
-        )
-        img2, mask2 = train_ds2[0]
-        
-        import torch
-        if torch.allclose(img, img2) and torch.allclose(mask, mask2):
-            print("  ✓ Synthetic dataset is deterministic with same seed")
-        else:
-            print("  ✗ Synthetic dataset is NOT deterministic")
-            return False
-        
-        print("\n✓ Medical dataset utilities working correctly!")
-        return True
-    except Exception as e:
-        print(f"\n✗ Medical dataset test failed: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
+    from src.core.medical_data_utils import get_medical_datasets
+    
+    # Test synthetic dataset
+    train_ds, test_ds = get_medical_datasets(
+        dataset_type='synthetic',
+        num_train=50,
+        num_test=25,
+        img_size=128,
+        seed=42
+    )
+    
+    assert len(train_ds) == 50, f"Expected 50 train samples, got {len(train_ds)}"
+    assert len(test_ds) == 25, f"Expected 25 test samples, got {len(test_ds)}"
+    print(f"  ✓ Synthetic dataset correct size: {len(train_ds)} train, {len(test_ds)} test")
+    
+    # Test shapes
+    img, mask = train_ds[0]
+    assert img.shape == (1, 128, 128), f"Wrong image shape: {img.shape}"
+    assert mask.shape == (1, 128, 128), f"Wrong mask shape: {mask.shape}"
+    print(f"  ✓ Synthetic dataset correct shapes: {img.shape}")
+    
+    # Test determinism
+    train_ds2, test_ds2 = get_medical_datasets(
+        dataset_type='synthetic',
+        num_train=50,
+        num_test=25,
+        img_size=128,
+        seed=42
+    )
+    img2, mask2 = train_ds2[0]
+    
+    import torch
+    assert torch.allclose(img, img2) and torch.allclose(mask, mask2), "Synthetic dataset is NOT deterministic"
+    print("  ✓ Synthetic dataset is deterministic with same seed")
+    
+    print("\n✓ Medical dataset utilities working correctly!")
 
 
 def test_data_loader_consistency():
@@ -184,36 +155,29 @@ def test_data_loader_consistency():
     print("TEST 5: Data Loader Consistency")
     print("="*60)
     
-    try:
-        from src.core.data_utils import get_mnist_loaders, get_cifar10_loaders
-        
-        # Test MNIST without val_split
-        loaders = get_mnist_loaders(batch_size=32, seed=42)
-        assert len(loaders) == 2, f"Expected 2 loaders, got {len(loaders)}"
-        print("  ✓ MNIST loaders without val_split: 2 loaders (train, test)")
-        
-        # Test MNIST with val_split
-        loaders = get_mnist_loaders(batch_size=32, seed=42, val_split=0.1)
-        assert len(loaders) == 3, f"Expected 3 loaders, got {len(loaders)}"
-        print("  ✓ MNIST loaders with val_split: 3 loaders (train, val, test)")
-        
-        # Test CIFAR-10 without val_split
-        loaders = get_cifar10_loaders(batch_size=32, seed=42)
-        assert len(loaders) == 2, f"Expected 2 loaders, got {len(loaders)}"
-        print("  ✓ CIFAR-10 loaders without val_split: 2 loaders (train, test)")
-        
-        # Test CIFAR-10 with val_split
-        loaders = get_cifar10_loaders(batch_size=32, seed=42, val_split=0.1)
-        assert len(loaders) == 3, f"Expected 3 loaders, got {len(loaders)}"
-        print("  ✓ CIFAR-10 loaders with val_split: 3 loaders (train, val, test)")
-        
-        print("\n✓ Data loader return values are consistent!")
-        return True
-    except Exception as e:
-        print(f"\n✗ Data loader test failed: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
+    from src.core.data_utils import get_mnist_loaders, get_cifar10_loaders
+    
+    # Test MNIST without val_split
+    loaders = get_mnist_loaders(batch_size=32, seed=42)
+    assert len(loaders) == 2, f"Expected 2 loaders, got {len(loaders)}"
+    print("  ✓ MNIST loaders without val_split: 2 loaders (train, test)")
+    
+    # Test MNIST with val_split
+    loaders = get_mnist_loaders(batch_size=32, seed=42, val_split=0.1)
+    assert len(loaders) == 3, f"Expected 3 loaders, got {len(loaders)}"
+    print("  ✓ MNIST loaders with val_split: 3 loaders (train, val, test)")
+    
+    # Test CIFAR-10 without val_split
+    loaders = get_cifar10_loaders(batch_size=32, seed=42)
+    assert len(loaders) == 2, f"Expected 2 loaders, got {len(loaders)}"
+    print("  ✓ CIFAR-10 loaders without val_split: 2 loaders (train, test)")
+    
+    # Test CIFAR-10 with val_split
+    loaders = get_cifar10_loaders(batch_size=32, seed=42, val_split=0.1)
+    assert len(loaders) == 3, f"Expected 3 loaders, got {len(loaders)}"
+    print("  ✓ CIFAR-10 loaders with val_split: 3 loaders (train, val, test)")
+    
+    print("\n✓ Data loader return values are consistent!")
 
 
 def test_build_model_and_data():
@@ -222,31 +186,24 @@ def test_build_model_and_data():
     print("TEST 6: build_model_and_data() Consistency")
     print("="*60)
     
-    try:
-        import torch
-        from src.experiments.run_nn_experiment import build_model_and_data
-        
-        device = torch.device('cpu')
-        
-        # Test without val_split
-        result = build_model_and_data('MNIST', 'SimpleMLP', 32, device, 42)
-        assert len(result) == 3, f"Expected 3 returns, got {len(result)}"
-        model, train_loader, test_loader = result
-        print("  ✓ build_model_and_data without val_split: 3 returns (model, train, test)")
-        
-        # Test with val_split
-        result = build_model_and_data('MNIST', 'SimpleMLP', 32, device, 42, val_split=0.1)
-        assert len(result) == 4, f"Expected 4 returns, got {len(result)}"
-        model, train_loader, val_loader, test_loader = result
-        print("  ✓ build_model_and_data with val_split: 4 returns (model, train, val, test)")
-        
-        print("\n✓ build_model_and_data() return values are consistent!")
-        return True
-    except Exception as e:
-        print(f"\n✗ build_model_and_data test failed: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
+    import torch
+    from src.experiments.run_nn_experiment import build_model_and_data
+    
+    device = torch.device('cpu')
+    
+    # Test without val_split
+    result = build_model_and_data('MNIST', 'SimpleMLP', 32, device, 42)
+    assert len(result) == 3, f"Expected 3 returns, got {len(result)}"
+    model, train_loader, test_loader = result
+    print("  ✓ build_model_and_data without val_split: 3 returns (model, train, test)")
+    
+    # Test with val_split
+    result = build_model_and_data('MNIST', 'SimpleMLP', 32, device, 42, val_split=0.1)
+    assert len(result) == 4, f"Expected 4 returns, got {len(result)}"
+    model, train_loader, val_loader, test_loader = result
+    print("  ✓ build_model_and_data with val_split: 4 returns (model, train, val, test)")
+    
+    print("\n✓ build_model_and_data() return values are consistent!")
 
 
 def test_no_duplicate_classes():
@@ -256,31 +213,20 @@ def test_no_duplicate_classes():
     print("="*60)
     
     # Check for duplicate SyntheticMedicalDataset
-    try:
-        from src.core.medical_data_utils import SyntheticMedicalDataset
-        print("  OK: SyntheticMedicalDataset only in medical_data_utils")
-    except ImportError as e:
-        print(f"  ERROR: Import error: {e}")
-        return False
+    from src.core.medical_data_utils import SyntheticMedicalDataset
+    print("  OK: SyntheticMedicalDataset only in medical_data_utils")
     
     # Verify run_all_kaggle uses the correct import
     with open('run_all_kaggle.py', 'r', encoding='utf-8') as f:
         content = f.read()
     
-    if 'from src.core.medical_data_utils import get_medical_datasets' in content:
-        print("  OK: run_all_kaggle.py uses correct medical utils import")
-    else:
-        print("  ERROR: run_all_kaggle.py missing medical utils import")
-        return False
+    assert 'from src.core.medical_data_utils import get_medical_datasets' in content, "run_all_kaggle.py missing medical utils import"
+    print("  OK: run_all_kaggle.py uses correct medical utils import")
     
-    if 'class SyntheticMedicalDataset' in content:
-        print("  ERROR: run_all_kaggle.py has duplicate SyntheticMedicalDataset class")
-        return False
-    else:
-        print("  OK: run_all_kaggle.py has no duplicate SyntheticMedicalDataset class")
+    assert 'class SyntheticMedicalDataset' not in content, "run_all_kaggle.py has duplicate SyntheticMedicalDataset class"
+    print("  OK: run_all_kaggle.py has no duplicate SyntheticMedicalDataset class")
     
     print("\nOK: No duplicate classes found!")
-    return True
 
 
 def main():

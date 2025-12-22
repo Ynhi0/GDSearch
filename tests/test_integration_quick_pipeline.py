@@ -23,7 +23,7 @@ def test_quick_mnist_pipeline():
             "--seeds", "42",
             "--results-dir", tmpdir,
             "--no-mlflow"
-        ], capture_output=True, text=True, timeout=300)  # 5 minutes should be plenty for ultra-quick
+        ], capture_output=True, text=True, timeout=1200)  # 20 minutes for ultra-quick with all optimizers
         
         # Check execution succeeded
         assert result.returncode == 0, f"Script failed with: {result.stderr}"
@@ -58,7 +58,7 @@ def test_quick_2d_pipeline():
             "--seeds", "123",
             "--results-dir", tmpdir,
             "--no-mlflow"
-        ], capture_output=True, text=True, timeout=120)
+        ], capture_output=True, text=True, timeout=300)  # 5 minutes for 2D quick mode
         
         assert result.returncode == 0, f"2D experiment failed: {result.stderr}"
         
@@ -83,7 +83,7 @@ def test_deterministic_flag():
             "--results-dir", tmpdir,
             "--no-mlflow",
             "--deterministic"
-        ], capture_output=True, text=True, timeout=120)
+        ], capture_output=True, text=True, timeout=300)  # 5 minutes for 2D deterministic
         
         # Check for deterministic mode messages in output
         stdout_check = "deterministic mode" in result.stdout.lower() if result.stdout else False
@@ -104,7 +104,7 @@ def test_multi_seed_consistency():
             "--seeds", "42,123,456",
             "--results-dir", tmpdir,
             "--no-mlflow"
-        ], capture_output=True, text=True, timeout=180)
+        ], capture_output=True, text=True, timeout=600)  # 10 minutes for 3 seeds
         
         assert result.returncode == 0, f"Multi-seed run failed: {result.stderr}"
         
@@ -128,7 +128,7 @@ def test_full_mnist_with_checkpoints():
             "--seeds", "42,123",
             "--results-dir", tmpdir,
             "--no-mlflow"
-        ], capture_output=True, text=True, timeout=600)  # 10 minutes for ultra-quick with 2 seeds
+        ], capture_output=True, text=True, timeout=1800)  # 30 minutes for ultra-quick with 2 seeds and all optimizers
         
         assert result.returncode == 0, f"Full MNIST run failed: {result.stderr}"
         

@@ -289,9 +289,6 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
         num_batches = len(train_loader)
         for batch_idx, (inputs, targets) in enumerate(pbar, start=1):
             if HAS_OOM_SAFE:
-                # Get optimizer name for SAM handling
-                opt_name = config.get('optimizer', 'Unknown')
-                
                 # grad norm before step (capture before OOM-safe call modifies gradients)
                 grad_norm = _flattened_grad_norm(model)
                 
@@ -306,7 +303,6 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
                         inputs=inputs,
                         targets=targets,
                         device=device,
-                        opt_name=opt_name,
                         max_retries=3,
                         min_batch_size=1
                     )

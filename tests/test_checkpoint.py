@@ -163,7 +163,7 @@ class TestCheckpointCompleteness:
             new_optimizer = optim.SGD(new_model.parameters(), lr=0.1, momentum=0.9)
             new_scheduler = optim.lr_scheduler.StepLR(new_optimizer, step_size=5, gamma=0.1)
             
-            loaded_ckpt = torch.load(ckpt_path)
+            loaded_ckpt = torch.load(ckpt_path, weights_only=False)
             new_model.load_state_dict(loaded_ckpt['model'])
             new_optimizer.load_state_dict(loaded_ckpt['optimizer'])
             new_scheduler.load_state_dict(loaded_ckpt['scheduler'])

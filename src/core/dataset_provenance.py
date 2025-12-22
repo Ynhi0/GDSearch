@@ -12,7 +12,7 @@ from typing import Dict, Any, Optional
 from pathlib import Path
 import hashlib
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -23,17 +23,32 @@ try:
 except ImportError:
     HAS_TORCH = False
 
-try:
-    import medmnist
-    HAS_MEDMNIST = True
-except ImportError:
-    HAS_MEDMNIST = False
+# Move heavy optional imports to function-level to avoid module-level import issues
+# This allows static analysis to run without requiring optional packages
+HAS_MEDMNIST = False
+HAS_HF_DATASETS = False
 
-try:
-    import datasets  # HuggingFace datasets
-    HAS_HF_DATASETS = True
-except ImportError:
-    HAS_HF_DATASETS = False
+def _check_medmnist():
+    """Check if medmnist is available (lazy import)."""
+    global HAS_MEDMNIST
+    try:
+        import medmnist
+        HAS_MEDMNIST = True
+        return True, medmnist
+    except ImportError:
+        HAS_MEDMNIST = False
+        return False, None
+
+def _check_hf_datasets():
+    """Check if HuggingFace datasets is available (lazy import)."""
+    global HAS_HF_DATASETS
+    try:
+        import datasets
+        HAS_HF_DATASETS = True
+        return True, datasets
+    except ImportError:
+        HAS_HF_DATASETS = False
+        return False, None
 
 
 def get_dataset_provenance(
@@ -66,7 +81,7 @@ def get_dataset_provenance(
         'dataset_name': dataset_name,
         'split': split,
         'data_source': 'unknown',
-        'timestamp': datetime.utcnow().isoformat(),
+        'timestamp': datetime.now(timezone.utc).isoformat(),
         'data_root': str(data_root) if data_root else None,
     }
     
@@ -129,7 +144,9 @@ def get_dataset_provenance(
     # MedMNIST family
     elif 'MEDMNIST' in dataset_upper or dataset_upper in ['PATHMNIST', 'CHESTMNIST', 'DERMAMNIST', 'OCTMNIST', 'PNEUMONIAMNIST', 'RETINAMNIST', 'BREASTMNIST', 'BLOODMNIST', 'TISSUEMNIST', 'ORGANAMNIST', 'ORGANCMNIST', 'ORGANSMNIST']:
         provenance['data_source'] = 'medmnist'
-        provenance['dataset_version'] = f'medmnist_{medmnist.__version__}' if HAS_MEDMNIST else 'unknown'
+        # Lazy import check
+        has_mm, medmnist_module = _check_medmnist()
+        provenance['dataset_version'] = f'medmnist_{medmnist_module.__version__}' if has_mm else 'unknown'
         provenance['official_url'] = 'https://medmnist.com/'
         provenance['citation'] = 'Yang et al. MedMNIST v2: A Large-Scale Lightweight Benchmark for 2D and 3D Biomedical Image Classification. arXiv:2110.14795'
         
@@ -140,7 +157,9 @@ def get_dataset_provenance(
     # IMDB (NLP)
     elif dataset_upper == 'IMDB':
         provenance['data_source'] = 'huggingface_datasets'
-        provenance['dataset_version'] = f'datasets_{datasets.__version__}' if HAS_HF_DATASETS else 'unknown'
+        # Lazy import check
+        has_hf, datasets_module = _check_hf_datasets()
+        provenance['dataset_version'] = f'datasets_{datasets_module.__version__}' if has_hf else 'unknown'
         provenance['official_url'] = 'https://ai.stanford.edu/~amaas/data/sentiment/'
         provenance['citation'] = 'Maas et al. Learning Word Vectors for Sentiment Analysis. ACL 2011'
         
@@ -263,14 +282,14 @@ def create_experiment_manifest(
     """
     manifest = {
         'experiment_name': experiment_name,
-        'created_at': datetime.utcnow().isoformat(),
+        'created_at': datetime.now(timezone.utc).isoformat(),
         'config': config,
         'dataset_provenance': dataset_provenance,
         'environment': {
             'torch_version': torch.__version__ if HAS_TORCH else None,
             'torchvision_version': torchvision.__version__ if HAS_TORCH else None,
-            'medmnist_version': medmnist.__version__ if HAS_MEDMNIST else None,
-            'datasets_version': datasets.__version__ if HAS_HF_DATASETS else None,
+            'medmnist_version': (_check_medmnist()[1].__version__ if _check_medmnist()[0] else None),
+            'datasets_version': (_check_hf_datasets()[1].__version__ if _check_hf_datasets()[0] else None),
         }
     }
     

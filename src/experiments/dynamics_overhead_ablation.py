@@ -332,14 +332,31 @@ def run_dynamics_overhead_ablation(
     print(f"Average Memory Overhead: {mem_overhead_mean:+.2f} MB")
     print(f"Average Accuracy Difference: {acc_diff_mean:+.4f}%")
     
-    # Statistical test
+    # Statistical test with proper seed alignment
     from scipy import stats
-    time_ttest = stats.ttest_rel(tracked_df['time_seconds'], baseline_df['time_seconds'])
-    acc_ttest = stats.ttest_rel(tracked_df['accuracy'], baseline_df['accuracy'])
+    # CRITICAL FIX: Merge on seed to ensure proper pairing for paired t-test
+    merged = pd.merge(
+        baseline_df[['seed', 'time_seconds', 'accuracy']],
+        tracked_df[['seed', 'time_seconds', 'accuracy']],
+        on='seed',
+        how='inner',
+        suffixes=('_baseline', '_tracked')
+    )
+    
+    if len(merged) < 2:
+        print(f"\nWarning: Insufficient paired samples (n={len(merged)}). Skipping statistical tests.")
+        time_ttest = None
+        acc_ttest = None
+    else:
+        time_ttest = stats.ttest_rel(merged['time_seconds_tracked'], merged['time_seconds_baseline'])
+        acc_ttest = stats.ttest_rel(merged['accuracy_tracked'], merged['accuracy_baseline'])
     
     print(f"\nStatistical Significance:")
-    print(f"  Time difference: p={time_ttest.pvalue:.4f} {'(significant)' if time_ttest.pvalue < 0.05 else '(not significant)'}")
-    print(f"  Accuracy difference: p={acc_ttest.pvalue:.4f} {'(significant)' if acc_ttest.pvalue < 0.05 else '(not significant)'}")
+    if time_ttest is not None and acc_ttest is not None:
+        print(f"  Time difference: p={time_ttest.pvalue:.4f} {'(significant)' if time_ttest.pvalue < 0.05 else '(not significant)'}")
+        print(f"  Accuracy difference: p={acc_ttest.pvalue:.4f} {'(significant)' if acc_ttest.pvalue < 0.05 else '(not significant)'}")
+    else:
+        print(f"  Statistical tests skipped due to insufficient paired samples.")
     
     # Generate visualization
     try:

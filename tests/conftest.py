@@ -9,7 +9,7 @@ import warnings
 import pytest
 
 
-def pytest_configure(_config):
+def pytest_configure(config):
     """Configure pytest with warning filters."""
     # Suppress specific deprecation warnings from third-party libraries
     

@@ -96,34 +96,51 @@ def extract_final_metric(dfs: List[pd.DataFrame], metric: str = 'test_accuracy',
         metric: Name of the metric to extract from `eval` phase rows
         exclude_tainted: If True, skip runs (DataFrames) where any `tainted` flag is True.
         exclude_diverged: If True, skip runs (DataFrames) where `diverged` column is True.
+        
+    Note:
+        Expects tainted/diverged columns to be boolean type. If they are strings,
+        will attempt to convert them, but proper boolean types are recommended.
     """
     values = []
     for df in dfs:
         if exclude_diverged and 'diverged' in df.columns:
             try:
-                # Normalize to string, strip whitespace, lowercase
-                s = df['diverged'].astype(str).str.strip().str.lower()
-                # Map known true/false strings to bool
-                df['diverged'] = s.isin(['true', '1', 't', 'yes', 'y'])
-                if df['diverged'].any():
+                # CRITICAL FIX: Expect boolean type, but handle string fallback gracefully
+                if df['diverged'].dtype == bool:
+                    is_diverged = df['diverged'].any()
+                else:
+                    # Fallback for legacy data: normalize to string, strip whitespace, lowercase
+                    s = df['diverged'].astype(str).str.strip().str.lower()
+                    # Map known true/false strings to bool
+                    is_diverged = s.isin(['true', '1', 't', 'yes', 'y']).any()
+                
+                if is_diverged:
                     logging.info(f"Excluding diverged run from statistical analysis")
                     continue
-            except Exception:
-                # If parsing fails, default to False (assume not diverged)
-                df['diverged'] = False
+            except Exception as e:
+                # If parsing fails, log warning and default to False (assume not diverged)
+                logging.warning(f"Failed to parse diverged column: {e}. Assuming not diverged.")
+                pass
         
         # If requested, skip runs that are marked tainted (OOM recovery happened)
         if exclude_tainted and 'tainted' in df.columns:
             try:
-                # Normalize to string, strip whitespace, lowercase
-                s = df['tainted'].astype(str).str.strip().str.lower()
-                # Map known true/false strings to bool
-                df['tainted'] = s.isin(['true', '1', 't', 'yes', 'y'])
-                if df['tainted'].any():
+                # CRITICAL FIX: Expect boolean type, but handle string fallback gracefully
+                if df['tainted'].dtype == bool:
+                    is_tainted = df['tainted'].any()
+                else:
+                    # Fallback for legacy data: normalize to string, strip whitespace, lowercase
+                    s = df['tainted'].astype(str).str.strip().str.lower()
+                    # Map known true/false strings to bool
+                    is_tainted = s.isin(['true', '1', 't', 'yes', 'y']).any()
+                
+                if is_tainted:
+                    logging.info(f"Excluding tainted run from statistical analysis")
                     continue
-            except Exception:
-                # If parsing fails, default to False (assume not tainted)
-                df['tainted'] = False
+            except Exception as e:
+                # If parsing fails, log warning and default to False (assume not tainted)
+                logging.warning(f"Failed to parse tainted column: {e}. Assuming not tainted.")
+                pass
 
         eval_df = df[df['phase'] == 'eval']
         if not eval_df.empty:

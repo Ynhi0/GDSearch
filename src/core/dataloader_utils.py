@@ -100,4 +100,15 @@ def make_dataloader(
         except Exception:
             pass  # Skip if version parsing fails
 
-    return DataLoader(dataset, **dl_kwargs)
+    loader = DataLoader(dataset, **dl_kwargs)
+    
+    # CRITICAL: Add basic metadata for test-leakage prevention
+    # Callers should override with more specific values if available
+    if not hasattr(loader, 'name'):
+        loader.name = 'unknown'
+    if not hasattr(loader, '_split_type'):
+        loader._split_type = 'unknown'
+    if not hasattr(loader, '_dataset_uid'):
+        loader._dataset_uid = f'dataset_{len(dataset)}'
+    
+    return loader

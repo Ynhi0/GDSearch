@@ -8,9 +8,24 @@ Scientific Validity Note:
 When OOM occurs and batch size is reduced, the training run is marked as "tainted"
 to indicate that the run used variable batch sizes, which invalidates fair optimizer
 comparisons in benchmarking studies.
+
+CRITICAL - SAM Optimizer Compatibility:
+SAM (Sharpness-Aware Minimization) and other closure-based optimizers (e.g., L-BFGS)
+are INCOMPATIBLE with OOM retry logic. This is because:
+1. SAM requires calling optimizer.step(closure) where the closure is called multiple times
+2. Retrying with reduced batch size would corrupt the adversarial gradient computation
+3. SAM maintains internal state that cannot be safely recovered after OOM
+
+When a closure-based optimizer is detected (requires_closure=True attribute), OOM retry
+is DISABLED and the function will fail immediately on OOM. Users must manually reduce
+batch size for SAM experiments.
+
+Supported Optimizers:
+- Full OOM retry: SGD, Adam, AdamW, RMSProp, Adagrad (standard optimizers)
+- No retry (fail-fast): SAM, Lookahead+SAM, L-BFGS (closure-based optimizers)
 """
 import logging
-from typing import Tuple, Any, Callable, Optional
+from typing import Tuple, Any, Callable
 import torch
 import torch.nn as nn
 
@@ -22,7 +37,6 @@ def oom_safe_train_step(
     inputs: torch.Tensor,
     targets: torch.Tensor,
     device: torch.device,
-    opt_name: str = "",
     max_retries: int = 3,
     min_batch_size: int = 1
 ) -> Tuple[float, int, Any, bool]:
@@ -41,7 +55,6 @@ def oom_safe_train_step(
         inputs: Input tensor batch
         targets: Target tensor batch
         device: torch.device
-        opt_name: Optimizer name (for SAM handling)
         max_retries: Maximum OOM recovery attempts
         min_batch_size: Minimum batch size before giving up
         
@@ -55,12 +68,23 @@ def oom_safe_train_step(
     Raises:
         RuntimeError: If OOM recovery fails after max_retries or batch too small
     """
-    # CRITICAL FIX: Prevent SAM state corruption
-    # SAM moves weights during the step. If OOM occurs mid-step, weights are corrupted.
-    # We must disable retry for SAM - better to crash than train on corrupted weights.
-    if "SAM" in optimizer.__class__.__name__:
+    # CRITICAL FIX: Use explicit optimizer capability flag instead of fragile string matching
+    # Check if optimizer has requires_closure flag (set in optimizer wrappers)
+    is_sam_optimizer = getattr(optimizer, 'requires_closure', False)
+    
+    # AUDIT FIX: Add assertion to catch missing requires_closure attribute on closure-based optimizers
+    # If optimizer name suggests closure requirement but attribute is missing, fail-fast
+    optimizer_name = type(optimizer).__name__
+    if any(keyword in optimizer_name.upper() for keyword in ['SAM', 'LBFGS']) and not hasattr(optimizer, 'requires_closure'):
+        raise AttributeError(
+            f"CRITICAL: Optimizer '{optimizer_name}' appears to be closure-based but lacks 'requires_closure' attribute. "
+            f"All closure-based optimizers must set self.requires_closure=True in their __init__ method. "
+            f"This is required for OOM handler safety. Fix the optimizer wrapper."
+        )
+    
+    if is_sam_optimizer:
         logging.warning(
-            "CRITICAL: SAM optimizer detected. OOM retry disabled to prevent state corruption. "
+            "CRITICAL: SAM optimizer detected (requires_closure=True). OOM retry disabled to prevent state corruption. "
             "If OOM occurs, the run will fail immediately. Reduce batch size manually."
         )
         # Bypass retry logic - execute SAM step directly
@@ -108,8 +132,8 @@ def oom_safe_train_step(
             current_inputs = current_inputs.to(device)
             current_targets = current_targets.to(device)
             
-            # Handle SAM optimizer (requires closure)
-            if 'SAM' in opt_name.upper():
+            # Handle SAM-like optimizers that require closure
+            if is_sam_optimizer:
                 def closure():
                     optimizer.zero_grad()
                     outputs = model(current_inputs)
@@ -299,7 +323,6 @@ def clear_gpu_memory(force: bool = False):
         # Log memory state
         try:
             allocated = torch.cuda.memory_allocated() / 1024**2
-            reserved = torch.cuda.memory_reserved() / 1024**2
             total = torch.cuda.get_device_properties(0).total_memory / 1024**2
             free = total - allocated
             logging.info(

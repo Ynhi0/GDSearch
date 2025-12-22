@@ -44,7 +44,7 @@ class TestOptunaHyperparameterTuner:
             pruner=None
         )
         
-        results = tuner.optimize(n_trials=20, show_progress_bar=False)
+        results = tuner.optimize(n_trials=20, show_progress_bar=False, enforce_validation=False)
         
         assert 'best_value' in results
         assert 'best_params' in results
@@ -67,7 +67,7 @@ class TestOptunaHyperparameterTuner:
             pruner=None
         )
         
-        results = tuner.optimize(n_trials=30, show_progress_bar=False)
+        results = tuner.optimize(n_trials=30, show_progress_bar=False, enforce_validation=False)
         
         # Should find maximum near x=5
         assert abs(results['best_params']['x'] - 5.0) < 1.0
@@ -245,7 +245,7 @@ class TestPruning:
             n_startup_trials=2
         )
         
-        results = tuner.optimize(n_trials=10, show_progress_bar=False)
+        results = tuner.optimize(n_trials=10, show_progress_bar=False, enforce_validation=False)
         
         # Some trials should be pruned
         assert results['n_pruned'] >= 0  # May or may not prune in small sample
@@ -267,7 +267,7 @@ class TestDifferentSamplers:
             pruner=None
         )
         
-        results = tuner.optimize(n_trials=10, show_progress_bar=False)
+        results = tuner.optimize(n_trials=10, show_progress_bar=False, enforce_validation=False)
         assert results['n_trials'] == 10
     
     def test_random_sampler(self):
@@ -283,7 +283,7 @@ class TestDifferentSamplers:
             pruner=None
         )
         
-        results = tuner.optimize(n_trials=10, show_progress_bar=False)
+        results = tuner.optimize(n_trials=10, show_progress_bar=False, enforce_validation=False)
         assert results['n_trials'] == 10
 
 

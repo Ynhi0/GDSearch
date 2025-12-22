@@ -6,6 +6,7 @@ Wraps our custom optimizers (SGD, Adam, etc.) to work with PyTorch nn.Module par
 
 import torch
 import logging
+import numpy as np
 from torch.optim.optimizer import Optimizer
 from collections import OrderedDict
 
@@ -48,6 +49,9 @@ class SGDWrapper(Optimizer):
         super().__init__(params, defaults)
         self.custom_opt = CustomSGD(lr=lr)
         
+        # CRITICAL: Flag for OOM handler - SGD does NOT require closure
+        self.requires_closure = False
+        
     def step(self, closure=None):
         loss = None
         if closure is not None:
@@ -64,15 +68,26 @@ class SGDWrapper(Optimizer):
                 original_shape = param_np.shape
                 original_dtype = p.data.dtype
                 
+                # AUDIT FIX: Check for NaN/Inf before step to fail fast
+                if not np.isfinite(grad).all():
+                    raise ValueError(
+                        f"SGDWrapper: Non-finite gradient detected before step.\\n"
+                        f"  Gradient contains NaN or Inf values.\\n"
+                        f"  This indicates numerical instability in the forward/backward pass.\\n"
+                        f"  Consider: gradient clipping, smaller learning rate, or mixed precision training."
+                    )
+                
                 # Compute update
                 updated_param = self.custom_opt.step(param_np.flatten(), grad.flatten())
                 
                 # CRITICAL FIX: Validate shape before reshaping
                 if updated_param.size != param_np.size:
                     raise ValueError(
-                        f"Custom optimizer returned wrong size: "
-                        f"expected {param_np.size}, got {updated_param.size}. "
-                        f"Original shape: {original_shape}"
+                        f"SGDWrapper: Shape mismatch:\\n"
+                        f"  Expected size: {param_np.size} (shape {original_shape})\\n"
+                        f"  Returned size: {updated_param.size}\\n"
+                        f"  Param device: {p.device}, dtype: {original_dtype}\\n"
+                        f"  This indicates a bug in the custom optimizer's step() method."
                     )
                 
                 # Reshape and update parameter preserving dtype/device
@@ -96,6 +111,9 @@ class SGDMomentumWrapper(Optimizer):
         super().__init__(params, defaults)
         # Create one optimizer per parameter (they have state)
         self.custom_opts = {}
+        
+        # CRITICAL: Flag for OOM handler - SGDMomentum does NOT require closure
+        self.requires_closure = False
         
     def step(self, closure=None):
         loss = None
@@ -121,9 +139,22 @@ class SGDMomentumWrapper(Optimizer):
                 # Get gradient as numpy
                 grad = p.grad.data.cpu().numpy()
                 param_np = p.data.cpu().numpy()
+                original_shape = param_np.shape
                 
                 # Compute update
                 updated_param = self.custom_opts[key].step(param_np.flatten(), grad.flatten())
+                
+                # FIXED: Validate shape before reshaping to prevent silent corruption
+                if updated_param.size != param_np.size:
+                    param_name = f"group{group_idx}_param{param_idx}"
+                    raise ValueError(
+                        f"SGDMomentumWrapper: Shape mismatch in {param_name}:\n"
+                        f"  Expected size: {param_np.size} (shape {original_shape})\n"
+                        f"  Returned size: {updated_param.size}\n"
+                        f"  Param device: {p.device}, dtype: {p.dtype}\n"
+                        f"  This indicates a bug in the custom optimizer's step() method.\n"
+                        f"  Check src/core/optimizers.py SGDMomentum implementation."
+                    )
                 
                 # Reshape and update parameter preserving dtype/device
                 updated_tensor = torch.from_numpy(updated_param.reshape(param_np.shape))
@@ -132,15 +163,20 @@ class SGDMomentumWrapper(Optimizer):
         return loss
     
     def state_dict(self):
-        """Save custom optimizer states with index-based keys for cross-process safety."""
+        """Save custom optimizer states with index-based keys for cross-process safety.
+        
+        AUDIT FIX: Use numpy arrays directly instead of .tolist() to reduce memory overhead.
+        Torch will handle numpy array serialization efficiently.
+        """
         base_state = super().state_dict()
         # Serialize custom_opts: map (group_idx, param_idx) to optimizer state (v=velocity, not m)
         custom_state = {}
         for key, opt in self.custom_opts.items():
             # Convert tuple key to string for JSON serialization
             key_str = f"{key[0]},{key[1]}"
+            # AUDIT FIX: Keep as numpy array, torch.save handles this efficiently
             custom_state[key_str] = {
-                'v': opt.v.tolist() if opt.v is not None else None,
+                'v': opt.v if opt.v is not None else None,  # Keep as numpy, no .tolist()
             }
         base_state['custom_opts'] = custom_state
         return base_state
@@ -176,6 +212,9 @@ class AdamWrapper(Optimizer):
         # Create one optimizer per parameter (they have state)
         self.custom_opts = {}
         
+        # CRITICAL: Flag for OOM handler - Adam does NOT require closure
+        self.requires_closure = False
+        
     def step(self, closure=None):
         loss = None
         if closure is not None:
@@ -201,9 +240,23 @@ class AdamWrapper(Optimizer):
                 # Get gradient as numpy
                 grad = p.grad.data.cpu().numpy()
                 param_np = p.data.cpu().numpy()
+                original_shape = param_np.shape
                 
                 # Compute update
                 updated_param = self.custom_opts[key].step(param_np.flatten(), grad.flatten())
+                
+                # FIXED: Validate shape before reshaping to prevent silent corruption
+                if updated_param.size != param_np.size:
+                    param_name = f"group{group_idx}_param{param_idx}"
+                    raise ValueError(
+                        f"AdamWrapper: Shape mismatch in {param_name}:\n"
+                        f"  Expected size: {param_np.size} (shape {original_shape})\n"
+                        f"  Returned size: {updated_param.size}\n"
+                        f"  Param device: {p.device}, dtype: {p.dtype}\n"
+                        f"  Optimizer state - m: {self.custom_opts[key].m is not None}, v: {self.custom_opts[key].v is not None}, t: {self.custom_opts[key].t}\n"
+                        f"  This indicates a bug in the custom optimizer's step() method.\n"
+                        f"  Check src/core/optimizers.py Adam implementation."
+                    )
                 
                 # Reshape and update parameter preserving dtype/device
                 updated_tensor = torch.from_numpy(updated_param.reshape(param_np.shape))
@@ -212,15 +265,19 @@ class AdamWrapper(Optimizer):
         return loss
     
     def state_dict(self):
-        """Save custom Adam optimizer states with index-based keys."""
+        """Save custom Adam optimizer states with index-based keys.
+        
+        AUDIT FIX: Keep numpy arrays instead of .tolist() for efficient serialization.
+        """
         base_state = super().state_dict()
         custom_state = {}
         for key, opt in self.custom_opts.items():
             # Convert tuple key to string for JSON serialization
             key_str = f"{key[0]},{key[1]}"
+            # AUDIT FIX: Keep as numpy arrays for efficient torch.save
             custom_state[key_str] = {
-                'm': opt.m.tolist() if opt.m is not None else None,
-                'v': opt.v.tolist() if opt.v is not None else None,
+                'm': opt.m if opt.m is not None else None,
+                'v': opt.v if opt.v is not None else None,
                 't': opt.t
             }
         base_state['custom_opts'] = custom_state
@@ -259,6 +316,9 @@ class SGDNesterovWrapper(Optimizer):
         defaults = dict(lr=lr, momentum=momentum)
         super().__init__(params, defaults)
         self.custom_opts = {}
+        
+        # CRITICAL: Flag for OOM handler - SGDNesterov does NOT require closure
+        self.requires_closure = False
 
     def step(self, closure=None):
         loss = None
@@ -287,9 +347,15 @@ class SGDNesterovWrapper(Optimizer):
                 
                 # Validate shape before reshaping
                 if updated_param.size != param_np.size:
+                    param_name = f"group{group_idx}_param{param_idx}"
                     raise ValueError(
-                        f"SGDNesterov optimizer returned wrong size: "
-                        f"expected {param_np.size}, got {updated_param.size}"
+                        f"SGDNesterovWrapper: Shape mismatch in {param_name}:\n"
+                        f"  Expected size: {param_np.size} (shape {original_shape})\n"
+                        f"  Returned size: {updated_param.size}\n"
+                        f"  Param device: {p.device}, dtype: {original_dtype}\n"
+                        f"  Optimizer state - v: {self.custom_opts[key].v is not None}\n"
+                        f"  This indicates a bug in the custom optimizer's step() method.\n"
+                        f"  Check src/core/optimizers.py SGDNesterov implementation."
                     )
                 
                 # Reshape and update parameter preserving dtype/device
@@ -302,14 +368,17 @@ class SGDNesterovWrapper(Optimizer):
         return loss
     
     def state_dict(self):
-        """Save Nesterov momentum states with index-based keys."""
+        """Save Nesterov momentum states with index-based keys.
+        
+        AUDIT FIX: Keep numpy arrays for efficient serialization.
+        """
         base_state = super().state_dict()
         custom_state = {}
         for key, opt in self.custom_opts.items():
             # Convert tuple key to string for JSON serialization
             key_str = f"{key[0]},{key[1]}"
             custom_state[key_str] = {
-                'v': opt.v.tolist() if opt.v is not None else None,
+                'v': opt.v if opt.v is not None else None,
             }
         base_state['custom_opts'] = custom_state
         return base_state
@@ -344,6 +413,9 @@ class RMSPropWrapper(Optimizer):
         # Create one optimizer per parameter (they have state)
         self.custom_opts = {}
         
+        # CRITICAL: Flag for OOM handler - RMSProp does NOT require closure
+        self.requires_closure = False
+        
     def step(self, closure=None):
         loss = None
         if closure is not None:
@@ -377,9 +449,15 @@ class RMSPropWrapper(Optimizer):
                 
                 # Validate shape before reshaping
                 if updated_param.size != param_np.size:
+                    param_name = f"group{group_idx}_param{param_idx}"
                     raise ValueError(
-                        f"RMSProp optimizer returned wrong size: "
-                        f"expected {param_np.size}, got {updated_param.size}"
+                        f"RMSPropWrapper: Shape mismatch in {param_name}:\n"
+                        f"  Expected size: {param_np.size} (shape {original_shape})\n"
+                        f"  Returned size: {updated_param.size}\n"
+                        f"  Param device: {p.device}, dtype: {original_dtype}\n"
+                        f"  Optimizer state - s: {self.custom_opts[key].s is not None}\n"
+                        f"  This indicates a bug in the custom optimizer's step() method.\n"
+                        f"  Check src/core/optimizers.py RMSProp implementation."
                     )
                 
                 # Reshape and update parameter preserving dtype/device
@@ -392,14 +470,17 @@ class RMSPropWrapper(Optimizer):
         return loss
     
     def state_dict(self):
-        """Save RMSProp states with index-based keys."""
+        """Save RMSProp states with index-based keys.
+        
+        AUDIT FIX: Keep numpy arrays for efficient serialization.
+        """
         base_state = super().state_dict()
         custom_state = {}
         for key, opt in self.custom_opts.items():
             # Convert tuple key to string for JSON serialization
             key_str = f"{key[0]},{key[1]}"
             custom_state[key_str] = {
-                's': opt.s.tolist() if opt.s is not None else None
+                's': opt.s if opt.s is not None else None
             }
         base_state['custom_opts'] = custom_state
         return base_state
@@ -438,6 +519,9 @@ class AdamWWrapper(Optimizer):
         defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
         super().__init__(params, defaults)
         self.custom_opts = {}
+        
+        # CRITICAL: Flag for OOM handler - AdamW does NOT require closure
+        self.requires_closure = False
 
     def step(self, closure=None):
         loss = None
@@ -470,9 +554,15 @@ class AdamWWrapper(Optimizer):
                 
                 # Validate shape before reshaping
                 if updated_param.size != param_np.size:
+                    param_name = f"group{group_idx}_param{param_idx}"
                     raise ValueError(
-                        f"AdamW optimizer returned wrong size: "
-                        f"expected {param_np.size}, got {updated_param.size}"
+                        f"AdamWWrapper: Shape mismatch in {param_name}:\n"
+                        f"  Expected size: {param_np.size} (shape {original_shape})\n"
+                        f"  Returned size: {updated_param.size}\n"
+                        f"  Param device: {p.device}, dtype: {original_dtype}\n"
+                        f"  Optimizer state - m: {self.custom_opts[key].m is not None}, v: {self.custom_opts[key].v is not None}, t: {self.custom_opts[key].t}\n"
+                        f"  This indicates a bug in the custom optimizer's step() method.\n"
+                        f"  Check src/core/optimizers.py AdamW implementation."
                     )
                 
                 # Reshape and update parameter preserving dtype/device
@@ -485,15 +575,18 @@ class AdamWWrapper(Optimizer):
         return loss
     
     def state_dict(self):
-        """Save AdamW states with index-based keys."""
+        """Save AdamW states with index-based keys.
+        
+        AUDIT FIX: Keep numpy arrays for efficient serialization.
+        """
         base_state = super().state_dict()
         custom_state = {}
         for key, opt in self.custom_opts.items():
             # Convert tuple key to string for JSON serialization
             key_str = f"{key[0]},{key[1]}"
             custom_state[key_str] = {
-                'm': opt.m.tolist() if opt.m is not None else None,
-                'v': opt.v.tolist() if opt.v is not None else None,
+                'm': opt.m if opt.m is not None else None,
+                'v': opt.v if opt.v is not None else None,
                 't': opt.t
             }
         base_state['custom_opts'] = custom_state
@@ -570,6 +663,9 @@ class SAMWrapper(Optimizer):
         self.base_optimizer = base_optimizer
         self.rho = rho
         self.adaptive = adaptive
+        
+        # CRITICAL: Flag for OOM handler - SAM requires closure
+        self.requires_closure = True
         
         # Inherit param_groups and state from base optimizer (reference, not copy)
         self.param_groups = base_optimizer.param_groups
@@ -676,20 +772,76 @@ class SAMWrapper(Optimizer):
         """
         if closure is None:
             raise ValueError(
-                "SAM requires a closure function to compute adversarial gradients. "
-                "Pass a closure that computes and backpropagates the loss."
+                "SAMWrapper: closure is required but was None.\\n"
+                "\\nSAM requires a closure function to compute adversarial gradients.\\n"
+                "\\nEXAMPLE USAGE:\\n"
+                "  def closure():\\n"
+                "      optimizer.zero_grad()\\n"
+                "      output = model(input)\\n"
+                "      loss = criterion(output, target)\\n"
+                "      loss.backward()\\n"
+                "      return loss\\n"
+                "\\n"
+                "  loss = optimizer.step(closure)\\n"
+                "\\nSee PyTorch LBFGS optimizer docs for closure examples."
+            )
+        
+        # AUDIT FIX: Validate closure is callable
+        if not callable(closure):
+            raise TypeError(
+                f"SAMWrapper: closure must be callable, got {type(closure).__name__}"
             )
         
         # First forward-backward pass (compute gradients at current point)
-        loss = closure()
+        try:
+            loss = closure()
+        except Exception as e:
+            raise RuntimeError(
+                f"SAMWrapper: closure() failed during first forward pass: {e}"
+            ) from e
+        
+        # AUDIT FIX: Validate loss is a tensor
+        if not hasattr(loss, 'item'):
+            raise TypeError(
+                f"SAMWrapper: closure must return a tensor with .item(), got {type(loss).__name__}"
+            )
+        
         loss_at_current = loss.item() if hasattr(loss, 'item') else float(loss)
+        
+        # AUDIT FIX: Check for non-finite loss
+        if not np.isfinite(loss_at_current):
+            raise ValueError(
+                f"SAMWrapper: Non-finite loss detected at current point: {loss_at_current}\\n"
+                "This indicates numerical instability. Consider: gradient clipping, smaller LR, or AMP."
+            )
         
         # Save current parameters and take adversarial step
         self._ascent_step()
         
         # Second forward-backward pass (compute gradients at adversarial point)
-        loss_adv = closure()  # Recompute loss and gradients at perturbed parameters
+        try:
+            loss_adv = closure()  # Recompute loss and gradients at perturbed parameters
+        except Exception as e:
+            # Restore parameters before raising
+            self._descent_step()
+            raise RuntimeError(
+                f"SAMWrapper: closure() failed during adversarial forward pass: {e}"
+            ) from e
+        
         loss_at_adversarial = loss_adv.item() if hasattr(loss_adv, 'item') else float(loss_adv)
+        
+        # AUDIT FIX: Check for non-finite adversarial loss
+        if not np.isfinite(loss_at_adversarial):
+            # Restore parameters
+            for group in self.param_groups:
+                for p in group["params"]:
+                    e_w = self._perturbations.pop(id(p), None)
+                    if e_w is not None:
+                        p.sub_(e_w)
+            raise ValueError(
+                f"SAMWrapper: Non-finite loss at adversarial point: {loss_at_adversarial}\\n"
+                "SAM perturbation may have caused overflow. Try smaller rho parameter."
+            )
         
         # Track sharpness (loss difference between adversarial and current point)
         sharpness = abs(loss_at_adversarial - loss_at_current)
@@ -802,6 +954,9 @@ class LookaheadWrapper(Optimizer):
         defaults = dict(k=k, alpha=alpha)
         super().__init__(params, defaults)
         
+        # CRITICAL: Flag for OOM handler - Lookahead does NOT require closure
+        self.requires_closure = False
+        
         self.base_optimizer = base_optimizer
         self.k = k
         self.alpha = alpha
@@ -907,6 +1062,9 @@ class AdaBoundWrapper(Optimizer):
         defaults = dict(lr=lr, beta1=beta1, beta2=beta2, final_lr=final_lr, epsilon=epsilon, gamma=gamma)
         super().__init__(params, defaults)
         
+        # CRITICAL: Flag for OOM handler - AdaBound does NOT require closure
+        self.requires_closure = False
+        
         # Create separate optimizer for each parameter group
         self.custom_opts = {}
         for group_id, group in enumerate(self.param_groups):
@@ -971,6 +1129,9 @@ class RAdamWrapper(Optimizer):
         defaults = dict(lr=lr, beta1=beta1, beta2=beta2, epsilon=epsilon)
         super().__init__(params, defaults)
         
+        # CRITICAL: Flag for OOM handler - RAdam does NOT require closure
+        self.requires_closure = False
+        
         # Create separate optimizer for each parameter group
         self.custom_opts = {}
         for group_id, group in enumerate(self.param_groups):
@@ -1032,6 +1193,9 @@ class LAMBWrapper(Optimizer):
     def __init__(self, params, lr=0.001, beta1=0.9, beta2=0.999, epsilon=1e-8, weight_decay=0.01):
         defaults = dict(lr=lr, beta1=beta1, beta2=beta2, epsilon=epsilon, weight_decay=weight_decay)
         super().__init__(params, defaults)
+        
+        # CRITICAL: Flag for OOM handler - LAMB does NOT require closure
+        self.requires_closure = False
         
         # Create separate optimizer for each parameter group
         self.custom_opts = {}

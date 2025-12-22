@@ -73,7 +73,6 @@ def test_medical_utils():
         print(f"  ✓ Kaggle dataset loaded")
     
     print("\n✓ All medical utility tests passed!")
-    return True
 
 
 def test_download_scripts():
@@ -95,7 +94,6 @@ def test_download_scripts():
     print("  ✓ download_datasets_kaggle.py imports successfully")
     
     print("\n✓ All download script tests passed!")
-    return True
 
 
 def test_integration():
@@ -127,7 +125,6 @@ def test_integration():
     print(f"  ✓ Medical experiment can load datasets: {len(train_ds)} train, {len(test_ds)} test")
     
     print("\n✓ All integration tests passed!")
-    return True
 
 
 def main():

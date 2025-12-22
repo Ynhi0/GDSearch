@@ -116,6 +116,11 @@ class SGDMomentum(Optimizer):
             if self.v is None:
                 self.v = np.zeros_like(params)
             
+            # AUDIT FIX: Check for non-finite gradients
+            if not np.isfinite(gradients).all():
+                logging.warning("SGDMomentum: Non-finite gradients detected, skipping update")
+                return params
+            
             # Update velocity
             self.v = self.beta * self.v + gradients
             
@@ -316,6 +321,11 @@ class Adam(Optimizer):
                 self.m = np.zeros_like(params)
                 self.v = np.zeros_like(params)
             
+            # AUDIT FIX: Check for non-finite gradients
+            if not np.isfinite(gradients).all():
+                logging.warning("Adam: Non-finite gradients detected, skipping update")
+                return params
+            
             # Update biased first moment estimate
             self.m = self.beta1 * self.m + (1 - self.beta1) * gradients
             
@@ -398,6 +408,12 @@ class AdamW(Optimizer):
             if self.m is None or self.m.shape != params.shape:
                 self.m = np.zeros_like(params)
                 self.v = np.zeros_like(params)
+            
+            # AUDIT FIX: Check for non-finite gradients
+            if not np.isfinite(gradients).all():
+                logging.warning("AdamW: Non-finite gradients detected, skipping update")
+                return params
+            
             self.m = self.beta1 * self.m + (1 - self.beta1) * gradients
             self.v = self.beta2 * self.v + (1 - self.beta2) * (gradients ** 2)
             m_hat = self.m / max(1 - self.beta1 ** self.t, 1e-8)

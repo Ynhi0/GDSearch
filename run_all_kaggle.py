@@ -8,17 +8,43 @@ Runs all experiments: MNIST, CIFAR-10, NLP, Medical Segmentation
 import os
 import sys
 
-# Force UTF-8 encoding for Windows console (must be FIRST, before any prints)
-if sys.platform == 'win32':
-    import io
-    # Only wrap if stdout/stderr have buffer attribute (not in test contexts)
-    if hasattr(sys.stdout, 'buffer'):
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    if hasattr(sys.stderr, 'buffer'):
-        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
-    # Also set environment variables for subprocess compatibility
-    os.environ['PYTHONIOENCODING'] = 'utf-8'
-    os.environ['PYTHONUTF8'] = '1'
+# Windows console encoding configuration (moved to function to avoid import-time side effects)
+def configure_windows_console_encoding():
+    """
+    Configure UTF-8 encoding for Windows console.
+    
+    IMPORTANT: This function must be called explicitly in the main entry point,
+    NOT at import time. Import-time global stream mutations break test harnesses
+    like pytest that replace stdout/stderr with capture objects.
+    """
+    if sys.platform == 'win32':
+        import io
+        # Only wrap if stdout/stderr have buffer attribute and are NOT already wrapped
+        # This prevents breaking pytest capture and other test frameworks
+        if hasattr(sys.stdout, 'buffer') and not isinstance(sys.stdout, io.TextIOWrapper):
+            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        if hasattr(sys.stderr, 'buffer') and not isinstance(sys.stderr, io.TextIOWrapper):
+            sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+        # Also set environment variables for subprocess compatibility
+        os.environ['PYTHONIOENCODING'] = 'utf-8'
+        os.environ['PYTHONUTF8'] = '1'
+
+def safe_print(*args, **kwargs):
+    """
+    Print with fallback for encoding errors (e.g., cp1252 can't handle Unicode checkmarks).
+    Replaces Unicode symbols with ASCII equivalents for Windows compatibility.
+    """
+    try:
+        print(*args, **kwargs)
+    except UnicodeEncodeError:
+        # Replace Unicode checkmarks with ASCII equivalents
+        safe_args = []
+        for arg in args:
+            if isinstance(arg, str):
+                arg = arg.replace('\u2713', '[OK]').replace('\u2717', '[ERROR]')
+                arg = arg.replace('✓', '[OK]').replace('✗', '[ERROR]')
+            safe_args.append(arg)
+        print(*safe_args, **kwargs)
 
 # Suppress CUDA plugin registration warnings FIRST (before any imports)
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TensorFlow warnings
@@ -109,9 +135,18 @@ try:
     print(f"Successfully imported core modules from {project_root / 'src'}")
     print("Using canonical ResNet18, BasicBlock, SAM from src/core/")
 except ImportError as e:
+    print(f"\n{'='*80}")
     print(f"CRITICAL: Failed to import core modules from {project_root / 'src'}")
+    print(f"{'='*80}")
     print(f"Error: {e}")
-    print(f"sys.path = {sys.path[:5]}")
+    print(f"\nDEBUGGING STEPS:")
+    print(f"  1. Verify you're in the project root: {project_root}")
+    print(f"  2. Check src/ directory exists: {(project_root / 'src').exists()}")
+    print(f"  3. Install in editable mode: pip install -e .")
+    print(f"  4. Check dependencies: pip install -r requirements.txt")
+    print(f"  5. Verify Python version: {sys.version}")
+    print(f"\nCurrent sys.path (first 5): {sys.path[:5]}")
+    print(f"{'='*80}\n")
     raise
 
 
@@ -239,30 +274,20 @@ try:
     HAS_HF = True
 except ImportError:
     HAS_HF = False
-    # Don't auto-install in local development - only on Kaggle where imports are missing
-    # Check if we're in a Kaggle environment by looking for /kaggle directory
+    # Don't auto-install - provide clear instructions instead
     is_kaggle = os.path.exists('/kaggle') or os.environ.get('KAGGLE_KERNEL_RUN_TYPE') is not None
     
     if is_kaggle:
-        logging.warning("transformers/datasets not available. Attempting to install for Kaggle...")
-        try:
-            import subprocess
-            print("Installing transformers and datasets for NLP experiments...")
-            # Use --no-input to prevent interactive prompts
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "--no-input", "transformers", "datasets"], 
-                                 timeout=120)
-            from transformers import AutoTokenizer, AutoModelForSequenceClassification
-            from datasets import load_dataset
-            HAS_HF = True
-            print("Successfully installed transformers and datasets")
-        except subprocess.TimeoutExpired:
-            logging.warning("Installation timed out. NLP experiments will be simplified.")
-            HAS_HF = False
-        except (subprocess.CalledProcessError, OSError, ImportError) as e:
-            logging.warning("Could not install transformers/datasets: %s. NLP experiments will be simplified.", e)
-            HAS_HF = False
+        logging.warning(
+            "transformers/datasets not available in Kaggle. NLP experiments will be simplified. "
+            "To enable full NLP experiments, add to Kaggle Notebook settings: "
+            "Settings > Docker > Custom Packages > transformers, datasets"
+        )
     else:
-        logging.warning("transformers/datasets not available. NLP experiments will be simplified. Install with: pip install transformers datasets")
+        logging.warning(
+            "transformers/datasets not available. NLP experiments will be simplified. "
+            "Install with: pip install transformers datasets"
+        )
 
 try:
     from scipy import stats
@@ -358,44 +383,29 @@ class PerformanceProfiler:
         if not self.metrics:
             return {}
         
-        # Robust transformers/datasets import with auto-install for all environments
-        try:
-            from transformers import AutoTokenizer, AutoModelForSequenceClassification
-            from datasets import load_dataset
-            HAS_HF = True
-            logging.info("✓ transformers and datasets available")
-        except ImportError as import_error:
-            HAS_HF = False
-            logging.debug("Initial import failed: %s", import_error)
+        # Return metrics summary
+        return self.metrics
     
-            # Attempt auto-install (works on both Kaggle and local environments)
-            try:
-                import subprocess
-                logging.info("Attempting to install transformers and datasets...")
-                # Install with retry and better error handling
-                try:
-                    subprocess.check_call(
-                        [sys.executable, "-m", "pip", "install", "-q", "transformers", "datasets"],
-                        timeout=180,
-                        stderr=subprocess.DEVNULL,
-                        stdout=subprocess.DEVNULL
-                    )
-                except subprocess.TimeoutExpired:
-                    # Retry without timeout suppression to see what's happening
-                    logging.warning("First install attempt timed out, retrying with longer timeout...")
-                    subprocess.check_call(
-                        [sys.executable, "-m", "pip", "install", "-q", "transformers", "datasets"],
-                        timeout=300
-                    )
+    def print_summary(self):
+        """AUDIT FIX: Print performance summary to console (missing method)"""
+        if not self.metrics:
+            print("No performance metrics recorded.")
+            return
         
-                # Try import again
-                from transformers import AutoTokenizer, AutoModelForSequenceClassification
-                from datasets import load_dataset
-                HAS_HF = True   
-                logging.info("✓ Successfully installed and imported transformers and datasets")
-            except Exception as e:
-                HAS_HF = False
-                logging.debug("Auto-install failed: %s. NLP experiments will use built-in models only.", e)
+        print("\n" + "="*60)
+        print("PERFORMANCE SUMMARY")
+        print("="*60)
+        for exp_name, metrics in self.metrics.items():
+            print(f"\n{exp_name}:")
+            if 'duration_seconds' in metrics:
+                print(f"  Duration: {metrics['duration_seconds']:.1f}s")
+            if 'memory_delta_mb' in metrics:
+                print(f"  Memory delta: {metrics['memory_delta_mb']:.1f} MB")
+            if 'gpu_memory_peak_mb' in metrics and metrics['gpu_memory_peak_mb']:
+                print(f"  GPU memory peak: {metrics['gpu_memory_peak_mb']:.1f} MB")
+            if 'gpu_memory_free_mb' in metrics and metrics['gpu_memory_free_mb']:
+                print(f"  GPU memory free: {metrics['gpu_memory_free_mb']:.1f} MB")
+        print("="*60 + "\n")
 
 class ExperimentTracker:
     """Experiment tracking with MLflow integration"""
@@ -1599,7 +1609,7 @@ def run_batch_ablation(dataset_name='MNIST', results_dir='results/batch_ablation
             elif opt_name == 'SAM':
                 from src.core.pytorch_optimizers import SAM as SAMWrapper
                 base_opt = torch.optim.SGD(model.parameters(), lr=scaled_lr, momentum=0.9)
-                optimizer = SAMWrapper(model.parameters(), base_opt, rho=0.05)
+                optimizer = SAMWrapper(base_opt, rho=0.05)
             
             criterion = nn.CrossEntropyLoss()
             
@@ -1611,19 +1621,32 @@ def run_batch_ablation(dataset_name='MNIST', results_dir='results/batch_ablation
                     data, target = data.to(device), target.to(device)
                     data = data.view(data.size(0), -1)  # Flatten for MLP
                     
-                    optimizer.zero_grad()
-                    output = model(data)
-                    loss = criterion(output, target)
-                    loss.backward()
-                    
-                    # Check gradient health before optimizer step
-                    grad_norm = check_gradient_health_quick(model, epoch=epoch, context=f"MNIST-{opt_name}")
-                    if not torch.isfinite(torch.tensor(grad_norm)):
-                        logging.warning(f"Skipping update due to bad gradients ({opt_name})")
-                        continue
-                    
-                    optimizer.step()
-                    total_loss += loss.item()
+                    # AUDIT FIX: SAM requires closure for step()
+                    if opt_name == 'SAM':
+                        def closure():
+                            optimizer.zero_grad()
+                            output = model(data)
+                            loss = criterion(output, target)
+                            loss.backward()
+                            return loss
+                        
+                        loss = optimizer.step(closure)
+                        loss_value = loss.item() if hasattr(loss, 'item') else float(loss)
+                        total_loss += loss_value
+                    else:
+                        optimizer.zero_grad()
+                        output = model(data)
+                        loss = criterion(output, target)
+                        loss.backward()
+                        
+                        # Check gradient health before optimizer step
+                        grad_norm = check_gradient_health_quick(model, epoch=epoch, context=f"MNIST-{opt_name}")
+                        if not torch.isfinite(torch.tensor(grad_norm)):
+                            logging.warning(f"Skipping update due to bad gradients ({opt_name})")
+                            continue
+                        
+                        optimizer.step()
+                        total_loss += loss.item()
                 
                 avg_loss = total_loss / len(train_loader)
                 
@@ -2250,6 +2273,25 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader
     return best_params
 
 
+def normalize_adam_params(params: Dict, optimizer_name: str = 'Adam') -> Dict:
+    """
+    Normalize Adam-like optimizer parameters for torch.optim compatibility.
+    
+    Converts beta1/beta2 to betas tuple format for torch.optim.Adam/AdamW/etc.
+    
+    Args:
+        params: Hyperparameter dictionary (may contain beta1/beta2 or betas)
+        optimizer_name: Name of optimizer (for logging)
+        
+    Returns:
+        Normalized parameter dictionary with betas tuple if needed
+    """
+    params = params.copy()
+    if 'beta1' in params and 'beta2' in params:
+        params['betas'] = (params.pop('beta1'), params.pop('beta2'))
+    return params
+
+
 def get_default_hyperparameters(optimizer_name: str, experiment_type: str = "2d_optimization") -> Dict:
     """Get default hyperparameters from tuned config file."""
     try:
@@ -2421,6 +2463,72 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                 LookaheadWrapper, SAMWrapper
             )
             
+            # CRITICAL FIX: Create factory that reads params at call-time, not definition-time
+            # This prevents stale parameter capture when AUTO_LR or other systems modify tuned_params
+            def make_optimizer_factory(opt_name, params_dict):
+                """
+                Create optimizer factory that reads params at call-time.
+                
+                This prevents stale capture bugs where lambda default args capture
+                params.get(...) values at definition time instead of call time.
+                """
+                def factory(model_params):
+                    # Read params at call time from the shared tuned_params dict
+                    current_params = tuned_params.get(opt_name, params_dict).copy()
+                    
+                    if opt_name == 'SGD':
+                        return optim.SGD(model_params, lr=current_params.get('lr', 0.01))
+                    elif opt_name == 'SGD_Momentum':
+                        return optim.SGD(model_params, lr=current_params.get('lr', 0.01),
+                                       momentum=current_params.get('momentum', 0.0))
+                    elif opt_name == 'Adam':
+                        return optim.Adam(model_params, lr=current_params.get('lr', 0.001),
+                                        betas=(current_params.get('beta1', 0.9), 
+                                               current_params.get('beta2', 0.999)))
+                    elif opt_name == 'AdamW':
+                        return optim.AdamW(model_params, lr=current_params.get('lr', 0.001),
+                                         betas=(current_params.get('beta1', 0.9),
+                                                current_params.get('beta2', 0.999)),
+                                         weight_decay=current_params.get('weight_decay', 0.0))
+                    elif opt_name == 'AMSGrad':
+                        return optim.Adam(model_params, lr=current_params.get('lr', 0.001),
+                                        betas=(current_params.get('beta1', 0.9),
+                                               current_params.get('beta2', 0.999)),
+                                        amsgrad=True)
+                    elif opt_name == 'SAM_SGD':
+                        base_opt = optim.SGD(model_params, lr=current_params.get('lr', 0.01))
+                        return SAMWrapper(base_opt, rho=current_params.get('rho', 0.05))
+                    elif opt_name == 'SAM_Adam':
+                        base_opt = optim.Adam(model_params, lr=current_params.get('lr', 0.001))
+                        return SAMWrapper(base_opt, rho=current_params.get('rho', 0.05))
+                    elif opt_name == 'Lookahead_SGD':
+                        base_opt = optim.SGD(model_params, lr=current_params.get('lr', 0.01))
+                        return LookaheadWrapper(base_opt, k=current_params.get('k', 5),
+                                              alpha=current_params.get('alpha', 0.5))
+                    elif opt_name == 'Lookahead_Adam':
+                        base_opt = optim.Adam(model_params, lr=current_params.get('lr', 0.001))
+                        return LookaheadWrapper(base_opt, k=current_params.get('k', 5),
+                                              alpha=current_params.get('alpha', 0.5))
+                    elif opt_name == 'AdaBound':
+                        return AdaBoundWrapper(model_params, lr=current_params.get('lr', 0.001),
+                                             beta1=current_params.get('beta1', 0.9),
+                                             beta2=current_params.get('beta2', 0.999),
+                                             final_lr=current_params.get('final_lr', 0.1),
+                                             gamma=current_params.get('gamma', 1e-3))
+                    elif opt_name == 'RAdam':
+                        return RAdamWrapper(model_params, lr=current_params.get('lr', 0.001),
+                                          beta1=current_params.get('beta1', 0.9),
+                                          beta2=current_params.get('beta2', 0.999))
+                    elif opt_name == 'LAMB':
+                        return LAMBWrapper(model_params, lr=current_params.get('lr', 0.001),
+                                         beta1=current_params.get('beta1', 0.9),
+                                         beta2=current_params.get('beta2', 0.999),
+                                         weight_decay=current_params.get('weight_decay', 0.0))
+                    else:
+                        raise ValueError(f"Unknown optimizer: {opt_name}")
+                
+                return factory
+            
             # Build optimizers with tuned or default parameters
             optimizers_config = []
             for opt_name in ['SGD', 'SGD_Momentum', 'Adam', 'AdamW', 'AMSGrad', 'SAM_SGD', 'SAM_Adam', 'Lookahead_SGD', 'Lookahead_Adam', 'AdaBound', 'RAdam', 'LAMB']:
@@ -2430,42 +2538,8 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                 if opt_name not in tuned_params:
                     logging.info(f"Using default hyperparameters for {opt_name} (tuning was skipped or failed)")
 
-                # Use safe .get() with sensible defaults to avoid KeyError when tuned params are missing keys
-                if opt_name == 'SGD':
-                    optimizers_config.append((opt_name, lambda p, lr=params.get('lr', 0.01): optim.SGD(p, lr=lr)))
-                elif opt_name == 'SGD_Momentum':
-                    optimizers_config.append((opt_name, lambda p, lr=params.get('lr', 0.01), m=params.get('momentum', 0.0): 
-                                            optim.SGD(p, lr=lr, momentum=m)))
-                elif opt_name == 'Adam':
-                    optimizers_config.append((opt_name, lambda p, lr=params.get('lr', 0.001), b1=params.get('beta1', 0.9), b2=params.get('beta2', 0.999): 
-                                            optim.Adam(p, lr=lr, betas=(b1, b2))))
-                elif opt_name == 'AdamW':
-                    optimizers_config.append((opt_name, lambda p, lr=params.get('lr', 0.001), b1=params.get('beta1', 0.9), b2=params.get('beta2', 0.999), wd=params.get('weight_decay', 0.0): 
-                                            optim.AdamW(p, lr=lr, betas=(b1, b2), weight_decay=wd)))
-                elif opt_name == 'AMSGrad':
-                    optimizers_config.append((opt_name, lambda p, lr=params.get('lr', 0.001), b1=params.get('beta1', 0.9), b2=params.get('beta2', 0.999): 
-                                            optim.Adam(p, lr=lr, betas=(b1, b2), amsgrad=True)))
-                elif opt_name == 'SAM_SGD':
-                    optimizers_config.append((opt_name, lambda p, lr=params.get('lr', 0.01), rho=params.get('rho', 0.05): 
-                                            SAMWrapper(optim.SGD(p, lr=lr), rho=rho)))
-                elif opt_name == 'SAM_Adam':
-                    optimizers_config.append((opt_name, lambda p, lr=params.get('lr', 0.001), rho=params.get('rho', 0.05): 
-                                            SAMWrapper(optim.Adam(p, lr=lr), rho=rho)))
-                elif opt_name == 'Lookahead_SGD':
-                    optimizers_config.append((opt_name, lambda p, lr=params.get('lr', 0.01), k=params.get('k', 5), alpha=params.get('alpha', 0.5):
-                                            LookaheadWrapper(optim.SGD(p, lr=lr), k=k, alpha=alpha)))
-                elif opt_name == 'Lookahead_Adam':
-                    optimizers_config.append((opt_name, lambda p, lr=params.get('lr', 0.001), k=params.get('k', 5), alpha=params.get('alpha', 0.5):
-                                            LookaheadWrapper(optim.Adam(p, lr=lr), k=k, alpha=alpha)))
-                elif opt_name == 'AdaBound':
-                    optimizers_config.append((opt_name, lambda p, lr=params.get('lr', 0.001), b1=params.get('beta1', 0.9), b2=params.get('beta2', 0.999), flr=params.get('final_lr', 0.1), g=params.get('gamma', 1e-3): 
-                                            AdaBoundWrapper(p, lr=lr, beta1=b1, beta2=b2, final_lr=flr, gamma=g)))
-                elif opt_name == 'RAdam':
-                    optimizers_config.append((opt_name, lambda p, lr=params.get('lr', 0.001), b1=params.get('beta1', 0.9), b2=params.get('beta2', 0.999): 
-                                            RAdamWrapper(p, lr=lr, beta1=b1, beta2=b2)))
-                elif opt_name == 'LAMB':
-                    optimizers_config.append((opt_name, lambda p, lr=params.get('lr', 0.001), b1=params.get('beta1', 0.9), b2=params.get('beta2', 0.999), wd=params.get('weight_decay', 0.0): 
-                                            LAMBWrapper(p, lr=lr, beta1=b1, beta2=b2, weight_decay=wd)))
+                # Use factory pattern that reads params at call-time (prevents stale capture)
+                optimizers_config.append((opt_name, make_optimizer_factory(opt_name, params)))
 
             logging.info("="*80)
             logging.info("RUNNING EXPERIMENTS WITH TUNED HYPERPARAMETERS")
@@ -2480,19 +2554,18 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
             if ULTRA_QUICK_MODE:
                 epochs = 2
             else:
-                epochs = 2 if ULTRA_QUICK_MODE else (20 if quick else 50)
+                epochs = 20 if quick else 50
             
-            # NOTE: In ultra-quick mode, we run ALL optimizers (not subset)
-            # This allows comprehensive testing across all 25+ experiments
-            # The speed comes from reduced epochs (2 instead of 50), not fewer optimizers
-
-            # Environment-based override: limit the number of optimizers for ultra-quick CI
+            # Ultra-quick mode tests ALL optimizers with reduced epochs
+            # This provides comprehensive coverage while keeping runtime manageable
+            # Optional: Set GDSEARCH_ULTRA_QUICK_LIMIT env var to limit optimizer count
             try:
                 ultra_quick_limit = int(os.environ.get('GDSEARCH_ULTRA_QUICK_LIMIT', '0'))
             except Exception:
                 ultra_quick_limit = 0
-            if ULTRA_QUICK_MODE and ultra_quick_limit > 0:
-                logging.info(f"Ultra-quick: limiting to first {ultra_quick_limit} optimizers for CI")
+            
+            if ultra_quick_limit > 0:
+                logging.info(f"Ultra-quick mode: limiting to first {ultra_quick_limit} optimizers (env override)")
                 optimizers_config = optimizers_config[:ultra_quick_limit]
 
             for opt_name, opt_func in optimizers_config:
@@ -2511,14 +2584,15 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                         
                         # === PHASE 1 FIX: WIRE AUTO-LR (Safe LR Finder) ===
                         # Find optimal LR if auto-lr flag is enabled
-                        # BUG FIX: Must get fresh params and recreate optimizer if LR changes
-                        current_params = tuned_params.get(opt_name, get_default_hyperparameters(opt_name)).copy()
-                        base_lr = current_params.get('lr', 0.001)
-                        
+                        # NEW: Update tuned_params directly so factory reads the updated value
                         if AUTO_LR_ENABLED:
                             # Create temporary dataloader for LR finding
                             temp_bs = 128
                             temp_loader = make_dataloader(train_dataset, batch_size=temp_bs, shuffle=True, seed=seed)
+                            
+                            # Get current params
+                            current_params = tuned_params.get(opt_name, get_default_hyperparameters(opt_name)).copy()
+                            base_lr = current_params.get('lr', 0.001)
                             
                             # Find optimal LR (uses deepcopy internally for safety)
                             suggested_lr = find_optimal_lr(
@@ -2530,68 +2604,13 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                                 opt_name=opt_name
                             )
                             logging.info(f"   Auto-LR: {base_lr:.2e} => {suggested_lr:.2e}")
-                            base_lr = suggested_lr
-                            current_params['lr'] = base_lr
+                            
+                            # Update tuned_params directly so the factory picks up the new LR
+                            current_params['lr'] = suggested_lr
+                            tuned_params[opt_name] = current_params
                         
-                        # CRITICAL BUG FIX: The lambda opt_func was created with old params captured.
-                        # When AUTO_LR modifies tuned_params, the lambda still has the old value.
-                        # Solution: Don't use the pre-made lambda if AUTO_LR changed anything.
-                        # Instead, recreate the optimizer with current_params.
-                        if AUTO_LR_ENABLED:
-                            # Rebuild optimizer with updated params
-                            if opt_name == 'SGD':
-                                optimizer = optim.SGD(model.parameters(), lr=current_params.get('lr', 0.01))
-                            elif opt_name == 'SGD_Momentum':
-                                optimizer = optim.SGD(model.parameters(), lr=current_params.get('lr', 0.01), 
-                                                    momentum=current_params.get('momentum', 0.0))
-                            elif opt_name == 'Adam':
-                                optimizer = optim.Adam(model.parameters(), lr=current_params.get('lr', 0.001),
-                                                     betas=(current_params.get('beta1', 0.9), current_params.get('beta2', 0.999)))
-                            elif opt_name == 'AdamW':
-                                optimizer = optim.AdamW(model.parameters(), lr=current_params.get('lr', 0.001),
-                                                      betas=(current_params.get('beta1', 0.9), current_params.get('beta2', 0.999)),
-                                                      weight_decay=current_params.get('weight_decay', 0.0))
-                            elif opt_name == 'AMSGrad':
-                                optimizer = optim.Adam(model.parameters(), lr=current_params.get('lr', 0.001),
-                                                     betas=(current_params.get('beta1', 0.9), current_params.get('beta2', 0.999)),
-                                                     amsgrad=True)
-                            elif opt_name == 'SAM_SGD':
-                                from src.core.pytorch_optimizers import SAMWrapper
-                                base_opt = optim.SGD(model.parameters(), lr=current_params.get('lr', 0.01))
-                                optimizer = SAMWrapper(base_opt, rho=current_params.get('rho', 0.05))
-                            elif opt_name == 'SAM_Adam':
-                                from src.core.pytorch_optimizers import SAMWrapper
-                                base_opt = optim.Adam(model.parameters(), lr=current_params.get('lr', 0.001))
-                                optimizer = SAMWrapper(base_opt, rho=current_params.get('rho', 0.05))
-                            elif opt_name == 'Lookahead_SGD':
-                                base_opt = optim.SGD(model.parameters(), lr=current_params.get('lr', 0.01))
-                                optimizer = LookaheadWrapper(base_opt, k=current_params.get('k', 5), 
-                                                           alpha=current_params.get('alpha', 0.5))
-                            elif opt_name == 'Lookahead_Adam':
-                                base_opt = optim.Adam(model.parameters(), lr=current_params.get('lr', 0.001))
-                                optimizer = LookaheadWrapper(base_opt, k=current_params.get('k', 5), 
-                                                           alpha=current_params.get('alpha', 0.5))
-                            elif opt_name == 'AdaBound':
-                                optimizer = AdaBoundWrapper(model.parameters(), lr=current_params.get('lr', 0.001),
-                                                          beta1=current_params.get('beta1', 0.9),
-                                                          beta2=current_params.get('beta2', 0.999),
-                                                          final_lr=current_params.get('final_lr', 0.1),
-                                                          gamma=current_params.get('gamma', 1e-3))
-                            elif opt_name == 'RAdam':
-                                optimizer = RAdamWrapper(model.parameters(), lr=current_params.get('lr', 0.001),
-                                                       beta1=current_params.get('beta1', 0.9),
-                                                       beta2=current_params.get('beta2', 0.999))
-                            elif opt_name == 'LAMB':
-                                optimizer = LAMBWrapper(model.parameters(), lr=current_params.get('lr', 0.001),
-                                                      beta1=current_params.get('beta1', 0.9),
-                                                      beta2=current_params.get('beta2', 0.999),
-                                                      weight_decay=current_params.get('weight_decay', 0.0))
-                            else:
-                                # Fallback to lambda if unknown optimizer
-                                optimizer = opt_func(model.parameters())
-                        else:
-                            # Use pre-made lambda when AUTO_LR is disabled (safe path)
-                            optimizer = opt_func(model.parameters())
+                        # Use factory to create optimizer (reads latest params from tuned_params)
+                        optimizer = opt_func(model.parameters())
                         
                         criterion = nn.CrossEntropyLoss()
 
@@ -2735,7 +2754,6 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                                             inputs=inputs,
                                             targets=targets,
                                             device=device,
-                                            opt_name=opt_name,
                                             max_retries=3,
                                             min_batch_size=1
                                         )
@@ -3164,7 +3182,6 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
                                 inputs=inputs,
                                 targets=targets,
                                 device=device,
-                                opt_name=opt_name,
                                 max_retries=3,
                                 min_batch_size=1
                             )
@@ -3514,13 +3531,22 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
 
             tokenized = raw.map(preprocess, batched=True)
 
-            # Select subset for speed
-            train_ds = tokenized['train'].shuffle(seed=seed).select(range(min(train_size, len(tokenized['train']))))
+            # AUDIT FIX: Create proper train/val/test split to prevent test set leakage
+            # Scientific validity requires validation set for early stopping, not test set
+            train_size_total = min(train_size, len(tokenized['train']))
+            val_size = max(int(train_size_total * 0.15), 100)  # 15% for validation, min 100 samples
+            actual_train_size = train_size_total - val_size
+            
+            # Select subset for speed with proper split
+            shuffled_train = tokenized['train'].shuffle(seed=seed)
+            train_ds = shuffled_train.select(range(actual_train_size))
+            val_ds = shuffled_train.select(range(actual_train_size, actual_train_size + val_size))
             test_ds = tokenized['test'].shuffle(seed=seed).select(range(min(test_size, len(tokenized['test']))))
 
             # Keep only needed columns
             keep = ['input_ids', 'attention_mask', 'label']
             train_ds = train_ds.remove_columns([c for c in train_ds.column_names if c not in keep])
+            val_ds = val_ds.remove_columns([c for c in val_ds.column_names if c not in keep])
             test_ds = test_ds.remove_columns([c for c in test_ds.column_names if c not in keep])
 
             # Collate function
@@ -3544,6 +3570,9 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
             # Use num_workers=0 to avoid tokenizer parallelism issues with DataLoader forking
             train_loader = make_dataloader(train_ds, batch_size=batch_size, shuffle=True,
                                            seed=seed, num_workers=0, collate_fn=collate_fn)
+            # AUDIT FIX: Add validation loader for scientific validity
+            val_loader = make_dataloader(val_ds, batch_size=batch_size, shuffle=False,
+                                         seed=seed, num_workers=0, collate_fn=collate_fn)
             test_loader = make_dataloader(test_ds, batch_size=batch_size, shuffle=False,
                                           seed=seed, num_workers=0, collate_fn=collate_fn)
 
@@ -3564,10 +3593,17 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                     lr_search_loader = make_dataloader(train_ds, batch_size=batch_size, shuffle=True,
                                                        seed=seed, num_workers=0, collate_fn=collate_fn)
                     
+                    # AUDIT FIX: Correct argument order to match find_optimal_lr(model, train_loader, criterion, device, ...)
                     suggested_lr = find_optimal_lr(
-                        temp_model, temp_opt, nn.CrossEntropyLoss(), lr_search_loader,
-                        start_lr=1e-7, end_lr=1.0, num_iter=min(100, len(lr_search_loader)),
-                        device=device
+                        model=temp_model,
+                        train_loader=lr_search_loader,
+                        criterion=nn.CrossEntropyLoss(),
+                        device=device,
+                        optimizer_class=type(temp_opt),
+                        start_lr=1e-7,
+                        end_lr=1.0,
+                        num_iter=min(100, len(lr_search_loader)),
+                        opt_name=opt_name
                     )
                     
                     if suggested_lr is not None and suggested_lr > 0:
@@ -3689,8 +3725,34 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                     if train_total < expected_samples * 0.9:
                         logging.warning(f"SANITY CHECK: Only processed {train_total}/{expected_samples} training samples")
 
-                    # Evaluation
+                    # AUDIT FIX: Evaluate on VALIDATION set for early stopping (not test set)
+                    # Test set should only be used for final reporting to avoid adaptive overfitting
                     model.eval()
+                    val_loss = 0.0
+                    val_correct = 0
+                    val_total = 0
+
+                    with torch.no_grad():
+                        for batch in val_loader:
+                            input_ids = batch['input_ids'].to(device)
+                            attention_mask = batch.get('attention_mask')
+                            if attention_mask is not None:
+                                attention_mask = attention_mask.to(device)
+                            labels = batch['labels'].to(device)
+
+                            outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
+                            loss = outputs.loss
+                            logits = outputs.logits
+
+                            val_loss += float(loss.item()) * input_ids.size(0)
+                            preds = torch.argmax(logits, dim=1)
+                            val_correct += (preds == labels).sum().item()
+                            val_total += input_ids.size(0)
+
+                    val_loss /= max(1, val_total)
+                    val_acc = 100.0 * val_correct / max(1, val_total)
+                    
+                    # Also evaluate on test set for monitoring (but don't use for early stopping)
                     test_loss = 0.0
                     test_correct = 0
                     test_total = 0
@@ -3719,9 +3781,10 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                     # Verified scheduler.step() is after optimizer.step() in training loop
                     scheduler.step()
                     
-                    # Best model tracking
-                    if test_acc > best_val_acc:
-                        best_val_acc = test_acc
+                    # AUDIT FIX: Best model tracking based on VALIDATION accuracy (not test)
+                    # This prevents adaptive overfitting to the test set
+                    if val_acc > best_val_acc:
+                        best_val_acc = val_acc
                         best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
                         patience_counter = 0
                     else:
@@ -3737,6 +3800,8 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                     history.append({
                         'epoch': epoch,
                         'train_loss': train_loss,
+                        'val_loss': val_loss,
+                        'val_acc': val_acc,
                         'test_loss': test_loss,
                         'test_acc': test_acc
                     })
@@ -3744,11 +3809,14 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                     if tracker:
                         tracker.log_metrics({
                             f'nlp_{opt_name}_seed_{seed}_train_loss': train_loss,
+                            f'nlp_{opt_name}_seed_{seed}_val_loss': val_loss,
+                            f'nlp_{opt_name}_seed_{seed}_val_acc': val_acc,
                             f'nlp_{opt_name}_seed_{seed}_test_loss': test_loss,
                             f'nlp_{opt_name}_seed_{seed}_test_acc': test_acc
                         }, step=epoch)
 
                     print(f"Epoch {epoch}/{epochs}: Train Loss={train_loss:.4f}, "
+                          f"Val Loss={val_loss:.4f}, Val Acc={val_acc:.1f}%, "
                           f"Test Loss={test_loss:.4f}, Test Acc={test_acc:.1f}%")
 
                     # Save checkpoint with complete training state (BLOCKER-2 fix)
@@ -5454,7 +5522,11 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, resume=False):
         elif opt_name == 'SGD':
             optimizers_2d.append((opt_name, lambda params, hp=hyperparams: optim.SGD(params, **hp)))
         elif opt_name == 'Adam':
-            optimizers_2d.append((opt_name, lambda params, hp=hyperparams: optim.Adam(params, **hp)))
+            # Convert beta1/beta2 to betas tuple for torch.optim.Adam
+            hp_adam = hyperparams.copy()
+            if 'beta1' in hp_adam and 'beta2' in hp_adam:
+                hp_adam['betas'] = (hp_adam.pop('beta1'), hp_adam.pop('beta2'))
+            optimizers_2d.append((opt_name, lambda params, hp=hp_adam: optim.Adam(params, **hp)))
 
     results = []
 
@@ -5583,7 +5655,11 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, resume
         elif opt_name == 'SGD':
             optimizers_robust.append((opt_name, lambda params, hp=hyperparams: optim.SGD(params, **hp)))
         elif opt_name == 'Adam':
-            optimizers_robust.append((opt_name, lambda params, hp=hyperparams: optim.Adam(params, **hp)))
+            # Convert beta1/beta2 to betas tuple for torch.optim.Adam
+            hp_adam = hyperparams.copy()
+            if 'beta1' in hp_adam and 'beta2' in hp_adam:
+                hp_adam['betas'] = (hp_adam.pop('beta1'), hp_adam.pop('beta2'))
+            optimizers_robust.append((opt_name, lambda params, hp=hp_adam: optim.Adam(params, **hp)))
 
     # Check if experiment is already completed (single CSV output)
     if resume:
@@ -5601,7 +5677,7 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, resume
     seed = seeds[0] if seeds else 42
 
     for opt_name, opt_func in optimizers_robust:
-        print(f"\n🎯 Testing Optimizer: {opt_name}")
+        print(f"\n[TESTING] Testing Optimizer: {opt_name}")
         print("-" * 50)
 
         for start_point in initial_points:
@@ -5725,7 +5801,7 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=None, resum
     results = []
 
     for rho in rho_values:
-        print(f"\n🎯 Testing rho = {rho}")
+        print(f"\n[TESTING] Testing rho = {rho}")
         print("-" * 30)
 
         set_seed(42)
@@ -5829,7 +5905,7 @@ def run_ablation_study(results_dir="results_ablation", seeds=None, resume=False)
     results = []
 
     for opt_name, params in ablation_configs:
-        print(f"\n🎯 Testing: {opt_name}")
+        print(f"\n[TESTING] Testing: {opt_name}")
         print("-" * 30)
 
         set_seed(seed)
@@ -6146,9 +6222,13 @@ def distributed_training_worker(rank, world_size, backend, results_dir):
 
         dist.init_process_group(backend, rank=rank, world_size=world_size)
 
-        # Set device for this process
-        torch.cuda.set_device(rank)
-        device = torch.device(f'cuda:{rank}')
+        # AUDIT FIX: Use LOCAL_RANK env var if available for cluster compatibility
+        local_rank = int(os.environ.get('LOCAL_RANK', rank))
+        torch.cuda.set_device(local_rank)
+        device = torch.device(f'cuda:{local_rank}')
+        
+        if local_rank != rank:
+            logging.info(f"Using LOCAL_RANK={local_rank} (different from process rank={rank}) for device mapping")
 
         # Create model and move to device
         model = ResNet18(num_classes=10).to(device)
@@ -6371,7 +6451,11 @@ services:
     print("   Run: docker-compose up")
 
 def run_code_quality_checks():
-    """Run code quality checks (linting, formatting, type checking)"""
+    """Run code quality checks (linting, formatting, type checking)
+    
+    Prerequisites:
+        pip install flake8 black mypy isort
+    """
     print("\n" + "="*80)
     print("🧹 CODE QUALITY CHECKS")
     print("="*80)
@@ -6380,14 +6464,20 @@ def run_code_quality_checks():
         import subprocess
         import sys
 
-        # Install code quality tools if not present
+        # Check if code quality tools are installed - don't auto-install
         quality_tools = ["flake8", "black", "mypy", "isort"]
+        missing_tools = []
         for tool in quality_tools:
             try:
-                subprocess.check_call([sys.executable, "-m", "pip", "install", tool],
-                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except subprocess.CalledProcessError:
-                print(f"Could not install {tool}")
+                subprocess.run([sys.executable, "-m", tool, "--version"],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                missing_tools.append(tool)
+        
+        if missing_tools:
+            print(f"Missing code quality tools: {', '.join(missing_tools)}")
+            print(f"Install with: pip install {' '.join(missing_tools)}")
+            return
 
         # Run linting
         print("Running flake8 linting...")
@@ -6932,12 +7022,16 @@ def run_highdim_experiment(results_dir="results_highdim", seeds=None, quick=Fals
         elif opt_name == 'SGD':
             optimizers_config.append((opt_name, lambda params, hp=hyperparams: optim.SGD(params, **hp)))
         elif opt_name == 'Adam':
-            optimizers_config.append((opt_name, lambda params, hp=hyperparams: optim.Adam(params, **hp)))
+            # Convert beta1/beta2 to betas tuple for torch.optim.Adam
+            hp_adam = hyperparams.copy()
+            if 'beta1' in hp_adam and 'beta2' in hp_adam:
+                hp_adam['betas'] = (hp_adam.pop('beta1'), hp_adam.pop('beta2'))
+            optimizers_config.append((opt_name, lambda params, hp=hp_adam: optim.Adam(params, **hp)))
 
     results = []
 
     for dim in dimensions:
-        print(f"\n🎯 Testing Dimension: {dim}")
+        print(f"\n[TESTING] Testing Dimension: {dim}")
         print("-" * 40)
 
         for opt_name, opt_func in optimizers_config:
@@ -7084,7 +7178,7 @@ def get_kaggle_t4_config():
             config['batch_size_cifar10'] = 512
             config['batch_size_mnist'] = 512
             
-        print(f"🎯 Kaggle T4 Optimizations Enabled:")
+        print(f"[KAGGLE-T4] Kaggle T4 Optimizations Enabled:")
         print(f"   GPUs: {n_gpus} ({config['gpu_memory_gb']:.1f}GB VRAM)")
         print(f"   Batch sizes: MNIST={config['batch_size_mnist']}, "
               f"CIFAR10={config['batch_size_cifar10']}, "
@@ -7203,6 +7297,63 @@ Examples:
     if experiment_config:
         globals()['EXPERIMENT_CONFIG'] = experiment_config
     
+    # PRE-RUN VALIDATION: Comprehensive scientific integrity checks
+    print("\n" + "="*70)
+    print("[PRE-RUN VALIDATION] Scientific Integrity & Configuration Checks")
+    print("="*70)
+    
+    # Check 1: Config schema and tuning fairness for multi-optimizer experiments
+    if experiment_config and not args.skip_tuning:
+        try:
+            from src.utils.fairness_check import validate_tuning_fairness
+            print("   Checking hyperparameter tuning fairness...")
+            
+            # Extract optimizer tuning configurations
+            optimizers = []
+            tuning_configs = {}
+            
+            if 'sweeps' in experiment_config:
+                for sweep in experiment_config['sweeps']:
+                    if 'optimizers' in sweep:
+                        for opt_cfg in sweep['optimizers']:
+                            opt_name = opt_cfg.get('name')
+                            if opt_name:
+                                optimizers.append(opt_name)
+                                tuning_configs[opt_name] = {
+                                    'n_trials': opt_cfg.get('n_trials', sweep.get('n_trials', 15)),
+                                    'epochs': sweep.get('epochs', 3),
+                                    'batch_size': sweep.get('batch_size'),
+                                    'is_tuned': not args.skip_tuning
+                                }
+            
+            if len(optimizers) > 1:
+                try:
+                    validate_tuning_fairness(optimizers, tuning_configs, strict=True)
+                    safe_print("   \u2713 Tuning fairness validated: All optimizers have equal budgets")
+                except Exception as fairness_err:
+                    print(f"   \u26a0 WARNING: Tuning fairness validation failed: {fairness_err}")
+                    print("   This may bias optimizer comparisons. Review your tuning configuration.")
+        except ImportError:
+            print("   \u26a0 Could not import fairness validator. Skipping check.")
+    
+    # Check 2: Verify optional dependencies for selected experiments (will be validated later)
+    print("   Deferring optional dependency checks until experiment selection...")
+    # Note: This check is performed after experiment selection to avoid referencing undefined variables
+    
+    # Check 3: Validate results directory is writable
+    try:
+        Path(args.results_dir).mkdir(parents=True, exist_ok=True)
+        test_file = Path(args.results_dir) / '.write_test'
+        test_file.write_text('test')
+        test_file.unlink()
+        safe_print(f"   \u2713 Results directory is writable: {args.results_dir}")
+    except Exception as e:
+        safe_print(f"   \u2717 ERROR: Results directory not writable: {e}")
+        raise RuntimeError(f"Cannot write to results directory: {args.results_dir}") from e
+    
+    print("[PRE-RUN VALIDATION] Complete")
+    print("="*70 + "\n")
+    
     # Parse seeds
     seeds = [int(s.strip()) for s in args.seeds.split(',')]
     
@@ -7225,6 +7376,34 @@ Examples:
                                 'beta_sensitivity_training', 'label_noise']
     else:
         selected_experiments = [e.strip() for e in args.experiments.split(',')]
+    
+    # NOW validate optional dependencies for selected experiments
+    print("\n[*] Validating Optional Dependencies for Selected Experiments:")
+    missing_deps = []
+    if 'nlp' in selected_experiments or args.experiments == 'all':
+        try:
+            import transformers
+            import datasets
+            safe_print("   ✓ NLP dependencies available (transformers, datasets)")
+        except ImportError:
+            missing_deps.append("NLP experiments require: pip install transformers datasets")
+            print("   ⚠ NLP dependencies missing")
+    
+    if 'medical' in selected_experiments or args.experiments == 'all':
+        try:
+            import medmnist
+            safe_print("   ✓ Medical imaging dependencies available (medmnist)")
+        except ImportError:
+            missing_deps.append("Medical experiments require: pip install medmnist")
+            print("   ⚠ Medical imaging dependencies missing")
+    
+    if missing_deps:
+        print("\n   ⚠ MISSING DEPENDENCIES:")
+        for dep in missing_deps:
+            print(f"      - {dep}")
+        print("   Some experiments may use fallback synthetic data or be skipped.")
+    else:
+        safe_print("   ✓ All required dependencies for selected experiments are available")
     
     # Display module availability status
     print("\n[*] Optional Module Status:")
@@ -7265,7 +7444,7 @@ Examples:
     if AUTO_LR_ENABLED:
         print("Auto-LR enabled: will use LR Finder before training")
     if ADAPTIVE_BATCH_ENABLED:
-        print("📦 Adaptive batch sizing enabled: will auto-detect optimal batch size")
+        print("[ADAPTIVE-BATCH] Adaptive batch sizing enabled: will auto-detect optimal batch size")
     
     # Display advanced training features status
     if USE_AMP:
@@ -7273,15 +7452,15 @@ Examples:
     if USE_EMA:
         print("Exponential Moving Average (EMA) enabled: smoother model weight updates")
     if LABEL_SMOOTHING > 0:
-        print(f"🎯 Label Smoothing enabled: factor={LABEL_SMOOTHING}")
+        print(f"[LABEL-SMOOTHING] Label Smoothing enabled: factor={LABEL_SMOOTHING}")
     
     # Deterministic mode setup
     if args.deterministic:
-        print("🔒 Forcing deterministic mode...")
+        print("[DETERMINISTIC] Forcing deterministic mode...")
         torch.use_deterministic_algorithms(True)
         os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
-        print("   ✓ torch.use_deterministic_algorithms(True)")
-        print("   ✓ CUBLAS_WORKSPACE_CONFIG=:4096:8")
+        safe_print("   [OK] torch.use_deterministic_algorithms(True)")
+        safe_print("   [OK] CUBLAS_WORKSPACE_CONFIG=:4096:8")
     
     # Kaggle T4 optimization setup
     kaggle_config = None
@@ -7291,10 +7470,10 @@ Examples:
         # Enable PyTorch optimizations
         if kaggle_config['cudnn_benchmark']:
             torch.backends.cudnn.benchmark = True
-            print("   ✓ torch.backends.cudnn.benchmark = True")
+            safe_print("   [OK] torch.backends.cudnn.benchmark = True")
         
         if kaggle_config['use_amp']:
-            print("   ✓ Automatic Mixed Precision (AMP) enabled")
+            safe_print("   [OK] Automatic Mixed Precision (AMP) enabled")
         
         # Store in global config for experiment functions to access
         globals()['KAGGLE_CONFIG'] = kaggle_config
@@ -7333,9 +7512,9 @@ Examples:
                     'pending_experiments': [k for k in selected_experiments if k not in experiment_results]
                 }
                 json.dump(summary, f, indent=2)
-            print(f"   ✓ Partial results saved to {partial_results_file}")
+            safe_print(f"   ✓ Partial results saved to {partial_results_file}")
         except Exception as e:
-            print(f"   ✗ Could not save partial results: {e}")
+            safe_print(f"   ✗ Could not save partial results: {e}")
     
     def graceful_report():
         """Generate partial report on time budget exceeded."""
@@ -7353,9 +7532,9 @@ Examples:
                 for exp in selected_experiments:
                     if exp not in experiment_results or experiment_results.get(exp) is None:
                         f.write(f"- ⏸️ {exp}\n")
-            print(f"   ✓ Partial report saved to {report_file}")
+            safe_print(f"   ✓ Partial report saved to {report_file}")
         except Exception as e:
-            print(f"   ✗ Could not generate partial report: {e}")
+            safe_print(f"   ✗ Could not generate partial report: {e}")
     
     print("="*80)
     print("GDSEARCH KAGGLE BENCHMARK SUITE")
@@ -7873,10 +8052,9 @@ Examples:
                     print("   Convergence validation already completed (found existing results)")
                     experiment_results['convergence_validation'] = "Skipped (already complete)"
                 else:
+                    # AUDIT FIX: run_convergence_rate_comparison only accepts output_dir parameter
+                    # The implementation has hardcoded optimizer list and test function
                     run_convergence_rate_comparison(
-                        optimizers=['sgd', 'momentum', 'adam', 'rmsprop'] if not args.quick else ['sgd', 'adam'],
-                        test_function='rosenbrock',
-                        max_iterations=5000 if args.quick else 10000,
                         output_dir=validation_dir
                     )
                     
@@ -8262,7 +8440,7 @@ Examples:
                         tuning_fairness_config,
                         strict=True  # STRICT: All optimizers receive equal tuning budget
                     )
-                    print("   ✓ Tuning fairness validated: ALL optimizers tuned with equal budget")
+                    safe_print("   ✓ Tuning fairness validated: ALL optimizers tuned with equal budget")
                     
                     results_dict = {}
                     
@@ -8277,7 +8455,7 @@ Examples:
                             output_dir=label_noise_dir
                         )
                         results_dict['mnist'] = mnist_results
-                        print(f"   ✓ MNIST ablation complete: {len(mnist_results)} results")
+                        safe_print(f"   ✓ MNIST ablation complete: {len(mnist_results)} results")
                     
                     # Run CIFAR-10 label noise ablation (if not quick mode)
                     if not args.quick:
@@ -8291,10 +8469,10 @@ Examples:
                                 output_dir=label_noise_dir
                             )
                             results_dict['cifar10'] = cifar10_results
-                            print(f"   ✓ CIFAR-10 ablation complete: {len(cifar10_results)} results")
+                            safe_print(f"   ✓ CIFAR-10 ablation complete: {len(cifar10_results)} results")
                     
                     experiment_results['label_noise'] = results_dict
-                    print("✓ Label noise ablation completed!")
+                    safe_print("✓ Label noise ablation completed!")
                     
                     # Generate summary statistics
                     print("\n📊 Generating robustness analysis...")
@@ -8349,21 +8527,21 @@ Examples:
         except Exception as e:
             logging.error(f"   [FAIL] Convergence analysis failed: {e}")
     else:
-        print("\n1️⃣  Convergence Analysis: SKIPPED (module not available)")
+        print("\n[1] Convergence Analysis: SKIPPED (module not available)")
     
     # Interactive visualizations
     if HAS_INTERACTIVE:
-        print("\n2️⃣  Interactive Visualizations...")
+        print("\n[2] Interactive Visualizations...")
         try:
             generate_interactive_visualizations(str(results_dir), str(results_dir / "visualizations"))
-            print("   ✓ Interactive plots generated")
+            safe_print("   [OK] Interactive plots generated")
         except Exception as e:
-            logging.error(f"   ✗ Visualization failed: {e}")
+            logging.error(f"   [ERROR] Visualization failed: {e}")
     else:
-        print("\n2️⃣  Interactive Visualizations: SKIPPED (install plotly)")
+        print("\n[2] Interactive Visualizations: SKIPPED (install plotly)")
     
     # Generate comprehensive summary report
-    print("\n3️⃣  Final Summary Report...")
+    print("\n[3] Final Summary Report...")
     try:
         generate_final_summary_report(results_dir, experiment_results)
         print("   [OK] Summary report generated")
@@ -8474,6 +8652,9 @@ Examples:
 
 
 if __name__ == "__main__":
+    # Configure Windows console encoding (must be done before any output)
+    configure_windows_console_encoding()
+    
     results = main()
     # Exit with code 0 on success (results returned), code 1 if main() returned None/raised exception
     sys.exit(0 if results else 1)

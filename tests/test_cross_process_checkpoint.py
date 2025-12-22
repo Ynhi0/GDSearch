@@ -163,7 +163,7 @@ class TestCrossProcessCheckpoint:
             params_before_save = [p.clone() for p in model.parameters()]
             
             # Phase 2: Load checkpoint in same process
-            loaded_checkpoint = torch.load(checkpoint_path)
+            loaded_checkpoint = torch.load(checkpoint_path, weights_only=False)
             new_model = create_simple_model()
             new_optimizer = optimizer_class(new_model.parameters(), **kwargs)
             
@@ -253,7 +253,7 @@ model = nn.Sequential(
 )
 
 # Load checkpoint
-checkpoint = torch.load(r'{checkpoint_path}')
+checkpoint = torch.load(r'{checkpoint_path}', weights_only=False)
 optimizer = AdamWrapper(model.parameters(), lr=0.001)
 
 model.load_state_dict(checkpoint['model'])

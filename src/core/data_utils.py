@@ -93,6 +93,10 @@ def get_mnist_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optiona
             worker_init_fn=_worker_init_fn if seed is not None else None,
             generator=generator,
         )
+        # CRITICAL: Add metadata for test-leakage prevention
+        train_loader.name = 'train'
+        train_loader._split_type = 'train'
+        train_loader._dataset_uid = f'mnist_train_{len(train_dataset)}'
         
         val_loader = DataLoader(
             val_dataset,
@@ -103,6 +107,11 @@ def get_mnist_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optiona
             worker_init_fn=_worker_init_fn if seed is not None else None,
             generator=generator,
         )
+        # CRITICAL: Add metadata for test-leakage prevention
+        val_loader.name = 'validation'
+        val_loader._split_type = 'validation'
+        val_loader._dataset_uid = f'mnist_val_{len(val_dataset)}'
+        val_loader._test_dataset_ref = test_dataset
         
         test_loader = DataLoader(
             test_dataset,
@@ -113,6 +122,10 @@ def get_mnist_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optiona
             worker_init_fn=_worker_init_fn if seed is not None else None,
             generator=generator,
         )
+        # CRITICAL: Add metadata for test-leakage prevention
+        test_loader.name = 'test'
+        test_loader._split_type = 'test'
+        test_loader._dataset_uid = f'mnist_test_{len(test_dataset)}'
         
         return train_loader, val_loader, test_loader
     
@@ -127,6 +140,11 @@ def get_mnist_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optiona
             worker_init_fn=_worker_init_fn if seed is not None else None,
             generator=generator,
         )
+        # CRITICAL: Add metadata for test-leakage prevention
+        train_loader.name = 'train'
+        train_loader._split_type = 'train'
+        train_loader._dataset_uid = f'mnist_train_{len(full_train_dataset)}'
+        
         test_loader = DataLoader(
             test_dataset,
             batch_size=batch_size,
@@ -136,6 +154,10 @@ def get_mnist_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optiona
             worker_init_fn=_worker_init_fn if seed is not None else None,
             generator=generator,
         )
+        # CRITICAL: Add metadata for test-leakage prevention
+        test_loader.name = 'test'
+        test_loader._split_type = 'test'
+        test_loader._dataset_uid = f'mnist_test_{len(test_dataset)}'
 
         return train_loader, test_loader
 
@@ -222,6 +244,10 @@ def get_cifar10_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optio
             worker_init_fn=_worker_init_fn if seed is not None else None,
             generator=generator,
         )
+        # CRITICAL: Add metadata for test-leakage prevention
+        train_loader.name = 'train'
+        train_loader._split_type = 'train'
+        train_loader._dataset_uid = f'cifar10_train_{len(train_dataset)}'
         
         val_loader = DataLoader(
             val_dataset,
@@ -232,6 +258,11 @@ def get_cifar10_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optio
             worker_init_fn=_worker_init_fn if seed is not None else None,
             generator=generator,
         )
+        # CRITICAL: Add metadata for test-leakage prevention
+        val_loader.name = 'validation'
+        val_loader._split_type = 'validation'
+        val_loader._dataset_uid = f'cifar10_val_{len(val_dataset)}'
+        val_loader._test_dataset_ref = test_dataset
         
         test_loader = DataLoader(
             test_dataset,
@@ -242,6 +273,10 @@ def get_cifar10_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optio
             worker_init_fn=_worker_init_fn if seed is not None else None,
             generator=generator,
         )
+        # CRITICAL: Add metadata for test-leakage prevention
+        test_loader.name = 'test'
+        test_loader._split_type = 'test'
+        test_loader._dataset_uid = f'cifar10_test_{len(test_dataset)}'
         
         return train_loader, val_loader, test_loader
     
@@ -256,6 +291,11 @@ def get_cifar10_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optio
             worker_init_fn=_worker_init_fn if seed is not None else None,
             generator=generator,
         )
+        # CRITICAL: Add metadata for test-leakage prevention
+        train_loader.name = 'train'
+        train_loader._split_type = 'train'
+        train_loader._dataset_uid = f'cifar10_train_{len(full_train_dataset)}'
+        
         test_loader = DataLoader(
             test_dataset,
             batch_size=batch_size,
@@ -265,6 +305,10 @@ def get_cifar10_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optio
             worker_init_fn=_worker_init_fn if seed is not None else None,
             generator=generator,
         )
+        # CRITICAL: Add metadata for test-leakage prevention
+        test_loader.name = 'test'
+        test_loader._split_type = 'test'
+        test_loader._dataset_uid = f'cifar10_test_{len(test_dataset)}'
 
         return train_loader, test_loader
 
@@ -296,6 +340,15 @@ def get_cifar100_loaders(batch_size: int = 128, num_workers: int = 2, seed: Opti
     full_train_dataset = datasets.CIFAR100(root=data_root, train=True, download=True, transform=transform_train)
     test_dataset = datasets.CIFAR100(root=data_root, train=False, download=True, transform=transform_test)
     
+    worker_seed = seed
+    def _worker_init_fn(worker_id: int):
+        if worker_seed is None:
+            return
+        base = int(worker_seed) + worker_id
+        np.random.seed(base)
+        random.seed(base)
+        torch.manual_seed(base)
+    
     generator = None
     if seed is not None:
         torch.manual_seed(seed)
@@ -311,10 +364,36 @@ def get_cifar100_loaders(batch_size: int = 128, num_workers: int = 2, seed: Opti
         train_dataset, val_dataset = random_split(full_train_dataset, [n_train_actual, n_val], generator=generator)
         
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=torch.cuda.is_available(), worker_init_fn=_worker_init_fn if seed is not None else None, generator=generator)
+        # CRITICAL: Add metadata for test-leakage prevention
+        train_loader.name = 'train'
+        train_loader._split_type = 'train'
+        train_loader._dataset_uid = f'cifar100_train_{len(train_dataset)}'
+        
         val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=torch.cuda.is_available(), worker_init_fn=_worker_init_fn if seed is not None else None, generator=generator)
+        # CRITICAL: Add metadata for test-leakage prevention
+        val_loader.name = 'validation'
+        val_loader._split_type = 'validation'
+        val_loader._dataset_uid = f'cifar100_val_{len(val_dataset)}'
+        val_loader._test_dataset_ref = test_dataset
+        
         test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=torch.cuda.is_available(), worker_init_fn=_worker_init_fn if seed is not None else None, generator=generator)
+        # CRITICAL: Add metadata for test-leakage prevention
+        test_loader.name = 'test'
+        test_loader._split_type = 'test'
+        test_loader._dataset_uid = f'cifar100_test_{len(test_dataset)}'
+        
         return train_loader, val_loader, test_loader
     else:
         train_loader = DataLoader(full_train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=torch.cuda.is_available(), worker_init_fn=_worker_init_fn if seed is not None else None, generator=generator)
+        # CRITICAL: Add metadata for test-leakage prevention
+        train_loader.name = 'train'
+        train_loader._split_type = 'train'
+        train_loader._dataset_uid = f'cifar100_train_{len(full_train_dataset)}'
+        
         test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=torch.cuda.is_available(), worker_init_fn=_worker_init_fn if seed is not None else None, generator=generator)
+        # CRITICAL: Add metadata for test-leakage prevention
+        test_loader.name = 'test'
+        test_loader._split_type = 'test'
+        test_loader._dataset_uid = f'cifar100_test_{len(test_dataset)}'
+        
         return train_loader, test_loader

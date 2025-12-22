@@ -1,13 +1,28 @@
 """
 Ablation study comparing optimizer progression: SGD → SGD+Momentum → RMSProp → Adam → AdamW → AMSGrad
 
-Demonstrates incremental algorithmic improvements on a single challenging task (Rosenbrock).
+⚠️ WARNING: This script uses FIXED learning rates (lr=0.01) for all optimizers.
+This violates hyperparameter fairness principles and may produce biased results.
+
+AUDIT FIX: This script now requires --allow-unfair-ablations flag to prevent
+accidental use in canonical benchmarks.
+
+For scientifically rigorous comparisons, use run_fair_optimizer_ablation.py instead,
+which implements HYPERPARAMETER_FAIRNESS_PROTOCOL.md with:
+- Published defaults from original papers (with citations)
+- OR per-optimizer LR sweeps with appropriate ranges
+- Statistical significance testing with multiple comparison corrections
+
+This script is retained for backward compatibility and quick sanity checks only.
+
 Outputs:
 - CSV with convergence metrics
 - Figure showing loss curves and final performance
 """
 
 import os
+import sys
+import argparse
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -16,6 +31,26 @@ import logging
 
 from src.core.test_functions import Rosenbrock
 from src.core.optimizers import SGD, SGDMomentum, RMSProp, Adam, AdamW, AMSGrad
+
+
+# AUDIT FIX: Add guard to prevent unfair benchmark usage
+def check_ablation_guard():
+    """Check if --allow-unfair-ablations flag is present in sys.argv."""
+    if '--allow-unfair-ablations' not in sys.argv:
+        print("\n" + "="*80)
+        print("ERROR: Ablation Guard - Preventing Unfair Benchmark Usage")
+        print("="*80)
+        print(
+            "⚠️ HYPERPARAMETER FAIRNESS WARNING: This script uses fixed lr=0.01 for all optimizers.\n"
+            "This is for EXPLORATORY ABLATION ANALYSIS ONLY and should NOT be used\n"
+            "for canonical benchmark comparisons.\n\n"
+            "Reason: Fixed learning rates create unfair comparisons between adaptive\n"
+            "(Adam, RMSProp) and non-adaptive (SGD) optimizers.\n\n"
+            "To run this script, add --allow-unfair-ablations flag to acknowledge this limitation.\n"
+            "For fair comparisons, use: src/experiments/run_fair_optimizer_ablation.py\n"
+        )
+        print("="*80)
+        sys.exit(1)
 
 
 def run_optimizer_ablation(
@@ -28,6 +63,17 @@ def run_optimizer_ablation(
     """
     Run ablation study comparing optimizer variants.
     
+    ⚠️ HYPERPARAMETER FAIRNESS WARNING:
+    This function uses lr=0.01 for ALL optimizers, which is scientifically unfair:
+    - SGD typically performs better with higher LR (0.1)
+    - Adam/AdamW typically perform better with lower LR (0.001)
+    
+    AUDIT FIX: This script requires --allow-unfair-ablations flag in sys.argv
+    to prevent accidental use in fair benchmarks.
+    
+    For publication-quality results, use run_fair_optimizer_ablation.py or
+    implement proper per-optimizer tuning per HYPERPARAMETER_FAIRNESS_PROTOCOL.md
+    
     Args:
         test_function: Test function instance
         initial_point: Starting (x, y)
@@ -38,6 +84,14 @@ def run_optimizer_ablation(
     Returns:
         DataFrame with summary metrics
     """
+    # AUDIT FIX: Enforce guard check
+    check_ablation_guard()
+    
+    logging.warning(
+        "⚠️ HYPERPARAMETER FAIRNESS WARNING: Using fixed lr=0.01 for all optimizers. "
+        "This may produce biased results. Consider using run_fair_optimizer_ablation.py instead."
+    )
+    
     os.makedirs(results_dir, exist_ok=True)
     os.makedirs(plots_dir, exist_ok=True)
     

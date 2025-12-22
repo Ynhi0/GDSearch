@@ -25,14 +25,24 @@ import shutil
 from pathlib import Path
 import subprocess
 
-# Set console encoding to UTF-8 for Windows
-if sys.platform == 'win32':
-    try:
-        import codecs
-        sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
-        sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
-    except Exception:
-        pass  # Fallback to ASCII-safe output
+# Windows console encoding configuration (function to avoid import-time side effects)
+def configure_windows_console_encoding():
+    """
+    Configure UTF-8 encoding for Windows console.
+    
+    IMPORTANT: This must be called explicitly in main, NOT at import time.
+    Import-time global stream mutations break test harnesses.
+    """
+    if sys.platform == 'win32':
+        try:
+            import codecs
+            # Only wrap if not already wrapped (avoid breaking pytest capture)
+            if not isinstance(sys.stdout, codecs.StreamWriter):
+                sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
+            if not isinstance(sys.stderr, codecs.StreamWriter):
+                sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
+        except Exception:
+            pass  # Fallback to ASCII-safe output
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
@@ -69,42 +79,37 @@ def test_imports():
     """Test that all critical modules can be imported"""
     print_header("IMPORT VALIDATION")
     
-    try:
-        # Core imports
-        import torch
-        import numpy as np
-        import pandas as pd
-        print_success("Core dependencies (torch, numpy, pandas)")
-        
-        # Optimizer imports
-        from src.core.optimizers import SGD, Adam, AdamW
-        print_success("Core optimizers (SGD, Adam, AdamW)")
-        
-        # Experiment imports
-        from src.experiments.beta_sensitivity_training import run_momentum_beta_sensitivity
-        print_success("Beta sensitivity training module")
-        
-        from src.experiments.hyperparameter_sensitivity import momentum_beta_sweep
-        print_success("Hyperparameter sensitivity module")
-        
-        from src.experiments.convergence_rate_validation import run_convergence_rate_comparison
-        print_success("Convergence rate validation module")
-        
-        from src.analysis.statistical_analysis import compare_two_optimizers
-        print_success("Statistical analysis module")
-        
-        print(f"\n{GREEN}All imports successful{RESET}")
-        return True
-        
-    except Exception as e:
-        print_error(f"Import failed: {e}")
-        return False
+    # Core imports
+    import torch
+    import numpy as np
+    import pandas as pd
+    print_success("Core dependencies (torch, numpy, pandas)")
+    
+    # Optimizer imports
+    from src.core.optimizers import SGD, Adam, AdamW
+    print_success("Core optimizers (SGD, Adam, AdamW)")
+    
+    # Experiment imports
+    from src.experiments.beta_sensitivity_training import run_momentum_beta_sensitivity
+    print_success("Beta sensitivity training module")
+    
+    from src.experiments.hyperparameter_sensitivity import momentum_beta_sweep
+    print_success("Hyperparameter sensitivity module")
+    
+    from src.experiments.convergence_rate_validation import run_convergence_rate_comparison
+    print_success("Convergence rate validation module")
+    
+    from src.analysis.statistical_analysis import compare_two_optimizers
+    print_success("Statistical analysis module")
+    
+    print(f"\n{GREEN}All imports successful{RESET}")
 
 
 def test_mnist_quick():
     """Test MNIST experiment with ultra-quick mode"""
     # Use the general helper which runs an ultra-quick single experiment and validates results
-    return run_quick_experiment('mnist', expected_min_optimizers=3, min_train_acc=80.0, min_test_acc=80.0)
+    success = run_quick_experiment('mnist', expected_min_optimizers=3, min_train_acc=80.0, min_test_acc=80.0)
+    assert success, "MNIST quick test failed"
         
         
 
@@ -119,11 +124,12 @@ def test_validation_script():
         "--smoke-test"
     ]
     
+    env = os.environ.copy()
+    # Force the child process to use UTF-8 I/O on Windows to avoid UnicodeEncodeError when printing emojis
+    env['PYTHONIOENCODING'] = 'utf-8'
+    env['PYTHONUTF8'] = '1'
+    
     try:
-        env = os.environ.copy()
-        # Force the child process to use UTF-8 I/O on Windows to avoid UnicodeEncodeError when printing emojis
-        env['PYTHONIOENCODING'] = 'utf-8'
-        env['PYTHONUTF8'] = '1'
         result = subprocess.run(
             cmd,
             capture_output=True,
@@ -133,26 +139,18 @@ def test_validation_script():
             cwd=project_root,
             env=env
         )
-        
-        if result.returncode == 0:
-            print_success("Comprehensive validation PASSED")
-            # Show summary
-            lines = result.stdout.split('\n')
-            for line in lines:
-                if 'Total Passed' in line or 'Total Failed' in line or 'Missing Files' in line:
-                    print(f"  {line.strip()}")
-            return True
-        else:
-            print_error("Comprehensive validation FAILED")
-            print(f"\nReturn code: {result.returncode}\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}")
-            return False
-            
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as e:
         print_error("Validation script timed out")
-        return False
-    except Exception as e:
-        print_error(f"Validation script error: {e}")
-        return False
+        raise AssertionError("Validation script timed out after 5 minutes") from e
+    
+    assert result.returncode == 0, f"Validation failed with return code {result.returncode}\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+    
+    print_success("Comprehensive validation PASSED")
+    # Show summary
+    lines = result.stdout.split('\n')
+    for line in lines:
+        if 'Total Passed' in line or 'Total Failed' in line or 'Missing Files' in line:
+            print(f"  {line.strip()}")
 
 
 def run_quick_experiment(experiment_name, expected_min_optimizers=3, min_train_acc=60.0, min_test_acc=50.0, timeout_sec=900):
@@ -397,4 +395,7 @@ def main():
 
 
 if __name__ == '__main__':
+    # Configure Windows console encoding before any output
+    configure_windows_console_encoding()
+    
     sys.exit(main())

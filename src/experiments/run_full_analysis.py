@@ -428,7 +428,7 @@ def run_full_pipeline(
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Run full multi-seed analysis pipeline')
+    parser = argparse.ArgumentParser(description='Run full multi-seed analysis pipeline with scientific rigor checks')
     
     parser.add_argument('--config', type=str, default='configs/nn_tuning.json',
                         help='Path to configuration file')
@@ -440,6 +440,8 @@ def main():
                         help='Directory to save plots')
     parser.add_argument('--compare', type=str, default=None,
                         help='Comma-separated pairs to compare, e.g., "AdamW-SGDMomentum,Adam-RMSProp"')
+    parser.add_argument('--skip-fairness-check', action='store_true',
+                        help='Skip automatic fairness validation (NOT RECOMMENDED for publication-quality work)')
     
     args = parser.parse_args()
     
@@ -452,19 +454,54 @@ def main():
         pairs = args.compare.split(',')
         comparison_pairs = [tuple(p.split('-')) for p in pairs]
     
-    # Before running, perform a quick schema check for config expectations
+    # PRE-RUN VALIDATION: Schema check and tuning fairness validation
+    print("\n[PRE-RUN VALIDATION] Checking configuration and scientific integrity...")
     try:
         with open(args.config, 'r', encoding='utf-8') as f:
             base_cfg_preview = json.load(f)
-        # If the config looks like a tuning config (has 'sweeps'/'final') but no top-level 'optimizer',
-        # provide a helpful message instead of failing deep inside.
+        
+        # Check 1: Config schema compatibility
         if 'optimizer' not in base_cfg_preview and ('sweeps' in base_cfg_preview or 'final' in base_cfg_preview):
             print("\nThe provided config appears to be a tuning spec (contains 'sweeps'/'final') without a top-level 'optimizer'.")
             print("   This runner expects a single-optimizer config, e.g.: {\n     'model': 'SimpleMLP', 'dataset': 'MNIST', 'optimizer': 'AdamW', 'lr': 1e-3, 'epochs': 5, 'batch_size': 128\n   }")
             print("   To generate tuned configs and results, run: python scripts/tune_nn.py (which reads configs/nn_tuning.json).\n")
-    except Exception:
+        
+        # Check 2: Multi-optimizer fairness validation (if applicable)
+        if not args.skip_fairness_check and 'sweeps' in base_cfg_preview:
+            try:
+                from src.utils.fairness_check import validate_tuning_fairness
+                print("   Performing tuning fairness validation...")
+                # Extract optimizer configs from sweeps
+                optimizers = []
+                tuning_configs = {}
+                for sweep in base_cfg_preview.get('sweeps', []):
+                    if 'optimizers' in sweep:
+                        for opt_cfg in sweep['optimizers']:
+                            opt_name = opt_cfg.get('name')
+                            if opt_name:
+                                optimizers.append(opt_name)
+                                tuning_configs[opt_name] = {
+                                    'n_trials': opt_cfg.get('n_trials', 0),
+                                    'epochs': sweep.get('epochs', 0),
+                                    'batch_size': sweep.get('batch_size'),
+                                    'is_tuned': True
+                                }
+                
+                if len(optimizers) > 1:
+                    # Validate fairness across multiple optimizers
+                    validate_tuning_fairness(optimizers, tuning_configs, strict=True)
+                    print("   ✓ Tuning fairness validated: All optimizers have equal budgets")
+            except ImportError:
+                print("   Warning: Could not import fairness validator. Skipping check.")
+            except Exception as e:
+                print(f"   Warning: Fairness validation failed: {e}")
+                print("   Consider reviewing tuning configuration for fair comparisons.")
+    except Exception as e:
         # Non-fatal; proceed and let downstream raise if truly invalid
+        print(f"   Warning: Pre-run validation encountered error: {e}")
         pass
+    
+    print("[PRE-RUN VALIDATION] Complete\n")
 
     # Run pipeline
     run_full_pipeline(

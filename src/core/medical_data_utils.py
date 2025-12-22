@@ -74,6 +74,7 @@ def load_medmnist_dataset(dataset_name: str = 'pathmnist', split: str = 'train',
     try:
         import medmnist
         from medmnist import INFO
+        import torchvision.transforms as transforms
         
         if dataset_name not in INFO:
             logging.warning(f"MedMNIST dataset '{dataset_name}' not found. Available: {list(INFO.keys())}")
@@ -82,8 +83,13 @@ def load_medmnist_dataset(dataset_name: str = 'pathmnist', split: str = 'train',
         # Dynamically get the dataset class
         DataClass = getattr(medmnist, INFO[dataset_name]['python_class'])
         
-        # Load the dataset
-        dataset = DataClass(split=split, download=download, root=root)
+        # CRITICAL FIX: Add transforms to ensure tensor output (prevents PIL.Image collate errors)
+        transform = transforms.Compose([
+            transforms.ToTensor(),  # Converts PIL Image to tensor and scales to [0,1]
+        ])
+        
+        # Load the dataset with transform
+        dataset = DataClass(split=split, download=download, root=root, transform=transform)
         logging.info(f"Loaded MedMNIST dataset '{dataset_name}' ({split} split): {len(dataset)} samples")
         return dataset
         
