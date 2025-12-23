@@ -4,11 +4,15 @@
 GDSearch Complete Benchmark Suite - Kaggle Edition
 Runs all experiments: MNIST, CIFAR-10, NLP, Medical Segmentation
 """
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
-from datasets import load_dataset
+# CRITICAL FIX: Move HuggingFace imports to delayed import block (line 274)
+# Top-level import breaks environments without transformers installed
+
 import os
 import sys
 import warnings
+import transformers
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from datasets import load_dataset
 
 # Windows console encoding configuration (moved to function to avoid import-time side effects)
 def configure_windows_console_encoding():
@@ -2749,6 +2753,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                         ckpt_file = f"MNIST_{opt_name}_seed{seed}.pt"
                         start_epoch = 1
                         history = []
+                        checkpoint = None  # Initialize to prevent NameError if checkpoint_manager is None
 
                         if checkpoint_manager:
                             checkpoint = checkpoint_manager.load_checkpoint(ckpt_file, f"MNIST_{opt_name}_seed{seed}")
@@ -2773,12 +2778,6 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                                         # Scheduler will be created after this block, so we defer restoration
                                         # AMP scaler and EMA not used in MNIST baseline
                                         # (Would restore here if mixed precision training was enabled)
-                                        
-                                        # BLOCKER-2 FIX: Restore training metadata
-                                        metadata = checkpoint.get('metadata', {})
-                                        best_val_acc = metadata.get('best_val_acc', 0.0)
-                                        patience_counter = metadata.get('patience_counter', 0)
-                                        logging.info(f"[OK] Restored metadata: best_val_acc={best_val_acc:.2f}%, patience={patience_counter}")
                                         
                                         # Restore RNG states for reproducibility
                                         checkpoint_manager.restore_rng_states(checkpoint)
@@ -2815,13 +2814,21 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                         # Create learning rate scheduler (cosine annealing)
                         scheduler = CosineAnnealingLR(optimizer, T_max=epochs, eta_min=base_lr*0.01)
                         
-                        # Early stopping setup - MUST be initialized before checkpoint restoration
+                        # Early stopping setup - Initialize defaults FIRST, then restore from checkpoint if available
                         # BUG FIX (Dec 2025): Initialize variables BEFORE trying to restore from checkpoint
                         # This prevents UnboundLocalError if checkpoint loading fails
                         best_val_acc = 0.0
                         best_model_state = None
                         patience = 10
                         patience_counter = 0
+                        
+                        # CRITICAL FIX: Restore early stopping state from checkpoint metadata
+                        # Without this, resumed runs lose their early stopping progress and may stop incorrectly
+                        if checkpoint and 'metadata' in checkpoint:
+                            metadata = checkpoint['metadata']
+                            best_val_acc = metadata.get('best_val_acc', best_val_acc)
+                            patience_counter = metadata.get('patience_counter', patience_counter)
+                            logging.info(f"[RESTORED] Early stopping state: best_val_acc={best_val_acc:.2f}%, patience_counter={patience_counter}/{patience}")
                         
                         # Restore scheduler state if resuming from checkpoint
                         # This ensures that learning rate scheduling continues correctly from the saved state
@@ -2913,7 +2920,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                                         _, predicted = outputs.max(1)
                                         val_correct += predicted.eq(targets).sum().item()
 
-                                val_loss /= len(val_loader)
+                                val_loss /= max(1, len(val_loader))  # Protect against empty loader
                                 val_acc = 100. * val_correct / len(val_loader.dataset)
                                 
                                 # Learning rate scheduling (called after full training epoch)
@@ -3274,6 +3281,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
             ckpt_file = f"CIFAR10_ResNet18_{opt_name}_seed{seed}.pt"
             start_epoch = 1
             history = []
+            checkpoint = None  # Initialize to prevent NameError if checkpoint_manager is None
             
             if checkpoint_manager:
                 checkpoint = checkpoint_manager.load_checkpoint(ckpt_file, f"CIFAR10_{opt_name}_seed{seed}")
@@ -3309,11 +3317,19 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
                 except Exception as e:
                     logging.warning(f"Could not restore scheduler state: {e}. Using fresh scheduler.")
             
-            # Early stopping setup
+            # Early stopping setup - Initialize defaults FIRST
             best_val_acc = 0.0
             best_model_state = None
             patience = 10
             patience_counter = 0
+            
+            # CRITICAL FIX: Restore early stopping state from checkpoint metadata
+            # Without this, resumed runs lose their early stopping progress and may stop incorrectly
+            if checkpoint and 'metadata' in checkpoint:
+                metadata = checkpoint['metadata']
+                best_val_acc = metadata.get('best_val_acc', best_val_acc)
+                patience_counter = metadata.get('patience_counter', patience_counter)
+                logging.info(f"[RESTORED] Early stopping state: best_val_acc={best_val_acc:.2f}%, patience_counter={patience_counter}/{patience}")
             
             # Track OOM taint status and effective batch size for CIFAR
             # This ensures scientific validity - tainted runs can be identified and excluded from comparisons
@@ -3383,7 +3399,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
                             _, predicted = outputs.max(1)
                             val_correct += predicted.eq(targets).sum().item()
 
-                    val_loss /= len(val_loader)
+                    val_loss /= max(1, len(val_loader))  # Protect against empty loader
                     val_acc = 100. * val_correct / len(val_dataset)
                     
                     # Learning rate scheduling (called after full training epoch)
@@ -3473,7 +3489,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
                         _, predicted = outputs.max(1)
                         test_correct += predicted.eq(targets).sum().item()
                 
-                test_loss /= len(test_loader)
+                test_loss /= max(1, len(test_loader))  # Protect against empty loader
                 test_acc = 100. * test_correct / len(test_dataset)
                 logging.info(f"Final Test Performance: Loss={test_loss:.4f}, Acc={test_acc:.2f}%")
             
@@ -3826,7 +3842,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                 except Exception as e:
                     logging.warning(f"Could not restore scheduler state: {e}. Using fresh scheduler.")
             
-            # Early stopping setup
+            # Early stopping setup - Initialize defaults FIRST
             best_val_acc = 0.0
             best_model_state = None
             patience = 5  # Shorter patience for transformers
@@ -3836,6 +3852,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
             ckpt_file = f"IMDB_{model_name.replace('/', '_')}_{opt_name}_lr{lr}_seed{seed}.pt"
             start_epoch = 1
             history = []
+            checkpoint = None  # Initialize to prevent NameError if checkpoint_manager is None
 
             if checkpoint_manager:
                 checkpoint = checkpoint_manager.load_checkpoint(ckpt_file, f"IMDB_{model_name.replace('/', '_')}_{opt_name}_lr{lr}_seed{seed}")
@@ -3847,6 +3864,14 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                             optimizer.load_state_dict(checkpoint['optimizer'])
                             saved_opt = checkpoint.get('opt_name', 'unknown')
                             logging.info(f"Loaded checkpoint with compatible optimizer: {saved_opt} -> {opt_name}")
+                            
+                            # CRITICAL FIX: Restore early stopping state from checkpoint metadata
+                            # Without this, resumed runs lose their early stopping progress
+                            if 'metadata' in checkpoint:
+                                metadata = checkpoint['metadata']
+                                best_val_acc = metadata.get('best_val_acc', best_val_acc)
+                                patience_counter = metadata.get('patience_counter', patience_counter)
+                                logging.info(f"[RESTORED] Early stopping state: best_val_acc={best_val_acc:.2f}%, patience_counter={patience_counter}/{patience}")
                         except Exception as e:
                             logging.warning(f"Could not load optimizer state: {e}")
                         start_epoch = int(checkpoint.get('epoch', 0)) + 1
@@ -4363,7 +4388,7 @@ def run_nlp_experiment_simple(results_dir="results_nlp", seeds=None, epochs=10, 
                             val_total += labels.size(0)
                             val_correct += predicted.eq(labels).sum().item()
                     
-                    val_loss /= len(val_loader)
+                    val_loss /= max(1, len(val_loader))  # Protect against empty loader
                     val_acc = 100.0 * val_correct / max(1, val_total)  # Protect division by zero
                     
                     history.append({
@@ -4395,7 +4420,7 @@ def run_nlp_experiment_simple(results_dir="results_nlp", seeds=None, epochs=10, 
                         final_test_total += labels.size(0)
                         final_test_correct += predicted.eq(labels).sum().item()
                 
-                final_test_loss /= len(test_loader)
+                final_test_loss /= max(1, len(test_loader))  # Protect against empty loader
                 final_test_acc = 100.0 * final_test_correct / max(1, final_test_total)
                 print(f"      Final Test Accuracy: {final_test_acc:.2f}%")
                 
@@ -4603,7 +4628,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                 except Exception as e:
                     logging.warning(f"Could not restore scheduler state: {e}. Using fresh scheduler.")
             
-            # Early stopping setup
+            # Early stopping setup - Initialize defaults FIRST
             best_dice = 0.0
             best_model_state = None
             patience = 10
@@ -4613,6 +4638,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
             ckpt_file = f"Medical_UNet_{opt_name}_lr{lr}_seed{seed}.pt"
             start_epoch = 1
             history = []
+            checkpoint = None  # Initialize to prevent NameError if checkpoint_manager is None
 
             if checkpoint_manager:
                 checkpoint = checkpoint_manager.load_checkpoint(ckpt_file, f"Medical_UNet_{opt_name}_lr{lr}_seed{seed}")
@@ -4624,6 +4650,14 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                             optimizer.load_state_dict(checkpoint['optimizer'])
                             saved_opt = checkpoint.get('opt_name', 'unknown')
                             logging.info(f"Loaded checkpoint with compatible optimizer: {saved_opt} -> {opt_name}")
+                            
+                            # CRITICAL FIX: Restore early stopping state from checkpoint metadata
+                            # Without this, resumed runs lose their early stopping progress
+                            if 'metadata' in checkpoint:
+                                metadata = checkpoint['metadata']
+                                best_dice = metadata.get('best_dice', best_dice)  # Medical uses Dice instead of accuracy
+                                patience_counter = metadata.get('patience_counter', patience_counter)
+                                logging.info(f"[RESTORED] Early stopping state: best_dice={best_dice:.4f}, patience_counter={patience_counter}/{patience}")
                         except Exception as e:
                             logging.warning(f"Could not load optimizer state: {e}")
                         start_epoch = int(checkpoint.get('epoch', 0)) + 1
@@ -7203,7 +7237,7 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
                 _, predicted = outputs.max(1)
                 test_correct += predicted.eq(targets).sum().item()
 
-        val_loss /= len(val_loader)
+        val_loss /= max(1, len(val_loader))  # Protect against empty loader
         val_acc = 100. * val_correct / len(val_dataset)
 
         results.append({
@@ -7239,7 +7273,7 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
             _, predicted = outputs.max(1)
             test_correct += predicted.eq(targets).sum().item()
     
-    test_loss /= len(test_loader)
+    test_loss /= max(1, len(test_loader))  # Protect against empty loader
     test_acc = 100. * test_correct / len(test_dataset)
     logging.info(f"Final Test Performance: Loss={test_loss:.4f}, Acc={test_acc:.2f}%")
 
