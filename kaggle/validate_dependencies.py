@@ -6,6 +6,7 @@ Run this after installing requirements to check for conflicts.
 
 import sys
 import importlib.metadata
+import logging
 from typing import Dict, List, Tuple
 
 # Define expected version constraints
@@ -17,7 +18,9 @@ EXPECTED_VERSIONS = {
     'click': ('>=', '7.0', '!=', '8.3.0'),
     'cryptography': ('>=', '19.0', '<', '44'),
     'pyOpenSSL': ('>=', '19.1.0', '<=', '24.2.1'),
-    'numpy': ('>=', '1.26.0', '<', '2.0'),
+    # NOTE: NumPy 2.x is increasingly present on hosted platforms (e.g., Kaggle).
+    # We allow >=1.26.0 here but handle NumPy 2.x as a soft warning below.
+    'numpy': ('>=', '1.26.0'),
 }
 
 def parse_version(version_str: str) -> Tuple[int, ...]:
@@ -90,6 +93,18 @@ def main():
         if not ok:
             all_ok = False
     
+    # Special handling for NumPy 2.x on hosted platforms (e.g., Kaggle)
+    try:
+        import numpy as _np
+        _np_ver = parse_version(_np.__version__)
+        if _np_ver[0] >= 2:
+            print("\n⚠️ NumPy >= 2.0 detected. This may cause binary incompatibilities with installed Pandas.")
+            print("   If you see 'numpy.dtype size changed' errors, consider running:")
+            print("     pip install --force-reinstall --no-cache-dir numpy==1.26.4 pandas==2.2.3")
+            print("   Or use the project's `kaggle/requirements_kaggle.txt` fallback which includes these pins.")
+    except Exception:
+        pass
+
     print("=" * 70)
     
     # Check critical imports

@@ -124,6 +124,7 @@ warnings.filterwarnings('ignore', message='.*cuBLAS.*')
 warnings.filterwarnings('ignore', message='.*register factory.*')
 from typing import Dict, List, Optional, Any
 import traceback
+import os
 from datetime import datetime
 warnings.filterwarnings('ignore')
 
@@ -150,6 +151,8 @@ except ImportError as e:
     print(f"  2. Check src/ directory exists: {(project_root / 'src').exists()}")
     print(f"  3. Install in editable mode: pip install -e .")
     print(f"  4. Check dependencies: pip install -r requirements.txt")
+    if os.environ.get('KAGGLE_KERNEL_RUN_TYPE') or os.path.exists('/kaggle'):
+        print(f"     NOTE: Detected Kaggle runtime — prefer `pip install -r kaggle/requirements_kaggle.txt` or skip numpy/pandas to use Kaggle's prebuilt binaries")
     print(f"  5. Verify Python version: {sys.version}")
     print(f"\nCurrent sys.path (first 5): {sys.path[:5]}")
     print(f"{'='*80}\n")

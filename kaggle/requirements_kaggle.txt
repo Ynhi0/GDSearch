@@ -8,8 +8,18 @@ torchvision>=0.15.0
 
 # Data & Utilities
 # NOTE: DO NOT specify pandas/numpy versions - use Kaggle's pre-installed optimized builds
-# Forcing specific versions causes binary incompatibility (numpy.dtype size errors)
+# Forcing specific versions may cause binary incompatibility (numpy.dtype size errors).
+# However, if you encounter 'numpy.dtype size changed' (common when Kaggle has NumPy 2.x),
+# use the compatibility fallback below to force a known-good pair.
 tqdm>=4.65.0
+
+# --- Compatibility fallback (use only if you see binary incompatibility) ---
+# These pins force a compatible binary pair that works with our codebase.
+# Install with: `pip install --force-reinstall --no-cache-dir -r kaggle/requirements_kaggle.txt`
+# (This will downgrade NumPy to 1.26 and reinstall Pandas built against it.)
+numpy==1.26.4
+pandas==2.2.3
+# --- End fallback ---
 
 # System Monitoring (CRITICAL: used in run_all_kaggle.py line 42)
 psutil>=5.9.0

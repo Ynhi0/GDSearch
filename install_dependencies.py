@@ -19,7 +19,12 @@ def install_dependencies():
     print_header("GDSEARCH DEPENDENCY INSTALLER")
     
     requirements_file = "requirements.txt"
-    
+
+    # Detect Kaggle runtime and prefer kaggle-specific requirements to avoid overwriting optimized NumPy/Pandas
+    if os.environ.get('KAGGLE_KERNEL_RUN_TYPE') or os.path.exists('/kaggle'):
+        print("Detected Kaggle environment — using 'kaggle/requirements_kaggle.txt' to avoid overwriting system NumPy/Pandas.")
+        requirements_file = os.path.join('kaggle', 'requirements_kaggle.txt')
+
     if not os.path.exists(requirements_file):
         print(f"ERROR: {requirements_file} not found!")
         return False

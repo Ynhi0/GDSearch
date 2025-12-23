@@ -8,10 +8,14 @@
 # - Kaggle: Python 3.10 (fully supported)
 #
 # For Kaggle execution, use requirements_kaggle.txt which adapts to pre-installed packages
+# IMPORTANT: Do NOT install this file in a Kaggle kernel — it will overwrite Kaggle's optimized
+# NumPy/Pandas binaries and can cause binary incompatibilities (e.g., "numpy.dtype size changed").
+# On Kaggle prefer: `pip install -r kaggle/requirements_kaggle.txt` or use the fallback pins there.
 
 # ============================================================================
 # CORE SCIENTIFIC STACK - PINNED FOR REPRODUCIBILITY
 # ============================================================================
+# NOTE: These are pinned for reproducible local/dev environments. See the top comment if you're on Kaggle.
 numpy==1.26.4  # PINNED: Compatible with PyTorch 2.6 and scipy
 matplotlib==3.9.2  # PINNED: Stable plotting
 pandas==2.2.3  # PINNED: Data analysis
