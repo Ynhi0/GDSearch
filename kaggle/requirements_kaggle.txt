@@ -7,8 +7,8 @@ torch>=2.0.0
 torchvision>=0.15.0
 
 # Data & Utilities
-pandas>=2.0.0
-numpy>=1.21.0,<2.0  # Kaggle-compatible version
+# NOTE: DO NOT specify pandas/numpy versions - use Kaggle's pre-installed optimized builds
+# Forcing specific versions causes binary incompatibility (numpy.dtype size errors)
 tqdm>=4.65.0
 
 # System Monitoring (CRITICAL: used in run_all_kaggle.py line 42)
