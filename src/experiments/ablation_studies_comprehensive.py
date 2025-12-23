@@ -120,37 +120,28 @@ def train_and_evaluate_model_with_loaders(model, optimizer, train_loader, test_l
             break
         
         train_losses.append(epoch_loss / len(train_loader))
-        
-        # Evaluation
-        model.eval()
-        correct = 0
-        total = 0
-        with torch.no_grad():
-            for inputs, targets in test_loader:
-                inputs, targets = inputs.to(device), targets.to(device)
-                outputs = model(inputs)
-                _, predicted = outputs.max(1)
-                correct += predicted.eq(targets).sum().item()
-                total += targets.size(0)
-        
-        test_acc = 100.0 * correct / max(1, total)  # Protect division by zero
-        test_accuracies.append(test_acc)
     
-    # Compute convergence speed (epochs to reach 95% of final accuracy)
-    final_acc = test_accuracies[-1] if test_accuracies else 0.0
-    target_acc = 0.95 * final_acc
-    convergence_epoch = epochs
-    for i, acc in enumerate(test_accuracies):
-        if acc >= target_acc:
-            convergence_epoch = i + 1
-            break
+    # Final test evaluation (only after training completes - for scientific rigor)
+    logging.info("Evaluating final performance on test set...")
+    model.eval()
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        for inputs, targets in test_loader:
+            inputs, targets = inputs.to(device), targets.to(device)
+            outputs = model(inputs)
+            _, predicted = outputs.max(1)
+            correct += predicted.eq(targets).sum().item()
+            total += targets.size(0)
+    
+    final_test_acc = 100.0 * correct / max(1, total)
+    logging.info(f"Final Test Accuracy: {final_test_acc:.2f}%")
     
     return {
         'final_train_loss': train_losses[-1] if train_losses else np.nan,
-        'final_test_accuracy': test_accuracies[-1] if test_accuracies else 0.0,
-        'convergence_epoch': convergence_epoch,
+        'final_test_accuracy': final_test_acc,
+        'convergence_epoch': epochs,
         'train_loss_curve': train_losses,
-        'test_acc_curve': test_accuracies,
         'diverged': diverged,
         'divergence_reason': divergence_reason if divergence_reason else 'None'
     }

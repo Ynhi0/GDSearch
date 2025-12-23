@@ -177,10 +177,11 @@ def get_imdb_loaders(
     max_len: int = 256,
     train_size: Optional[int] = None,
     test_size: Optional[int] = None,
+    val_split: Optional[float] = None,
     seed: int = 42
-) -> Tuple[DataLoader, DataLoader, Vocabulary]:
+):
     """
-    Create IMDB train and test data loaders.
+    Create IMDB data loaders with optional validation split.
     
     Args:
         batch_size: Batch size for data loaders
@@ -188,10 +189,12 @@ def get_imdb_loaders(
         max_len: Maximum sequence length
         train_size: Number of training samples (None = use all 25000)
         test_size: Number of test samples (None = use all 25000)
+        val_split: Fraction of training data to use for validation (e.g., 0.1 for 10%)
         seed: Random seed
         
     Returns:
-        Tuple of (train_loader, test_loader, vocabulary)
+        If val_split is None: Tuple of (train_loader, test_loader, vocabulary)
+        If val_split is provided: Tuple of (train_loader, val_loader, test_loader, vocabulary)
     """
     print("="*80)
     print("Loading IMDB dataset...")
@@ -247,6 +250,33 @@ def get_imdb_loaders(
     vocab = Vocabulary(max_vocab_size=max_vocab_size)
     vocab.build_vocab(train_texts)
     
+    # Split training data for validation if requested
+    if val_split is not None and 0 < val_split < 1:
+        val_size = int(len(train_texts) * val_split)
+        np.random.seed(seed)
+        indices = np.random.permutation(len(train_texts))
+        val_indices = indices[:val_size]
+        train_indices = indices[val_size:]
+        
+        val_texts = [train_texts[i] for i in val_indices]
+        val_labels = [train_labels[i] for i in val_indices]
+        train_texts = [train_texts[i] for i in train_indices]
+        train_labels = [train_labels[i] for i in train_indices]
+        
+        print(f"Created validation split: {val_size} samples ({val_split*100:.1f}%)")
+        print(f"Adjusted training set: {len(train_texts)} samples")
+        
+        # Create validation dataset
+        val_dataset = IMDBDataset(val_texts, val_labels, vocab, max_len)
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            collate_fn=collate_batch
+        )
+    else:
+        val_loader = None
+    
     # Create datasets
     train_dataset = IMDBDataset(train_texts, train_labels, vocab, max_len)
     test_dataset = IMDBDataset(test_texts, test_labels, vocab, max_len)
@@ -267,11 +297,16 @@ def get_imdb_loaders(
     )
     
     print(f"✓ Train loader: {len(train_loader)} batches")
+    if val_loader is not None:
+        print(f"✓ Validation loader: {len(val_loader)} batches")
     print(f"✓ Test loader: {len(test_loader)} batches")
     print(f"✓ Vocabulary size: {len(vocab)}")
     print("="*80)
     
-    return train_loader, test_loader, vocab
+    if val_loader is not None:
+        return train_loader, val_loader, test_loader, vocab
+    else:
+        return train_loader, test_loader, vocab
 
 
 if __name__ == '__main__':

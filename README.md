@@ -253,7 +253,6 @@ GDSearch/
 ├── pytest.ini
 ├── requirements.txt
 ├── run_all_kaggle.py
-├── pyproject.toml              # Modern Python project configuration (v2.0.0)
 ├── README.md                   # This file
 ├── .git/
 ├── .github/

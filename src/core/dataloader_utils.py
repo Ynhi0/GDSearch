@@ -58,7 +58,20 @@ def make_dataloader(
         
     Returns:
         DataLoader with configured settings
+        
+    WINDOWS COMPATIBILITY: On Windows, num_workers is forced to 0 to prevent
+    multiprocessing issues. This ensures testing works on Windows while still
+    allowing full multiprocessing on Kaggle/Linux.
     """
+    # AUDIT FIX: Force num_workers=0 on Windows to prevent hanging/crashes
+    import platform
+    import logging
+    if platform.system() == 'Windows' and num_workers > 0:
+        logging.debug(f"Windows detected: forcing num_workers=0 (was {num_workers}) for stability")
+        num_workers = 0
+        # persistent_workers requires num_workers > 0, so disable it
+        persistent_workers = False
+    
     generator = None
     worker_init_fn = None
 

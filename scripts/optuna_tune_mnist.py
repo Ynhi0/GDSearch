@@ -2,7 +2,8 @@
 Optuna-based Hyperparameter Tuning for MNIST
 
 Demonstrates automated hyperparameter optimization using Optuna.
-Tunes optimizer hyperparameters (lr, momentum, betas) for best test accuracy.
+Tunes optimizer hyperparameters (lr, momentum, betas) for best VALIDATION accuracy.
+Test set is held out and only used for final evaluation after selecting best hyperparameters.
 """
 
 import sys
@@ -163,14 +164,24 @@ def main():
     # Set random seeds for full reproducibility
     set_seed(args.seed)
     
-    # Create objective function
+    # Prepare data loaders and create objective function
+    # Create validation loader upfront and pass to tuner for strict checking
+    from src.core.data_utils import get_mnist_loaders
+    train_loader_template, val_loader_template, test_loader_template = get_mnist_loaders(
+        batch_size=128,
+        num_workers=2,
+        seed=args.seed,
+        val_split=0.1  # 10% validation split used during tuning
+    )
+
+    # Create objective function (it can still create its own per-trial loaders, but we pass val_loader for verification)
     objective_fn = create_objective_function(
         optimizer_name=args.optimizer,
         epochs=args.epochs,
         device=device,
         seed=args.seed
     )
-    
+
     # Create tuner
     pruner = None if args.pruner == 'none' else args.pruner
     tuner = OptunaHyperparameterTuner(
@@ -181,11 +192,14 @@ def main():
         pruner=pruner,
         seed=args.seed
     )
-    
-    # Run optimization
+
+    # Run optimization and provide val_loader + test_dataset for stricter checks
     results = tuner.optimize(
         n_trials=args.n_trials,
-        show_progress_bar=True
+        show_progress_bar=True,
+        val_loader=val_loader_template,
+        test_dataset=getattr(test_loader_template, 'dataset', None),
+        enforce_validation=True
     )
     
     # Save results
@@ -215,24 +229,30 @@ def main():
     logging.info("\n" + "="*80)
     logging.info("RETRAINING WITH BEST HYPERPARAMETERS ON TRAIN+VAL")
     logging.info("="*80)
-    
-    # Get full train+val combined as training set
+
+    # Get train and val loaders (same split used during tuning) and combine them for final training
     from src.core.data_utils import get_mnist_loaders
-    train_val_loader, test_loader = get_mnist_loaders(
+    train_loader_final, val_loader_final, test_loader_final = get_mnist_loaders(
         batch_size=128,
         num_workers=2,
-        seed=args.seed
-        # val_split omitted (defaults to None) - use all training data
+        seed=args.seed,
+        val_split=0.1  # Use same validation fraction as during tuning
     )
-    
+
+    # Combine train + val datasets into a single training dataset
+    from torch.utils.data import ConcatDataset, DataLoader
+    combined_dataset = ConcatDataset([train_loader_final.dataset, val_loader_final.dataset])
+    train_val_loader = DataLoader(combined_dataset, batch_size=128, shuffle=True, num_workers=2)
+    test_loader = test_loader_final
+
     # Create model with best params (num_classes not output_size)
     from src.core.models import SimpleMLP
     final_model = SimpleMLP(input_size=784, hidden_size=256, num_classes=10).to(device)
-    
+
     # Build optimizer with best params
     best_params = results['best_params'].copy()
     lr = best_params.pop('lr')
-    
+
     # Use optimizer adapter for final retrain to ensure consistency
     best_params['lr'] = lr  # Restore lr to params dict
     final_optimizer = build_optimizer_for_tuning(
@@ -241,11 +261,11 @@ def main():
         params=best_params,
         use_custom_wrappers=False  # Keep using native PyTorch for consistency
     )
-    
+
     # Train for same number of epochs
     from torch.nn import CrossEntropyLoss
     criterion = CrossEntropyLoss()
-    
+
     logging.info(f"Training for {args.epochs} epochs on combined train+val set...")
     for epoch in range(args.epochs):
         final_model.train()

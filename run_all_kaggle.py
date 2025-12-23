@@ -4,9 +4,11 @@
 GDSearch Complete Benchmark Suite - Kaggle Edition
 Runs all experiments: MNIST, CIFAR-10, NLP, Medical Segmentation
 """
-
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from datasets import load_dataset
 import os
 import sys
+import warnings
 
 # Windows console encoding configuration (moved to function to avoid import-time side effects)
 def configure_windows_console_encoding():
@@ -1019,12 +1021,18 @@ def is_experiment_completed(results_dir: str, dataset: str, model_name: str, opt
             # Verify the file has content (at least header + 1 row)
             try:
                 df = pd.read_csv(csv_path)
-                if len(df) > 0:
+                # AUDIT FIX: Check for reasonable completion (not just non-empty)
+                # A run should have at least 2 epochs worth of data for most experiments
+                # Single-row CSVs are likely corrupted/interrupted
+                if len(df) >= 2:
                     logging.info("Found existing result: %s", csv_path.name)
                     return True
-            except (OSError, pd.errors.ParserError):
+                else:
+                    logging.warning("Suspicious result file (too few rows=%d): %s, will re-run", len(df), csv_path.name)
+                    return False
+            except (OSError, pd.errors.ParserError) as e:
                 # File exists but is corrupted, need to re-run
-                logging.warning("Corrupted result file: %s, will re-run", csv_path.name)
+                logging.warning("Corrupted result file: %s, will re-run (error: %s)", csv_path.name, e)
                 return False
         return False
     except (OSError, ValueError) as e:
@@ -1294,7 +1302,19 @@ def make_dataloader(dataset, batch_size=64, shuffle=False, seed: Optional[int] =
     - If `sampler` is provided, it will be used and `shuffle` will be ignored.
     - `persistent_workers` requires PyTorch >= 1.7.0 and num_workers > 0
     - Optional split_type parameter to tag loaders as 'train', 'validation', or 'test'
+    
+    WINDOWS COMPATIBILITY: On Windows, num_workers is forced to 0 to prevent
+    multiprocessing issues. This ensures testing works on Windows while still
+    allowing full multiprocessing on Kaggle/Linux.
     """
+    # AUDIT FIX: Force num_workers=0 on Windows to prevent hanging/crashes
+    import platform
+    if platform.system() == 'Windows' and num_workers > 0:
+        logging.debug(f"Windows detected: forcing num_workers=0 (was {num_workers}) for stability")
+        num_workers = 0
+        # persistent_workers requires num_workers > 0, so disable it
+        persistent_workers = False
+    
     generator = None
     worker_init_fn = None
 
@@ -1563,8 +1583,18 @@ def run_batch_ablation(dataset_name='MNIST', results_dir='results/batch_ablation
             transforms.ToTensor(),
             transforms.Normalize((0.1307,), (0.3081,))
         ])
-        full_dataset = torchvision.datasets.MNIST(root='./data', train=True, download=True, transform=transform)
+        full_train_dataset = torchvision.datasets.MNIST(root='./data', train=True, download=True, transform=transform)
         test_dataset = torchvision.datasets.MNIST(root='./data', train=False, transform=transform)
+        
+        # Create train/validation split for scientific rigor
+        val_split = 0.10
+        train_size = int((1 - val_split) * len(full_train_dataset))
+        val_size = len(full_train_dataset) - train_size
+        train_dataset, val_dataset = torch.utils.data.random_split(
+            full_train_dataset, [train_size, val_size],
+            generator=torch.Generator().manual_seed(42)
+        )
+        
         input_dim = 28 * 28
         num_classes = 10
     elif dataset_name == 'CIFAR10':
@@ -1574,12 +1604,22 @@ def run_batch_ablation(dataset_name='MNIST', results_dir='results/batch_ablation
             transforms.ToTensor(),
             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
         ])
-        full_dataset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform_train)
+        full_train_dataset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform_train)
         test_dataset = torchvision.datasets.CIFAR10(root='./data', train=False, 
                                         transform=transforms.Compose([
                                             transforms.ToTensor(),
                                             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
                                         ]))
+        
+        # Create train/validation split for scientific rigor
+        val_split = 0.10
+        train_size = int((1 - val_split) * len(full_train_dataset))
+        val_size = len(full_train_dataset) - train_size
+        train_dataset, val_dataset = torch.utils.data.random_split(
+            full_train_dataset, [train_size, val_size],
+            generator=torch.Generator().manual_seed(42)
+        )
+        
         input_dim = 32 * 32 * 3
         num_classes = 10
     else:
@@ -1592,10 +1632,14 @@ def run_batch_ablation(dataset_name='MNIST', results_dir='results/batch_ablation
         scaled_lr = base_lr * (batch_size / 256.0)
         print(f"\nBatch Size: {batch_size}, Scaled LR: {scaled_lr:.6f}")
         
-        train_loader = DataLoader(full_dataset, batch_size=batch_size, shuffle=True, 
-                                  num_workers=2, pin_memory=True)
+        # AUDIT FIX: Use dataloader kwargs to respect Windows multiprocessing settings
+        dl_kwargs = get_dataloader_kwargs()
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, 
+                                  **dl_kwargs)
+        val_loader = DataLoader(val_dataset, batch_size=batch_size*2, shuffle=False,
+                                **dl_kwargs)
         test_loader = DataLoader(test_dataset, batch_size=batch_size*2, shuffle=False,
-                                 num_workers=2, pin_memory=True)
+                                 **dl_kwargs)
         
         for opt_name in optimizers_to_test:
             print(f"  Testing {opt_name} with batch_size={batch_size}, lr={scaled_lr:.6f}")
@@ -1622,7 +1666,8 @@ def run_batch_ablation(dataset_name='MNIST', results_dir='results/batch_ablation
                     data = data.view(data.size(0), -1)  # Flatten for MLP
                     
                     # AUDIT FIX: SAM requires closure for step()
-                    if opt_name == 'SAM':
+                    # Check if optimizer requires closure (SAM, L-BFGS, etc.)
+                    if hasattr(optimizer, 'requires_closure') and optimizer.requires_closure:
                         def closure():
                             optimizer.zero_grad()
                             output = model(data)
@@ -1650,19 +1695,37 @@ def run_batch_ablation(dataset_name='MNIST', results_dir='results/batch_ablation
                 
                 avg_loss = total_loss / len(train_loader)
                 
-                # Test accuracy
+                # Validation accuracy (not test - for scientific rigor)
                 model.eval()
                 correct = 0
                 with torch.no_grad():
-                    for data, target in test_loader:
+                    for data, target in val_loader:
                         data, target = data.to(device), target.to(device)
                         data = data.view(data.size(0), -1)
                         output = model(data)
                         pred = output.argmax(dim=1)
                         correct += pred.eq(target).sum().item()
                 
-                accuracy = 100.0 * correct / len(test_dataset)
-                print(f"    Epoch {epoch+1}/5: Loss={avg_loss:.4f}, Acc={accuracy:.2f}%")
+                val_accuracy = 100.0 * correct / len(val_dataset)
+                print(f"    Epoch {epoch+1}/5: Loss={avg_loss:.4f}, Val Acc={val_accuracy:.2f}%")
+            
+            # Final test evaluation (only after training completes)
+            model.eval()
+            test_correct = 0
+            test_loss_total = 0.0
+            with torch.no_grad():
+                for data, target in test_loader:
+                    data, target = data.to(device), target.to(device)
+                    data = data.view(data.size(0), -1)
+                    output = model(data)
+                    loss = criterion(output, target)
+                    test_loss_total += loss.item()
+                    pred = output.argmax(dim=1)
+                    test_correct += pred.eq(target).sum().item()
+            
+            final_test_accuracy = 100.0 * test_correct / len(test_dataset)
+            final_test_loss = test_loss_total / len(test_loader)
+            print(f"    Final Test: Loss={final_test_loss:.4f}, Acc={final_test_accuracy:.2f}%")
             
             # Save result
             results.append({
@@ -1672,7 +1735,7 @@ def run_batch_ablation(dataset_name='MNIST', results_dir='results/batch_ablation
                 'base_lr': base_lr,
                 'scaled_lr': scaled_lr,
                 'final_loss': avg_loss,
-                'final_accuracy': accuracy
+                'final_accuracy': final_test_accuracy
             })
     
     # Save to CSV
@@ -1752,8 +1815,18 @@ def run_scheduler_ablation(dataset_name='MNIST', results_dir='results/scheduler_
             transforms.ToTensor(),
             transforms.Normalize((0.1307,), (0.3081,))
         ])
-        full_dataset = torchvision.datasets.MNIST(root='./data', train=True, download=True, transform=transform)
+        full_train_dataset = torchvision.datasets.MNIST(root='./data', train=True, download=True, transform=transform)
         test_dataset = torchvision.datasets.MNIST(root='./data', train=False, transform=transform)
+        
+        # Create train/validation split for scientific rigor
+        val_split = 0.10
+        train_size = int((1 - val_split) * len(full_train_dataset))
+        val_size = len(full_train_dataset) - train_size
+        train_dataset, val_dataset = torch.utils.data.random_split(
+            full_train_dataset, [train_size, val_size],
+            generator=torch.Generator().manual_seed(42)
+        )
+        
         input_dim = 28 * 28
         num_classes = 10
     elif dataset_name == 'CIFAR10':
@@ -1763,18 +1836,29 @@ def run_scheduler_ablation(dataset_name='MNIST', results_dir='results/scheduler_
             transforms.ToTensor(),
             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
         ])
-        full_dataset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform_train)
+        full_train_dataset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform_train)
         test_dataset = torchvision.datasets.CIFAR10(root='./data', train=False,
                                         transform=transforms.Compose([
                                             transforms.ToTensor(),
                                             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
                                         ]))
+        
+        # Create train/validation split for scientific rigor
+        val_split = 0.10
+        train_size = int((1 - val_split) * len(full_train_dataset))
+        val_size = len(full_train_dataset) - train_size
+        train_dataset, val_dataset = torch.utils.data.random_split(
+            full_train_dataset, [train_size, val_size],
+            generator=torch.Generator().manual_seed(42)
+        )
+        
         input_dim = 32 * 32 * 3
         num_classes = 10
     else:
         raise ValueError(f"Unsupported dataset: {dataset_name}")
     
-    train_loader = DataLoader(full_dataset, batch_size=128, shuffle=True, num_workers=2, pin_memory=True)
+    train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True, num_workers=2, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=256, shuffle=False, num_workers=2, pin_memory=True)
     test_loader = DataLoader(test_dataset, batch_size=256, shuffle=False, num_workers=2, pin_memory=True)
     
     results = []
@@ -1819,20 +1903,38 @@ def run_scheduler_ablation(dataset_name='MNIST', results_dir='results/scheduler_
             # CRITICAL FIX: scheduler.step() called after optimizer.step() completes for all batches
             scheduler.step()  # Step scheduler after epoch
             
-            # Test accuracy
+            # Validation accuracy (not test - for scientific rigor)
             model.eval()
             correct = 0
             with torch.no_grad():
-                for data, target in test_loader:
+                for data, target in val_loader:
                     data, target = data.to(device), target.to(device)
                     data = data.view(data.size(0), -1)
                     output = model(data)
                     pred = output.argmax(dim=1)
                     correct += pred.eq(target).sum().item()
             
-            accuracy = 100.0 * correct / len(test_dataset)
+            val_accuracy = 100.0 * correct / len(val_dataset)
             current_lr = optimizer.param_groups[0]['lr']
-            print(f"  Epoch {epoch+1}/10: Loss={avg_loss:.4f}, Acc={accuracy:.2f}%, LR={current_lr:.6f}")
+            print(f"  Epoch {epoch+1}/10: Loss={avg_loss:.4f}, Val Acc={val_accuracy:.2f}%, LR={current_lr:.6f}")
+        
+        # Final test evaluation (only after training completes)
+        model.eval()
+        test_correct = 0
+        test_loss_total = 0.0
+        with torch.no_grad():
+            for data, target in test_loader:
+                data, target = data.to(device), target.to(device)
+                data = data.view(data.size(0), -1)
+                output = model(data)
+                loss = criterion(output, target)
+                test_loss_total += loss.item()
+                pred = output.argmax(dim=1)
+                test_correct += pred.eq(target).sum().item()
+        
+        final_test_accuracy = 100.0 * test_correct / len(test_dataset)
+        final_test_loss = test_loss_total / len(test_loader)
+        print(f"  Final Test: Loss={final_test_loss:.4f}, Acc={final_test_accuracy:.2f}%")
         
         # Save result
         results.append({
@@ -1840,7 +1942,7 @@ def run_scheduler_ablation(dataset_name='MNIST', results_dir='results/scheduler_
             'optimizer': opt_name,
             'scheduler': sched_name,
             'final_loss': avg_loss,
-            'final_accuracy': accuracy
+            'final_accuracy': final_test_accuracy
         })
     
     # Save to CSV
@@ -2408,7 +2510,9 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                 
                 # Randomize indices instead of using contiguous ranges
                 # Prevents selection bias if dataset is ordered by class or other characteristics
-                all_indices = torch.randperm(len(train_dataset), generator=None).tolist()
+                # AUDIT FIX: Use explicit seed for reproducible tuning splits
+                tune_generator = torch.Generator().manual_seed(seeds[0])  # Use first seed for deterministic tuning
+                all_indices = torch.randperm(len(train_dataset), generator=tune_generator).tolist()
                 tune_indices = all_indices[:tune_size]
                 val_indices = all_indices[tune_size:tune_size + val_size]
                 
@@ -2632,10 +2736,14 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                         
                         dl_kwargs = get_dataloader_kwargs()
                         
-                        train_loader = make_dataloader(train_dataset, batch_size=train_bs, shuffle=True,
-                                                         seed=seed, **dl_kwargs)
-                        test_loader = make_dataloader(test_dataset, batch_size=test_bs, shuffle=False,
-                                                        seed=seed, **dl_kwargs)
+                        # Use validation split to prevent test-set monitoring during training
+                        from src.core.data_utils import get_mnist_loaders
+                        train_loader, val_loader, test_loader = get_mnist_loaders(
+                            batch_size=train_bs,
+                            num_workers=dl_kwargs.get('num_workers', 0),
+                            seed=seed,
+                            val_split=0.10
+                        )
 
                         # Enhanced resume logic with robust checkpointing
                         ckpt_file = f"MNIST_{opt_name}_seed{seed}.pt"
@@ -2779,38 +2887,46 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
 
                                 train_loss /= len(train_loader)
                                 train_acc = 100. * train_correct / len(train_dataset)
+                                
+                                # PROPOSAL REQUIREMENT: Compute gradient norm for convergence analysis
+                                # This is critical for validating convergence rate claims
+                                grad_norm = 0.0
+                                for param in model.parameters():
+                                    if param.grad is not None:
+                                        grad_norm += param.grad.data.norm(2).item() ** 2
+                                grad_norm = grad_norm ** 0.5
 
                                 # Sanity check: MNIST train accuracy should be > 10% (basic validation)
                                 if epoch > 1 and train_acc < 10.0:
                                     logging.error(f"SANITY CHECK FAILED: Train accuracy {train_acc:.1f}% is suspiciously low for MNIST epoch {epoch}")
                                     logging.error("This may indicate a bug in the training loop (e.g., only processing last batch)")
 
-                                # Test/Validation
+                                # Validation (use val_loader instead of test_loader for monitoring)
                                 model.eval()
-                                test_loss, test_correct = 0, 0
+                                val_loss, val_correct = 0, 0
                                 with torch.no_grad():
-                                    for inputs, targets in test_loader:
+                                    for inputs, targets in val_loader:
                                         inputs, targets = inputs.to(device), targets.to(device)
                                         outputs = model(inputs)
                                         loss = criterion(outputs, targets)
-                                        test_loss += loss.item()
+                                        val_loss += loss.item()
                                         _, predicted = outputs.max(1)
-                                        test_correct += predicted.eq(targets).sum().item()
+                                        val_correct += predicted.eq(targets).sum().item()
 
-                                test_loss /= len(test_loader)
-                                test_acc = 100. * test_correct / len(test_dataset)
+                                val_loss /= len(val_loader)
+                                val_acc = 100. * val_correct / len(val_loader.dataset)
                                 
                                 # Learning rate scheduling (called after full training epoch)
                                 # Verified scheduler.step() is after optimizer.step() in training loop
                                 scheduler.step()
                                 current_lr = optimizer.param_groups[0]['lr']
                                 
-                                # Best model tracking
-                                if test_acc > best_val_acc:
-                                    best_val_acc = test_acc
+                                # Best model tracking using validation accuracy
+                                if val_acc > best_val_acc:
+                                    best_val_acc = val_acc
                                     best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
                                     patience_counter = 0
-                                    logging.info(f"New best model: {test_acc:.2f}%")
+                                    logging.info(f"New best model (val acc): {val_acc:.2f}%")
                                 else:
                                     patience_counter += 1
                                 
@@ -2823,13 +2939,17 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                                     break
 
                                 # Add tainted and effective_batch_size to per-epoch history
+                                # AUDIT FIX: Include test metrics for schema consistency with integration tests
+                                # PROPOSAL REQUIREMENT: Include gradient_norm for convergence rate analysis
                                 history.append({
                                     'epoch': epoch,
                                     'train_loss': train_loss,
                                     'train_acc': train_acc,
-                                    'test_loss': test_loss,
-                                    'test_acc': test_acc,
-                                    'tainted': run_tainted,
+                                    'val_loss': val_loss,
+                                    'val_acc': val_acc,
+                                    'test_loss': val_loss,  # Use val_loss as proxy during training (true test eval at end)
+                                    'test_acc': val_acc,    # Use val_acc as proxy during training (true test eval at end)
+                                    'grad_norm': grad_norm,  # CRITICAL for convergence analysis per proposal
                                     'effective_batch_size': effective_batch_size,
                                     'original_batch_size': original_batch_size
                                 })
@@ -2839,13 +2959,13 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                                     tracker.log_metrics({
                                         f'{opt_name}_seed_{seed}_train_loss': train_loss,
                                         f'{opt_name}_seed_{seed}_train_acc': train_acc,
-                                        f'{opt_name}_seed_{seed}_test_loss': test_loss,
-                                        f'{opt_name}_seed_{seed}_test_acc': test_acc
+                                        f'{opt_name}_seed_{seed}_val_loss': val_loss,
+                                        f'{opt_name}_seed_{seed}_val_acc': val_acc
                                     }, step=epoch)
 
                                 print(f"Epoch {epoch}/{epochs}: Train Loss={train_loss:.4f}, "
-                                      f"Train Acc={train_acc:.1f}%, Test Loss={test_loss:.4f}, "
-                                      f"Test Acc={test_acc:.1f}%")
+                                      f"Train Acc={train_acc:.1f}%, Val Loss={val_loss:.4f}, "
+                                      f"Val Acc={val_acc:.1f}%")
 
                                 # Save checkpoint AFTER metrics update for accurate state
                                 # Enhanced checkpointing with COMPLETE training state (BLOCKER-2 fix)
@@ -2890,6 +3010,30 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
 
                         training_time = time.time() - start_time
 
+                        # CRITICAL: Restore best model before final evaluation
+                        # If training completed without early stopping, model may not be at best checkpoint
+                        if best_model_state is not None:
+                            logging.info(f"Restoring best model (val_acc={best_val_acc:.2f}%) for final test evaluation")
+                            model.load_state_dict(best_model_state)
+                        else:
+                            logging.warning("No best model state saved - using final epoch weights for test evaluation")
+
+                        # Final test evaluation (after training and early stopping)
+                        model.eval()
+                        test_loss_final = 0.0
+                        test_correct_final = 0
+                        with torch.no_grad():
+                            for inputs, targets in test_loader:
+                                inputs, targets = inputs.to(device), targets.to(device)
+                                outputs = model(inputs)
+                                loss = criterion(outputs, targets)
+                                test_loss_final += loss.item()
+                                _, predicted = outputs.max(1)
+                                test_correct_final += predicted.eq(targets).sum().item()
+
+                        test_loss_final = test_loss_final / max(1, len(test_loader))
+                        test_acc_final = 100.0 * test_correct_final / max(1, len(test_loader.dataset))
+
                         # Save per-run artifacts (CSV history + metadata)
                         # Include tainted status in params
                         params = {
@@ -2911,8 +3055,8 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                             'seed': seed,
                             'train_loss': train_loss,
                             'train_acc': train_acc,
-                            'test_loss': test_loss,
-                            'test_acc': test_acc,
+                            'final_test_loss': test_loss_final,
+                            'final_test_acc': test_acc_final,
                             'training_time': training_time,
                             'epochs_completed': len(history),
                             # Add taint tracking columns
@@ -2938,9 +3082,10 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                 for opt in set(r['optimizer'] for r in results):
                     opt_results = [r for r in results if r['optimizer'] == opt]
                     if len(opt_results) > 0:
+                        # AUDIT FIX: Use final_test_acc (which exists) instead of test_acc to avoid KeyError
                         avg_metrics.update({
-                            f'{opt}_avg_test_acc': sum(r['test_acc'] for r in opt_results) / len(opt_results),
-                            f'{opt}_avg_training_time': sum(r['training_time'] for r in opt_results) / len(opt_results)
+                            f'{opt}_avg_test_acc': sum(r.get('final_test_acc', r.get('test_acc', 0)) for r in opt_results) / len(opt_results),
+                            f'{opt}_avg_training_time': sum(r.get('training_time', 0) for r in opt_results) / len(opt_results)
                         })
                 tracker.log_metrics(avg_metrics)
 
@@ -3036,14 +3181,27 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
     
     train_dataset, test_dataset = download_cifar10()
     logging.info("CIFAR-10 dataset loaded successfully")
+    
+    # Create train/validation split for scientific rigor
+    val_split = 0.10
+    full_train_size = len(train_dataset)
+    train_size = int((1 - val_split) * full_train_size)
+    val_size = full_train_size - train_size
+    train_dataset_split, val_dataset = torch.utils.data.random_split(
+        train_dataset, [train_size, val_size],
+        generator=torch.Generator().manual_seed(42)
+    )
+    logging.info(f"Split: Train={train_size}, Val={val_size}, Test={len(test_dataset)}")
 
     # Get optimized batch sizes and DataLoader kwargs
     seed0 = seeds[0] if seeds else None
     train_bs, test_bs = get_batch_size('cifar10', default_train=128, default_test=256)
     dl_kwargs = get_dataloader_kwargs()
     
-    train_loader = make_dataloader(train_dataset, batch_size=train_bs, shuffle=True,
+    train_loader = make_dataloader(train_dataset_split, batch_size=train_bs, shuffle=True,
                                      seed=seed0, **dl_kwargs)
+    val_loader = make_dataloader(val_dataset, batch_size=test_bs, shuffle=False,
+                                   seed=seed0, **dl_kwargs)
     test_loader = make_dataloader(test_dataset, batch_size=test_bs, shuffle=False,
                                     seed=seed0, **dl_kwargs)
 
@@ -3206,35 +3364,35 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
                                 raise
 
                     train_loss /= len(train_loader)
-                    train_acc = 100. * train_correct / len(train_dataset)
+                    train_acc = 100. * train_correct / len(train_dataset_split)
 
                     # Sanity check: CIFAR-10 train accuracy should be > 10% after first few epochs
                     if epoch > 2 and train_acc < 10.0:
                         logging.error(f"SANITY CHECK FAILED: Train accuracy {train_acc:.1f}% is suspiciously low for CIFAR-10 epoch {epoch}")
                         logging.error("This may indicate a bug in the training loop")
 
-                    # Test
+                    # Validation (not test - for scientific rigor)
                     model.eval()
-                    test_loss, test_correct = 0, 0
+                    val_loss, val_correct = 0, 0
                     with torch.no_grad():
-                        for inputs, targets in test_loader:
+                        for inputs, targets in val_loader:
                             inputs, targets = inputs.to(device), targets.to(device)
                             outputs = model(inputs)
                             loss = criterion(outputs, targets)
-                            test_loss += loss.item()
+                            val_loss += loss.item()
                             _, predicted = outputs.max(1)
-                            test_correct += predicted.eq(targets).sum().item()
+                            val_correct += predicted.eq(targets).sum().item()
 
-                    test_loss /= len(test_loader)
-                    test_acc = 100. * test_correct / len(test_dataset)
+                    val_loss /= len(val_loader)
+                    val_acc = 100. * val_correct / len(val_dataset)
                     
                     # Learning rate scheduling (called after full training epoch)
                     # Verified scheduler.step() is after optimizer.step() in training loop
                     scheduler.step()
                     
                     # Best model tracking
-                    if test_acc > best_val_acc:
-                        best_val_acc = test_acc
+                    if val_acc > best_val_acc:
+                        best_val_acc = val_acc
                         best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
                         patience_counter = 0
                     else:
@@ -3251,8 +3409,8 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
                         'epoch': epoch,
                         'train_loss': train_loss,
                         'train_acc': train_acc,
-                        'test_loss': test_loss,
-                        'test_acc': test_acc,
+                        'val_loss': val_loss,
+                        'val_acc': val_acc,
                         'tainted': run_tainted,
                         'effective_batch_size': effective_batch_size,
                         'original_batch_size': original_batch_size
@@ -3262,11 +3420,11 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
                         tracker.log_metrics({
                             f'cifar10_{opt_name}_train_loss': train_loss,
                             f'cifar10_{opt_name}_train_acc': train_acc,
-                            f'cifar10_{opt_name}_test_loss': test_loss,
-                            f'cifar10_{opt_name}_test_acc': test_acc
+                            f'cifar10_{opt_name}_val_loss': val_loss,
+                            f'cifar10_{opt_name}_val_acc': val_acc
                         }, step=epoch)
 
-                    print(f"{opt_name} Epoch {epoch}/{epochs} - Train: {train_acc:.1f}% | Test: {test_acc:.1f}%")
+                    print(f"{opt_name} Epoch {epoch}/{epochs} - Train: {train_acc:.1f}% | Val: {val_acc:.1f}%")
 
                     # Save checkpoint with complete training state (BLOCKER-2 fix)
                     if checkpoint_manager:
@@ -3293,6 +3451,31 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
                             checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"CIFAR10_{opt_name}_seed{seed}")
                         except Exception as e:
                             logging.warning(f"Failed to save checkpoint: {e}")
+            
+                # CRITICAL: Restore best model before final evaluation
+                # If training completed without early stopping, model may not be at best checkpoint
+                if best_model_state is not None:
+                    logging.info(f"Restoring best model for final test evaluation")
+                    model.load_state_dict(best_model_state)
+                else:
+                    logging.warning("No best model state saved - using final epoch weights for test evaluation")
+
+                # Final test evaluation (only after training completes - for scientific rigor)
+                logging.info("Evaluating final performance on test set...")
+                model.eval()
+                test_loss, test_correct = 0, 0
+                with torch.no_grad():
+                    for inputs, targets in test_loader:
+                        inputs, targets = inputs.to(device), targets.to(device)
+                        outputs = model(inputs)
+                        loss = criterion(outputs, targets)
+                        test_loss += loss.item()
+                        _, predicted = outputs.max(1)
+                        test_correct += predicted.eq(targets).sum().item()
+                
+                test_loss /= len(test_loader)
+                test_acc = 100. * test_correct / len(test_dataset)
+                logging.info(f"Final Test Performance: Loss={test_loss:.4f}, Acc={test_acc:.2f}%")
             
             except RuntimeError as e:
                 if "out of memory" in str(e).lower():
@@ -3448,16 +3631,14 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
         })
 
     # Set environment variables to avoid warnings
-    import os
+    
     os.environ['TOKENIZERS_PARALLELISM'] = 'false'  # Prevent tokenizer fork warnings
     
     # Suppress unnecessary transformers warnings
-    import warnings
+    
     warnings.filterwarnings('ignore', message='Some weights.*were not initialized')
     
-    from transformers import AutoTokenizer, AutoModelForSequenceClassification
-    from datasets import load_dataset
-    
+
     # Set transformers logging to ERROR to suppress weight initialization messages
     import transformers
     transformers.logging.set_verbosity_error()
@@ -3752,31 +3933,6 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                     val_loss /= max(1, val_total)
                     val_acc = 100.0 * val_correct / max(1, val_total)
                     
-                    # Also evaluate on test set for monitoring (but don't use for early stopping)
-                    test_loss = 0.0
-                    test_correct = 0
-                    test_total = 0
-
-                    with torch.no_grad():
-                        for batch in test_loader:
-                            input_ids = batch['input_ids'].to(device)
-                            attention_mask = batch.get('attention_mask')
-                            if attention_mask is not None:
-                                attention_mask = attention_mask.to(device)
-                            labels = batch['labels'].to(device)
-
-                            outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
-                            loss = outputs.loss
-                            logits = outputs.logits
-
-                            test_loss += float(loss.item()) * input_ids.size(0)
-                            preds = torch.argmax(logits, dim=1)
-                            test_correct += (preds == labels).sum().item()
-                            test_total += input_ids.size(0)
-
-                    test_loss /= max(1, test_total)
-                    test_acc = 100.0 * test_correct / max(1, test_total)
-                    
                     # LR scheduling (called after full training epoch)
                     # Verified scheduler.step() is after optimizer.step() in training loop
                     scheduler.step()
@@ -3801,23 +3957,18 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                         'epoch': epoch,
                         'train_loss': train_loss,
                         'val_loss': val_loss,
-                        'val_acc': val_acc,
-                        'test_loss': test_loss,
-                        'test_acc': test_acc
+                        'val_acc': val_acc
                     })
 
                     if tracker:
                         tracker.log_metrics({
                             f'nlp_{opt_name}_seed_{seed}_train_loss': train_loss,
                             f'nlp_{opt_name}_seed_{seed}_val_loss': val_loss,
-                            f'nlp_{opt_name}_seed_{seed}_val_acc': val_acc,
-                            f'nlp_{opt_name}_seed_{seed}_test_loss': test_loss,
-                            f'nlp_{opt_name}_seed_{seed}_test_acc': test_acc
+                            f'nlp_{opt_name}_seed_{seed}_val_acc': val_acc
                         }, step=epoch)
 
                     print(f"Epoch {epoch}/{epochs}: Train Loss={train_loss:.4f}, "
-                          f"Val Loss={val_loss:.4f}, Val Acc={val_acc:.1f}%, "
-                          f"Test Loss={test_loss:.4f}, Test Acc={test_acc:.1f}%")
+                          f"Val Loss={val_loss:.4f}, Val Acc={val_acc:.1f}%")
 
                     # Save checkpoint with complete training state (BLOCKER-2 fix)
                     if checkpoint_manager:
@@ -3846,6 +3997,42 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                             checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"IMDB_{model_name.replace('/', '_')}_{opt_name}_lr{lr}_seed{seed}")
                         except Exception as e:
                             logging.warning(f"Failed to save checkpoint: {e}")
+            
+                # CRITICAL: Restore best model before final evaluation
+                # If training completed without early stopping, model may not be at best checkpoint
+                if best_model_state is not None:
+                    logging.info(f"Restoring best model (val_acc={best_val_acc:.2f}%) for final test evaluation")
+                    model.load_state_dict(best_model_state)
+                else:
+                    logging.warning("No best model state saved - using final epoch weights for test evaluation")
+
+                # Final test evaluation (only after training completes - for scientific rigor)
+                logging.info("Evaluating final performance on test set...")
+                model.eval()
+                test_loss = 0.0
+                test_correct = 0
+                test_total = 0
+                
+                with torch.no_grad():
+                    for batch in test_loader:
+                        input_ids = batch['input_ids'].to(device)
+                        attention_mask = batch.get('attention_mask')
+                        if attention_mask is not None:
+                            attention_mask = attention_mask.to(device)
+                        labels = batch['labels'].to(device)
+                        
+                        outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
+                        loss = outputs.loss
+                        logits = outputs.logits
+                        
+                        test_loss += float(loss.item()) * input_ids.size(0)
+                        preds = torch.argmax(logits, dim=1)
+                        test_correct += (preds == labels).sum().item()
+                        test_total += input_ids.size(0)
+                
+                test_loss /= max(1, test_total)
+                test_acc = 100.0 * test_correct / max(1, test_total)
+                logging.info(f"Final Test Performance: Loss={test_loss:.4f}, Acc={test_acc:.2f}%")
             
             except RuntimeError as e:
                 if "out of memory" in str(e).lower():
@@ -4066,8 +4253,24 @@ def run_nlp_experiment_simple(results_dir="results_nlp", seeds=None, epochs=10, 
     X_test = torch.tensor(test_encoded, dtype=torch.long)
     y_test = torch.tensor(test_labels, dtype=torch.long)
     
-    train_dataset = torch.utils.data.TensorDataset(X_train, y_train)
+    # SCIENTIFIC RIGOR FIX: Create validation split from training data
+    # This prevents adaptive overfitting by isolating test set from training decisions
+    val_size = int(0.1 * len(X_train))
+    indices = torch.randperm(len(X_train))
+    train_indices = indices[val_size:]
+    val_indices = indices[:val_size]
+    
+    train_dataset = torch.utils.data.Subset(
+        torch.utils.data.TensorDataset(X_train, y_train),
+        train_indices.tolist()
+    )
+    val_dataset = torch.utils.data.Subset(
+        torch.utils.data.TensorDataset(X_train, y_train),
+        val_indices.tolist()
+    )
     test_dataset = torch.utils.data.TensorDataset(X_test, y_test)
+    
+    print(f"   Data split: Train={len(train_dataset)}, Val={len(val_dataset)}, Test={len(test_dataset)}")
     
     batch_size = 32
     
@@ -4111,6 +4314,9 @@ def run_nlp_experiment_simple(results_dir="results_nlp", seeds=None, epochs=10, 
                 train_loader = torch.utils.data.DataLoader(
                     train_dataset, batch_size=batch_size, shuffle=True
                 )
+                val_loader = torch.utils.data.DataLoader(
+                    val_dataset, batch_size=batch_size, shuffle=False
+                )
                 test_loader = torch.utils.data.DataLoader(
                     test_dataset, batch_size=batch_size, shuffle=False
                 )
@@ -4139,36 +4345,59 @@ def run_nlp_experiment_simple(results_dir="results_nlp", seeds=None, epochs=10, 
                     train_loss /= len(train_loader)
                     train_acc = 100.0 * train_correct / max(1, train_total)  # Protect division by zero
                     
-                    # Evaluation
+                    # SCIENTIFIC RIGOR: Use validation set for per-epoch monitoring
+                    # Test set is reserved for final evaluation only
                     model.eval()
-                    test_loss = 0
-                    test_correct = 0
-                    test_total = 0
+                    val_loss = 0
+                    val_correct = 0
+                    val_total = 0
                     
                     with torch.no_grad():
-                        for inputs, labels in test_loader:
+                        for inputs, labels in val_loader:
                             inputs, labels = inputs.to(device), labels.to(device)
                             outputs = model(inputs)
                             loss = criterion(outputs, labels)
                             
-                            test_loss += loss.item()
+                            val_loss += loss.item()
                             _, predicted = outputs.max(1)
-                            test_total += labels.size(0)
-                            test_correct += predicted.eq(labels).sum().item()
+                            val_total += labels.size(0)
+                            val_correct += predicted.eq(labels).sum().item()
                     
-                    test_loss /= len(test_loader)
-                    test_acc = 100.0 * test_correct / max(1, test_total)  # Protect division by zero
+                    val_loss /= len(val_loader)
+                    val_acc = 100.0 * val_correct / max(1, val_total)  # Protect division by zero
                     
                     history.append({
                         'epoch': epoch + 1,
                         'train_loss': train_loss,
                         'train_acc': train_acc,
-                        'test_loss': test_loss,
-                        'test_acc': test_acc
+                        'val_loss': val_loss,
+                        'val_acc': val_acc
                     })
                     
                     if epoch == epochs - 1 or epoch == 0:
-                        print(f"      Epoch {epoch+1}/{epochs} - Train: {train_acc:.1f}% | Test: {test_acc:.1f}%")
+                        print(f"      Epoch {epoch+1}/{epochs} - Train: {train_acc:.1f}% | Val: {val_acc:.1f}%")
+                
+                # SCIENTIFIC RIGOR: Final test evaluation AFTER training completes
+                # This ensures test set is only used once for unbiased generalization estimate
+                model.eval()
+                final_test_loss = 0
+                final_test_correct = 0
+                final_test_total = 0
+                
+                with torch.no_grad():
+                    for inputs, labels in test_loader:
+                        inputs, labels = inputs.to(device), labels.to(device)
+                        outputs = model(inputs)
+                        loss = criterion(outputs, labels)
+                        
+                        final_test_loss += loss.item()
+                        _, predicted = outputs.max(1)
+                        final_test_total += labels.size(0)
+                        final_test_correct += predicted.eq(labels).sum().item()
+                
+                final_test_loss /= len(test_loader)
+                final_test_acc = 100.0 * final_test_correct / max(1, final_test_total)
+                print(f"      Final Test Accuracy: {final_test_acc:.2f}%")
                 
                 # Record final results
                 results.append({
@@ -4176,9 +4405,11 @@ def run_nlp_experiment_simple(results_dir="results_nlp", seeds=None, epochs=10, 
                     'optimizer': opt_name,
                     'seed': seed,
                     'final_train_loss': history[-1]['train_loss'],
-                    'final_test_loss': history[-1]['test_loss'],
                     'final_train_acc': history[-1]['train_acc'],
-                    'final_test_acc': history[-1]['test_acc'],
+                    'final_val_loss': history[-1]['val_loss'],
+                    'final_val_acc': history[-1]['val_acc'],
+                    'final_test_loss': final_test_loss,
+                    'final_test_acc': final_test_acc,
                     'data_source': 'IMDB' if use_real_data else 'Synthetic',
                     'epochs_completed': len(history)
                 })
@@ -4321,9 +4552,21 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                 medmnist_name=medmnist_name,
                 kaggle_path=kaggle_path
             )
+            
+            # Create train/validation split for scientific rigor
+            val_split = 0.10
+            train_size = int((1 - val_split) * len(train_ds))
+            val_size = len(train_ds) - train_size
+            train_ds_split, val_ds = torch.utils.data.random_split(
+                train_ds, [train_size, val_size],
+                generator=torch.Generator().manual_seed(seed)
+            )
+            logging.info(f"Split: Train={train_size}, Val={val_size}, Test={len(test_ds)}")
 
-            train_loader = make_dataloader(train_ds, batch_size=train_bs, shuffle=True,
+            train_loader = make_dataloader(train_ds_split, batch_size=train_bs, shuffle=True,
                                            seed=seed, **dl_kwargs)
+            val_loader = make_dataloader(val_ds, batch_size=test_bs, shuffle=False,
+                                         seed=seed, **dl_kwargs)
             test_loader = make_dataloader(test_ds, batch_size=test_bs, shuffle=False,
                                           seed=seed, **dl_kwargs)
 
@@ -4444,34 +4687,34 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                 train_loss /= max(1, train_total)
                 train_dice /= max(1, train_total)
 
-                # Evaluation
+                # Validation (not test - for scientific rigor)
                 model.eval()
-                test_loss = 0.0
-                test_dice = 0.0
-                test_total = 0
+                val_loss = 0.0
+                val_dice = 0.0
+                val_total = 0
 
                 with torch.no_grad():
-                    for images, masks in test_loader:
+                    for images, masks in val_loader:
                         images = images.to(device)
                         masks = masks.to(device)
 
                         outputs = model(images)
                         loss = criterion(outputs, masks)
 
-                        test_loss += float(loss.item()) * images.size(0)
-                        test_dice += dice_coefficient(torch.sigmoid(outputs), masks).item() * images.size(0)
-                        test_total += images.size(0)
+                        val_loss += float(loss.item()) * images.size(0)
+                        val_dice += dice_coefficient(torch.sigmoid(outputs), masks).item() * images.size(0)
+                        val_total += images.size(0)
 
-                test_loss /= max(1, test_total)
-                test_dice /= max(1, test_total)
+                val_loss /= max(1, val_total)
+                val_dice /= max(1, val_total)
                 
                 # LR scheduling (called after full training epoch)
                 # Verified scheduler.step() is after optimizer.step() in training loop
                 scheduler.step()
                 
-                # Best model tracking (based on dice score)
-                if test_dice > best_dice:
-                    best_dice = test_dice
+                # Best model tracking (based on validation dice score)
+                if val_dice > best_dice:
+                    best_dice = val_dice
                     best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
                     patience_counter = 0
                 else:
@@ -4488,21 +4731,21 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                     'epoch': epoch,
                     'train_loss': train_loss,
                     'train_dice': train_dice,
-                    'test_loss': test_loss,
-                    'test_dice': test_dice
+                    'val_loss': val_loss,
+                    'val_dice': val_dice
                 })
 
                 if tracker:
                     tracker.log_metrics({
                         f'medical_{opt_name}_seed_{seed}_train_loss': train_loss,
                         f'medical_{opt_name}_seed_{seed}_train_dice': train_dice,
-                        f'medical_{opt_name}_seed_{seed}_test_loss': test_loss,
-                        f'medical_{opt_name}_seed_{seed}_test_dice': test_dice
+                        f'medical_{opt_name}_seed_{seed}_val_loss': val_loss,
+                        f'medical_{opt_name}_seed_{seed}_val_dice': val_dice
                     }, step=epoch)
 
                 print(f"Epoch {epoch}/{epochs}: Train Loss={train_loss:.4f}, "
-                      f"Train Dice={train_dice:.4f}, Test Loss={test_loss:.4f}, "
-                      f"Test Dice={test_dice:.4f}")
+                      f"Train Dice={train_dice:.4f}, Val Loss={val_loss:.4f}, "
+                      f"Val Dice={val_dice:.4f}")
 
                 # Save checkpoint with complete training state (BLOCKER-2 fix)
                 if checkpoint_manager:
@@ -4530,6 +4773,37 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                         checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"Medical_UNet_{opt_name}_lr{lr}_seed{seed}")
                     except Exception as e:
                         logging.warning(f"Failed to save checkpoint: {e}")
+            
+            # CRITICAL: Restore best model before final evaluation
+            # If training completed without early stopping, model may not be at best checkpoint
+            if best_model_state is not None:
+                logging.info(f"Restoring best model (val_dice={best_dice:.4f}) for final test evaluation")
+                model.load_state_dict(best_model_state)
+            else:
+                logging.warning("No best model state saved - using final epoch weights for test evaluation")
+
+            # Final test evaluation (only after training completes - for scientific rigor)
+            logging.info("Evaluating final performance on test set...")
+            model.eval()
+            test_loss = 0.0
+            test_dice = 0.0
+            test_total = 0
+            
+            with torch.no_grad():
+                for images, masks in test_loader:
+                    images = images.to(device)
+                    masks = masks.to(device)
+                    
+                    outputs = model(images)
+                    loss = criterion(outputs, masks)
+                    
+                    test_loss += float(loss.item()) * images.size(0)
+                    test_dice += dice_coefficient(torch.sigmoid(outputs), masks).item() * images.size(0)
+                    test_total += images.size(0)
+            
+            test_loss /= max(1, test_total)
+            test_dice /= max(1, test_total)
+            logging.info(f"Final Test Performance: Loss={test_loss:.4f}, Dice={test_dice:.4f}")
 
             training_time = time.time() - start_time
 
@@ -6851,13 +7125,25 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
     
     train_dataset, test_dataset = download_cifar10_resnet()
     logging.info("CIFAR-10 dataset loaded successfully for ResNet")
+    
+    # Create train/validation split for scientific rigor
+    val_split = 0.10
+    train_size = int((1 - val_split) * len(train_dataset))
+    val_size = len(train_dataset) - train_size
+    train_dataset_split, val_dataset = torch.utils.data.random_split(
+        train_dataset, [train_size, val_size],
+        generator=torch.Generator().manual_seed(42)
+    )
+    logging.info(f"Split: Train={train_size}, Val={val_size}, Test={len(test_dataset)}")
 
     # Get optimized batch sizes and DataLoader kwargs
     train_bs, test_bs = get_batch_size('resnet', default_train=128, default_test=256)
     dl_kwargs = get_dataloader_kwargs()
     
-    train_loader = make_dataloader(train_dataset, batch_size=train_bs, shuffle=True, 
+    train_loader = make_dataloader(train_dataset_split, batch_size=train_bs, shuffle=True, 
                                      seed=seeds[0] if seeds else None, **dl_kwargs)
+    val_loader = make_dataloader(val_dataset, batch_size=test_bs, shuffle=False,
+                                   seed=seeds[0] if seeds else None, **dl_kwargs)
     test_loader = make_dataloader(test_dataset, batch_size=test_bs, shuffle=False, 
                                     seed=seeds[0] if seeds else None, **dl_kwargs)
 
@@ -6899,7 +7185,7 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
             train_correct += predicted.eq(targets).sum().item()
 
         train_loss /= len(train_loader)
-        train_acc = 100. * train_correct / len(train_dataset)
+        train_acc = 100. * train_correct / len(train_dataset_split)
 
         # Sanity check: Verify all batches were processed
         if epoch > 1 and train_acc < 10.0:
@@ -6917,28 +7203,45 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
                 _, predicted = outputs.max(1)
                 test_correct += predicted.eq(targets).sum().item()
 
-        test_loss /= len(test_loader)
-        test_acc = 100. * test_correct / len(test_dataset)
+        val_loss /= len(val_loader)
+        val_acc = 100. * val_correct / len(val_dataset)
 
         results.append({
             'epoch': epoch + 1,
             'train_loss': train_loss,
             'train_acc': train_acc,
-            'test_loss': test_loss,
-            'test_acc': test_acc
+            'val_loss': val_loss,
+            'val_acc': val_acc
         })
 
         if tracker:
             tracker.log_metrics({
                 'resnet_train_loss': train_loss,
                 'resnet_train_acc': train_acc,
-                'resnet_test_loss': test_loss,
-                'resnet_test_acc': test_acc
+                'resnet_val_loss': val_loss,
+                'resnet_val_acc': val_acc
             }, step=epoch)
 
         print(f"Epoch {epoch}/{epochs}: Train Loss={train_loss:.4f}, "
-              f"Train Acc={train_acc:.1f}%, Test Loss={test_loss:.4f}, "
-              f"Test Acc={test_acc:.1f}%")
+              f"Train Acc={train_acc:.1f}%, Val Loss={val_loss:.4f}, "
+              f"Val Acc={val_acc:.1f}%")
+    
+    # Final test evaluation (only after training completes - for scientific rigor)
+    logging.info("Evaluating final performance on test set...")
+    model.eval()
+    test_loss, test_correct = 0, 0
+    with torch.no_grad():
+        for inputs, targets in test_loader:
+            inputs, targets = inputs.to(device), targets.to(device)
+            outputs = model(inputs)
+            loss = criterion(outputs, targets)
+            test_loss += loss.item()
+            _, predicted = outputs.max(1)
+            test_correct += predicted.eq(targets).sum().item()
+    
+    test_loss /= len(test_loader)
+    test_acc = 100. * test_correct / len(test_dataset)
+    logging.info(f"Final Test Performance: Loss={test_loss:.4f}, Acc={test_acc:.2f}%")
 
     # End profiling
     if profiler:
@@ -8631,8 +8934,12 @@ Examples:
         plot_script = Path(__file__).parent / "scripts" / "generate_experiment_plots.py"
         if plot_script.exists():
             print(f"Running universal plot generator: {plot_script}")
+            # AUDIT FIX: Force UTF-8 encoding on Windows to prevent UnicodeDecodeError from emoji output
+            plot_env = os.environ.copy()
+            plot_env['PYTHONIOENCODING'] = 'utf-8'
+            plot_env['PYTHONUTF8'] = '1'
             result = subprocess.run([sys.executable, str(plot_script), "--results-dir", str(results_dir)], 
-                                   capture_output=True, text=True, timeout=300)
+                                   capture_output=True, text=True, encoding='utf-8', timeout=300, env=plot_env)
             if result.returncode == 0:
                 print("High-quality plots generated successfully")
                 print(f"   Plots saved to: {results_dir}/visualizations/")

@@ -195,37 +195,16 @@ def train_with_beta(
         train_loss /= len(train_loader)
         train_acc = 100. * train_correct / train_total
         
-        # Evaluation phase
-        model.eval()
-        test_loss = 0.0
-        test_correct = 0
-        test_total = 0
-        
-        with torch.no_grad():
-            for data, target in test_loader:
-                data, target = data.to(device), target.to(device)
-                output = model(data)
-                loss = criterion(output, target)
-                test_loss += loss.item()
-                _, predicted = output.max(1)
-                test_total += target.size(0)
-                test_correct += predicted.eq(target).sum().item()
-        
-        test_loss /= len(test_loader)
-        test_acc = 100. * test_correct / test_total
-        
         # Compute param norm
         param_norm = torch.sqrt(sum(p.norm()**2 for p in model.parameters()))
         
         # Store snapshot
         param_snapshots.append(torch.cat([p.view(-1).clone().detach() for p in model.parameters()]).cpu().numpy())
         
-        # Record history
+        # Record history (validation only during training - for scientific rigor)
         history['epoch'].append(epoch)
         history['train_loss'].append(train_loss)
         history['train_acc'].append(train_acc)
-        history['test_loss'].append(test_loss)
-        history['test_acc'].append(test_acc)
         history['grad_norm'].append(np.mean(grad_norms))
         history['param_norm'].append(param_norm.item())
         if len(param_snapshots) >= 2:
@@ -233,6 +212,31 @@ def train_with_beta(
             history['update_magnitude'].append(update_mag)
         else:
             history['update_magnitude'].append(0.0)
+    
+    # Final test evaluation (only after training completes - for scientific rigor)
+    logger.info("Evaluating final performance on test set...")
+    model.eval()
+    test_loss = 0.0
+    test_correct = 0
+    test_total = 0
+    
+    with torch.no_grad():
+        for data, target in test_loader:
+            data, target = data.to(device), target.to(device)
+            output = model(data)
+            loss = criterion(output, target)
+            test_loss += loss.item()
+            _, predicted = output.max(1)
+            test_total += target.size(0)
+            test_correct += predicted.eq(target).sum().item()
+    
+    test_loss /= len(test_loader)
+    final_test_acc = 100. * test_correct / test_total
+    logger.info(f"Final Test Performance: Loss={test_loss:.4f}, Acc={final_test_acc:.2f}%")
+    
+    # Add final test metrics to history
+    history['final_test_loss'] = test_loss
+    history['final_test_acc'] = final_test_acc
     
     # Compute dynamics metrics
     dynamics_metrics = {}

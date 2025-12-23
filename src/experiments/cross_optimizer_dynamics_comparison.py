@@ -134,25 +134,26 @@ def run_single_optimizer_with_dynamics(
         avg_loss = epoch_loss / max(1, len(train_loader))
         train_acc = 100.0 * correct / max(1, total)
         
-        # Test accuracy
-        model.eval()
-        test_correct = 0
-        test_total = 0
-        with torch.no_grad():
-            for data, target in test_loader:
-                data, target = data.to(device), target.to(device)
-                output = model(data)
-                _, predicted = output.max(1)
-                test_total += target.size(0)
-                test_correct += predicted.eq(target).sum().item()
-        
-        test_acc = 100.0 * test_correct / test_total
-        
         loss_history.append(avg_loss)
-        accuracy_history.append(test_acc)
         
         if (epoch + 1) % 10 == 0:
-            print(f"  Epoch {epoch+1}/{epochs}: Loss={avg_loss:.4f}, Train Acc={train_acc:.2f}%, Test Acc={test_acc:.2f}%")
+            print(f"  Epoch {epoch+1}/{epochs}: Loss={avg_loss:.4f}, Train Acc={train_acc:.2f}%")
+    
+    # Final test evaluation (only after training completes - for scientific rigor)
+    print(f"Evaluating final performance on test set...")
+    model.eval()
+    test_correct = 0
+    test_total = 0
+    with torch.no_grad():
+        for data, target in test_loader:
+            data, target = data.to(device), target.to(device)
+            output = model(data)
+            _, predicted = output.max(1)
+            test_total += target.size(0)
+            test_correct += predicted.eq(target).sum().item()
+    
+    final_test_acc = 100.0 * test_correct / test_total
+    print(f"Final Test Accuracy: {final_test_acc:.2f}%")
     
     # Compute dynamics metrics
     trajectory_array = np.array(param_trajectories)
@@ -180,11 +181,10 @@ def run_single_optimizer_with_dynamics(
     return {
         'optimizer': optimizer_name,
         'loss_history': loss_history,
-        'accuracy_history': accuracy_history,
         'speeds': speeds,
         'gradient_norms': gradient_norms,
         'dynamics_metrics': dynamics_metrics,
-        'final_test_acc': test_acc
+        'final_test_acc': final_test_acc
     }
 
 
