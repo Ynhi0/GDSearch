@@ -276,17 +276,17 @@ cd /workspaces/GDSearch
 pip install -r requirements.txt
 ```
 
-> **Kaggle users:** Kaggle kernels ship with prebuilt NumPy/Pandas binaries. Reinstalling these packages can cause binary incompatibilities (e.g., "numpy.dtype size changed"). Prefer the Kaggle-specific requirements:
+> **Kaggle users:** Kaggle kernels use modern NumPy 2.x (optimized and performant). Our codebase is NumPy 2.x compatible. If you encounter binary incompatibility errors:
 >
-> ```bash
-> pip install -r kaggle/requirements_kaggle.txt
-> ```
+> 1. **Best practice (automatic in notebook):** Let the compatibility check cell reinstall Pandas to match NumPy 2.x
+> 2. **Manual fix if needed:**
+>    ```bash
+>    pip install --force-reinstall --no-cache-dir --no-deps pandas
+>    pip install pandas  # Reinstall dependencies
+>    ```
+> 3. **Restart the kernel** after any reinstallation
 >
-> If you encounter the "numpy.dtype size changed" error, use the compatibility fallback:
->
-> ```bash
-> pip install --force-reinstall --no-cache-dir numpy==1.26.4 pandas==2.2.3
-> ```
+> The notebook automatically handles this in the pre-install compatibility check cell.
 
 **Dependencies:** numpy, pandas, matplotlib, scipy, torch, torchvision, tqdm, pytest, optuna, datasets, plotly
 
