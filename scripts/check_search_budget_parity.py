@@ -166,7 +166,7 @@ def main():
             print(f"⚠  {config_file.name}: Not found (skipping)")
             continue
         
-        print(f"📁 {config_file.name}")
+        print(f"{config_file.name}")
         print("-" * 80)
         
         result = check_search_budget_parity(config_file, args.threshold)
@@ -188,10 +188,10 @@ def main():
         print()
         
         if result['valid']:
-            print(f"   ✓ PASS: Ratio {result['max_ratio']:.2f}× ≤ {args.threshold}×")
+            print(f"   PASS: Ratio {result['max_ratio']:.2f}× ≤ {args.threshold}×")
         else:
-            print(f"   ✗ FAIL: Ratio {result['max_ratio']:.2f}× > {args.threshold}×")
-            print(f"   ⚠  WARNING: Unequal search budgets create unfair comparisons!")
+            print(f"   FAIL: Ratio {result['max_ratio']:.2f}× > {args.threshold}×")
+            print(f"   WARNING: Unequal search budgets create unfair comparisons!")
             print(f"   ⚠  Baselines may appear weaker due to under-tuning.")
             all_valid = False
         

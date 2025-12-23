@@ -130,7 +130,7 @@ def load_checkpoint_model(checkpoint_path, config):
     else:
         model.load_state_dict(checkpoint)
     
-    print(f"✓ Loaded FINAL CHECKPOINT (epoch {checkpoint.get('epoch', 'unknown')})")
+    print(f"Loaded FINAL CHECKPOINT (epoch {checkpoint.get('epoch', 'unknown')})")
     
     criterion = nn.CrossEntropyLoss()
     return model, test_loader, criterion, device

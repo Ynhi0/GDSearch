@@ -25,7 +25,7 @@ from pathlib import Path
 
 def download_mnist():
     """Download MNIST dataset."""
-    print("📥 Downloading MNIST dataset...")
+    print("Downloading MNIST dataset...")
     data_root = Path('./data')
 
     # Basic transform for download
@@ -42,7 +42,7 @@ def download_mnist():
             download=True,
             transform=transform
         )
-        print(f"✓ MNIST train set: {len(train_dataset)} samples")
+        print(f"MNIST train set: {len(train_dataset)} samples")
 
         # Download test set
         test_dataset = torchvision.datasets.MNIST(
@@ -51,17 +51,17 @@ def download_mnist():
             download=True,
             transform=transform
         )
-        print(f"✓ MNIST test set: {len(test_dataset)} samples")
+        print(f"MNIST test set: {len(test_dataset)} samples")
 
     except Exception as e:
-        print(f"✗ Failed to download MNIST: {e}")
+        print(f"Failed to download MNIST: {e}")
         return False
 
     return True
 
 def download_cifar10():
     """Download CIFAR-10 dataset."""
-    print("📥 Downloading CIFAR-10 dataset...")
+    print("Downloading CIFAR-10 dataset...")
     data_root = Path('./data')
 
     # Basic transforms for download
@@ -85,7 +85,7 @@ def download_cifar10():
             download=True,
             transform=transform_train
         )
-        print(f"✓ CIFAR-10 train set: {len(train_dataset)} samples")
+        print(f"CIFAR-10 train set: {len(train_dataset)} samples")
 
         # Download test set
         test_dataset = torchvision.datasets.CIFAR10(
@@ -94,17 +94,17 @@ def download_cifar10():
             download=True,
             transform=transform_test
         )
-        print(f"✓ CIFAR-10 test set: {len(test_dataset)} samples")
+        print(f"CIFAR-10 test set: {len(test_dataset)} samples")
 
     except Exception as e:
-        print(f"✗ Failed to download CIFAR-10: {e}")
+        print(f"Failed to download CIFAR-10: {e}")
         return False
 
     return True
 
 def download_fashion_mnist():
     """Download FashionMNIST dataset."""
-    print("📥 Downloading FashionMNIST dataset...")
+    print("Downloading FashionMNIST dataset...")
     data_root = Path('./data')
 
     # Basic transform for download
@@ -121,7 +121,7 @@ def download_fashion_mnist():
             download=True,
             transform=transform
         )
-        print(f"✓ FashionMNIST train set: {len(train_dataset)} samples")
+        print(f"FashionMNIST train set: {len(train_dataset)} samples")
 
         # Download test set
         test_dataset = torchvision.datasets.FashionMNIST(
@@ -130,17 +130,17 @@ def download_fashion_mnist():
             download=True,
             transform=transform
         )
-        print(f"✓ FashionMNIST test set: {len(test_dataset)} samples")
+        print(f"FashionMNIST test set: {len(test_dataset)} samples")
 
     except Exception as e:
-        print(f"✗ Failed to download FashionMNIST: {e}")
+        print(f"Failed to download FashionMNIST: {e}")
         return False
 
     return True
 
 def download_imdb():
     """Download IMDB dataset from HuggingFace."""
-    print("📥 Downloading IMDB dataset...")
+    print("Downloading IMDB dataset...")
 
     try:
         from datasets import load_dataset
@@ -148,17 +148,17 @@ def download_imdb():
         # Try to download IMDB dataset (small sample first)
         print("   Attempting to load IMDB dataset from HuggingFace (small sample)...")
         dataset = load_dataset('imdb', split='train[:100]')  # Small sample for testing
-        print(f"✓ IMDB dataset sample: {len(dataset)} samples")
+        print(f"IMDB dataset sample: {len(dataset)} samples")
         print(f"   Sample text: {dataset[0]['text'][:100]}...")
 
         # Try full dataset
         print("   Loading full IMDB dataset...")
         full_dataset = load_dataset('imdb')
-        print(f"✓ IMDB train set: {len(full_dataset['train'])} samples")
-        print(f"✓ IMDB test set: {len(full_dataset['test'])} samples")
+        print(f"IMDB train set: {len(full_dataset['train'])} samples")
+        print(f"IMDB test set: {len(full_dataset['test'])} samples")
 
     except Exception as e:
-        print(f"✗ Failed to download IMDB: {e}")
+        print(f"Failed to download IMDB: {e}")
         print("   Note: IMDB may fail on Python 3.13 - this is expected on some machines.")
         print("   If you see failures locally, try running on Kaggle (Python 3.10) or install 'datasets' and fsspec appropriately.")
         return False
@@ -182,13 +182,13 @@ def download_medmnist(dataset_name: str = 'pathmnist', strict: bool = False) -> 
     Raises:
         RuntimeError: If strict=True and medmnist is not available
     """
-    print("📥 Downloading MedMNIST (lightweight medical dataset)...")
+    print("Downloading MedMNIST (lightweight medical dataset)...")
     try:
         import medmnist
         from medmnist import INFO
         if dataset_name not in INFO:
             msg = f"MedMNIST: dataset '{dataset_name}' not available. Available: {list(INFO.keys())}"
-            print(f"✗ {msg}")
+            print(f"{msg}")
             if strict:
                 raise RuntimeError(msg)
             return False
@@ -199,20 +199,20 @@ def download_medmnist(dataset_name: str = 'pathmnist', strict: bool = False) -> 
         # `python -c "from medmnist import INFO; print(INFO['pathmnist'])"` locally
         # to verify details. For reproducible experiments, see docs/ for how to
         # plug MedMNIST into the medical experiment.
-        print("✓ medmnist package is installed — please run experiments that use MedMNIST or follow docs to integrate it.")
+        print("medmnist package is installed — please run experiments that use MedMNIST or follow docs to integrate it.")
         return True
     except ImportError as e:
         msg = (f"MedMNIST package not installed: {e}\n"
                "   REQUIRED for medical experiments. Install with: pip install medmnist\n"
                "   For publication-quality results, MedMNIST is mandatory (not synthetic data).")
-        print(f"✗ {msg}")
+        print(f"{msg}")
         if strict:
             raise RuntimeError(msg) from e
         print("   Tip: install with `pip install medmnist` and re-run this script, or provide a real medical dataset via the Kaggle option below.")
         return False
     except Exception as e:
         msg = f"MedMNIST not available: {e}"
-        print(f"✗ {msg}")
+        print(f"{msg}")
         if strict:
             raise RuntimeError(msg) from e
         print("   Tip: install with `pip install medmnist` and re-run this script, or provide a real medical dataset via the Kaggle option below.")
@@ -227,7 +227,7 @@ def download_medical_real_kaggle(dataset_slug: str = 'paultimothymooney/chest-xr
     require registration or have usage restrictions.
     """
     dest = Path(dest)
-    print("📥 Attempting to download a real medical dataset from Kaggle (optional)...")
+    print("Attempting to download a real medical dataset from Kaggle (optional)...")
 
     try:
         from kaggle.api.kaggle_api_extended import KaggleApi
@@ -245,10 +245,10 @@ def download_medical_real_kaggle(dataset_slug: str = 'paultimothymooney/chest-xr
         api.authenticate()
         print(f"   Downloading {dataset_slug} to {dest} (this may take a while)...")
         api.dataset_download_files(dataset_slug, path=str(dest), unzip=True, quiet=False)
-        print(f"✓ Medical dataset '{dataset_slug}' downloaded to {dest}")
+        print(f"Medical dataset '{dataset_slug}' downloaded to {dest}")
         return True
     except Exception as e:
-        print(f"✗ Kaggle medical download failed: {e}")
+        print(f"Kaggle medical download failed: {e}")
         return False
 
 
@@ -263,7 +263,7 @@ def main():
     # Create data directory
     data_dir = Path('./data')
     data_dir.mkdir(exist_ok=True)
-    print(f"📁 Using data directory: {data_dir.absolute()}")
+    print(f"Using data directory: {data_dir.absolute()}")
 
     results = []
 
@@ -305,7 +305,7 @@ def main():
 
     successful = 0
     for name, success in results:
-        status = "✓ SUCCESS" if success else "✗ FAILED"
+        status = "SUCCESS" if success else "FAILED"
         print(f"{name:25s}: {status}")
         if success:
             successful += 1
@@ -315,11 +315,11 @@ def main():
     print(f"Failed: {len(results) - successful}")
 
     if successful == len(results):
-        print("\n🎉 All datasets downloaded successfully!")
+        print("\nAll datasets downloaded successfully!")
         print("You can now run GDSearch experiments on your machine or Kaggle.")
     else:
-        print(f"\n⚠️  {len(results) - successful} dataset(s) failed to download.")
-        print("\n⚠️  CRITICAL: MedMNIST is REQUIRED for medical experiments.")
+        print(f"\n{len(results) - successful} dataset(s) failed to download.")
+        print("\nCRITICAL: MedMNIST is REQUIRED for medical experiments.")
         print("   Install with: pip install medmnist")
         print("\nNote: IMDB may fail on Python 3.13 but often works on Kaggle (Python 3.10).")
 

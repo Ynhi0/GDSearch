@@ -49,8 +49,8 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 # ASCII-safe symbols for Windows compatibility
-CHECK = 'OK' if sys.platform == 'win32' else '✓'
-CROSS = 'X' if sys.platform == 'win32' else '✗'
+CHECK = 'OK' if sys.platform == 'win32' else 'OK'
+CROSS = 'X' if sys.platform == 'win32' else 'X'
 INFO = 'i' if sys.platform == 'win32' else 'ℹ'
 
 # ANSI colors

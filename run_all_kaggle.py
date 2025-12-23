@@ -78,6 +78,9 @@ from tqdm import tqdm
 import warnings
 import argparse
 import logging
+
+# Configure basic logging for the module
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 import json
 import psutil
 from contextlib import contextmanager
@@ -1882,12 +1885,16 @@ def run_scheduler_ablation(dataset_name='MNIST', results_dir='results/scheduler_
         elif opt_name == 'AdamW':
             adamw_params = get_default_hyperparameters('AdamW', 'resnet_cifar10')
             optimizer = torch.optim.AdamW(model.parameters(), **adamw_params)
+        else:
+            raise ValueError(f"Unsupported optimizer: {opt_name}. Expected 'SGD' or 'AdamW'.")
         
         # Create scheduler
         if sched_name == 'CosineAnnealingLR':
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
         elif sched_name == 'StepLR':
             scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.1)
+        else:
+            raise ValueError(f"Unsupported scheduler: {sched_name}. Expected 'CosineAnnealingLR' or 'StepLR'.")
         
         criterion = nn.CrossEntropyLoss()
         
@@ -3841,7 +3848,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
             if 'checkpoint' in locals() and checkpoint and 'scheduler' in checkpoint:
                 try:
                     scheduler.load_state_dict(checkpoint['scheduler'])
-                    logging.info(f"✓ Restored scheduler state (last_epoch={scheduler.last_epoch})")
+                    logging.info(f"Restored scheduler state (last_epoch={scheduler.last_epoch})")
                 except Exception as e:
                     logging.warning(f"Could not restore scheduler state: {e}. Using fresh scheduler.")
             
@@ -4627,7 +4634,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
             if 'checkpoint' in locals() and checkpoint and 'scheduler' in checkpoint:
                 try:
                     scheduler.load_state_dict(checkpoint['scheduler'])
-                    logging.info(f"✓ Restored scheduler state (last_epoch={scheduler.last_epoch})")
+                    logging.info(f"Restored scheduler state (last_epoch={scheduler.last_epoch})")
                 except Exception as e:
                     logging.warning(f"Could not restore scheduler state: {e}. Using fresh scheduler.")
             
@@ -7240,6 +7247,17 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
                 _, predicted = outputs.max(1)
                 test_correct += predicted.eq(targets).sum().item()
 
+        # Validation
+        val_loss, val_correct = 0, 0
+        with torch.no_grad():
+            for inputs, targets in val_loader:
+                inputs, targets = inputs.to(device), targets.to(device)
+                outputs = model(inputs)
+                loss = criterion(outputs, targets)
+                val_loss += loss.item()
+                _, predicted = outputs.max(1)
+                val_correct += predicted.eq(targets).sum().item()
+
         val_loss /= max(1, len(val_loader))  # Protect against empty loader
         val_acc = 100. * val_correct / len(val_dataset)
 
@@ -7724,26 +7742,26 @@ Examples:
         try:
             import transformers
             import datasets
-            safe_print("   ✓ NLP dependencies available (transformers, datasets)")
+            safe_print("   NLP dependencies available (transformers, datasets)")
         except ImportError:
             missing_deps.append("NLP experiments require: pip install transformers datasets")
-            print("   ⚠ NLP dependencies missing")
+            print("   NLP dependencies missing")
     
     if 'medical' in selected_experiments or args.experiments == 'all':
         try:
             import medmnist
-            safe_print("   ✓ Medical imaging dependencies available (medmnist)")
+            safe_print("   Medical imaging dependencies available (medmnist)")
         except ImportError:
             missing_deps.append("Medical experiments require: pip install medmnist")
-            print("   ⚠ Medical imaging dependencies missing")
+            print("   Medical imaging dependencies missing")
     
     if missing_deps:
-        print("\n   ⚠ MISSING DEPENDENCIES:")
+        print("\n   MISSING DEPENDENCIES:")
         for dep in missing_deps:
             print(f"      - {dep}")
         print("   Some experiments may use fallback synthetic data or be skipped.")
     else:
-        safe_print("   ✓ All required dependencies for selected experiments are available")
+        safe_print("   All required dependencies for selected experiments are available")
     
     # Display module availability status
     print("\n[*] Optional Module Status:")
@@ -7852,9 +7870,9 @@ Examples:
                     'pending_experiments': [k for k in selected_experiments if k not in experiment_results]
                 }
                 json.dump(summary, f, indent=2)
-            safe_print(f"   ✓ Partial results saved to {partial_results_file}")
+            safe_print(f"   Partial results saved to {partial_results_file}")
         except Exception as e:
-            safe_print(f"   ✗ Could not save partial results: {e}")
+            safe_print(f"   Could not save partial results: {e}")
     
     def graceful_report():
         """Generate partial report on time budget exceeded."""
@@ -7871,10 +7889,10 @@ Examples:
                 f.write("\n## Pending Experiments (run with --resume)\n")
                 for exp in selected_experiments:
                     if exp not in experiment_results or experiment_results.get(exp) is None:
-                        f.write(f"- ⏸️ {exp}\n")
-            safe_print(f"   ✓ Partial report saved to {report_file}")
+                        f.write(f"- {exp}\n")
+            safe_print(f"   Partial report saved to {report_file}")
         except Exception as e:
-            safe_print(f"   ✗ Could not generate partial report: {e}")
+            safe_print(f"   Could not generate partial report: {e}")
     
     print("="*80)
     print("GDSEARCH KAGGLE BENCHMARK SUITE")
@@ -8627,7 +8645,7 @@ Examples:
                     
                     # Run Momentum β sensitivity
                     if not momentum_csv.exists() or not args.resume:
-                        print("\n🔹 Running Momentum β sweep on MNIST...")
+                        print("\nRunning Momentum β sweep on MNIST...")
                         sgd_params = get_default_hyperparameters('SGD', 'resnet_cifar10')
                         lr = sgd_params.get('lr', 0.01)
                         momentum_df = run_momentum_beta_sensitivity(
@@ -8643,7 +8661,7 @@ Examples:
                     
                     # Run Adam β1 sensitivity
                     if not adam_beta1_csv.exists() or not args.resume:
-                        print("\n🔹 Running Adam β1 sweep on MNIST...")
+                        print("\nRunning Adam β1 sweep on MNIST...")
                         adam_params = get_default_hyperparameters('Adam', 'resnet_cifar10')
                         lr = adam_params.get('lr', 0.001)
                         adam_beta1_df = run_adam_beta_sensitivity(
@@ -8659,7 +8677,7 @@ Examples:
                     
                     # Run Adam β2 sensitivity (NEW)
                     if not adam_beta2_csv.exists() or not args.resume:
-                        print("\n🔹 Running Adam β2 sweep on MNIST...")
+                        print("\nRunning Adam β2 sweep on MNIST...")
                         adam_beta2_df = run_adam_beta2_sensitivity(
                             beta1=0.9,  # Fixed β1
                             beta2_values=[0.95, 0.99, 0.999] if args.quick else [0.9, 0.95, 0.99, 0.999, 0.9999],
@@ -8674,7 +8692,7 @@ Examples:
                     
                     # Run Adam (β1, β2) grid search (NEW)
                     if not adam_grid_csv.exists() or not args.resume:
-                        print("\n🔹 Running Adam (β1, β2) grid search on MNIST...")
+                        print("\nRunning Adam (β1, β2) grid search on MNIST...")
                         adam_grid_df = run_adam_beta1_beta2_grid(
                             beta1_values=[0.7, 0.9, 0.99] if args.quick else [0.7, 0.9, 0.95, 0.99],
                             beta2_values=[0.9, 0.99, 0.999] if args.quick else [0.9, 0.99, 0.999, 0.9999],
@@ -8697,9 +8715,9 @@ Examples:
     if 'label_noise' in selected_experiments:
         with error_context("Label Noise Ablation", continue_on_error=True):
             print("\n" + "="*80)
-            print("🔬 LABEL NOISE ABLATION STUDY")
+            print(" LABEL NOISE ABLATION STUDY")
             print("="*80)
-            print("📌 This addresses critical methodological gap:")
+            print(" This addresses critical methodological gap:")
             print("   'Label noise ablation is the gold standard for validating claims")
             print("    about flat minima and optimizer robustness to noisy labels'")
             print("="*80)
@@ -8780,13 +8798,13 @@ Examples:
                         tuning_fairness_config,
                         strict=True  # STRICT: All optimizers receive equal tuning budget
                     )
-                    safe_print("   ✓ Tuning fairness validated: ALL optimizers tuned with equal budget")
+                    safe_print("   Tuning fairness validated: ALL optimizers tuned with equal budget")
                     
                     results_dict = {}
                     
                     # Run MNIST label noise ablation
                     if not mnist_csv.exists() or not args.resume:
-                        print("\n🔹 Running label noise ablation on MNIST MLP...")
+                        print("\nRunning label noise ablation on MNIST MLP...")
                         mnist_results = run_label_noise_ablation(
                             dataset_name='mnist',
                             model_name='mlp',
@@ -8795,12 +8813,12 @@ Examples:
                             output_dir=label_noise_dir
                         )
                         results_dict['mnist'] = mnist_results
-                        safe_print(f"   ✓ MNIST ablation complete: {len(mnist_results)} results")
+                        safe_print(f"   MNIST ablation complete: {len(mnist_results)} results")
                     
                     # Run CIFAR-10 label noise ablation (if not quick mode)
                     if not args.quick:
                         if not cifar10_csv.exists() or not args.resume:
-                            print("\n🔹 Running label noise ablation on CIFAR-10 ResNet-18...")
+                            print("\nRunning label noise ablation on CIFAR-10 ResNet-18...")
                             cifar10_results = run_label_noise_ablation(
                                 dataset_name='cifar10',
                                 model_name='resnet18',
@@ -8809,13 +8827,13 @@ Examples:
                                 output_dir=label_noise_dir
                             )
                             results_dict['cifar10'] = cifar10_results
-                            safe_print(f"   ✓ CIFAR-10 ablation complete: {len(cifar10_results)} results")
+                            safe_print(f"   CIFAR-10 ablation complete: {len(cifar10_results)} results")
                     
                     experiment_results['label_noise'] = results_dict
-                    safe_print("✓ Label noise ablation completed!")
+                    safe_print("Label noise ablation completed!")
                     
                     # Generate summary statistics
-                    print("\n📊 Generating robustness analysis...")
+                    print("\nGenerating robustness analysis...")
                     from src.experiments.run_label_noise_ablation import (
                         create_label_noise_summary,
                         analyze_robustness_to_noise
@@ -8886,7 +8904,7 @@ Examples:
         generate_final_summary_report(results_dir, experiment_results)
         print("   [OK] Summary report generated")
     except Exception as e:
-        logging.error(f"   ✗ Report generation failed: {e}")
+        logging.error(f"   Report generation failed: {e}")
     
     # Final summary
     print("\n" + "="*80)

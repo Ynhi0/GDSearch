@@ -297,7 +297,7 @@ def run_cross_optimizer_dynamics_comparison(
         print(f"{'='*80}")
         
         for opt_name in optimizers:
-            print(f"\n🔹 Training with {opt_name}...")
+            print(f"\nTraining with {opt_name}...")
             
             # Set seed
             torch.manual_seed(seed)

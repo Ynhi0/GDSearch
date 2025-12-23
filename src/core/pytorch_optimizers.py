@@ -1031,9 +1031,9 @@ def test_sam_and_lookahead():
     
     try:
         loss = sam_opt.step(closure)
-        logging.info(f"  ✓ SAM step completed successfully, loss: {loss.item():.4f}")
+        logging.info(f"  SAM step completed successfully, loss: {loss.item():.4f}")
     except Exception as e:
-        logging.info(f"  ✗ SAM failed: {e}")
+        logging.info(f"  SAM failed: {e}")
     
     # Test Lookahead
     logging.info("  Testing Lookahead...")
@@ -1049,11 +1049,11 @@ def test_sam_and_lookahead():
             return loss
         
         loss = lookahead_opt.step(lookahead_closure)
-        logging.info(f"  ✓ Lookahead step completed successfully, loss: {loss.item():.4f}")
+        logging.info(f"  Lookahead step completed successfully, loss: {loss.item():.4f}")
     except Exception as e:
-        logging.info(f"  ✗ Lookahead failed: {e}")
+        logging.info(f"  Lookahead failed: {e}")
     
-    logging.info("\n✓ SAM and Lookahead optimizer wrappers tested!")
+    logging.info("\nSAM and Lookahead optimizer wrappers tested!")
 
 class AdaBoundWrapper(Optimizer):
     """PyTorch wrapper for custom AdaBound optimizer."""
@@ -1285,7 +1285,7 @@ if __name__ == '__main__':
         # Optimizer step
         optimizer.step()
         
-    logging.info("\n✓ All optimizer wrappers work correctly!")
+    logging.info("\nAll optimizer wrappers work correctly!")
     
     # Test new optimizers
     logging.info("\n" + "="*60)
@@ -1313,12 +1313,12 @@ if __name__ == '__main__':
             loss = torch.nn.functional.cross_entropy(output, y)
             loss.backward()
             opt_test.step()
-            logging.info(f"    ✓ {name} step completed successfully, loss: {loss.item():.4f}")
+            logging.info(f"    {name} step completed successfully, loss: {loss.item():.4f}")
         except Exception as e:
-            logging.info(f"    ✗ {name} failed: {e}")
+            logging.info(f"    {name} failed: {e}")
     
-    logging.info("\n✓ New optimizer wrappers tested!")
-    logging.info("\n✓ All optimizer wrappers working!")
+    logging.info("\nNew optimizer wrappers tested!")
+    logging.info("\nAll optimizer wrappers working!")
     
     test_sam_and_lookahead()
 

@@ -520,7 +520,7 @@ def create_visualizations(df: pd.DataFrame, results_dir: str):
     plt.savefig(viz_dir / 'accuracy_comparison.png', dpi=300, bbox_inches='tight')
     plt.savefig(viz_dir / 'accuracy_comparison.pdf', bbox_inches='tight')
     plt.close()
-    print("  ✓ Saved accuracy_comparison.png/.pdf")
+    print("  Saved accuracy_comparison.png/.pdf")
     
     # 2. Feature effect heatmap
     fig, ax = plt.subplots(figsize=(10, 8))
@@ -576,7 +576,7 @@ def create_visualizations(df: pd.DataFrame, results_dir: str):
     plt.savefig(viz_dir / 'feature_heatmap.png', dpi=300, bbox_inches='tight')
     plt.savefig(viz_dir / 'feature_heatmap.pdf', bbox_inches='tight')
     plt.close()
-    print("  ✓ Saved feature_heatmap.png/.pdf")
+    print("  Saved feature_heatmap.png/.pdf")
     
     # 3. Box plot for variance analysis
     fig, ax = plt.subplots(figsize=(14, 6))
@@ -602,7 +602,7 @@ def create_visualizations(df: pd.DataFrame, results_dir: str):
     plt.savefig(viz_dir / 'accuracy_distribution.png', dpi=300, bbox_inches='tight')
     plt.savefig(viz_dir / 'accuracy_distribution.pdf', bbox_inches='tight')
     plt.close()
-    print("  ✓ Saved accuracy_distribution.png/.pdf")
+    print("  Saved accuracy_distribution.png/.pdf")
     
     # 4. Training time comparison
     if 'training_time' in df.columns:

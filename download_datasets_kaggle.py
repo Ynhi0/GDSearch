@@ -17,7 +17,7 @@ from pathlib import Path
 
 def download_mnist():
     """Download MNIST dataset."""
-    print("📥 Downloading MNIST dataset...")
+    print("Downloading MNIST dataset...")
     data_root = Path('/kaggle/working/data')
 
     transform = transforms.Compose([
@@ -32,15 +32,15 @@ def download_mnist():
         test_dataset = torchvision.datasets.MNIST(
             root=str(data_root), train=False, download=True, transform=transform
         )
-        print(f"✓ MNIST: {len(train_dataset)} train, {len(test_dataset)} test samples")
+        print(f"MNIST: {len(train_dataset)} train, {len(test_dataset)} test samples")
         return True
     except Exception as e:
-        print(f"✗ MNIST failed: {e}")
+        print(f"MNIST failed: {e}")
         return False
 
 def download_cifar10():
     """Download CIFAR-10 dataset."""
-    print("📥 Downloading CIFAR-10 dataset...")
+    print("Downloading CIFAR-10 dataset...")
     data_root = Path('/kaggle/working/data')
 
     transform_train = transforms.Compose([
@@ -62,15 +62,15 @@ def download_cifar10():
         test_dataset = torchvision.datasets.CIFAR10(
             root=str(data_root), train=False, download=True, transform=transform_test
         )
-        print(f"✓ CIFAR-10: {len(train_dataset)} train, {len(test_dataset)} test samples")
+        print(f"CIFAR-10: {len(train_dataset)} train, {len(test_dataset)} test samples")
         return True
     except Exception as e:
-        print(f"✗ CIFAR-10 failed: {e}")
+        print(f"CIFAR-10 failed: {e}")
         return False
 
 def download_fashion_mnist():
     """Download FashionMNIST dataset."""
-    print("📥 Downloading FashionMNIST dataset...")
+    print("Downloading FashionMNIST dataset...")
     data_root = Path('/kaggle/working/data')
 
     transform = transforms.Compose([
@@ -85,48 +85,48 @@ def download_fashion_mnist():
         test_dataset = torchvision.datasets.FashionMNIST(
             root=str(data_root), train=False, download=True, transform=transform
         )
-        print(f"✓ FashionMNIST: {len(train_dataset)} train, {len(test_dataset)} test samples")
+        print(f"FashionMNIST: {len(train_dataset)} train, {len(test_dataset)} test samples")
         return True
     except Exception as e:
-        print(f"✗ FashionMNIST failed: {e}")
+        print(f"FashionMNIST failed: {e}")
         return False
 
 def download_imdb():
     """Download IMDB dataset from HuggingFace."""
-    print("📥 Downloading IMDB dataset...")
+    print("Downloading IMDB dataset...")
 
     try:
         from datasets import load_dataset
 
         # Load full IMDB dataset (works on Kaggle Python 3.10)
         dataset = load_dataset('imdb')
-        print(f"✓ IMDB: {len(dataset['train'])} train, {len(dataset['test'])} test samples")
+        print(f"IMDB: {len(dataset['train'])} train, {len(dataset['test'])} test samples")
         return True
     except Exception as e:
-        print(f"✗ IMDB failed: {e}")
+        print(f"IMDB failed: {e}")
         return False
 
 
 def download_medmnist(dataset_name: str = 'pathmnist') -> bool:
     """Attempt to ensure medmnist is available on Kaggle (optional real medical dataset)."""
-    print("📥 Checking for MedMNIST package on Kaggle...")
+    print("Checking for MedMNIST package on Kaggle...")
     try:
         import medmnist
         from medmnist import INFO
         if dataset_name not in INFO:
-            print(f"✗ MedMNIST: dataset '{dataset_name}' not available. Available: {list(INFO.keys())}")
+            print(f"MedMNIST: dataset '{dataset_name}' not available. Available: {list(INFO.keys())}")
             return False
-        print("✓ medmnist is installed on this environment. You can run medical experiments with MedMNIST.")
+        print("medmnist is installed on this environment. You can run medical experiments with MedMNIST.")
         return True
     except Exception as e:
-        print(f"✗ MedMNIST not available: {e}")
+        print(f"MedMNIST not available: {e}")
         print("   You can install it in Kaggle notebooks with `pip install medmnist` if needed.")
         return False
 
 
 def download_medical_real_kaggle(dataset_slug: str = 'paultimothymooney/chest-xray-pneumonia', dest: Path | str = Path('/kaggle/working/data/medical')) -> bool:
     """Try to download a real medical dataset via Kaggle API if possible (Kaggle environment may already have datasets)."""
-    print("📥 Attempting optional Kaggle medical dataset download...")
+    print("Attempting optional Kaggle medical dataset download...")
     try:
         from kaggle.api.kaggle_api_extended import KaggleApi
     except Exception:
@@ -140,10 +140,10 @@ def download_medical_real_kaggle(dataset_slug: str = 'paultimothymooney/chest-xr
         api.authenticate()
         print(f"   Downloading {dataset_slug} to {dest} (this may take a while)...")
         api.dataset_download_files(dataset_slug, path=str(dest), unzip=True, quiet=False)
-        print(f"✓ Medical dataset '{dataset_slug}' downloaded to {dest}")
+        print(f"Medical dataset '{dataset_slug}' downloaded to {dest}")
         return True
     except Exception as e:
-        print(f"✗ Kaggle medical download failed: {e}")
+        print(f"Kaggle medical download failed: {e}")
         return False
 
 
@@ -156,7 +156,7 @@ def main():
     # Create data directory
     data_dir = Path('/kaggle/working/data')
     data_dir.mkdir(parents=True, exist_ok=True)
-    print(f"📁 Data directory: {data_dir}")
+    print(f"Data directory: {data_dir}")
 
     # Download datasets (including optional medical datasets)
     datasets = [
@@ -182,7 +182,7 @@ def main():
 
     successful = sum(1 for _, success in results if success)
     for name, success in results:
-        status = "✓ SUCCESS" if success else "✗ FAILED"
+        status = "SUCCESS" if success else "FAILED"
         print(f"{name:25s}: {status}")
 
     print(f"\nTotal: {len(results)} datasets (including optional medical datasets)")
@@ -190,9 +190,9 @@ def main():
     print(f"Failed: {len(results) - successful}")
 
     if successful == len(results):
-        print("\n🎉 All datasets ready for GDSearch!")
+        print("\nAll datasets ready for GDSearch!")
     else:
-        print(f"\n⚠️  {len(results) - successful} dataset(s) failed")
+        print(f"\n{len(results) - successful} dataset(s) failed")
 
 if __name__ == '__main__':
     main()

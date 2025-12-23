@@ -48,7 +48,7 @@ def test_auto_lr_call_signature():
     assert 'criterion=' in context, "Auto-LR must use criterion= keyword argument"
     assert 'device=' in context, "Auto-LR must use device= keyword argument"
     
-    print("✓ Auto-LR uses keyword arguments (not positional)")
+    print("Auto-LR uses keyword arguments (not positional)")
 
 
 
@@ -75,7 +75,7 @@ def test_sam_closure_requirement():
         assert 'requires_closure' in sam_def, "SAM wrapper missing requires_closure flag"
         assert 'requires_closure = True' in sam_def, "SAM wrapper should set requires_closure = True"
     
-    print("✓ SAM wrapper correctly requires closure")
+    print("SAM wrapper correctly requires closure")
 
 
 
@@ -102,7 +102,7 @@ def test_convergence_validation_signature():
     assert 'epochs' not in params
     assert 'seed' not in params
     
-    print("✓ Convergence validation has correct signature (output_dir only)")
+    print("Convergence validation has correct signature (output_dir only)")
 
 
 def test_performance_profiler_print_summary():
@@ -133,7 +133,7 @@ def test_performance_profiler_print_summary():
     
     assert class_start < method_location < next_class, "print_summary() not inside PerformanceProfiler class"
     
-    print("✓ PerformanceProfiler.print_summary() method exists")
+    print("PerformanceProfiler.print_summary() method exists")
 
 
 def test_hf_nlp_validation_split():
@@ -167,7 +167,7 @@ def test_hf_nlp_validation_split():
     assert 'val_loader' in hf_section or 'validation_loader' in hf_section, \
         "No validation loader found in HF NLP section"
     
-    print("✓ HF NLP uses validation split (not test set for early stopping)")
+    print("HF NLP uses validation split (not test set for early stopping)")
 
 
 def test_no_runtime_auto_install():

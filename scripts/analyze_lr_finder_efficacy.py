@@ -199,7 +199,7 @@ def compare_lr_finder_vs_default(epochs=20, seeds=None, output_dir='results/lr_f
         optimal_lr = find_optimal_lr_wrapper(device, seed)
         
         # Train with default LR
-        logging.info(f"\n🔹 Training with DEFAULT LR = 0.001")
+        logging.info(f"\nTraining with DEFAULT LR = 0.001")
         default_history, default_final_acc = run_training(0.001, epochs, device, seed)
         
         # Train with optimal LR
@@ -217,7 +217,7 @@ def compare_lr_finder_vs_default(epochs=20, seeds=None, output_dir='results/lr_f
             'improvement': improvement
         })
         
-        logging.info(f"\n📊 SEED {seed} SUMMARY:")
+        logging.info(f"\nSEED {seed} SUMMARY:")
         logging.info(f"   Default LR (0.001): {default_final_acc:.2f}% test accuracy")
         logging.info(f"   Auto-Tuned LR ({optimal_lr:.6f}): {optimal_final_acc:.2f}% test accuracy")
         logging.info(f"   Improvement: {improvement:+.2f}%")
@@ -257,13 +257,13 @@ def compare_lr_finder_vs_default(epochs=20, seeds=None, output_dir='results/lr_f
     from scipy import stats
     if len(seeds) >= 3:
         t_stat, p_value = stats.ttest_rel(df['optimal_final_test_acc'], df['default_final_test_acc'])
-        logging.info(f"\n📊 Paired t-test:")
+        logging.info(f"\nPaired t-test:")
         logging.info(f"   t-statistic: {t_stat:.4f}")
         logging.info(f"   p-value: {p_value:.4f}")
         if p_value < 0.05:
             logging.info(f"   ✅ SIGNIFICANT improvement with Auto-Tuned LR (p < 0.05)")
         else:
-            logging.info(f"   ⚠️  No significant difference (p >= 0.05)")
+            logging.info(f"   No significant difference (p >= 0.05)")
     
     logging.info(f"\n{'='*80}")
     logging.info("CONCLUSION:")
@@ -271,7 +271,7 @@ def compare_lr_finder_vs_default(epochs=20, seeds=None, output_dir='results/lr_f
         logging.info(f"✅ LR Finder provides {df['improvement'].mean():.2f}% average improvement")
         logging.info("   RECOMMENDATION: Enable --auto-lr for production runs")
     else:
-        logging.info(f"⚠️  LR Finder shows {df['improvement'].mean():.2f}% average change")
+        logging.info(f"LR Finder shows {df['improvement'].mean():.2f}% average change")
         logging.info("   RECOMMENDATION: Default LR (0.001) is adequate for MNIST/Adam")
     logging.info(f"{'='*80}")
     

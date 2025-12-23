@@ -327,4 +327,4 @@ if __name__ == '__main__':
         print(f"  {k}: {v}")
     
     if 'warning' in synth_prov:
-        print(f"\n⚠️  WARNING: {synth_prov['warning']}")
+        print(f"\nWARNING: {synth_prov['warning']}")

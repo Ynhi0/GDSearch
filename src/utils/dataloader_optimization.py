@@ -231,12 +231,12 @@ if __name__ == '__main__':
     # Test 1: Get optimal kwargs
     device_gpu = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     kwargs = get_optimal_dataloader_kwargs(device_gpu, benchmark_mode=True)
-    print(f"✓ Optimal kwargs for {device_gpu}: {kwargs}")
+    print(f"Optimal kwargs for {device_gpu}: {kwargs}")
     
     # Test 2: CPU vs GPU settings should differ
     device_cpu = torch.device('cpu')
     kwargs_cpu = get_optimal_dataloader_kwargs(device_cpu, benchmark_mode=True)
-    print(f"✓ Optimal kwargs for CPU: {kwargs_cpu}")
+    print(f"Optimal kwargs for CPU: {kwargs_cpu}")
     
     # Validate difference
     if device_gpu.type == 'cuda':
@@ -256,4 +256,4 @@ if __name__ == '__main__':
     )
     print(f"✓ Recommended batch size for simple model: {batch_size}")
     
-    print("\n✓ All DataLoader optimization tests passed!")
+    print("\nAll DataLoader optimization tests passed!")

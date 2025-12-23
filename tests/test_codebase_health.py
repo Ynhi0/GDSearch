@@ -26,9 +26,9 @@ def test_requirements():
     
     for pkg in required_packages:
         if pkg in content:
-            print(f"  ✓ {pkg} found in requirements.txt")
+            print(f"  {pkg} found in requirements.txt")
         else:
-            print(f"  ✗ {pkg} MISSING from requirements.txt")
+            print(f"  {pkg} MISSING from requirements.txt")
             assert False, f"{pkg} missing from requirements.txt"
     
     # Check Kaggle requirements
@@ -44,7 +44,7 @@ def test_requirements():
             print(f"  ✗ {pkg} MISSING from kaggle requirements")
             assert False, f"{pkg} missing from kaggle requirements"
     
-    print("\n✓ All requirements files are complete!")
+    print("\nAll requirements files are complete!")
 
 
 def test_imports():
@@ -57,7 +57,7 @@ def test_imports():
         SyntheticMedicalDataset, get_medical_datasets,
         load_medmnist_dataset, load_kaggle_medical_dataset
     )
-    print("  ✓ Medical data utils import successful")
+    print("  Medical data utils import successful")
     
     from src.core.training_utils import set_seed
     print("  ✓ Training utils import successful")
@@ -71,7 +71,7 @@ def test_imports():
     from src.experiments.run_nn_experiment import build_model_and_data
     print("  ✓ Run NN experiment import successful")
     
-    print("\n✓ All critical imports successful!")
+    print("\nAll critical imports successful!")
 
 
 def test_seed_consistency():

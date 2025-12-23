@@ -98,7 +98,7 @@ def test_json_config_loading():
     config_path = 'configs/nn_tuning.json'
     
     if not os.path.exists(config_path):
-        print(f"⚠️  Config file not found: {config_path}")
+        print(f"Config file not found: {config_path}")
         print("   (This is OK - fallback to defaults will be used)")
         return True
     
@@ -198,7 +198,7 @@ def main():
         print("   The codebase now tests custom optimizer implementations.")
         return 0
     else:
-        print(f"\n⚠️  {total - passed} test(s) failed. Review the output above.")
+        print(f"\n{total - passed} test(s) failed. Review the output above.")
         return 1
 
 
