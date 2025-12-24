@@ -102,8 +102,8 @@ def main():
             print("   If you see 'numpy.dtype size changed' errors, consider running:")
             print("     pip install --force-reinstall --no-cache-dir numpy==1.26.4 pandas==2.2.3")
             print("   Or use the project's `kaggle/requirements_kaggle.txt` fallback which includes these pins.")
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug(f"NumPy version check issue: {e}")
 
     print("=" * 70)
     

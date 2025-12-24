@@ -20,10 +20,13 @@ Usage:
 
 import sys
 import os
+import logging
 import tempfile
 import shutil
 from pathlib import Path
 import subprocess
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
 
 # Windows console encoding configuration (function to avoid import-time side effects)
 def configure_windows_console_encoding():
@@ -41,8 +44,8 @@ def configure_windows_console_encoding():
                 sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
             if not isinstance(sys.stderr, codecs.StreamWriter):
                 sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
-        except Exception:
-            pass  # Fallback to ASCII-safe output
+        except Exception as e:
+            logging.debug(f"Could not set Windows console encoding: {e}")  # Fallback to ASCII-safe output
 
 # Add project root to path
 project_root = Path(__file__).parent.parent

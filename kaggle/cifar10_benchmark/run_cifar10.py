@@ -14,6 +14,8 @@ import argparse
 import logging
 from pathlib import Path
 
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
+
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -69,9 +71,9 @@ def get_data_loaders(batch_size: int, num_workers: int = 2, pin_memory: bool = T
     ])
 
     # Kaggle note: Enable Internet to download CIFAR-10.
-    root = "/kaggle/working/data"
-    train = torchvision.datasets.CIFAR10(root=root, train=True, download=True, transform=transform_train)
-    test = torchvision.datasets.CIFAR10(root=root, train=False, download=True, transform=transform_test)
+    DATA_ROOT = os.environ.get('GDSEARCH_DATA_ROOT', '/kaggle/working/data')
+    train = torchvision.datasets.CIFAR10(root=DATA_ROOT, train=True, download=True, transform=transform_train)
+    test = torchvision.datasets.CIFAR10(root=DATA_ROOT, train=False, download=True, transform=transform_test)
 
     pin_memory = torch.cuda.is_available()
     train_loader = DataLoader(train, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=pin_memory)
@@ -171,12 +173,12 @@ def run_single_experiment(optimizer_name: str, seed: int, lr: float, epochs: int
                 elif opt_tag == 'Adam' and isinstance(optimizer, optim.Adam) and not optimizer.defaults.get('amsgrad', False):
                     optimizer.load_state_dict(state['optimizer'])
             except Exception as _:
-                pass
+                logging.exception("Optimizer resume mismatch - skipping optimizer state restoration")
             start_epoch = int(state.get('epoch', 0)) + 1
             history = state.get('history', [])
             print(f"Resuming from epoch {start_epoch}: {ckpt_file}")
         except Exception as e:
-            print('Resume failed, starting fresh:', e)
+            logging.exception('Resume failed, starting fresh')
 
     # Train
     if torch.cuda.is_available():
@@ -257,7 +259,7 @@ def run_suite(seeds, epochs, batch_size, results_dir: str, *, resume: bool = Fal
                 durations.append(dur)
                 completed += 1
             except Exception as e:
-                tqdm.write(f"❌ Error: {e}")
+                logging.exception(f"Error running {opt_name} seed={seed}: {e}")
 
     print(f"\n✅ Completed {completed}/{total_runs} runs")
     if durations:

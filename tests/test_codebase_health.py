@@ -229,6 +229,24 @@ def test_no_duplicate_classes():
     print("\nOK: No duplicate classes found!")
 
 
+def test_no_bare_except_and_hardcoded_paths():
+    """Fail if any Python file contains bare excepts or hardcoded Windows paths."""
+    import re
+    repo = Path(__file__).parent.parent
+    bad_patterns = [r'^\s*except\s*:\s*$', r'except\s+Exception\s+[^:]*:\s*pass', r'c:\\\\Users\\\\']
+    matches = []
+    for p in bad_patterns:
+        prog = re.compile(p, re.M)
+        for f in repo.rglob('*.py'):
+            try:
+                txt = f.read_text()
+            except Exception:
+                continue
+            if prog.search(txt):
+                matches.append((str(f.relative_to(repo)), p))
+    assert not matches, f"Found banned patterns: {matches}"
+
+
 def main():
     """Run all health checks."""
     print("\n" + "="*60)
@@ -243,6 +261,7 @@ def main():
         test_data_loader_consistency,
         test_build_model_and_data,
         test_no_duplicate_classes,
+        test_no_bare_except_and_hardcoded_paths,
     ]
     
     results = []

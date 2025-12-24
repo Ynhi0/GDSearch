@@ -35,6 +35,14 @@ A comprehensive Python framework for comparing gradient descent algorithms on 2D
 - **Interactive Visualizations:** Plotly-based 2D/3D plots, animations, loss landscapes
 - **Error Bar Visualization:** Plots with mean ± std bands
 - **Adaptive Overfitting Prevention:** Enforced train/val/test separation (BLOCKER-1 fix)
+
+### Tuning & Kaggle Best Practices ⚖️
+- **Tuning seeds:** Use `GDSEARCH_TUNE_SEED_COUNT` (default `3`) to run tuning across multiple tuning splits to reduce bias from a single tuning split.
+- **Cross-evaluation (optional):** Enable `GDSEARCH_TUNE_EVAL_ALL_CANDIDATES=1` to gather candidate sets from all trials and re-evaluate the top candidates across all tuning splits. This is more robust but computationally expensive. Control how many candidates to re-evaluate with `GDSEARCH_TUNE_TOPK` (default `5`).
+- **Ultra-quick safety:** When running in `--ultra-quick` (CI/quick validation), full candidate evaluation is disabled and `top-k` is reduced for CI safety.
+- **Resume safety on Kaggle:** To avoid inadvertent reuse of previous artifacts, resume behavior now requires explicit confirmation via `GDSEARCH_RESUME_CONFIRM=1`. You can inspect what would be copied without copying by setting `GDSEARCH_RESUME_DRYRUN=1`.
+- **Why we copy into `/kaggle/working`:** Kaggle mounts datasets under `/kaggle/input` as read-only; the repository and prior results are copied to `/kaggle/working` to allow package installation, checkpoint saving, and resume operations which require write access. Always inspect copied artifacts when resuming to prevent accidental contamination.
+
 - **Checkpoint Robustness:** Complete state saving including scheduler/scaler/EMA (BLOCKER-2 fix)
 - **Config Validation:** Automated schema checks prevent silent errors (BLOCKER-3 fix)
 - **Search Budget Parity:** Automated fairness checks across optimizers (HIGH-2 fix)

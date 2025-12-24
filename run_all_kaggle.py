@@ -828,8 +828,8 @@ def error_context(context: str, continue_on_error: bool = False):
             print('\n--- TRACEBACK (debug) ---')
             print(traceback_str)
             print('--- END TRACEBACK ---\n')
-        except Exception:
-            pass
+        except Exception as e:
+            logging.debug(f"Ignored non-critical exception: {e}")
 
         if not continue_on_error:
             raise
@@ -1200,7 +1200,8 @@ def get_provenance_info() -> Dict[str, Any]:
 def save_run_artifacts(base_results_dir: str, dataset: str, model_name: str, optimizer_name: str,
                        seed: int, history: List[Dict[str, Any]], params: Dict[str, Any],
                        device: Optional[torch.device] = None, tracker: Optional[ExperimentTracker] = None,
-                       model: Optional[torch.nn.Module] = None, save_model: bool = True):
+                       model: Optional[torch.nn.Module] = None, save_model: bool = True,
+                       tuning_artifact: Optional[str] = None):
     """Save per-run CSV and metadata sidecar using a canonical filename.
 
     Filename pattern: <dataset>_<model>_<optimizer>_seed<seed>.csv
@@ -1265,6 +1266,7 @@ def save_run_artifacts(base_results_dir: str, dataset: str, model_name: str, opt
             'rows': len(df_hist),
             'params': params,
             'model_path': str(model_path) if model_path else None,
+            'tuning_artifact': tuning_artifact,
             'system': get_system_info(),
             'provenance': get_provenance_info()
         }
@@ -1290,6 +1292,36 @@ def save_run_artifacts(base_results_dir: str, dataset: str, model_name: str, opt
         return None, None
 
 
+def save_tuning_artifact(base_results_dir: str, experiment_name: str, model_name: str, optimizer_name: str, tuning_meta: Dict[str, Any]):
+    """Save tuning metadata and candidate pool for later auditability.
+
+    Writes JSON to: <base_results_dir>/optuna_results/<experiment>_<optimizer>_tuning.json
+    """
+    try:
+        base = Path(base_results_dir)
+        out_dir = base / 'optuna_results' / experiment_name
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        file_stem = f"{experiment_name}_{model_name}_{optimizer_name}_tuning"
+        out_path = out_dir / f"{file_stem}.tuning.json"
+
+        # Add provenance
+        tuning_meta_copy = tuning_meta.copy()
+        tuning_meta_copy.setdefault('provenance', {})
+        tuning_meta_copy['provenance']['timestamp'] = datetime.now().isoformat()
+        tuning_meta_copy['provenance']['git'] = get_provenance_info()
+        tuning_meta_copy['provenance']['system'] = get_system_info()
+
+        with open(out_path, 'w', encoding='utf-8') as f:
+            json.dump(tuning_meta_copy, f, indent=2)
+
+        logging.info(f"Saved tuning metadata to {out_path}")
+        return str(out_path)
+    except Exception as e:
+        logging.error(f"Failed to save tuning artifact: {e}")
+        return None
+
+
 def _worker_init(worker_id, seed):
     """Initialize worker with deterministic seed."""
     worker_seed = int(seed) + worker_id + 1
@@ -1297,8 +1329,8 @@ def _worker_init(worker_id, seed):
     random.seed(worker_seed)
     try:
         torch.manual_seed(worker_seed)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug(f"Could not set torch seed in worker {worker_id}: {e}")
 
 
 def make_dataloader(dataset, batch_size=64, shuffle=False, seed: Optional[int] = None,
@@ -1363,8 +1395,8 @@ def make_dataloader(dataset, batch_size=64, shuffle=False, seed: Optional[int] =
             pytorch_version = tuple(int(x) for x in torch.__version__.split('.')[:2])
             if pytorch_version >= (1, 7):
                 dl_kwargs['persistent_workers'] = True
-        except Exception:
-            pass  # Skip if version parsing fails
+        except Exception as e:
+            logging.debug(f"PyTorch version parsing failed: {e}")  # Skip if version parsing fails
 
     loader = DataLoader(dataset, **dl_kwargs)
     
@@ -2162,9 +2194,13 @@ def dice_coefficient(pred, target, smooth=1e-6):
 # ==============================================================================
 
 def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader, 
-                        device, epochs=3, n_trials=10, seed=42):
+                        device, epochs=3, n_trials=10, seed=42, return_all_trials: bool = False):
     """
     Quick hyperparameter tuning for an optimizer.
+
+    If `return_all_trials` is True, the function returns a tuple
+    `(best_params, best_value, trials)` where `trials` is a list of
+    dictionaries containing each trial's `params` and `value`.
     
     CRITICAL SAFETY (BLOCKER-1): The 'val_loader' parameter MUST contain
     VALIDATION data, NOT true test data. Using test data for hyperparameter
@@ -2383,10 +2419,192 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader
     best_params = study.best_params
     best_value = study.best_value
     
+    # Collect completed trials
+    trials = []
+    for t in study.trials:
+        if t.state == optuna.trial.TrialState.COMPLETE and t.value is not None:
+            trials.append({'params': t.params, 'value': t.value})
+
     logging.info(f"    Best params: {best_params}")
     logging.info(f"    Best val acc: {best_value:.4f}")
     
-    return best_params
+    if return_all_trials:
+        return best_params, best_value, trials
+
+    # Return both params and best validation value so callers can aggregate across seeds
+    return best_params, best_value
+
+
+def select_best_params_across_seeds(per_seed_results):
+    """
+    Aggregate tuning results across multiple tuning seeds.
+
+    Args:
+        per_seed_results: List of tuples (params_dict, best_val)
+
+    Returns:
+        (best_params_dict, mean_best_val, std_of_mean_across_param_groups)
+
+    Strategy:
+        - Groups identical parameter dicts (by JSON canonicalization)
+        - Computes mean best_val per unique param set
+        - Returns the param set with highest mean best_val
+    """
+    import json
+    import statistics
+
+    if not per_seed_results:
+        return {}, 0.0, 0.0
+
+    groups = {}
+    for params, val in per_seed_results:
+        # canonicalize dict to JSON string for grouping
+        key = json.dumps(params, sort_keys=True)
+        groups.setdefault(key, []).append(val)
+
+    # Compute mean for each param group
+    group_means = {k: sum(v) / len(v) for k, v in groups.items()}
+
+    # Select best by mean value
+    best_key = max(group_means.items(), key=lambda x: x[1])[0]
+    best_mean = group_means[best_key]
+    best_params = json.loads(best_key)
+
+    # Compute std of group means as a simple variance measure
+    try:
+        std = statistics.pstdev(list(group_means.values())) if len(group_means) > 1 else 0.0
+    except Exception:
+        std = 0.0
+
+    return best_params, best_mean, std
+
+
+# ------------------------- Candidate evaluation helpers ----------------------
+
+def build_optimizer_from_params(optimizer_name: str, model, params: dict):
+    """Construct optimizer instance for a model given optimizer params."""
+    # Normalize Adam-style params
+    p = params.copy()
+    if 'betas' not in p and 'beta1' in p and 'beta2' in p:
+        p['betas'] = (p.pop('beta1'), p.pop('beta2'))
+
+    if optimizer_name == 'SGD':
+        return optim.SGD(model.parameters(), lr=p.get('lr', 0.01))
+    if optimizer_name == 'SGD_Momentum':
+        return optim.SGD(model.parameters(), lr=p.get('lr', 0.01), momentum=p.get('momentum', 0.0))
+    if optimizer_name == 'Adam':
+        return optim.Adam(model.parameters(), lr=p.get('lr', 0.001), betas=p.get('betas', (0.9, 0.999)))
+    if optimizer_name == 'AdamW':
+        return optim.AdamW(model.parameters(), lr=p.get('lr', 0.001), betas=p.get('betas', (0.9, 0.999)), weight_decay=p.get('weight_decay', 0.0))
+    if optimizer_name == 'AMSGrad':
+        return optim.Adam(model.parameters(), lr=p.get('lr', 0.001), betas=p.get('betas', (0.9, 0.999)), amsgrad=True)
+    if optimizer_name == 'SAM_SGD':
+        from src.core.pytorch_optimizers import SAMWrapper
+        base = optim.SGD(model.parameters(), lr=p.get('lr', 0.01))
+        return SAMWrapper(base, rho=p.get('rho', 0.05))
+    if optimizer_name == 'SAM_Adam':
+        from src.core.pytorch_optimizers import SAMWrapper
+        base = optim.Adam(model.parameters(), lr=p.get('lr', 0.001))
+        return SAMWrapper(base, rho=p.get('rho', 0.05))
+    if optimizer_name == 'Lookahead_SGD':
+        from src.core.pytorch_optimizers import LookaheadWrapper
+        base = optim.SGD(model.parameters(), lr=p.get('lr', 0.01))
+        return LookaheadWrapper(base, k=p.get('k', 5), alpha=p.get('alpha', 0.5))
+    if optimizer_name == 'Lookahead_Adam':
+        from src.core.pytorch_optimizers import LookaheadWrapper
+        base = optim.Adam(model.parameters(), lr=p.get('lr', 0.001))
+        return LookaheadWrapper(base, k=p.get('k', 5), alpha=p.get('alpha', 0.5))
+    if optimizer_name == 'AdaBound':
+        from src.core.pytorch_optimizers import AdaBoundWrapper
+        return AdaBoundWrapper(model.parameters(), lr=p.get('lr', 0.001), beta1=p.get('beta1', 0.9), beta2=p.get('beta2', 0.999), final_lr=p.get('final_lr', 0.1), gamma=p.get('gamma', 1e-3))
+    if optimizer_name == 'RAdam':
+        from src.core.pytorch_optimizers import RAdamWrapper
+        return RAdamWrapper(model.parameters(), lr=p.get('lr', 0.001), beta1=p.get('beta1', 0.9), beta2=p.get('beta2', 0.999))
+    if optimizer_name == 'LAMB':
+        from src.core.pytorch_optimizers import LAMBWrapper
+        return LAMBWrapper(model.parameters(), lr=p.get('lr', 0.001), beta1=p.get('beta1', 0.9), beta2=p.get('beta2', 0.999), weight_decay=p.get('weight_decay', 0.0))
+
+    raise ValueError(f"Unknown optimizer for build: {optimizer_name}")
+
+
+def evaluate_candidate(optimizer_name: str, params: dict, model_fn, train_loader, val_loader, device, epochs=1, seed=42):
+    """
+    Evaluate a fixed hyperparameter candidate by training for `epochs` and returning validation accuracy.
+    This is intentionally lightweight and used for cross-evaluation during tuning.
+    """
+    set_seed(seed)
+    model = model_fn().to(device)
+
+    optimizer = build_optimizer_from_params(optimizer_name, model, params)
+    from src.core.pytorch_optimizers import SAMWrapper
+    requires_closure = isinstance(optimizer, SAMWrapper)
+
+    criterion = nn.CrossEntropyLoss()
+
+    for epoch in range(epochs):
+        model.train()
+        for inputs, targets in train_loader:
+            inputs, targets = inputs.to(device), targets.to(device)
+            if requires_closure:
+                def closure():
+                    optimizer.zero_grad()
+                    outputs = model(inputs)
+                    loss = criterion(outputs, targets)
+                    loss.backward()
+                    return loss
+                loss = optimizer.step(closure)
+            else:
+                optimizer.zero_grad()
+                outputs = model(inputs)
+                loss = criterion(outputs, targets)
+                loss.backward()
+                optimizer.step()
+
+    # Evaluate
+    model.eval()
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        for inputs, targets in val_loader:
+            inputs, targets = inputs.to(device), targets.to(device)
+            outputs = model(inputs)
+            _, predicted = outputs.max(1)
+            correct += predicted.eq(targets).sum().item()
+            total += targets.size(0)
+
+    if total == 0:
+        return 0.0
+    return 100.0 * correct / total
+
+
+def choose_best_candidate_from_eval(candidate_eval_results: dict):
+    """
+    Select the best candidate given precomputed evaluation lists per candidate.
+
+    Args:
+        candidate_eval_results: dict mapping candidate_key (json string) -> list of accuracy floats
+
+    Returns:
+        (best_params_dict, mean_val, std_val)
+    """
+    import json
+    import statistics
+
+    if not candidate_eval_results:
+        return {}, 0.0, 0.0
+
+    means = {k: (sum(v) / len(v)) for k, v in candidate_eval_results.items()}
+    best_key = max(means.items(), key=lambda x: x[1])[0]
+    best_mean = means[best_key]
+
+    try:
+        std = statistics.pstdev(list(means.values())) if len(means) > 1 else 0.0
+    except Exception:
+        std = 0.0
+
+    best_params = json.loads(best_key)
+    return best_params, best_mean, std
+
 
 
 def normalize_adam_params(params: Dict, optimizer_name: str = 'Adam') -> Dict:
@@ -2512,6 +2730,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
 
             # Hyperparameter tuning (if enabled)
             tuned_params = {}
+            tuned_artifacts = {}  # Map optimizer_name -> tuning artifact path
             if not skip_tuning:
                 logging.info("\nHYPERPARAMETER TUNING PHASE")
                 logging.info("-" * 80)
@@ -2566,11 +2785,168 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                 
                 for opt_name in optimizers_to_tune:
                     logging.info(f"  Tuning {opt_name}...")
-                    tuned_params[opt_name] = quick_tune_optimizer(
-                        opt_name, SimpleMLP, tune_loader, val_loader,
-                        device, epochs=tune_epochs, n_trials=n_trials, seed=seeds[0]
-                    )
-                
+
+                    # Multi-seed tuning for robustness: use up to GDSEARCH_TUNE_SEED_COUNT seeds
+                    try:
+                        tune_seed_count = max(1, int(os.environ.get('GDSEARCH_TUNE_SEED_COUNT', '3')))
+                    except Exception:
+                        tune_seed_count = 3
+
+                    tune_seeds = seeds[:min(len(seeds), tune_seed_count)]
+                    per_seed_results = []
+
+                    # Prepare per-seed loaders (so we can re-use for candidate re-eval)
+                    per_seed_loaders = {}
+                    for ts in tune_seeds:
+                        tune_generator = torch.Generator().manual_seed(ts)
+                        all_indices = torch.randperm(len(train_dataset), generator=tune_generator).tolist()
+                        tune_indices = all_indices[:tune_size]
+                        val_indices = all_indices[tune_size:tune_size + val_size]
+
+                        tune_subset_ts = torch.utils.data.Subset(train_dataset, tune_indices)
+                        val_subset_ts = torch.utils.data.Subset(train_dataset, val_indices)
+
+                        tune_loader_ts = make_dataloader(tune_subset_ts, batch_size=train_bs, shuffle=True, 
+                                                         split_type='train', **dl_kwargs)
+                        val_loader_ts = make_dataloader(val_subset_ts, batch_size=test_bs, shuffle=False, 
+                                                        split_type='validation', **dl_kwargs)
+
+                        per_seed_loaders[ts] = (tune_loader_ts, val_loader_ts)
+
+                    # Determine whether to evaluate all unique candidates across seeds
+                    try:
+                        eval_all_candidates = str(os.environ.get('GDSEARCH_TUNE_EVAL_ALL_CANDIDATES', 'false')).lower() in ('1', 'true', 'yes')
+                    except Exception:
+                        eval_all_candidates = False
+
+                    # Top-K parameter for candidate re-eval to limit compute cost
+                    try:
+                        tune_top_k = int(os.environ.get('GDSEARCH_TUNE_TOPK', '5'))
+                        if tune_top_k < 1:
+                            tune_top_k = 5
+                    except Exception:
+                        tune_top_k = 5
+
+                    # Guard: when running in ULTRA_QUICK_MODE, disable full candidate eval and reduce top-k
+                    if ULTRA_QUICK_MODE:
+                        if eval_all_candidates:
+                            logging.warning("ULTRA_QUICK_MODE enabled: full candidate evaluation is disabled for CI safety. Falling back to fast aggregation.")
+                        eval_all_candidates = False
+                        tune_top_k = 1
+
+                    if eval_all_candidates:
+                        logging.warning(f"GDSEARCH_TUNE_EVAL_ALL_CANDIDATES enabled — this will perform cross-evaluation across tuning seeds and is computationally expensive; top-K set to {tune_top_k}.")
+
+                    all_trials = []
+
+                    for ts in tune_seeds:
+                        if eval_all_candidates:
+                            # Request all trials so we can gather candidate pool
+                            best_ts, best_val_ts, trials_ts = quick_tune_optimizer(
+                                opt_name, SimpleMLP, per_seed_loaders[ts][0], per_seed_loaders[ts][1],
+                                device, epochs=tune_epochs, n_trials=n_trials, seed=ts, return_all_trials=True
+                            )
+                            per_seed_results.append((best_ts, best_val_ts))
+                            all_trials.extend(trials_ts)
+                        else:
+                            params_ts, best_val_ts = quick_tune_optimizer(
+                                opt_name, SimpleMLP, per_seed_loaders[ts][0], per_seed_loaders[ts][1],
+                                device, epochs=tune_epochs, n_trials=n_trials, seed=ts
+                            )
+                            per_seed_results.append((params_ts, best_val_ts))
+
+                    # If enabled, perform cross-evaluation of unique candidates across all tuning splits
+                    if eval_all_candidates and all_trials:
+                        import json
+                        # Build unique candidate param sets and select top-K candidates by their per-seed best values
+                        unique_candidates = {}
+                        # candidate_best_vals maps key->list of best vals observed across seeds
+                        candidate_best_vals = {}
+                        for tr in all_trials:
+                            key = json.dumps(tr['params'], sort_keys=True)
+                            unique_candidates.setdefault(key, tr['params'])
+                            candidate_best_vals.setdefault(key, []).append(tr['value'])
+
+                        # Compute mean best value per candidate (from trials pool) and pick top-K candidates
+                        candidate_mean_vals = {k: (sum(v)/len(v)) for k, v in candidate_best_vals.items()}
+                        # Sort candidates descending by mean val
+                        sorted_candidates = sorted(candidate_mean_vals.items(), key=lambda x: x[1], reverse=True)
+                        top_candidates = [k for k, _ in sorted_candidates][:tune_top_k]
+
+                        candidate_eval_results = {k: [] for k in top_candidates}
+
+                        # Evaluate each TOP-K candidate on every tuning seed split
+                        for cand_key in top_candidates:
+                            cand_params = unique_candidates[cand_key]
+                            for ts in tune_seeds:
+                                tune_loader_ts, val_loader_ts = per_seed_loaders[ts]
+                                acc = evaluate_candidate(opt_name, cand_params, SimpleMLP, tune_loader_ts, val_loader_ts, device, epochs=max(1, tune_epochs), seed=ts)
+                                candidate_eval_results[cand_key].append(acc)
+
+                        # Choose the best candidate by mean accuracy across tuning seeds
+                        final_params, mean_val, std_val = choose_best_candidate_from_eval(candidate_eval_results)
+                        tuned_params[opt_name] = final_params
+
+                        logging.info(f"Tuning across seeds {tune_seeds} (top-{tune_top_k} candidate eval) completed: selected params (mean_val={mean_val:.4f}, std={std_val:.4f})")
+                        if std_val > 1.0:
+                            logging.warning("High variance across tuning seeds for candidate evaluation (std=%.4f). Consider increasing budget.", std_val)
+
+                        # Save tuning metadata artifact for auditability
+                        try:
+                            tuning_meta = {
+                                'tuning_method': 'optuna_topk_cross_eval',
+                                'n_trials': n_trials,
+                                'tune_seeds': tune_seeds,
+                                'GDSEARCH_TUNE_EVAL_ALL_CANDIDATES': eval_all_candidates,
+                                'GDSEARCH_TUNE_TOPK': tune_top_k,
+                                'GDSEARCH_TUNE_SEED_COUNT': tune_seed_count,
+                                'candidate_pool_size': len(unique_candidates),
+                                'top_candidates_evaluated': len(top_candidates),
+                                'per_seed_results': per_seed_results,
+                                'selected_params': final_params,
+                                'selected_mean_val': mean_val,
+                                'selected_std_val': std_val,
+                                'timestamp': datetime.now().isoformat()
+                            }
+                            tuning_art_path = save_tuning_artifact(str(results_dir), experiment_name, 'SimpleMLP', opt_name, tuning_meta)
+                            if tuning_art_path:
+                                tuned_artifacts[opt_name] = tuning_art_path
+                        except Exception as e:
+                            logging.warning(f"Failed to save tuning metadata for {opt_name}: {e}")
+
+                    else:
+                        # Aggregate results across tuning seeds and select robust params (fast path)
+                        final_params, mean_val, std_val = select_best_params_across_seeds(per_seed_results)
+                        tuned_params[opt_name] = final_params
+
+                        if len(tune_seeds) == 1:
+                            logging.info(f"Tuning performed with single tuning seed (seed={tune_seeds[0]}). Consider increasing GDSEARCH_TUNE_SEED_COUNT to reduce bias.")
+                        else:
+                            logging.info(f"Tuning across seeds {tune_seeds} completed: selected params (mean_val={mean_val:.4f}, std={std_val:.4f})")
+                            if std_val > 1.0:
+                                logging.warning("High variance across tuning seeds (std=%.4f). Consider increasing tuning budget or seeds.", std_val)
+
+                        # Save tuning metadata artifact for auditability
+                        try:
+                            tuning_meta = {
+                                'tuning_method': 'optuna_seed_aggregation',
+                                'n_trials': n_trials,
+                                'tune_seeds': tune_seeds,
+                                'GDSEARCH_TUNE_EVAL_ALL_CANDIDATES': eval_all_candidates,
+                                'GDSEARCH_TUNE_TOPK': tune_top_k,
+                                'GDSEARCH_TUNE_SEED_COUNT': tune_seed_count,
+                                'per_seed_results': per_seed_results,
+                                'selected_params': final_params,
+                                'selected_mean_val': mean_val,
+                                'selected_std_val': std_val,
+                                'timestamp': datetime.now().isoformat()
+                            }
+                            tuning_art_path = save_tuning_artifact(str(results_dir), experiment_name, 'SimpleMLP', opt_name, tuning_meta)
+                            if tuning_art_path:
+                                tuned_artifacts[opt_name] = tuning_art_path
+                        except Exception as e:
+                            logging.warning(f"Failed to save tuning metadata for {opt_name}: {e}")
+
                 logging.info("\nTuning complete!\n")
             
             results = []
@@ -2818,27 +3194,23 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                         try:
                             if 'lr' not in optimizer.param_groups[0]:
                                 optimizer.param_groups[0]['lr'] = base_lr
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logging.debug(f"Could not ensure optimizer.lr exists: {e}")
                         
                         # Create learning rate scheduler (cosine annealing)
                         scheduler = CosineAnnealingLR(optimizer, T_max=epochs, eta_min=base_lr*0.01)
                         
-                        # Early stopping setup - Initialize defaults FIRST, then restore from checkpoint if available
-                        # BUG FIX (Dec 2025): Initialize variables BEFORE trying to restore from checkpoint
-                        # This prevents UnboundLocalError if checkpoint loading fails
+                        # NO EARLY STOPPING - Run full epochs per research proposal requirements
+                        # Research proposal: "Convergence Rate Analysis" requires all optimizers to train equally
                         best_val_acc = 0.0
                         best_model_state = None
-                        patience = 10
-                        patience_counter = 0
+                        logging.info(f"Training for full {epochs} epochs (no early stopping)")
                         
-                        # CRITICAL FIX: Restore early stopping state from checkpoint metadata
-                        # Without this, resumed runs lose their early stopping progress and may stop incorrectly
+                        # Restore best validation state if resuming
                         if checkpoint and 'metadata' in checkpoint:
                             metadata = checkpoint['metadata']
                             best_val_acc = metadata.get('best_val_acc', best_val_acc)
-                            patience_counter = metadata.get('patience_counter', patience_counter)
-                            logging.info(f"[RESTORED] Early stopping state: best_val_acc={best_val_acc:.2f}%, patience_counter={patience_counter}/{patience}")
+                            logging.info(f"[RESTORED] Best validation accuracy: {best_val_acc:.2f}%")
                         
                         # Restore scheduler state if resuming from checkpoint
                         # This ensures that learning rate scheduling continues correctly from the saved state
@@ -2938,22 +3310,11 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                                 scheduler.step()
                                 current_lr = optimizer.param_groups[0]['lr']
                                 
-                                # Best model tracking using validation accuracy
+                                # Track best model for final checkpoint (monitoring only, NO early stopping)
                                 if val_acc > best_val_acc:
                                     best_val_acc = val_acc
                                     best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
-                                    patience_counter = 0
                                     logging.info(f"New best model (val acc): {val_acc:.2f}%")
-                                else:
-                                    patience_counter += 1
-                                
-                                # Early stopping check
-                                if patience_counter >= patience:
-                                    logging.info(f"Early stopping triggered at epoch {epoch} (no improvement for {patience} epochs)")
-                                    # Restore best model
-                                    if best_model_state is not None:
-                                        model.load_state_dict(best_model_state)
-                                    break
 
                                 # Add tainted and effective_batch_size to per-epoch history
                                 # AUDIT FIX: Include test metrics for schema consistency with integration tests
@@ -3002,10 +3363,9 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                                         'history': history,
                                         'opt_name': opt_name,
                                         'seed': seed,
-                                        'metadata': {  # ADDED: training metadata
+                                        'metadata': {  # Training metadata for monitoring
                                             'current_lr': optimizer.param_groups[0]['lr'],
                                             'best_val_acc': best_val_acc,
-                                            'patience_counter': patience_counter,
                                             'completed': epoch >= epochs
                                         }
                                     }
@@ -3065,7 +3425,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
 
                         save_run_artifacts(results_dir, 'MNIST', 'SimpleMLP', opt_name,
                                            seed, history, params, device=device, tracker=tracker,
-                                           model=model, save_model=True)  # Save model weights
+                                           model=model, save_model=True, tuning_artifact=tuned_artifacts.get(opt_name))  # Save model weights
 
                         results.append({
                             'optimizer': opt_name,
@@ -3327,19 +3687,16 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
                 except Exception as e:
                     logging.warning(f"Could not restore scheduler state: {e}. Using fresh scheduler.")
             
-            # Early stopping setup - Initialize defaults FIRST
+            # NO EARLY STOPPING - Run full epochs per research proposal
             best_val_acc = 0.0
             best_model_state = None
-            patience = 10
-            patience_counter = 0
+            logging.info(f"Training for full {epochs} epochs (no early stopping)")
             
-            # CRITICAL FIX: Restore early stopping state from checkpoint metadata
-            # Without this, resumed runs lose their early stopping progress and may stop incorrectly
+            # Restore best validation state if resuming
             if checkpoint and 'metadata' in checkpoint:
                 metadata = checkpoint['metadata']
                 best_val_acc = metadata.get('best_val_acc', best_val_acc)
-                patience_counter = metadata.get('patience_counter', patience_counter)
-                logging.info(f"[RESTORED] Early stopping state: best_val_acc={best_val_acc:.2f}%, patience_counter={patience_counter}/{patience}")
+                logging.info(f"[RESTORED] Best validation accuracy: {best_val_acc:.2f}%")
             
             # Track OOM taint status and effective batch size for CIFAR
             # This ensures validity - tainted runs can be identified and excluded from comparisons
@@ -3416,20 +3773,10 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
                     # Verified scheduler.step() is after optimizer.step() in training loop
                     scheduler.step()
                     
-                    # Best model tracking
+                    # Track best model (monitoring only, NO early stopping)
                     if val_acc > best_val_acc:
                         best_val_acc = val_acc
                         best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
-                        patience_counter = 0
-                    else:
-                        patience_counter += 1
-                    
-                    # Early stopping
-                    if patience_counter >= patience:
-                        logging.info(f"Early stopping at epoch {epoch}")
-                        if best_model_state is not None:
-                            model.load_state_dict(best_model_state)
-                        break
 
                     history.append({
                         'epoch': epoch,
@@ -3468,7 +3815,6 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
                                 'metadata': {
                                     'current_lr': optimizer.param_groups[0]['lr'],
                                     'best_val_acc': best_val_acc if 'best_val_acc' in locals() else 0.0,
-                                    'patience_counter': patience_counter if 'patience_counter' in locals() else 0,
                                     'training_time_sec': time.time() - training_start_time if 'training_start_time' in locals() else 0.0,
                                     'total_epochs_trained': epoch + 1,
                                     'completed': epoch >= epochs
@@ -3852,11 +4198,10 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                 except Exception as e:
                     logging.warning(f"Could not restore scheduler state: {e}. Using fresh scheduler.")
             
-            # Early stopping setup - Initialize defaults FIRST
+            # NO EARLY STOPPING - Run full epochs per research proposal
             best_val_acc = 0.0
             best_model_state = None
-            patience = 5  # Shorter patience for transformers
-            patience_counter = 0
+            logging.info(f"Training for full {epochs} epochs (no early stopping)")
 
             # Resume logic with compatibility validation
             ckpt_file = f"IMDB_{model_name.replace('/', '_')}_{opt_name}_lr{lr}_seed{seed}.pt"
@@ -3875,13 +4220,11 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                             saved_opt = checkpoint.get('opt_name', 'unknown')
                             logging.info(f"Loaded checkpoint with compatible optimizer: {saved_opt} -> {opt_name}")
                             
-                            # CRITICAL FIX: Restore early stopping state from checkpoint metadata
-                            # Without this, resumed runs lose their early stopping progress
+                            # Restore best validation accuracy for monitoring
                             if 'metadata' in checkpoint:
                                 metadata = checkpoint['metadata']
                                 best_val_acc = metadata.get('best_val_acc', best_val_acc)
-                                patience_counter = metadata.get('patience_counter', patience_counter)
-                                logging.info(f"[RESTORED] Early stopping state: best_val_acc={best_val_acc:.2f}%, patience_counter={patience_counter}/{patience}")
+                                logging.info(f"[RESTORED] Best validation accuracy: {best_val_acc:.2f}%")
                         except Exception as e:
                             logging.warning(f"Could not load optimizer state: {e}")
                         start_epoch = int(checkpoint.get('epoch', 0)) + 1
@@ -3972,21 +4315,10 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                     # Verified scheduler.step() is after optimizer.step() in training loop
                     scheduler.step()
                     
-                    # AUDIT FIX: Best model tracking based on VALIDATION accuracy (not test)
-                    # This prevents adaptive overfitting to the test set
+                    # Track best model (monitoring only, NO early stopping)
                     if val_acc > best_val_acc:
                         best_val_acc = val_acc
                         best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
-                        patience_counter = 0
-                    else:
-                        patience_counter += 1
-                    
-                    # Early stopping
-                    if patience_counter >= patience:
-                        logging.info(f"Early stopping at epoch {epoch}")
-                        if best_model_state is not None:
-                            model.load_state_dict(best_model_state)
-                        break
 
                     history.append({
                         'epoch': epoch,
@@ -4023,7 +4355,6 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                                 'metadata': {
                                     'current_lr': optimizer.param_groups[0]['lr'],
                                     'best_val_acc': best_val_acc if 'best_val_acc' in locals() else 0.0,
-                                    'patience_counter': patience_counter if 'patience_counter' in locals() else 0,
                                     'training_time_sec': time.time() - training_start_time if 'training_start_time' in locals() else 0.0,
                                     'total_epochs_trained': epoch + 1,
                                     'completed': epoch >= epochs
@@ -4636,11 +4967,10 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                 except Exception as e:
                     logging.warning(f"Could not restore scheduler state: {e}. Using fresh scheduler.")
             
-            # Early stopping setup - Initialize defaults FIRST
+            # NO EARLY STOPPING - Run full epochs per research proposal
             best_dice = 0.0
             best_model_state = None
-            patience = 10
-            patience_counter = 0
+            logging.info(f"Training for full {epochs} epochs (no early stopping)")
 
             # Resume logic with compatibility validation
             ckpt_file = f"Medical_UNet_{opt_name}_lr{lr}_seed{seed}.pt"
@@ -4659,13 +4989,11 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                             saved_opt = checkpoint.get('opt_name', 'unknown')
                             logging.info(f"Loaded checkpoint with compatible optimizer: {saved_opt} -> {opt_name}")
                             
-                            # CRITICAL FIX: Restore early stopping state from checkpoint metadata
-                            # Without this, resumed runs lose their early stopping progress
+                            # Restore best dice for monitoring
                             if 'metadata' in checkpoint:
                                 metadata = checkpoint['metadata']
-                                best_dice = metadata.get('best_dice', best_dice)  # Medical uses Dice instead of accuracy
-                                patience_counter = metadata.get('patience_counter', patience_counter)
-                                logging.info(f"[RESTORED] Early stopping state: best_dice={best_dice:.4f}, patience_counter={patience_counter}/{patience}")
+                                best_dice = metadata.get('best_dice', best_dice)
+                                logging.info(f"[RESTORED] Best dice score: {best_dice:.4f}")
                         except Exception as e:
                             logging.warning(f"Could not load optimizer state: {e}")
                         start_epoch = int(checkpoint.get('epoch', 0)) + 1
@@ -4754,20 +5082,10 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                 # Verified scheduler.step() is after optimizer.step() in training loop
                 scheduler.step()
                 
-                # Best model tracking (based on validation dice score)
+                # Track best model (monitoring only, NO early stopping)
                 if val_dice > best_dice:
                     best_dice = val_dice
                     best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
-                    patience_counter = 0
-                else:
-                    patience_counter += 1
-                
-                # Early stopping
-                if patience_counter >= patience:
-                    logging.info(f"Early stopping at epoch {epoch}")
-                    if best_model_state is not None:
-                        model.load_state_dict(best_model_state)
-                    break
 
                 history.append({
                     'epoch': epoch,
@@ -4806,7 +5124,6 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                             'metadata': {
                                 'current_lr': optimizer.param_groups[0]['lr'],
                                 'best_dice': best_dice if 'best_dice' in locals() else 0.0,
-                                'patience_counter': patience_counter if 'patience_counter' in locals() else 0,
                                 'training_time_sec': time.time() - training_start_time if 'training_start_time' in locals() else 0.0,
                                 'total_epochs_trained': epoch + 1,
                                 'completed': epoch >= epochs
@@ -5986,8 +6303,8 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, resume
                 if len(df) > 0:
                     logging.info(f"Skipping Robustness experiment (already completed)")
                     return df
-            except Exception:
-                pass
+            except Exception as e:
+                logging.debug(f"Failed to read existing robustness result file: {e}")
 
     results = []
     seed = seeds[0] if seeds else 42
@@ -6082,8 +6399,8 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=None, resum
                 if len(df) > 0:
                     logging.info(f"Skipping SAM Sensitivity experiment (already completed)")
                     return df
-            except Exception:
-                pass
+            except Exception as e:
+                logging.debug(f"Failed to read existing SAM sensitivity results: {e}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     seed = seeds[0] if seeds else 42
@@ -6202,8 +6519,8 @@ def run_ablation_study(results_dir="results_ablation", seeds=None, resume=False)
                 if len(df) > 0:
                     logging.info(f"Skipping Ablation Study experiment (already completed)")
                     return df
-            except Exception:
-                pass
+            except Exception as e:
+                logging.debug(f"Failed to read existing ablation results: {e}")
 
     rosenbrock = Rosenbrock()
     initial_point = (-1.5, 2.0)
@@ -6332,8 +6649,8 @@ def run_advanced_training_ablation(results_dir="results_advanced_ablation", seed
                     logging.info(f"Skipping Advanced Training Ablation (already completed)")
                     logging.info(f"   Found {len(df)} configurations in {result_file}")
                     return df
-            except Exception:
-                pass
+            except Exception as e:
+                logging.debug(f"Failed to read existing advanced training ablation summary: {e}")
     
     # Check if training utilities are available
     if not HAS_TRAINING_UTILS:
@@ -7123,8 +7440,8 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
                 if len(df) > 0:
                     logging.info(f"Skipping ResNet18 experiment (already completed)")
                     return df
-            except Exception:
-                pass
+            except Exception as e:
+                logging.debug(f"Failed to read existing ResNet18 result file: {e}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
@@ -7351,8 +7668,8 @@ def run_highdim_experiment(results_dir="results_highdim", seeds=None, quick=Fals
                 if len(df) > 0:
                     logging.info(f"Skipping HighDim experiment (already completed)")
                     return df
-            except Exception:
-                pass
+            except Exception as e:
+                logging.debug(f"Failed to read existing HighDim result file: {e}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")

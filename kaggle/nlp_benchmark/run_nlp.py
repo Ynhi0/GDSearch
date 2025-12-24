@@ -31,8 +31,8 @@ def set_seed(seed: int):
     try:
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug(f"Non-critical error setting cudnn flags in NLP script: {e}")
 
 
 def _try_import_hf():

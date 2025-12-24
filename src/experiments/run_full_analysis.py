@@ -165,8 +165,8 @@ def run_full_pipeline(
                         ev = df[df['phase'] == 'eval']
                         if not ev.empty:
                             map_A[s] = float(ev[metric].iloc[-1])
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logging.debug(f"Non-critical failure parsing {f}: {e}")
                 for f in files_B:
                     s = _extract_seed(f)
                     if s is None:
@@ -180,8 +180,8 @@ def run_full_pipeline(
                         ev = df[df['phase'] == 'eval']
                         if not ev.empty:
                             map_B[s] = float(ev[metric].iloc[-1])
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logging.debug(f"Non-critical failure parsing {f}: {e}")
                 common = sorted(set(map_A) & set(map_B))
                 seeds_A_only = set(map_A) - set(map_B)
                 seeds_B_only = set(map_B) - set(map_A)

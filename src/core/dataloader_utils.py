@@ -20,10 +20,8 @@ def _worker_init(worker_id: int, seed: int):
     random.seed(worker_seed)
     try:
         torch.manual_seed(worker_seed)
-    except Exception:
-        pass
-
-
+    except Exception as e:
+        logging.debug(f"Could not set torch seed in worker {worker_id}: {e}")
 def make_dataloader(
     dataset: Dataset,
     batch_size: int = 64,
@@ -110,8 +108,8 @@ def make_dataloader(
             pytorch_version = tuple(int(x) for x in torch.__version__.split('.')[:2])
             if pytorch_version >= (1, 7):
                 dl_kwargs['persistent_workers'] = True
-        except Exception:
-            pass  # Skip if version parsing fails
+        except Exception as e:
+            logging.debug(f"PyTorch version parsing failed: {e}")  # Skip if version parsing fails
 
     loader = DataLoader(dataset, **dl_kwargs)
     

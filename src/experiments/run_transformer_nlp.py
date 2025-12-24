@@ -25,11 +25,14 @@ import time
 from pathlib import Path
 from typing import Dict, Tuple
 
+import logging
 import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 from src.core.training_utils import set_seed
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
 
 
 def _try_import_hf():
@@ -99,8 +102,8 @@ def run_single_imdb(optimizer_name: str, seed: int, lr: float, epochs: int, batc
             if len(df) > 0:
                 print(f"Skipping {optimizer_name} seed {seed} (already completed)")
                 return df
-        except Exception:
-            pass  # File exists but corrupted, re-run
+        except Exception as e:
+            logging.warning(f"Corrupted output file {out_path}, will re-run: {e}")  # File exists but corrupted, re-run
 
     # Set environment variables to avoid warnings
     import os

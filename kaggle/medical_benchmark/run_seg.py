@@ -34,8 +34,8 @@ def set_seed(seed: int):
     try:
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug(f"Non-critical error setting cudnn flags in medical script: {e}")
 
 
 class SegDataset(Dataset):

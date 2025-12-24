@@ -230,8 +230,9 @@ class ConvergenceAnalyzer:
                 if p_value_sub < 0.05 and r_value_sub**2 > 0.7:
                     return 'sublinear', abs(slope_sub)
                 
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.debug(f"Convergence fit failure: {e}")
         
         return 'unknown', np.nan
     

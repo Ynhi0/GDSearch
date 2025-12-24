@@ -331,8 +331,7 @@ results/
 3. ✅ **Dataloader Utils:** Added Windows check to `src/core/dataloader_utils.py`
 4. ✅ **Test Schema:** All integration tests now pass with `grad_norm` column
 5. ✅ **Syntax Errors:** Fixed indentation in history.append() block
-6. ✅ **Import Safety:** All files import cleanly without side effects
-
+6. ✅ **Import Safety:** All files import cleanly without side effects7. ✅ **Tuning Robustness & Auditability:** Added multi-seed tuning aggregation, optional top-K cross-evaluation (`GDSEARCH_TUNE_EVAL_ALL_CANDIDATES`, `GDSEARCH_TUNE_TOPK`), and automatic tuning metadata artifacts for reproducibility and auditability
 ---
 
 ## 📝 Notes for Research Report

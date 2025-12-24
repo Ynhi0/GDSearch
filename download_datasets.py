@@ -18,10 +18,13 @@ Note: MedMNIST is now REQUIRED (not optional) for medical experiments.
 
 import os
 import sys
+import logging
 import torch
 import torchvision
 import torchvision.transforms as transforms
 from pathlib import Path
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
 
 def download_mnist():
     """Download MNIST dataset."""
@@ -328,8 +331,8 @@ def main():
         import shutil
         total_size = sum(f.stat().st_size for f in data_dir.rglob('*') if f.is_file())
         print(f"Disk usage for {data_dir}: {total_size / (1024**2):.2f} MB")
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug(f"Unable to compute disk usage: {e}")
 
 if __name__ == '__main__':
     main()

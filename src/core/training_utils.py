@@ -83,8 +83,8 @@ def set_seed(seed: int):
     try:
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug(f"Non-critical error setting cuDNN deterministic flags: {e}")
     
     try:
         torch.use_deterministic_algorithms(True)
