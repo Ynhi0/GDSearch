@@ -1,0 +1,48 @@
+name: Tuning Audit CI
+
+on:
+  pull_request:
+    paths:
+      - 'run_all_kaggle.py'
+      - 'tests/**'
+      - '.github/workflows/**'
+
+jobs:
+  tuning-audit:
+    name: Tuning Audit (ULTRA_QUICK-safe)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Set ULTRA_QUICK env for CI safety
+        run: |
+          echo "GDSEARCH_TUNE_EVAL_ALL_CANDIDATES=false" >> $GITHUB_ENV
+          echo "GDSEARCH_TUNE_SEED_COUNT=1" >> $GITHUB_ENV
+          echo "GDSEARCH_TUNE_TOPK=1" >> $GITHUB_ENV
+          echo "GDSEARCH_ULTRA_QUICK_LIMIT=1" >> $GITHUB_ENV
+
+      - name: Run ULTRA_QUICK tuning integration test
+        run: |
+          # Run only the ULTRA_QUICK-safe integration tuning test and smoke tests
+          python -m pytest tests/test_integration_tuning_artifact.py -q
+          python -m pytest tests/test_tuning_smoke_ci.py -q
+
+      - name: Run tuning artifact unit tests
+        run: |
+          python -m pytest tests/test_tuning_artifact.py -q
+
+      - name: Quick repo health check (no venv files)
+        run: |
+          python scripts/ci_check_repo_health.py || true
