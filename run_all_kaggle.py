@@ -7851,8 +7851,9 @@ Examples:
     )
     
     # Initialize TimeBudgetManager for Kaggle 12h timeout protection
-    # Uses 11h max with 10.5h warning to leave buffer for cleanup
-    time_budget = TimeBudgetManager(max_hours=11.0, warning_hours=10.5)
+    # Use user-specified time budget or default to 11.5h (leaving 30min buffer)
+    # Note: Kaggle has hard 12h limit; we need buffer for graceful shutdown
+    time_budget = TimeBudgetManager(max_hours=args.time_budget, warning_hours=args.time_budget - 0.5)
     
     def graceful_save():
         """Save partial results on time budget exceeded."""
