@@ -3915,6 +3915,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
     seed0 = seeds[0] if seeds else None
     try:
         save_run_artifacts(results_dir, 'CIFAR10', 'ResNet18', 'Adam', seed0, all_results, params={
+                                       'tuning_artifact': locals().get('tuned_artifacts', {}).get('Adam') if 'tuned_artifacts' in locals() else None,
             'epochs': epochs,
             'batch_size': 128
         }, device=device, tracker=tracker)
@@ -4426,7 +4427,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
             # Save per-run artifacts for this optimizer/seed
             try:
                 params = {'lr': lr, 'epochs': epochs, 'batch_size': batch_size, 'model_name': model_name}
-                save_run_artifacts(results_dir, 'IMDB', model_name.replace('/', '_'), opt_name, seed, history, params, device=device, tracker=tracker)
+                save_run_artifacts(results_dir, 'IMDB', model_name.replace('/', '_'), opt_name, seed, history, params, device=device, tracker=tracker, tuning_artifact=locals().get('tuned_artifacts', {}).get(opt_name))
             except Exception:
                 logging.debug("Failed to save per-run NLP artifact for %s seed %s", opt_name, seed)
 
@@ -6235,7 +6236,7 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, resume=False):
                 # Save per-run artifact for this 2D optimization run
                 try:
                     params = {'function': func_name, 'optimizer': opt_name, 'max_iter': max_iter}
-                    save_run_artifacts(results_dir, '2D', func_name, opt_name, seed, history, params, device=None, tracker=None)
+                    save_run_artifacts(results_dir, '2D', func_name, opt_name, seed, history, params, device=None, tracker=None, tuning_artifact=locals().get('tuned_artifacts', {}).get(opt_name))
                 except Exception:
                     logging.debug("Failed to save 2D artifact for %s %s seed %s", func_name, opt_name, seed)
 
@@ -6476,7 +6477,7 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=None, resum
         # Save per-run artifact for this rho
         try:
             params = {'rho': rho, 'epochs': 3, 'batch_size': 256}
-            save_run_artifacts(results_dir, 'MNIST', 'SimpleMLP', f'SAM_rho_{rho}', 42, [{'final_loss': epoch_loss}], params, device=device, tracker=None)
+            save_run_artifacts(results_dir, 'MNIST', 'SimpleMLP', f'SAM_rho_{rho}', 42, [{'final_loss': epoch_loss}], params, device=device, tracker=None, tuning_artifact=locals().get('tuned_artifacts', {}).get(f'SAM_rho_{rho}'))
         except Exception:
             logging.debug("Failed to save SAM sensitivity artifact for rho %s", rho)
 
@@ -6586,7 +6587,7 @@ def run_ablation_study(results_dir="results_ablation", seeds=None, resume=False)
         # Save per-run artifact for ablation configuration
         try:
             params = params if isinstance(params, dict) else {'params': params}
-            save_run_artifacts(results_dir, 'Ablation', '2D_Rosenbrock', opt_name, 42, [{'final_loss': loss.item(), 'iterations': i+1}], params, device=None, tracker=None)
+            save_run_artifacts(results_dir, 'Ablation', '2D_Rosenbrock', opt_name, 42, [{'final_loss': loss.item(), 'iterations': i+1}], params, device=None, tracker=None, tuning_artifact=locals().get('tuned_artifacts', {}).get(opt_name))
         except Exception:
             logging.debug("Failed to save ablation artifact for %s", opt_name)
 
@@ -7630,7 +7631,7 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
     try:
         seed0 = seeds[0] if seeds else None
         params = {'epochs': epochs, 'batch_size': 128}
-        save_run_artifacts(results_dir, 'ResNet18', 'ResNet18', 'Adam', seed0, results, params, device=device, tracker=tracker)
+        save_run_artifacts(results_dir, 'ResNet18', 'ResNet18', 'Adam', seed0, results, params, device=device, tracker=tracker, tuning_artifact=locals().get('tuned_artifacts', {}).get('Adam'))
     except Exception:
         logging.debug("Failed to save per-run ResNet artifact")
 
@@ -7763,7 +7764,7 @@ def run_highdim_experiment(results_dir="results_highdim", seeds=None, quick=Fals
                 # Save per-run artifact for this high-dim run
                 try:
                     params = {'dimension': dim, 'optimizer': opt_name, 'max_iter': max_iter}
-                    save_run_artifacts(results_dir, 'HighDim', f'Dim{dim}', opt_name, seed, history, params, device=device, tracker=tracker)
+                    save_run_artifacts(results_dir, 'HighDim', f'Dim{dim}', opt_name, seed, history, params, device=device, tracker=tracker, tuning_artifact=locals().get('tuned_artifacts', {}).get(opt_name))
                 except Exception:
                     logging.debug("Failed to save highdim artifact for dim %s opt %s seed %s", dim, opt_name, seed)
 
