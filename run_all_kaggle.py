@@ -6366,7 +6366,7 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, resume
     df = pd.DataFrame(results)
     df.to_csv(f"{results_dir}/robustness_results.csv", index=False)
 
-    print(f"\n💾 Results saved to {results_dir}/robustness_results.csv")
+    print(f"\n Results saved to {results_dir}/robustness_results.csv")
     
     # Generate visualizations for Robustness experiment
     try:
@@ -7127,7 +7127,7 @@ def run_code_quality_checks():
             print("flake8 not available")
 
         # Run formatting check
-        print("🎨 Checking code formatting with black...")
+        print(" Checking code formatting with black...")
         try:
             result = subprocess.run([sys.executable, "-m", "black", "--check", "--diff", "src/"],
                                   capture_output=True, text=True)
