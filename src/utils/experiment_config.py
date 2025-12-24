@@ -56,7 +56,7 @@ class ExperimentConfig:
     save_plots: bool = True
     save_checkpoints: bool = True
     
-    # Scientific rigor
+    # Reproducibility
     exclude_tainted: bool = True  # Exclude OOM-tainted runs from aggregation
     validate_fairness: bool = True  # Check tuning budget parity
     strict_fairness: bool = False  # Raise on fairness violations
@@ -150,7 +150,7 @@ class ExperimentConfig:
             f"  Checkpointing: {self.use_checkpointing}",
             f"  Mixed precision: {self.use_mixed_precision}",
             "",
-            "Scientific rigor:",
+            "Reproducibility:",
             f"  Exclude tainted runs: {self.exclude_tainted}",
             f"  Validate fairness: {self.validate_fairness}",
             f"  Strict fairness: {self.strict_fairness}",

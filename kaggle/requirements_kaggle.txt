@@ -15,7 +15,7 @@ tqdm>=4.65.0
 # System Monitoring (CRITICAL: used in run_all_kaggle.py line 42)
 psutil>=5.9.0
 
-# Scientific Computing (CRITICAL: required for statistical analysis)
+# Numerical Computing (CRITICAL: required for statistical analysis)
 scipy>=1.10.0
 
 # Experiment Tracking & Hyperparameter Tuning

@@ -23,7 +23,7 @@ A comprehensive Python framework for comparing gradient descent algorithms on 2D
 - Curvature analysis (trajectory turning angles)
 - Generalization gap monitoring
 
-### Scientific Rigor
+### Reproducibility & Statistical Validity
 
 - **Multi-Seed Experiments:** Run experiments with multiple random seeds for statistical reliability
 - **Statistical Analysis:** T-tests, effect sizes (Cohen's d), 95% confidence intervals
@@ -309,7 +309,7 @@ The primary interface for running experiments is `run_all_kaggle.py`, which supp
 # Quick test with 3 seeds (ultra-fast mode)
 python run_all_kaggle.py --ultra-quick --seeds 42,123,456
 
-# Full reproducible run with 10 seeds (statistical rigor)
+# Full reproducible run with 10 seeds (statistical validity)
 python run_all_kaggle.py --seeds 42,123,456,789,1011,1213,1415,1617,1819,2021
 
 # Run specific experiments only

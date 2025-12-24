@@ -2,9 +2,9 @@
 OOM-safe training utilities for PyTorch models.
 
 This module provides robust out-of-memory (OOM) handling with automatic batch size
-reduction, taint tracking for scientific validity, and proper error recovery.
+reduction, taint tracking for validity, and proper error recovery.
 
-Scientific Validity Note:
+Validity Note:
 When OOM occurs and batch size is reduced, the training run is marked as "tainted"
 to indicate that the run used variable batch sizes, which invalidates fair optimizer
 comparisons in benchmarking studies.
@@ -45,8 +45,8 @@ def oom_safe_train_step(
     
     When CUDA OOM occurs, this function automatically reduces the batch size
     and retries the training step. The run is marked as "tainted" to indicate
-    that it used variable batch sizes, which is scientifically invalid for
-    fair optimizer comparisons.
+    that it used variable batch sizes, which invalidates fair optimizer
+    comparisons.
     
     Args:
         model: PyTorch model
@@ -260,7 +260,7 @@ def oom_safe_train_step(
                 # Mark run as tainted and log warning
                 tainted = True
                 logging.warning(
-                    "SCIENTIFIC INTEGRITY WARNING: Run Tainted - "
+                    "INTEGRITY WARNING: Run Tainted - "
                     "Batch size reduced from %d to %d due to OOM",
                     original_batch_size,
                     new_size

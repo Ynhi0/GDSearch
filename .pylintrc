@@ -30,7 +30,7 @@ disable=
     # Notebook cells and scripts often have imports at top level
     import-outside-toplevel,
     
-    # Scientific code often needs descriptive variable names
+    # Numeric code often needs descriptive variable names
     invalid-name,
     
     # Allow TODO comments during development

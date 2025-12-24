@@ -1,5 +1,5 @@
 """
-Test suite for audit fixes - Scientific Integrity & Robustness
+Test suite for audit fixes - Integrity & Robustness
 
 This test file validates all critical fixes from the security audit:
 1. Test-leakage enforcement (untagged loaders must fail)

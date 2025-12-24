@@ -204,7 +204,7 @@ def download_medmnist(dataset_name: str = 'pathmnist', strict: bool = False) -> 
     except ImportError as e:
         msg = (f"MedMNIST package not installed: {e}\n"
                "   REQUIRED for medical experiments. Install with: pip install medmnist\n"
-               "   For publication-quality results, MedMNIST is mandatory (not synthetic data).")
+               "   For high-quality results, MedMNIST is recommended (not synthetic data).")
         print(f"{msg}")
         if strict:
             raise RuntimeError(msg) from e

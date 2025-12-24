@@ -548,7 +548,7 @@ class SelfHealingTrainer:
     - Clears GPU cache and retries
     - Logs recovery actions
     
-    SCIENTIFIC INTEGRITY WARNING:
+    INTEGRITY WARNING:
     When OOM recovery is triggered, this trainer DROPS data from the batch tail:
         inputs[:new_size] is kept, inputs[new_size:] is DISCARDED
     

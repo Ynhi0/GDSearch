@@ -268,10 +268,10 @@ class ReadinessChecker:
             self.log_fail("Golden test", str(e))
             return False
     
-    def check_scientific_integrity_warnings(self):
+    def check_integrity_warnings(self):
         """Check OOM recovery warnings are present."""
         logging.info("\n" + "="*80)
-        logging.info("CHECK 8: Scientific Integrity Warnings")
+        logging.info("CHECK 8: Integrity Warnings")
         logging.info("="*80)
         
         run_all_path = Path('run_all_kaggle.py')
@@ -279,7 +279,7 @@ class ReadinessChecker:
             content = f.read()
         
         # Check for OOM warnings
-        warning_count = content.count('SCIENTIFIC INTEGRITY: This run is INVALID')
+        warning_count = content.count('INTEGRITY: This run is INVALID')
         
         if warning_count >= 3:
             self.log_pass(f"OOM recovery warnings present ({warning_count} locations)")
@@ -293,7 +293,7 @@ class ReadinessChecker:
             with open(enhancements_path, encoding='utf-8') as f:
                 enhancements_content = f.read()
             
-            if 'SCIENTIFIC INTEGRITY WARNING' in enhancements_content:
+            if 'INTEGRITY WARNING' in enhancements_content:
                 self.log_pass("SelfHealingTrainer docstring warning present")
             else:
                 self.log_warning("SelfHealingTrainer", "Missing docstring warning")
@@ -378,7 +378,7 @@ def main():
     checker.check_results_directory()
     checker.check_src_imports()
     checker.check_unit_tests()
-    checker.check_scientific_integrity_warnings()
+    checker.check_integrity_warnings()
     checker.check_golden_test()
     checker.run_dry_run_experiments()
     

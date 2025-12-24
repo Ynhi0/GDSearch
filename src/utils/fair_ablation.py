@@ -1,7 +1,7 @@
 """
 Fair Optimizer Ablation Framework
 
-Implements hyperparameter fairness protocols for scientifically rigorous optimizer comparisons.
+Implements hyperparameter fairness protocols for rigorous optimizer comparisons.
 Based on best practices from:
 - Choi et al. "On Empirical Comparisons of Optimizers for Deep Learning" NeurIPS 2019
 - Schmidt et al. "Descending through a Crowded Valley" ICML 2021

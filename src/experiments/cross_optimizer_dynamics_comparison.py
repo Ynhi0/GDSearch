@@ -139,7 +139,7 @@ def run_single_optimizer_with_dynamics(
         if (epoch + 1) % 10 == 0:
             print(f"  Epoch {epoch+1}/{epochs}: Loss={avg_loss:.4f}, Train Acc={train_acc:.2f}%")
     
-    # Final test evaluation (only after training completes - for scientific rigor)
+    # Final test evaluation (only after training completes - use test set only for final evaluation)
     print(f"Evaluating final performance on test set...")
     model.eval()
     test_correct = 0

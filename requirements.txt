@@ -13,13 +13,13 @@
 # by reinstalling Pandas (not NumPy) to match the platform version.
 
 # ============================================================================
-# CORE SCIENTIFIC STACK - PINNED FOR REPRODUCIBILITY
+# CORE ANALYTICS STACK - PINNED FOR REPRODUCIBILITY
 # ============================================================================
 # NOTE: These pins are for local/dev reproducibility. Kaggle uses its own optimized versions.
 numpy==1.26.4  # PINNED: Compatible with PyTorch 2.6 and scipy
 matplotlib==3.9.2  # PINNED: Stable plotting
 pandas==2.2.3  # PINNED: Data analysis
-scipy==1.14.1  # PINNED: Scientific computing
+scipy==1.14.1  # PINNED: Numerical computing
 
 # ============================================================================
 # DEEP LEARNING STACK - PINNED

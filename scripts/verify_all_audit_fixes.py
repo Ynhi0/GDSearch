@@ -296,7 +296,7 @@ def main():
         print("  ✅ OOM/SAM detection: Uses explicit requires_closure flag")
         print("  ✅ Statistical analysis: Proper boolean flag handling")
         print("  ✅ Tuning integrity: Validation enforcement in place")
-        print("\nThe codebase is now production-ready with A* scientific rigor.")
+        print("\nThe codebase is now production-ready with A* validation standards.")
         return 0
         
     except AssertionError as e:

@@ -7,7 +7,7 @@ This violates hyperparameter fairness principles and may produce biased results.
 AUDIT FIX: This script now requires --allow-unfair-ablations flag to prevent
 accidental use in canonical benchmarks.
 
-For scientifically rigorous comparisons, use run_fair_optimizer_ablation.py instead,
+For rigorous comparisons, use run_fair_optimizer_ablation.py instead,
 which implements HYPERPARAMETER_FAIRNESS_PROTOCOL.md with:
 - Published defaults from original papers (with citations)
 - OR per-optimizer LR sweeps with appropriate ranges
@@ -64,14 +64,14 @@ def run_optimizer_ablation(
     Run ablation study comparing optimizer variants.
     
     HYPERPARAMETER FAIRNESS WARNING:
-    This function uses lr=0.01 for ALL optimizers, which is scientifically unfair:
+    This function uses lr=0.01 for ALL optimizers, which is methodologically unfair:
     - SGD typically performs better with higher LR (0.1)
     - Adam/AdamW typically perform better with lower LR (0.001)
     
     AUDIT FIX: This script requires --allow-unfair-ablations flag in sys.argv
     to prevent accidental use in fair benchmarks.
     
-    For publication-quality results, use run_fair_optimizer_ablation.py or
+    For higher-quality results, use run_fair_optimizer_ablation.py or
     implement proper per-optimizer tuning per HYPERPARAMETER_FAIRNESS_PROTOCOL.md
     
     Args:

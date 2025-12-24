@@ -138,7 +138,7 @@ def run_fair_optimizer_ablation_published_defaults(
     This is the LEAST recommended strategy but acceptable when:
     1. Computational budget is extremely limited
     2. Results are clearly labeled as using defaults (not optimized)
-    3. All defaults are cited from original publications
+    3. All defaults are cited from original papers
     
     Follows HYPERPARAMETER_FAIRNESS_PROTOCOL.md Strategy C.
     """
@@ -288,7 +288,7 @@ def run_fair_optimizer_ablation_published_defaults(
 
 
 def plot_fair_ablation_results(histories, stats_df, plots_dir, function_name):
-    """Generate publication-quality plots with error bars."""
+    """Generate high-quality plots with error bars."""
     os.makedirs(plots_dir, exist_ok=True)
     
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
@@ -331,11 +331,7 @@ if __name__ == '__main__':
         test_function=test_fn,
         initial_point=initial_pt,
         max_iterations=10000,
-        seeds=[42, 123, 456, 789, 1011],  # 5 seeds for publication quality
-        results_dir='results/fair_ablation',
-        plots_dir='results/fair_ablation/plots'
-    )
-    
+        seeds=[42, 123, 456, 789, 1011],  # 5 seeds for robust evaluation
     logger.info("\n" + "="*80)
     logger.info("ABLATION STUDY COMPLETE")
     logger.info("="*80)

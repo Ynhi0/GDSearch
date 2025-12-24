@@ -5,7 +5,7 @@ This script demonstrates the full pipeline:
 1. Run multi-seed experiments with dataset provenance logging
 2. Compute empirical convergence rates
 3. Compare to theoretical bounds
-4. Generate publication-ready reports and figures
+4. Generate high-quality reports and figures
 
 Usage:
     python scripts/run_experiment_with_analysis.py --dataset MNIST --optimizers SGD Adam AdamW --seeds 42,123,456

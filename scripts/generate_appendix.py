@@ -378,7 +378,7 @@ def main():
     print(f"  ✅ Complete transparency")
     print(f"  ✅ Full reproducibility")
     print(f"  ✅ Respect for readers")
-    print(f"  ✅ Scientific rigor")
+    print(f"  ✅ Reproducibility")
     
     print(f"\n📖 Next steps:")
     print(f"  1. Review generated appendix: {appendix_path}")

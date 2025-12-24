@@ -2,7 +2,7 @@
 """
 Run benchmark-quality MNIST experiments with multiple seeds.
 
-This script runs comprehensive MNIST experiments for scientific benchmark:
+This script runs comprehensive MNIST experiments for benchmark:
 - 10 seeds per optimizer for robust statistics
 - 5 optimizers: SGD, SGD+Momentum, Adam, AdamW, AMSGrad
 - Statistical analysis with paired tests and Holm-Bonferroni correction

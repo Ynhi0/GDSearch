@@ -189,7 +189,7 @@ class TestEdgeCases:
 
 
 class TestTaintIntegrity:
-    """Test that taint tracking maintains scientific integrity."""
+    """Test that taint tracking maintains integrity."""
     
     def test_taint_flag_propagation(self):
         """Test that taint flag is properly propagated."""

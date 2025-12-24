@@ -1596,7 +1596,7 @@ def run_batch_ablation(dataset_name='MNIST', results_dir='results/batch_ablation
         full_train_dataset = torchvision.datasets.MNIST(root='./data', train=True, download=True, transform=transform)
         test_dataset = torchvision.datasets.MNIST(root='./data', train=False, transform=transform)
         
-        # Create train/validation split for scientific rigor
+        # Create train/validation split
         val_split = 0.10
         train_size = int((1 - val_split) * len(full_train_dataset))
         val_size = len(full_train_dataset) - train_size
@@ -1621,7 +1621,7 @@ def run_batch_ablation(dataset_name='MNIST', results_dir='results/batch_ablation
                                             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
                                         ]))
         
-        # Create train/validation split for scientific rigor
+        # Create train/validation split
         val_split = 0.10
         train_size = int((1 - val_split) * len(full_train_dataset))
         val_size = len(full_train_dataset) - train_size
@@ -1705,7 +1705,7 @@ def run_batch_ablation(dataset_name='MNIST', results_dir='results/batch_ablation
                 
                 avg_loss = total_loss / len(train_loader)
                 
-                # Validation accuracy (not test - for scientific rigor)
+                # Validation accuracy (use validation set for model selection)
                 model.eval()
                 correct = 0
                 with torch.no_grad():
@@ -1828,7 +1828,7 @@ def run_scheduler_ablation(dataset_name='MNIST', results_dir='results/scheduler_
         full_train_dataset = torchvision.datasets.MNIST(root='./data', train=True, download=True, transform=transform)
         test_dataset = torchvision.datasets.MNIST(root='./data', train=False, transform=transform)
         
-        # Create train/validation split for scientific rigor
+        # Create train/validation split
         val_split = 0.10
         train_size = int((1 - val_split) * len(full_train_dataset))
         val_size = len(full_train_dataset) - train_size
@@ -1853,7 +1853,7 @@ def run_scheduler_ablation(dataset_name='MNIST', results_dir='results/scheduler_
                                             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
                                         ]))
         
-        # Create train/validation split for scientific rigor
+        # Create train/validation split
         val_split = 0.10
         train_size = int((1 - val_split) * len(full_train_dataset))
         val_size = len(full_train_dataset) - train_size
@@ -1917,7 +1917,7 @@ def run_scheduler_ablation(dataset_name='MNIST', results_dir='results/scheduler_
             # CRITICAL FIX: scheduler.step() called after optimizer.step() completes for all batches
             scheduler.step()  # Step scheduler after epoch
             
-            # Validation accuracy (not test - for scientific rigor)
+            # Validation accuracy (use validation set for model selection)
             model.eval()
             correct = 0
             with torch.no_grad():
@@ -2542,7 +2542,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                 val_loader = make_dataloader(val_subset, batch_size=test_bs, shuffle=False, 
                                             split_type='validation', **dl_kwargs)
                 
-                # === SCIENTIFIC FAIRNESS: Equal tuning budget for all optimizers ===
+                # === FAIRNESS: Equal tuning budget for all optimizers ===
                 # All optimizers receive identical n_trials and epochs to ensure fair comparison
                 # This prevents biasing results toward specific optimizer families
                 n_trials = 5 if quick else 15
@@ -2562,7 +2562,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                 ]
                 
                 logging.info(f"Tuning ALL optimizers with equal budget: n_trials={n_trials}, epochs={tune_epochs}")
-                logging.info("This ensures scientific fairness - all optimizers tuned with identical compute budget")
+                logging.info("This ensures fairness - all optimizers tuned with identical compute budget")
                 
                 for opt_name in optimizers_to_tune:
                     logging.info(f"  Tuning {opt_name}...")
@@ -3018,7 +3018,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                                 logging.error(f"VERIFICATION WARNING: Run Tainted for {opt_name} seed {seed}")
                                 logging.error(f"OOM Error detected for {opt_name}: {e}")
                                 logging.info("Self-Healing: Reducing batch size - skipping this config")
-                                logging.warning("SCIENTIFIC INTEGRITY: This run is INVALID for strict convergence analysis.")
+                                logging.warning("INTEGRITY: This run is INVALID for strict convergence analysis.")
                                 logging.warning("    Re-run with smaller fixed batch size for high-quality results.")
                                 torch.cuda.empty_cache()
                                 continue  # Skip this optimizer config
@@ -3199,7 +3199,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
     train_dataset, test_dataset = download_cifar10()
     logging.info("CIFAR-10 dataset loaded successfully")
     
-    # Create train/validation split for scientific rigor
+    # Create train/validation split
     val_split = 0.10
     full_train_size = len(train_dataset)
     train_size = int((1 - val_split) * full_train_size)
@@ -3342,7 +3342,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
                 logging.info(f"[RESTORED] Early stopping state: best_val_acc={best_val_acc:.2f}%, patience_counter={patience_counter}/{patience}")
             
             # Track OOM taint status and effective batch size for CIFAR
-            # This ensures scientific validity - tainted runs can be identified and excluded from comparisons
+            # This ensures validity - tainted runs can be identified and excluded from comparisons
             run_tainted = False
             effective_batch_size = 128  # Will be updated if OOM recovery occurs
             original_batch_size = 128
@@ -3397,7 +3397,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
                         logging.error(f"SANITY CHECK FAILED: Train accuracy {train_acc:.1f}% is suspiciously low for CIFAR-10 epoch {epoch}")
                         logging.error("This may indicate a bug in the training loop")
 
-                    # Validation (not test - for scientific rigor)
+                    # Validation (not test - use validation set for model selection)
                     model.eval()
                     val_loss, val_correct = 0, 0
                     with torch.no_grad():
@@ -3486,7 +3486,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
                 else:
                     logging.warning("No best model state saved - using final epoch weights for test evaluation")
 
-                # Final test evaluation (only after training completes - for scientific rigor)
+                # Final test evaluation (only after training completes - use test set only for final evaluation)
                 logging.info("Evaluating final performance on test set...")
                 model.eval()
                 test_loss, test_correct = 0, 0
@@ -3507,7 +3507,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
                 if "out of memory" in str(e).lower():
                     logging.error(f"OOM Error detected for {opt_name}: {e}")
                     logging.info("Self-Healing: Marking run as TAINTED and continuing with reduced functionality")
-                    logging.warning("SCIENTIFIC INTEGRITY: This run is TAINTED for strict convergence analysis.")
+                    logging.warning("INTEGRITY: This run is TAINTED for strict convergence analysis.")
                     logging.warning("    Re-run with smaller fixed batch size for high-quality results.")
                     
                     # Mark as tainted instead of skipping
@@ -3739,7 +3739,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
             tokenized = raw.map(preprocess, batched=True)
 
             # AUDIT FIX: Create proper train/val/test split to prevent test set leakage
-            # Scientific validity requires validation set for early stopping, not test set
+            # Validity requires validation set for early stopping, not test set
             train_size_total = min(train_size, len(tokenized['train']))
             val_size = max(int(train_size_total * 0.15), 100)  # 15% for validation, min 100 samples
             actual_train_size = train_size_total - val_size
@@ -3777,7 +3777,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
             # Use num_workers=0 to avoid tokenizer parallelism issues with DataLoader forking
             train_loader = make_dataloader(train_ds, batch_size=batch_size, shuffle=True,
                                            seed=seed, num_workers=0, collate_fn=collate_fn)
-            # AUDIT FIX: Add validation loader for scientific validity
+            # AUDIT FIX: Add validation loader for validity
             val_loader = make_dataloader(val_ds, batch_size=batch_size, shuffle=False,
                                          seed=seed, num_workers=0, collate_fn=collate_fn)
             test_loader = make_dataloader(test_ds, batch_size=batch_size, shuffle=False,
@@ -4041,7 +4041,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                 else:
                     logging.warning("No best model state saved - using final epoch weights for test evaluation")
 
-                # Final test evaluation (only after training completes - for scientific rigor)
+                # Final test evaluation (only after training completes - use test set only for final evaluation)
                 logging.info("Evaluating final performance on test set...")
                 model.eval()
                 test_loss = 0.0
@@ -4073,7 +4073,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                 if "out of memory" in str(e).lower():
                     logging.error(f"OOM Error detected for {opt_name}: {e}")
                     logging.info("Self-Healing: Transformer OOM - skipping this config")
-                    logging.warning("SCIENTIFIC INTEGRITY: This run is INVALID for strict convergence analysis.")
+                    logging.warning("INTEGRITY: This run is INVALID for strict convergence analysis.")
                     logging.warning("    Re-run with smaller fixed batch size for high-quality results.")
                     torch.cuda.empty_cache()
                     continue  # Skip this optimizer config
@@ -4288,8 +4288,6 @@ def run_nlp_experiment_simple(results_dir="results_nlp", seeds=None, epochs=10, 
     X_test = torch.tensor(test_encoded, dtype=torch.long)
     y_test = torch.tensor(test_labels, dtype=torch.long)
     
-    # SCIENTIFIC RIGOR FIX: Create validation split from training data
-    # This prevents adaptive overfitting by isolating test set from training decisions
     val_size = int(0.1 * len(X_train))
     indices = torch.randperm(len(X_train))
     train_indices = indices[val_size:]
@@ -4380,7 +4378,7 @@ def run_nlp_experiment_simple(results_dir="results_nlp", seeds=None, epochs=10, 
                     train_loss /= len(train_loader)
                     train_acc = 100.0 * train_correct / max(1, train_total)  # Protect division by zero
                     
-                    # SCIENTIFIC RIGOR: Use validation set for per-epoch monitoring
+                    # REPRODUCIBILITY: Use validation set for per-epoch monitoring
                     # Test set is reserved for final evaluation only
                     model.eval()
                     val_loss = 0
@@ -4412,7 +4410,7 @@ def run_nlp_experiment_simple(results_dir="results_nlp", seeds=None, epochs=10, 
                     if epoch == epochs - 1 or epoch == 0:
                         print(f"      Epoch {epoch+1}/{epochs} - Train: {train_acc:.1f}% | Val: {val_acc:.1f}%")
                 
-                # SCIENTIFIC RIGOR: Final test evaluation AFTER training completes
+                # REPRODUCIBILITY: Final test evaluation AFTER training completes
                 # This ensures test set is only used once for unbiased generalization estimate
                 model.eval()
                 final_test_loss = 0
@@ -4588,7 +4586,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                 kaggle_path=kaggle_path
             )
             
-            # Create train/validation split for scientific rigor
+            # Create train/validation split
             val_split = 0.10
             train_size = int((1 - val_split) * len(train_ds))
             val_size = len(train_ds) - train_size
@@ -4731,7 +4729,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                 train_loss /= max(1, train_total)
                 train_dice /= max(1, train_total)
 
-                # Validation (not test - for scientific rigor)
+                # Validation (not test - use validation set for model selection)
                 model.eval()
                 val_loss = 0.0
                 val_dice = 0.0
@@ -4826,7 +4824,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
             else:
                 logging.warning("No best model state saved - using final epoch weights for test evaluation")
 
-            # Final test evaluation (only after training completes - for scientific rigor)
+            # Final test evaluation (only after training completes - use test set only for final evaluation)
             logging.info("Evaluating final performance on test set...")
             model.eval()
             test_loss = 0.0
@@ -5760,7 +5758,7 @@ def generate_final_summary_report(results_dir, experiment_results):
         f.write("If you use these results, please cite:\n")
         f.write("```\n")
         f.write("GDSearch: Gradient Descent Optimizer Comparison Platform\n")
-        f.write("Multi-seed reproducible experiments with statistical rigor\n")
+        f.write("Multi-seed reproducible experiments with statistical validity\n")
         f.write("```\n\n")
         
         f.write("---\n")
@@ -6399,7 +6397,7 @@ def run_initialization_ablation(device='cuda', epochs=10, seeds=None, quick=Fals
         print("\nExperimental Design:")
         print("  - Initialization methods: Zero, Uniform, Normal, Xavier, Kaiming")
         print("  - Optimizers: SGD, SGD+Momentum, Adam, AdamW")
-        print("  - Multiple seeds for statistical rigor")
+        print("  - Multiple seeds for statistical validity")
         print("  - Measures: Convergence speed, final accuracy, training stability")
         print("\nExpected Findings:")
         print("  - Adaptive optimizers (Adam/AdamW) should be more robust to poor initialization")
@@ -7170,7 +7168,7 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
     train_dataset, test_dataset = download_cifar10_resnet()
     logging.info("CIFAR-10 dataset loaded successfully for ResNet")
     
-    # Create train/validation split for scientific rigor
+    # Create train/validation split
     val_split = 0.10
     train_size = int((1 - val_split) * len(train_dataset))
     val_size = len(train_dataset) - train_size
@@ -7281,7 +7279,7 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
               f"Train Acc={train_acc:.1f}%, Val Loss={val_loss:.4f}, "
               f"Val Acc={val_acc:.1f}%")
     
-    # Final test evaluation (only after training completes - for scientific rigor)
+    # Final test evaluation (only after training completes - use test set only for final evaluation)
     logging.info("Evaluating final performance on test set...")
     model.eval()
     test_loss, test_correct = 0, 0
@@ -7591,7 +7589,7 @@ Examples:
     parser.add_argument('--skip-tuning', action='store_true', default=False,
                         help='Skip Optuna hyperparameter tuning (default: False - tuning enabled)')
     parser.add_argument('--seeds', type=str, default='42,123,456,789,1011,1213,1415,1617,1819,2021',
-                        help='Comma-separated random seeds (default: 10 seeds for statistical rigor)')
+                        help='Comma-separated random seeds (default: 10 seeds for statistical validity)')
     parser.add_argument('--experiments', type=str, default='all',
                         help='Comma-separated experiment names (mnist,cifar10,nlp,medical,2d,robustness,sam,ablation,advanced_ablation,init_ablation,batch_ablation,lr_ablation,wd_ablation,scheduler_ablation,optimizer_comparison,resnet,highdim,hyperparam_sensitivity,convergence_validation,ablation_comprehensive,2d_visualization,dynamics_overhead,theory_practice,cross_optimizer_dynamics,label_noise) or "all"')
     parser.add_argument('--results-dir', type=str, default='results',
@@ -7655,9 +7653,9 @@ Examples:
     if experiment_config:
         globals()['EXPERIMENT_CONFIG'] = experiment_config
     
-    # PRE-RUN VALIDATION: Comprehensive scientific integrity checks
+    # PRE-RUN VALIDATION: Comprehensive integrity checks
     print("\n" + "="*70)
-    print("[PRE-RUN VALIDATION] Scientific Integrity & Configuration Checks")
+    print("[PRE-RUN VALIDATION] Integrity & Configuration Checks")
     print("="*70)
     
     # Check 1: Config schema and tuning fairness for multi-optimizer experiments
@@ -8760,7 +8758,7 @@ Examples:
                     cifar10_optimizers_config = {}
                     tuning_fairness_config = {}
                     
-                    # === SCIENTIFIC FAIRNESS FIX: ALL optimizers receive equal tuning budget ===
+                    # === FAIRNESS FIX: ALL optimizers receive equal tuning budget ===
                     # As of the latest fixes, run_mnist_experiment now tunes ALL 12 optimizers
                     # with identical n_trials and epochs. This ensures fair comparison.
                     # Previously only 5 basic optimizers were tuned, creating unfair advantage.

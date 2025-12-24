@@ -122,7 +122,7 @@ class OptunaHyperparameterTuner:
             callbacks: List of callback functions
             val_loader: Validation DataLoader (required for test-leakage checks when enforce_validation=True)
             test_dataset: Reference to test dataset for identity validation (RECOMMENDED)
-            enforce_validation: If True, raises error if val_loader is None (default: True for scientific rigor)
+            enforce_validation: If True, raises error if val_loader is None (default: True to enforce validation)
             
         Returns:
             Dictionary with best parameters and statistics
@@ -135,7 +135,7 @@ class OptunaHyperparameterTuner:
         if val_loader is None:
             if enforce_validation:
                 raise ValueError(
-                    "SCIENTIFIC INTEGRITY ERROR: No validation loader provided to OptunaHyperparameterTuner.optimize().\n"
+                    "INTEGRITY ERROR: No validation loader provided to OptunaHyperparameterTuner.optimize().\n"
                     "\nTest-leakage prevention requires a validation loader to verify that the test set is not used during tuning.\n"
                     "\nREMEDIATION OPTIONS:\n"
                     "  1. RECOMMENDED: Use create_validated_loaders() from src.core.loader_validation:\n"
@@ -146,7 +146,7 @@ class OptunaHyperparameterTuner:
                 )
             else:
                 logging.warning(
-                    "SCIENTIFIC INTEGRITY WARNING: No validation loader provided and enforce_validation=False. "
+                    "INTEGRITY WARNING: No validation loader provided and enforce_validation=False. "
                     "Cannot enforce test-leakage prevention. Ensure you are not using the test set for tuning."
                 )
         else:
@@ -165,7 +165,7 @@ class OptunaHyperparameterTuner:
                     
                     if split_type != 'validation' and 'val' not in str(loader_name).lower():
                         raise ValueError(
-                            "SCIENTIFIC INTEGRITY ERROR: Validation loader lacks proper metadata. "
+                            "INTEGRITY ERROR: Validation loader lacks proper metadata. "
                             f"Expected _split_type='validation' or name containing 'val', got split_type={split_type}, name={loader_name}. "
                             "Either: (1) provide test_dataset parameter for identity check, or (2) ensure loader has proper metadata tags. "
                             "This strict check prevents accidental test-set leakage during hyperparameter tuning."

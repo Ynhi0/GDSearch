@@ -5,7 +5,7 @@ This module provides adapters to ensure hyperparameters tuned with PyTorch-nativ
 optimizers (torch.optim.Adam, torch.optim.SGD) are compatible with custom optimizer
 wrappers (AdamWrapper, SGDWrapper) used in the main experiment runner.
 
-CRITICAL: This ensures scientific integrity by validating that tuned hyperparameters
+CRITICAL: This helps ensure integrity by validating that tuned hyperparameters
 transfer correctly between tuning and evaluation phases.
 """
 

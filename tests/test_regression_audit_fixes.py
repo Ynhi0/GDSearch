@@ -139,7 +139,7 @@ def test_performance_profiler_print_summary():
 def test_hf_nlp_validation_split():
     """Regression test: HF NLP must use validation split, not test set for early stopping.
     
-    Scientific Blocker from audit: NLP path was using test set for early stopping,
+    Audit blocker: NLP path was using test set for early stopping,
     causing adaptive overfitting.
     
     This test verifies the validation split logic is present in the HF NLP path.

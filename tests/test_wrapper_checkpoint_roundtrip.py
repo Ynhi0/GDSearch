@@ -7,7 +7,7 @@ is correctly persisted and restored across save/load cycles.
 This is critical for:
 1. Training resumption without state loss
 2. Reproducible experiments
-3. Scientific rigor in optimizer comparisons
+3. Reproducibility in optimizer comparisons
 """
 
 import pytest

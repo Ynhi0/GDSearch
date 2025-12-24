@@ -99,4 +99,4 @@ print("  3. ✓ Welch's t-test with harmonic mean effect size (statistical_analy
 print("  4. ✓ Modular dataloader utilities (dataloader_utils.py)")
 print("  5. ✓ Robust checkpoint manager (checkpoint_manager.py)")
 print("  6. ✓ Centralized hyperparameters (hyperparameters.py)")
-print("\nAll critical scientific validity issues resolved!")
+print("\nAll critical validity issues resolved!")

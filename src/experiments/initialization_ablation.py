@@ -24,7 +24,7 @@ Experimental Design:
    - Adam (more robust to initialization)
    - AdamW
 
-3. Multiple seeds for statistical rigor
+3. Multiple seeds for statistical validity
 
 4. Measure:
    - Convergence speed (epochs to reach threshold)

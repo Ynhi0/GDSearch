@@ -428,7 +428,7 @@ def run_full_pipeline(
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Run full multi-seed analysis pipeline with scientific rigor checks')
+    parser = argparse.ArgumentParser(description='Run full multi-seed analysis pipeline with reproducibility checks')
     
     parser.add_argument('--config', type=str, default='configs/nn_tuning.json',
                         help='Path to configuration file')
@@ -441,7 +441,7 @@ def main():
     parser.add_argument('--compare', type=str, default=None,
                         help='Comma-separated pairs to compare, e.g., "AdamW-SGDMomentum,Adam-RMSProp"')
     parser.add_argument('--skip-fairness-check', action='store_true',
-                        help='Skip automatic fairness validation (NOT RECOMMENDED for publication-quality work)')
+                        help='Skip automatic fairness validation (NOT RECOMMENDED for formal reporting)')
     
     args = parser.parse_args()
     
@@ -455,7 +455,7 @@ def main():
         comparison_pairs = [tuple(p.split('-')) for p in pairs]
     
     # PRE-RUN VALIDATION: Schema check and tuning fairness validation
-    print("\n[PRE-RUN VALIDATION] Checking configuration and scientific integrity...")
+    print("\n[PRE-RUN VALIDATION] Checking configuration and integrity...")
     try:
         with open(args.config, 'r', encoding='utf-8') as f:
             base_cfg_preview = json.load(f)

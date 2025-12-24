@@ -5,7 +5,7 @@ This module provides standardized logging of dataset metadata to MLflow
 to ensure full reproducibility and traceability of experiments.
 
 Addresses research proposal requirement: "Ensure every experiment logs
-dataset name, version, seed, and config in MLflow for scientific rigor."
+dataset name, version, seed, and config in MLflow for reproducibility."
 """
 import logging
 from typing import Dict, Any, Optional
@@ -175,7 +175,7 @@ def get_dataset_provenance(
     elif 'SYNTHETIC' in dataset_upper:
         provenance['data_source'] = 'synthetic'
         provenance['dataset_version'] = 'generated'
-        provenance['warning'] = 'SYNTHETIC DATA - Not suitable for publication claims'
+        provenance['warning'] = 'SYNTHETIC DATA - Not suitable for formal reporting'
         provenance['num_samples'] = kwargs.get('num_samples', 'unknown')
     
     # Unknown dataset

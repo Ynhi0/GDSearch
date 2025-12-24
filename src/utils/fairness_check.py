@@ -224,7 +224,7 @@ class TuningFairnessValidator:
             "1. Ensure all optimizers have equal n_trials in tuning configs",
             "2. Use consistent epochs and batch sizes across all trials",
             "3. Either tune all optimizers or use defaults for all (no mixing)",
-            "4. Document any exceptions with scientific justification",
+            "4. Document any exceptions with justification",
             "",
             header
         ])

@@ -168,7 +168,7 @@ def main():
     checker.check_results_directory()
     checker.check_src_imports()
     checker.check_unit_tests()
-    checker.check_scientific_integrity_warnings()
+    checker.check_integrity_warnings()
     checker.check_golden_test()
     checker.run_dry_run_experiments()
     

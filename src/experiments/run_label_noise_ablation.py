@@ -274,7 +274,7 @@ def train_with_noisy_labels(
         val_loss /= val_total
         val_acc = 100.0 * val_correct / val_total
         
-        # SCIENTIFIC RIGOR: Only track validation during training, not test
+        # REPRODUCIBILITY: Only track validation during training, not test
         history.append({
             'epoch': epoch,
             'optimizer': optimizer_name,
@@ -293,7 +293,7 @@ def train_with_noisy_labels(
                 f"Train Acc={train_acc:.2f}% Val Acc={val_acc:.2f}%"
             )
     
-    # Final test evaluation (only after training completes - for scientific rigor)
+    # Final test evaluation (only after training completes - use test set only for final evaluation)
     logger.info(f"[{optimizer_name}] Evaluating final performance on test set...")
     model.eval()
     test_loss = 0.0

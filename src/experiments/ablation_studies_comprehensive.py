@@ -121,7 +121,7 @@ def train_and_evaluate_model_with_loaders(model, optimizer, train_loader, test_l
         
         train_losses.append(epoch_loss / len(train_loader))
     
-    # Final test evaluation (only after training completes - for scientific rigor)
+    # Final test evaluation (only after training completes - use test set only for final evaluation)
     logging.info("Evaluating final performance on test set...")
     model.eval()
     correct = 0

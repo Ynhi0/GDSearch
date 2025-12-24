@@ -278,7 +278,7 @@ def run_ablation_study(
     7. Label Smoothing + EMA
     8. All combined (AMP + Label Smoothing + EMA)
     
-    Statistical rigor:
+    Statistical validity:
     - Multiple seeds for each configuration
     - Controlled experiments (one variable at a time)
     - Report mean ± std for all metrics

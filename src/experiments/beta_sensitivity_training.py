@@ -201,7 +201,7 @@ def train_with_beta(
         # Store snapshot
         param_snapshots.append(torch.cat([p.view(-1).clone().detach() for p in model.parameters()]).cpu().numpy())
         
-        # Record history (validation only during training - for scientific rigor)
+        # Record history (validation only during training - use validation set for monitoring)
         history['epoch'].append(epoch)
         history['train_loss'].append(train_loss)
         history['train_acc'].append(train_acc)
@@ -213,7 +213,7 @@ def train_with_beta(
         else:
             history['update_magnitude'].append(0.0)
     
-    # Final test evaluation (only after training completes - for scientific rigor)
+    # Final test evaluation (only after training completes - use test set only for final evaluation)
     logger.info("Evaluating final performance on test set...")
     model.eval()
     test_loss = 0.0

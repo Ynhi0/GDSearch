@@ -2,7 +2,7 @@
 Resume equivalence tests for full training pipeline.
 
 Verifies that checkpointing and resuming produces identical results to
-continuous training. This is fundamental for scientific reproducibility.
+continuous training. This is fundamental for reproducibility.
 
 Tests cover:
 - Basic optimizer resume (train 10 steps == train 5 + resume + train 5)

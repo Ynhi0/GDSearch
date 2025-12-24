@@ -1,7 +1,7 @@
 # Dataset Provenance and Version Information
 
 ## Overview
-This document provides exact dataset sources, versions, and provenance information for all experiments in the GDSearch project. This ensures full reproducibility and scientific rigor as required by the research proposal.
+This document provides exact dataset sources, versions, and provenance information for all experiments in the GDSearch project. This ensures full reproducibility as required by the research proposal.
 
 ## Datasets Used
 
@@ -185,7 +185,7 @@ Each experiment generates a JSON manifest file with complete provenance:
 pip install torch torchvision torchaudio  # PyTorch ecosystem
 pip install medmnist                       # Medical imaging datasets
 pip install datasets transformers          # HuggingFace NLP datasets
-pip install numpy pandas matplotlib scipy  # Scientific computing
+pip install numpy pandas matplotlib scipy  # Numerical computing
 pip install scikit-learn optuna mlflow     # ML tools
 ```
 
@@ -196,7 +196,7 @@ Run this script to verify all datasets are accessible:
 python download_datasets.py
 ```
 
-For strict MedMNIST requirement (publication mode):
+For strict MedMNIST requirement (reporting mode):
 ```python
 from download_datasets import download_medmnist
 download_medmnist('pathmnist', strict=True)  # Raises error if unavailable
@@ -234,7 +234,7 @@ For each experiment, ensure:
 
 ### Synthetic vs. Real Data
 - **Synthetic medical data**: Used for CI/debugging ONLY
-- **MedMNIST**: REQUIRED for publication claims
+- **MedMNIST**: REQUIRED for formal reporting
 - **Warning**: Experiments using synthetic data are marked with `dataset_source='synthetic'` and include a warning in provenance
 
 ### Clinical Datasets

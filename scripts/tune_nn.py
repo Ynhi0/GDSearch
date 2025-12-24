@@ -41,7 +41,7 @@ def best_by_eval(csv_paths: List[str], prefer: str = 'accuracy') -> Tuple[str, f
     Use 'val' phase (validation set) instead of 'eval' phase (test set)
     to prevent test set leakage during hyperparameter tuning.
     
-    Scientific Rationale:
+    Rationale:
     Hyperparameter selection MUST use a held-out validation set carved from
     the training data. Using the test set for tuning constitutes adaptive
     overfitting and invalidates generalization claims.
@@ -63,7 +63,7 @@ def best_by_eval(csv_paths: List[str], prefer: str = 'accuracy') -> Tuple[str, f
             # Fallback to 'eval' with warning (should not happen with val_split enabled)
             import logging
             logging.warning(
-                "SCIENTIFIC INTEGRITY WARNING: No validation data found in %s, "
+                "INTEGRITY WARNING: No validation data found in %s, "
                 "falling back to eval. This may indicate test set leakage!",
                 p
             )

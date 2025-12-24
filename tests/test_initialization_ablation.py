@@ -215,8 +215,8 @@ class TestAblationStudy:
         assert all(result_df['n_seeds'] == 3)
 
 
-class TestScientificRigor:
-    """Test scientific rigor of the ablation study"""
+class TestReproducibility:
+    """Test reproducibility of the ablation study"""
     
     @pytest.mark.slow
     def test_controlled_comparison(self, tmp_path):

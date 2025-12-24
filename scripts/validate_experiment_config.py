@@ -3,7 +3,7 @@
 Validate Experiment Configuration and Output Integrity
 
 This script checks that all experiments in the codebase:
-1. Use multi-seed runs (recommended: 10 seeds for statistical rigor)
+1. Use multi-seed runs (recommended: 10 seeds for statistical validity)
 2. Have adequate epoch counts for meaningful results
 3. Include VRAM tracking
 4. Have proper checkpoint/resume logic
@@ -92,7 +92,7 @@ class ExperimentValidator:
                 
                 if num_seeds >= RECOMMENDED_CONFIG['recommended_seeds']:
                     self.successes.append(
-                        f"PASS: Default seeds: {num_seeds} seeds (excellent for statistical rigor)"
+                        f"PASS: Default seeds: {num_seeds} seeds (excellent for statistical validity)"
                     )
                 elif num_seeds >= RECOMMENDED_CONFIG['min_seeds']:
                     self.warnings.append(

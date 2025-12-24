@@ -1,7 +1,7 @@
 """
-Generate benchmark-ready experimental results with proper statistical rigor.
+Generate benchmark-ready experimental results with proper statistical validity.
 
-This script runs comprehensive experiments suitable for inclusion in a scientific paper:
+This script runs comprehensive experiments suitable for inclusion in a paper:
 1. Multi-seed MNIST experiments (10 seeds) with all optimizers
 2. Statistical comparisons with effect sizes and power analysis
 3. 2D optimization experiments on all test functions
@@ -398,7 +398,7 @@ def main():
     print("\n" + "="*80)
     print(" HIGH-QUALITY EXPERIMENT SUITE ")
     print("="*80)
-    print("\nThis will generate comprehensive results for your scientific paper:")
+    print("\nThis will generate comprehensive results for your paper:")
     print("1. Multi-seed MNIST experiments (10 seeds × 5 optimizers = 50 runs)")
     print("2. Statistical analysis with Holm-Bonferroni correction")
     print("3. 2D optimization experiments on 3 test functions")
@@ -462,7 +462,7 @@ def main():
     print("   - optimizer_ablation_study.png")
     print("   - initial_condition_robustness_*.png")
     print("   - statistical_*_vs_*.png")
-    print("\n✅ All data is benchmark-ready with proper statistical rigor!")
+    print("\n✅ All data is benchmark-ready with proper statistical validity!")
     print("="*80)
 
 
