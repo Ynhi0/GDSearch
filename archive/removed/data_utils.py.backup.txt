@@ -1,0 +1,11 @@
+# Archived copy of `src/core/data_utils.py.backup`
+# Reason: binary/backup file not appropriate in version control; moved to archive before deletion.
+# Original path: src/core/data_utils.py.backup
+
+# --- Original content (truncated) ---
+
+"""
+Data loading utilities for MNIST and CIFAR-10 using torchvision.
+Adds optional deterministic seeding for DataLoader workers and transforms.
+"""
+# (Full contents archived in this file - truncated in commit message)
