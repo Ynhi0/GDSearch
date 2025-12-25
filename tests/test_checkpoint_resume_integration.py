@@ -275,12 +275,8 @@ class TestCheckpointResumeRNGState:
         np.random.seed(42)
         random.seed(42)
         
-        # Generate some random numbers
-        random_torch_1 = torch.rand(5)
-        random_numpy_1 = np.random.rand(5)
-        random_python_1 = random.random()
-        
-        # Save checkpoint with RNG states
+        # Capture RNG states BEFORE generating numbers so restores reproduce
+        # the earlier draws when the RNG is restored to this saved state.
         checkpoint = {
             'model': sample_model.state_dict(),
             'optimizer': sample_optimizer.state_dict(),
@@ -291,6 +287,11 @@ class TestCheckpointResumeRNGState:
                 'python_random_state': random.getstate()
             }
         }
+
+        # Generate some random numbers
+        random_torch_1 = torch.rand(5)
+        random_numpy_1 = np.random.rand(5)
+        random_python_1 = random.random()
         ckpt_file = "test_rng.pt"
         manager.save_checkpoint(checkpoint, ckpt_file, "test_run")
         

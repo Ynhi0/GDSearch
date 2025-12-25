@@ -235,8 +235,19 @@ class RobustCheckpointManager:
                 random.setstate(rng['python_random_state'])
             if 'numpy_random_state' in rng and rng['numpy_random_state'] is not None:
                 np.random.set_state(rng['numpy_random_state'])
+            # Support multiple key names used historically across tests and code
+            torch_cpu_state = None
             if 'torch_cpu_rng_state' in rng and rng['torch_cpu_rng_state'] is not None:
-                torch.set_rng_state(rng['torch_cpu_rng_state'])
+                torch_cpu_state = rng['torch_cpu_rng_state']
+            elif 'torch_rng_state' in rng and rng['torch_rng_state'] is not None:
+                torch_cpu_state = rng['torch_rng_state']
+
+            if torch_cpu_state is not None:
+                try:
+                    torch.set_rng_state(torch_cpu_state)
+                except Exception as e:
+                    logging.warning("Failed to restore CPU RNG state: %s", e)
+
             if 'torch_cuda_rng_state_all' in rng and rng['torch_cuda_rng_state_all'] is not None and torch.cuda.is_available():
                 try:
                     torch.cuda.set_rng_state_all(rng['torch_cuda_rng_state_all'])

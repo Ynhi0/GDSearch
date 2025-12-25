@@ -13,6 +13,7 @@ Supports:
 - Visualization of optimization results
 """
 
+import os
 import optuna
 from optuna.pruners import MedianPruner, PercentilePruner
 from optuna.samplers import TPESampler, RandomSampler, GridSampler
@@ -27,10 +28,14 @@ from pathlib import Path
 class OptunaHyperparameterTuner:
     """
     Hyperparameter tuner using Optuna for GDSearch experiments.
-    
-    Supports automatic search over optimizer and model hyperparameters.
+
+    NOTE: Use `create_tuner(objective_fn, use_optuna=None, **kwargs)` to obtain a tuner
+    instance. Optuna is disabled by default unless the environment variable
+    `GDSEARCH_ENABLE_OPTUNA` is set to '1'/'true'/'yes' or `use_optuna=True` is passed.
+    When Optuna is disabled this class will still be importable but the factory will
+    return a `RandomTuner` fallback instead.
     """
-    
+
     def __init__(
         self,
         objective_fn: Callable,
@@ -396,6 +401,137 @@ def suggest_model_params(trial: optuna.Trial, model_type: str) -> Dict[str, Any]
         params['kernel_size'] = trial.suggest_categorical('kernel_size', [3, 5])
     
     return params
+
+
+# ---------------------------
+# Optional/Opt-in Tuner API
+# ---------------------------
+
+class _RandomTrial:
+    """Lightweight trial-like object with suggest_* methods supported by common objective functions."""
+    def __init__(self):
+        self.params = {}
+
+    def suggest_float(self, name, low, high, log=False):
+        if log:
+            val = np.exp(np.random.uniform(np.log(low), np.log(high)))
+        else:
+            val = float(np.random.uniform(low, high))
+        self.params[name] = val
+        return val
+
+    def suggest_int(self, name, low, high):
+        val = int(np.random.randint(low, high + 1))
+        self.params[name] = val
+        return val
+
+    def suggest_categorical(self, name, choices):
+        val = choices[int(np.random.randint(0, len(choices)))]
+        self.params[name] = val
+        return val
+
+
+class RandomTuner:
+    """A simple random-search tuner that mimics the basic Optuna interface for objective functions.
+
+    Use this tuner when Optuna is explicitly disabled (default). It provides a safe, dependency-free
+    fallback so tuning remains possible without Optuna.
+    """
+
+    def __init__(self, objective_fn: Callable, direction: str = "maximize", seed: int = 42):
+        self.objective_fn = objective_fn
+        self.direction = direction
+        self.seed = seed
+        np.random.seed(seed)
+
+    def optimize(self, n_trials: int = 50, timeout: Optional[int] = None, show_progress_bar: bool = False,
+                 callbacks: Optional[List[Callable]] = None, val_loader=None, test_dataset=None, enforce_validation: bool = True) -> Dict[str, Any]:
+        best_value = None
+        best_params = None
+        trials = []
+
+        for i in range(n_trials):
+            trial = _RandomTrial()
+            try:
+                val = self.objective_fn(trial)
+            except Exception as e:
+                logging.warning("RandomTuner: objective function failed on trial %d: %s", i, e)
+                continue
+
+            trials.append({'number': i, 'value': val, 'params': trial.params})
+
+            if best_value is None:
+                best_value = val
+                best_params = trial.params
+            else:
+                improved = (val > best_value) if self.direction == 'maximize' else (val < best_value)
+                if improved:
+                    best_value = val
+                    best_params = trial.params
+
+        results = {
+            'best_value': best_value,
+            'best_params': best_params or {},
+            'n_trials': len(trials),
+            'n_pruned': 0,
+            'n_complete': len(trials),
+            'study_name': 'random_fallback'
+        }
+
+        return results
+
+
+def create_tuner(objective_fn: Callable, use_optuna: Optional[bool] = None, **kwargs):
+    """Factory: create an Optuna tuner if the environment opts-in; otherwise return RandomTuner.
+
+    Preference resolution:
+      - If use_optuna is not None, respect it (True -> try to create Optuna tuner, False -> RandomTuner)
+      - Else, check env var `GDSEARCH_ENABLE_OPTUNA` (case-insensitive). If set to '1'/'true'/'yes', try Optuna.
+      - If Optuna is requested but not importable, raise RuntimeError instructing how to install.
+    """
+    # Determine opt-in flag
+    if use_optuna is None:
+        flag = os.environ.get('GDSEARCH_ENABLE_OPTUNA', '').lower() in ('1', 'true', 'yes')
+    else:
+        flag = bool(use_optuna)
+
+    if flag:
+        # Try to instantiate Optuna tuner (may raise if optuna not available)
+        try:
+            tuner = OptunaHyperparameterTuner(objective_fn=objective_fn, **kwargs)
+            return tuner
+        except Exception as e:
+            raise RuntimeError(
+                "Optuna requested but could not be initialized. Install optuna and retry: `pip install optuna`. "
+                f"Underlying error: {e}"
+            )
+    else:
+        # Return a lightweight fallback
+        return RandomTuner(objective_fn=objective_fn, direction=kwargs.get('direction', 'maximize'), seed=kwargs.get('seed', 42))
+
+
+def apply_best_params_to_config(config: Dict[str, Any], best_params: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Merge Optuna `best_params` into an experiment `config` dictionary.
+
+    - Overwrites keys in `config` with values from `best_params`.
+    - Normalizes optimizer names using `src.core.optimizer_registry.normalize_optimizer_name` if present.
+    - Returns a new merged dict (does not mutate inputs).
+    """
+    merged = config.copy() if isinstance(config, dict) else dict(config)
+    # Shallow merge: overwrite top-level keys
+    merged.update(best_params or {})
+
+    # Normalize optimizer name if present
+    if 'optimizer' in merged and isinstance(merged['optimizer'], str):
+        try:
+            from src.core.optimizer_registry import normalize_optimizer_name
+            merged['optimizer'] = normalize_optimizer_name(merged['optimizer'])
+        except Exception:
+            # If normalization fails, keep original name but log for debugging
+            logging.debug("Could not normalize optimizer name: %s", merged.get('optimizer'))
+
+    return merged
 
 
 def suggest_training_params(trial: optuna.Trial) -> Dict[str, Any]:
