@@ -222,6 +222,29 @@ class RobustCheckpointManager:
         )
         return None
 
+    def restore_rng_states(self, checkpoint: Dict):
+        """Restore RNG states from a checkpoint if present.
+
+        This will restore Python's random, NumPy RNG, PyTorch CPU RNG and
+        CUDA RNG states (if available and stored). It is a no-op if RNG
+        states are missing from the checkpoint.
+        """
+        rng = checkpoint.get('rng_states', {}) if isinstance(checkpoint, dict) else {}
+        try:
+            if 'python_random_state' in rng and rng['python_random_state'] is not None:
+                random.setstate(rng['python_random_state'])
+            if 'numpy_random_state' in rng and rng['numpy_random_state'] is not None:
+                np.random.set_state(rng['numpy_random_state'])
+            if 'torch_cpu_rng_state' in rng and rng['torch_cpu_rng_state'] is not None:
+                torch.set_rng_state(rng['torch_cpu_rng_state'])
+            if 'torch_cuda_rng_state_all' in rng and rng['torch_cuda_rng_state_all'] is not None and torch.cuda.is_available():
+                try:
+                    torch.cuda.set_rng_state_all(rng['torch_cuda_rng_state_all'])
+                except Exception as e:
+                    logging.warning("Failed to restore CUDA RNG state: %s", e)
+        except Exception as e:
+            logging.warning("Failed to restore RNG states: %s", e)
+
     def _create_backup(self, ckpt_path: Path, _experiment_name: str):
         """Create rolling backup - only if checkpoint exists."""
         if not ckpt_path.exists():

@@ -56,45 +56,54 @@ def validate_pytorch_version(expected_version: str = "2.6.0", strict: bool = Fal
         logging.warning(f"Could not validate PyTorch version: {e}")
 
 
-def set_seed(seed: int):
+def set_seed(seed: int, deterministic: bool = True):
     """
     Set random seeds for reproducibility across all libraries.
-    
-    This function ensures deterministic behavior by:
-    - Setting Python's random seed
-    - Setting NumPy's random seed
-    - Setting PyTorch's random seed (CPU and CUDA)
-    - Enforcing deterministic cuDNN operations
-    - Enabling PyTorch's deterministic algorithms (when available)
-    
+
+    This function ensures deterministic behavior by default. If `deterministic`
+    is False, the function will set RNG seeds but will NOT force cuDNN to disable
+    `benchmark`, allowing performance optimizations for fixed-size workloads
+    (e.g., ResNet on CIFAR/ImageNet) to remain active.
+
     Args:
         seed: Random seed value
-        
+        deterministic: If True (default) enforce deterministic cuDNN and algorithms.
+                     If False, preserve performance-related settings (e.g., cudnn.benchmark).
+
     Note:
-        Deterministic operations may reduce performance. Use in research
-        for reproducibility, but consider disabling for production.
+        Deterministic operations may reduce performance. Use deterministic=True in
+        research for reproducibility, but consider disabling it for performance
+        comparisons or production benchmarking.
     """
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-    
-    # Enforce deterministic behavior where possible
-    try:
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
-    except Exception:
-        pass
-    
-    try:
-        torch.use_deterministic_algorithms(True)
-        # Set CUBLAS environment variable for deterministic CUDA operations
-        # Required for CUDA >= 10.2 when using deterministic algorithms
-        if torch.cuda.is_available() and 'CUBLAS_WORKSPACE_CONFIG' not in os.environ:
-            os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
-    except Exception:
-        # Older PyTorch versions may not support this
-        pass
+
+    if deterministic:
+        # Enforce deterministic behavior where possible
+        try:
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
+        except Exception:
+            pass
+
+        try:
+            torch.use_deterministic_algorithms(True)
+            # Set CUBLAS environment variable for deterministic CUDA operations
+            # Required for CUDA >= 10.2 when using deterministic algorithms
+            if torch.cuda.is_available() and 'CUBLAS_WORKSPACE_CONFIG' not in os.environ:
+                os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
+        except Exception:
+            # Older PyTorch versions may not support this
+            pass
+    else:
+        # Preserve performance-related flags (do not override cudnn.benchmark)
+        try:
+            if hasattr(torch.backends, 'cudnn'):
+                logging.debug("set_seed(..., deterministic=False) preserving cudnn.benchmark=%s", getattr(torch.backends.cudnn, 'benchmark', None))
+        except Exception:
+            pass
 
 
 class LabelSmoothingCrossEntropy(nn.Module):

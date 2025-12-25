@@ -157,6 +157,9 @@ def build_optimizer(optimizer_name: str, model: torch.nn.Module, lr: float, weig
         else:
             base_opt = SGDWrapper(model.parameters(), lr=lr)
         return SAMWrapper(base_opt, rho=0.05)
+    elif name in ('SGD_NESTEROV', 'SGDNESTEROV', 'NESTEROV'):
+        # Expose SGD with Nesterov momentum to avoid confusion with the SGDNesterov class
+        return optim.SGD(model.parameters(), lr=lr, momentum=momentum, nesterov=True)
     elif name == 'LOOKAHEAD':
         # Lookahead requires base optimizer
         base_opt = AdamWrapper(model.parameters(), lr=lr)
@@ -168,7 +171,7 @@ def build_optimizer(optimizer_name: str, model: torch.nn.Module, lr: float, weig
     elif name == 'LAMB':
         return LAMBWrapper(model.parameters(), lr=lr, weight_decay=weight_decay)
     else:
-        raise ValueError(f"Unsupported optimizer '{optimizer_name}'. Available: SGD, SGD_MOMENTUM, ADAM, ADAMW, RMSPROP, SAM, LOOKAHEAD, ADABOUND, RADAM, LAMB")
+        raise ValueError(f"Unsupported optimizer '{optimizer_name}'. Available: SGD, SGD_MOMENTUM, SGD_NESTEROV, ADAM, ADAMW, RMSPROP, SAM, LOOKAHEAD, ADABOUND, RADAM, LAMB")
 
 
 def evaluate(model: torch.nn.Module, loader: torch.utils.data.DataLoader, criterion: nn.Module, device: torch.device):
@@ -546,17 +549,25 @@ def main():
                 "No experiments parsed from config file. Check 'sweeps' format in configs/nn_tuning.json or use the 'optimizers' list format."
             )
     else:
-        # Fallback to hardcoded experiments if config doesn't exist
-        print(f"Config file {config_path} not found. Using defaults.")
-        experiments = [
-            # MNIST with MLP, Adam vs AdamW
-            {'model': 'SimpleMLP', 'dataset': 'MNIST', 'optimizer': 'Adam',  'lr': 1e-3, 'epochs': 2, 'batch_size': 128, 'seed': 42},
-            {'model': 'SimpleMLP', 'dataset': 'MNIST', 'optimizer': 'AdamW', 'lr': 1e-3, 'epochs': 2, 'batch_size': 128, 'seed': 42},
-            # CIFAR-10 with CNN, SGD Momentum
-            {'model': 'SimpleCNN', 'dataset': 'CIFAR-10', 'optimizer': 'SGD_Momentum', 'lr': 0.01, 'momentum': 0.9, 'epochs': 2, 'batch_size': 128, 'seed': 42},
-            # Optional delayed optimization example
-            {'model': 'SimpleMLP', 'dataset': 'MNIST', 'optimizer': 'Adam',  'lr': 1e-3, 'epochs': 2, 'batch_size': 128, 'seed': 42, 'use_delay_wrapper': True, 'delay_steps': 3},
-        ]
+        # By default we fail-fast when config is missing to avoid silent, non-reproducible defaults.
+        # To allow quick local runs using a built-in default sweep, explicitly set the
+        # environment variable `GDSEARCH_ALLOW_DEFAULTS=1` (or 'true'). This must be
+        # an explicit opt-in rather than the default behavior.
+        if os.environ.get('GDSEARCH_ALLOW_DEFAULTS', '').lower() in ('1', 'true', 'yes'):
+            logging.warning("Config file %s not found. Using built-in default experiments because GDSEARCH_ALLOW_DEFAULTS is set.", config_path)
+            experiments = [
+                # MNIST with MLP, Adam vs AdamW
+                {'model': 'SimpleMLP', 'dataset': 'MNIST', 'optimizer': 'Adam',  'lr': 1e-3, 'epochs': 2, 'batch_size': 128, 'seed': 42},
+                {'model': 'SimpleMLP', 'dataset': 'MNIST', 'optimizer': 'AdamW', 'lr': 1e-3, 'epochs': 2, 'batch_size': 128, 'seed': 42},
+                # CIFAR-10 with CNN, SGD Momentum
+                {'model': 'SimpleCNN', 'dataset': 'CIFAR-10', 'optimizer': 'SGD_Momentum', 'lr': 0.01, 'momentum': 0.9, 'epochs': 2, 'batch_size': 128, 'seed': 42},
+                # Optional delayed optimization example
+                {'model': 'SimpleMLP', 'dataset': 'MNIST', 'optimizer': 'Adam',  'lr': 1e-3, 'epochs': 2, 'batch_size': 128, 'seed': 42, 'use_delay_wrapper': True, 'delay_steps': 3},
+            ]
+        else:
+            raise FileNotFoundError(
+                f"Config file {config_path} not found. To proceed with default (non-reproducible) experiments, set GDSEARCH_ALLOW_DEFAULTS=1. Otherwise, create a valid config at {config_path}."
+            )
 
     print(f"Total experiments: {len(experiments)}")
 

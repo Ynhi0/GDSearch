@@ -640,9 +640,15 @@ class SAM(Optimizer):
             adv_gradients = loss_fn(adv_params)  # loss_fn should return gradients
             return self.base_opt.step(params, adv_gradients)
         else:
-            # Fallback for backward compatibility (not correct SAM)
-            logging.warning("SAM without adversarial gradients - using base optimizer only")
-            return self.base_opt.step(params, gradients)
+            # Fail-fast: SAM requires either pre-computed adversarial gradients
+            # (from a closure/second forward pass) or a loss function capable of
+            # computing gradients at the adversarial point. Silently falling back
+            # to the base optimizer can disable SAM undetected and break experiments.
+            raise RuntimeError(
+                "SAM.step requires `adversarial_gradients` or `loss_fn` to compute "
+                "the SAM adversarial update; refusing to proceed without them. "
+                "In PyTorch use SAMWrapper which provides the required closure/gradients."
+            )
     
     def reset(self):
         """Reset optimizer state."""
@@ -1059,5 +1065,53 @@ class LAMB(Optimizer):
         self.v_x, self.v_y = 0.0, 0.0
         self.m, self.v = None, None
         self.t = 0
+
+
+# -----------------------------------------------------------------------------
+# Optimizer factory
+# -----------------------------------------------------------------------------
+
+def create_optimizer_instance(name: str, **kwargs) -> Optimizer:
+    """Create an optimizer instance given a (possibly non-canonical) name.
+
+    This function accepts names like 'SGDMomentum' or 'SGD_Momentum' and
+    normalizes them before instantiation. It provides a single place to
+    centralize any alias handling for the simple optimizers used in 2D tests.
+    """
+    try:
+        from src.core.optimizer_registry import normalize_optimizer_name
+    except Exception:
+        # Minimal fallback normalization
+        def normalize_optimizer_name(x):
+            return x.replace(' ', '_').replace('-', '_')
+
+    canon = normalize_optimizer_name(name)
+
+    # Map canonical names to classes
+    if canon == 'SGD':
+        return SGD(**kwargs)
+    elif canon == 'SGD_Momentum':
+        # Accept 'momentum' as alias for 'beta' (SGDMomentum expects 'beta')
+        params = kwargs.copy()
+        if 'momentum' in params and 'beta' not in params:
+            params['beta'] = params.pop('momentum')
+        return SGDMomentum(**params)
+    elif canon in ('SGDNesterov', 'SGD_Nesterov'):
+        params = kwargs.copy()
+        if 'momentum' in params and 'beta' not in params:
+            params['beta'] = params.pop('momentum')
+        return SGDNesterov(**params)
+    elif canon.lower() == 'rmsprop' or canon == 'RMSProp':
+        return RMSProp(**kwargs)
+    elif canon == 'Adam':
+        return Adam(**kwargs)
+    elif canon == 'AdamW':
+        return AdamW(**kwargs)
+    elif canon == 'AMSGrad':
+        return AMSGrad(**kwargs)
+    elif canon == 'LAMB':
+        return LAMB(**kwargs)
+    else:
+        raise ValueError(f"Unknown optimizer name for factory: {name} (normalized: {canon})")
 
 

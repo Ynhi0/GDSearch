@@ -29,8 +29,9 @@ def run_single_experiment(optimizer_config, function_config, initial_point, num_
     Returns:
         DataFrame containing optimization process history
     """
-    # Set seed to ensure reproducibility
-    np.random.seed(seed)
+    # Set seed to ensure reproducibility across libraries
+    from src.core.training_utils import set_seed
+    set_seed(seed)
     
     # Initialize test function
     func_type = function_config['type']
@@ -50,24 +51,12 @@ def run_single_experiment(optimizer_config, function_config, initial_point, num_
     # Initialize optimizer
     opt_type = optimizer_config['type']
     opt_params = optimizer_config.get('params', {})
-    
-    if opt_type == 'SGD':
-        optimizer = SGD(**opt_params)
-    elif opt_type == 'SGDMomentum':
-        optimizer = SGDMomentum(**opt_params)
-    elif opt_type == 'SGDNesterov':
-        optimizer = SGDNesterov(**opt_params)
-    elif opt_type == 'RMSProp':
-        optimizer = RMSProp(**opt_params)
-    elif opt_type == 'Adam':
-        optimizer = Adam(**opt_params)
-    elif opt_type == 'AdamW':
-        optimizer = AdamW(**opt_params)
-    elif opt_type == 'AMSGrad':
-        optimizer = AMSGrad(**opt_params)
-    else:
-        raise ValueError(f"Invalid optimizer type: {opt_type}")
-    
+
+    # Use factory to support aliases and canonical names
+    from src.core.optimizers import create_optimizer_instance
+
+    optimizer = create_optimizer_instance(opt_type, **opt_params)
+
     # Reset optimizer to initial state
     optimizer.reset()
     
@@ -88,8 +77,14 @@ def run_single_experiment(optimizer_config, function_config, initial_point, num_
         loss = test_function.compute(current_x, current_y)
         grad_x, grad_y = test_function.gradient(current_x, current_y)
         
-        # Calculate gradient norm
-        grad_norm = np.sqrt(grad_x**2 + grad_y**2)
+        # Calculate gradient norm (use hypot to avoid overflow and handle large values safely)
+        import math
+        try:
+            grad_norm = float(math.hypot(float(grad_x), float(grad_y)))
+        except Exception:
+            # Robust fallback and logging
+            grad_norm = float('inf')
+            print(f"Warning: gradient norm computation overflowed or invalid: grad_x={grad_x}, grad_y={grad_y}")
         
         # Compute Hessian eigenvalues for curvature analysis
         hessian = test_function.hessian(current_x, current_y)
@@ -100,10 +95,23 @@ def run_single_experiment(optimizer_config, function_config, initial_point, num_
         
         # Perform update step
         new_x, new_y = optimizer.step((current_x, current_y), (grad_x, grad_y))
-        
-        # Calculate update norm
-        update_norm = np.sqrt((new_x - current_x)**2 + (new_y - current_y)**2)
-        
+
+        # Guard against non-finite or explosively large updates
+        try:
+            if (not np.isfinite(new_x)) or (not np.isfinite(new_y)) or abs(new_x) > 1e12 or abs(new_y) > 1e12:
+                logging.warning(f"Optimizer produced invalid update: new=({new_x},{new_y}), skipping update and keeping previous parameters.")
+                new_x, new_y = current_x, current_y
+        except Exception:
+            # Fallback: ensure numeric stability
+            new_x, new_y = current_x, current_y
+
+        # Calculate update norm (use hypot for robustness)
+        try:
+            update_norm = float(math.hypot(float(new_x - current_x), float(new_y - current_y)))
+        except Exception:
+            update_norm = float('inf')
+            print(f"Warning: update norm computation overflowed or invalid: new=({new_x},{new_y}), old=({current_x},{current_y})")
+
         # Save information to history (including Hessian eigenvalues)
         history.append({
             'iteration': i,
