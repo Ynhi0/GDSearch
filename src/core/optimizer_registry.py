@@ -396,26 +396,84 @@ def load_experiment_config(config_path: Union[str, Path]) -> List[Dict]:
     return config.get('optimizers', [])
 
 
+def normalize_optimizer_name(name: str) -> str:
+    """Normalize an optimizer name string to a registered canonical name.
+
+    Rules:
+      - Attempts direct match first
+      - Replaces spaces and dashes with underscores
+      - Case-insensitive match
+      - Maps common alias patterns (e.g., 'SGDMomentum' -> 'SGD_Momentum')
+
+    Raises:
+        ValueError: If no mapping exists
+    """
+    if not isinstance(name, str):
+        raise ValueError("Optimizer name must be a string")
+
+    # Direct match
+    if name in registry._registry:
+        return name
+
+    # Normalize separators and case
+    normalized = name.replace('-', '_').replace(' ', '_')
+    if normalized in registry._registry:
+        return normalized
+
+    # Lowercase matching with underscores removed/added
+    low = normalized.lower()
+    for canon in registry.list_optimizers():
+        if canon.lower() == low or canon.lower().replace('_', '') == low.replace('_', ''):
+            return canon
+
+    # Specific common alias fixes
+    alias_map = {
+        'sgdmomentum': 'SGD_Momentum',
+        'sgdnesterov': 'SGD_Nesterov',
+        'rmsprop': 'RMSprop',
+        'adamw': 'AdamW',
+        'amsgrad': 'AMSGrad',
+        'sam_sgd': 'SAM_SGD',
+        'sam_adam': 'SAM_Adam',
+        'lookahead_sgd': 'Lookahead_SGD',
+        'lookahead_adam': 'Lookahead_Adam',
+        'adabound': 'AdaBound',
+        'radam': 'RAdam',
+        'lamb': 'LAMB'
+    }
+
+    if low.replace('_', '') in alias_map:
+        return alias_map[low.replace('_', '')]
+
+    raise ValueError(f"Unknown optimizer name: '{name}'. Available: {registry.list_optimizers()}")
+
+
 # Example usage function
 def example_usage():
     """Demonstrate registry usage."""
-    
+
     # Print all registered optimizers
     registry.print_registry()
-    
+
     # Create optimizer from registry
     import torch.nn as nn
     model = nn.Linear(10, 2)
-    
+
     # Method 1: Direct creation
     optimizer = registry.create('Adam', model.parameters(), lr=0.001)
     print(f"\nCreated optimizer: {optimizer}")
-    
+
     # Method 2: From config dict
-    config = {'name': 'SGD_Momentum', 'lr': 0.01, 'momentum': 0.9}
-    optimizer2 = create_optimizer_from_config(config, model.parameters())
-    print(f"Created from config: {optimizer2}")
-    
+    config = {'name': 'SGDMomentum', 'lr': 0.01, 'momentum': 0.9}
+    try:
+        # Normalize name before creating (accepts 'SGDMomentum' as alias)
+        config_normalized = config.copy()
+        config_normalized['name'] = normalize_optimizer_name(config['name'])
+        optimizer2 = create_optimizer_from_config(config_normalized, model.parameters())
+        print(f"Created from config: {optimizer2}")
+    except ValueError as e:
+        print(f"Could not create optimizer from config: {e}")
+
     # Method 3: Get defaults and modify
     defaults = registry.get_default_hyperparams('AdamW')
     defaults['lr'] = 0.0005

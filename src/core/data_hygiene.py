@@ -133,14 +133,18 @@ class DataSplitManager:
         """
         Get DataLoader for test set (used ONLY for final evaluation).
         
-        CRITICAL: This should NEVER be accessed during hyperparameter tuning.
-        Accessing it triggers a warning and sets a flag.
+        CRITICAL: This must not be accessed during hyperparameter tuning.
+        This method will *raise* if hyperparameters are not frozen to prevent
+        accidental data leakage (fail-fast behavior).
         """
         if not self._hyperparams_frozen:
-            logging.error("🚨 PROTOCOL VIOLATION: Test set accessed before hyperparameters frozen!")
-            logging.error("   This constitutes data leakage and invalidates results.")
-            logging.error("   Call freeze_hyperparameters() first!")
-        
+            # Fail fast: raise an exception to prevent using the test set during tuning
+            raise RuntimeError(
+                "PROTOCOL VIOLATION: Attempted to access TEST set before hyperparameters were frozen. "
+                "Call DataSplitManager.freeze_hyperparameters(best_hyperparams) after tuning before requesting the test loader. "
+                "Accessing the test set during tuning invalidates results."
+            )
+
         self._test_accessed = True
         test_subset = Subset(self.dataset, self.test_indices)
         return DataLoader(test_subset, batch_size=batch_size, shuffle=False, **kwargs)

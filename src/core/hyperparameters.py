@@ -33,10 +33,35 @@ def get_default_hyperparameters(
             
             # Get hyperparameters for the specific experiment type
             exp_config = config.get("experiment_configs", {}).get(experiment_type, {})
-            opt_config = exp_config.get("optimizers", {}).get(optimizer_name, {})
-            
-            if opt_config:
+            optimizers_cfg = exp_config.get("optimizers", {})
+
+            # Normalize optimizer names from config to canonical keys
+            from src.core.optimizer_registry import normalize_optimizer_name
+
+            normalized_cfg = {}
+            for k, v in optimizers_cfg.items():
+                try:
+                    canon = normalize_optimizer_name(k)
+                    normalized_cfg[canon] = v
+                except ValueError as e:
+                    # Fail-fast: unknown optimizer specified in config
+                    raise RuntimeError(f"Invalid optimizer name in hyperparameter config: '{k}': {e}") from e
+
+            # Normalize requested optimizer name
+            try:
+                canonical_name = normalize_optimizer_name(optimizer_name)
+            except ValueError:
+                canonical_name = optimizer_name  # use as-is and allow fallback
+
+            opt_config = normalized_cfg.get(canonical_name, None)
+
+            if opt_config is not None:
                 return opt_config
+            else:
+                logging.warning(
+                    "No hyperparameters found in config for optimizer '%s' (normalized: '%s'). Using fallback defaults.",
+                    optimizer_name, canonical_name
+                )
     except Exception as e:
         logging.warning(
             "Could not load hyperparameters from config: %s, using fallback defaults",
@@ -46,7 +71,8 @@ def get_default_hyperparameters(
     # Fallback defaults if config loading fails
     defaults = {
         'SGD': {'lr': 0.01},
-        'SGD_Momentum': {'lr': 0.05, 'momentum': 0.9},
+        # Align default with README and benchmark config: SGD momentum lr=0.01
+        'SGD_Momentum': {'lr': 0.01, 'momentum': 0.9},
         'Adam': {'lr': 0.001, 'beta1': 0.9, 'beta2': 0.999},
         'AdamW': {'lr': 0.001, 'beta1': 0.9, 'beta2': 0.999, 'weight_decay': 1e-4},
         'AMSGrad': {'lr': 0.001, 'beta1': 0.9, 'beta2': 0.999},
