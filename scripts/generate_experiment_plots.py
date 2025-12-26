@@ -36,18 +36,27 @@ def plot_training_curves(csv_files: List[str], output_dir: Path, title: str = "T
         df = pd.read_csv(csv_file)
         basename = os.path.basename(csv_file)
         
-        # Extract optimizer name
-        # Format: NN_{dataset}_{optimizer}_lr{lr}_seed{seed}.csv
-        parts = basename.replace('.csv', '').split('_')
-        
-        # Find optimizer (between dataset and lr)
+        # Extract optimizer name robustly
+        # Strategy: search for known optimizer tokens in the filename (handles hyphens and variants)
+        norm_name = basename.replace('.csv', '').replace('-', '').replace('+', '_').upper()
+        known_opts = [
+            'SGD_MOMENTUM', 'SGD', 'SGDMOMENTUM', 'ADAMW', 'ADAM', 'RMSPROP', 'AMSgrad'.upper(),
+            'SAM_SGD', 'SAM_ADAM', 'LOOKAHEAD_SGD', 'LOOKAHEAD_ADAM', 'ADABOUND', 'RADAM', 'LAMB'
+        ]
         optimizer = None
-        for i, part in enumerate(parts):
-            if part.startswith('lr'):
-                # Optimizer is parts before lr
-                dataset_idx = next((j for j, p in enumerate(parts) if p.upper() in ['MNIST', 'CIFAR10', 'IMDB', 'MEDICAL', 'SIMPLECIFAR10']), 0)
-                optimizer = '_'.join(parts[dataset_idx+1:i])
+        for opt in known_opts:
+            if opt.upper() in norm_name:
+                optimizer = opt
                 break
+
+        # Fallback to original position-based extraction if not found
+        if not optimizer:
+            parts = basename.replace('.csv', '').split('_')
+            for i, part in enumerate(parts):
+                if part.startswith('lr'):
+                    dataset_idx = next((j for j, p in enumerate(parts) if p.upper() in ['MNIST', 'CIFAR10', 'IMDB', 'MEDICAL', 'SIMPLECIFAR10']), 0)
+                    optimizer = '_'.join(parts[dataset_idx+1:i])
+                    break
         
         if not optimizer:
             optimizer = 'Unknown'

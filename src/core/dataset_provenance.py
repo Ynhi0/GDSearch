@@ -256,8 +256,8 @@ def _compute_directory_checksum(directory: Path, max_files: int = 10) -> str:
             try:
                 with open(file_path, 'rb') as f:
                     hasher.update(f.read())
-            except Exception:
-                pass  # Skip unreadable files
+            except Exception as e:
+                logger.debug("Skipping unreadable file %s: %s", file_path, e, exc_info=True)  # Skip unreadable files
     
     return hasher.hexdigest()[:16]  # First 16 chars
 

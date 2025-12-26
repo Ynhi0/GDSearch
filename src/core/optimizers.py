@@ -1080,7 +1080,8 @@ def create_optimizer_instance(name: str, **kwargs) -> Optimizer:
     """
     try:
         from src.core.optimizer_registry import normalize_optimizer_name
-    except Exception:
+    except Exception as e:
+        logging.debug("optimizer_registry import failed: %s", e, exc_info=True)
         # Minimal fallback normalization
         def normalize_optimizer_name(x):
             return x.replace(' ', '_').replace('-', '_')

@@ -13,6 +13,7 @@ import pandas as pd
 from typing import Dict, List, Tuple, Optional
 from scipy import stats
 import warnings
+import logging
 
 
 class ConvergenceAnalyzer:
@@ -230,7 +231,8 @@ class ConvergenceAnalyzer:
                 if p_value_sub < 0.05 and r_value_sub**2 > 0.7:
                     return 'sublinear', abs(slope_sub)
                 
-        except Exception:
+        except Exception as e:
+            logging.debug("Convergence detection failed: %s", e, exc_info=True)
             pass
         
         return 'unknown', np.nan

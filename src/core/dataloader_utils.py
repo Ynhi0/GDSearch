@@ -80,7 +80,8 @@ def make_dataloader(
             generator = torch.Generator()
             generator.manual_seed(int(seed))
             worker_init_fn = functools.partial(_worker_init, seed=seed)
-        except Exception:
+        except Exception as e:
+            logging.debug("Failed to create deterministic generator/worker_init_fn: %s", e, exc_info=True)
             generator = None
             worker_init_fn = None
 
@@ -110,8 +111,8 @@ def make_dataloader(
             pytorch_version = tuple(int(x) for x in torch.__version__.split('.')[:2])
             if pytorch_version >= (1, 7):
                 dl_kwargs['persistent_workers'] = True
-        except Exception:
-            pass  # Skip if version parsing fails
+        except Exception as e:
+            logging.debug("Failed to parse PyTorch version for persistent_workers: %s", e, exc_info=True)  # Skip if version parsing fails
 
     loader = DataLoader(dataset, **dl_kwargs)
     

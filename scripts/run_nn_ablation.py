@@ -46,8 +46,8 @@ def _collect_runs(results_dir: str) -> Dict[str, List[pd.DataFrame]]:
             try:
                 df = pd.read_csv(f)
                 runs.append(df)
-            except Exception:
-                # Skip corrupted files
+            except Exception as e:
+                logging.debug("Skipping corrupted run file %s: %s", f, e, exc_info=True)
                 continue
         data[opt] = runs
     return data

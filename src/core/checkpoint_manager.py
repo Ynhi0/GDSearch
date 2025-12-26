@@ -332,5 +332,6 @@ class RobustCheckpointManager:
             if len(loaded) == 0:
                 return False
             return True
-        except Exception:
+        except Exception as e:
+            logging.debug("Failed to validate checkpoint %s: %s", ckpt_path, e, exc_info=True)
             return False

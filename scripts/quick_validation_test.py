@@ -41,8 +41,9 @@ def configure_windows_console_encoding():
                 sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
             if not isinstance(sys.stderr, codecs.StreamWriter):
                 sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
-        except Exception:
-            pass  # Fallback to ASCII-safe output
+        except Exception as e:
+            import logging
+            logging.debug("configure_windows_console_encoding failed: %s", e, exc_info=True)  # Fallback to ASCII-safe output
 
 # Add project root to path
 project_root = Path(__file__).parent.parent

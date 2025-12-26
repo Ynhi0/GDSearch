@@ -97,10 +97,10 @@ def run_single_imdb(optimizer_name: str, seed: int, lr: float, epochs: int, batc
         try:
             df = pd.read_csv(out_path)
             if len(df) > 0:
-                print(f"Skipping {optimizer_name} seed {seed} (already completed)")
+                logging.info("Skipping %s seed %s (already completed)", optimizer_name, seed)
                 return df
-        except Exception:
-            pass  # File exists but corrupted, re-run
+        except Exception as e:
+            logging.debug("Existing result file appears corrupted: %s", out_path, exc_info=True)  # Re-run
 
     # Set environment variables to avoid warnings
     import os

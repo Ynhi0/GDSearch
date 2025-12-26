@@ -160,13 +160,14 @@ def run_full_pipeline(
                         df = pd.read_csv(f)
                         # Skip runs that were tainted (OOM recovery)
                         if 'tainted' in df.columns and df['tainted'].any():
-                            print(f"Skipping tainted run for {opt_A}, seed={s}")
+                            logging.info("Skipping tainted run for %s, seed=%s", opt_A, s)
                             continue
                         ev = df[df['phase'] == 'eval']
                         if not ev.empty:
                             map_A[s] = float(ev[metric].iloc[-1])
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logging.debug("Failed to read/parse result file %s: %s", f, e, exc_info=True)
+                        continue
                 for f in files_B:
                     s = _extract_seed(f)
                     if s is None:
@@ -175,13 +176,14 @@ def run_full_pipeline(
                         df = pd.read_csv(f)
                         # Skip runs that were tainted (OOM recovery)
                         if 'tainted' in df.columns and df['tainted'].any():
-                            print(f"Skipping tainted run for {opt_B}, seed={s}")
+                            logging.info("Skipping tainted run for %s, seed=%s", opt_B, s)
                             continue
                         ev = df[df['phase'] == 'eval']
                         if not ev.empty:
                             map_B[s] = float(ev[metric].iloc[-1])
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logging.debug("Failed to read/parse result file %s: %s", f, e, exc_info=True)
+                        continue
                 common = sorted(set(map_A) & set(map_B))
                 seeds_A_only = set(map_A) - set(map_B)
                 seeds_B_only = set(map_B) - set(map_A)
@@ -189,13 +191,13 @@ def run_full_pipeline(
                 
                 # Warn if seeds don't fully match
                 if seeds_A_only or seeds_B_only:
-                    print(f"Seed mismatch detected:")
-                    print(f"   {opt_A} has {len(map_A)} seeds, {opt_B} has {len(map_B)} seeds, {n_common_seeds} in common")
+                    logging.warning("Seed mismatch detected: %s has %d seeds, %s has %d seeds, %d in common",
+                                    opt_A, len(map_A), opt_B, len(map_B), n_common_seeds)
                     if seeds_A_only:
-                        print(f"   {opt_A}-only seeds: {sorted(seeds_A_only)}")
+                        logging.warning("%s-only seeds: %s", opt_A, sorted(seeds_A_only))
                     if seeds_B_only:
-                        print(f"   {opt_B}-only seeds: {sorted(seeds_B_only)}")
-                    print(f"   Recommendation: Use identical seed lists for all optimizers to enable pairing.\n")
+                        logging.warning("%s-only seeds: %s", opt_B, sorted(seeds_B_only))
+                    logging.warning("Recommendation: Use identical seed lists for all optimizers to enable pairing.")
                 
                 if n_common_seeds >= 3:
                     results_A = np.array([map_A[s] for s in common], dtype=float)
@@ -306,7 +308,9 @@ def run_full_pipeline(
                 row['Observed power'] = float(pow_rep.get('achieved_power', np.nan))
                 rn = pow_rep.get('required_n', np.nan)
                 row['Required n (80% power)'] = int(rn) if isinstance(rn, (int, np.integer)) else (int(rn) if np.isfinite(rn) else np.nan)
-            except Exception:
+            except Exception as e:
+                import logging
+                logging.debug("Power analysis failed for %s vs %s: %s", opt_A, opt_B, e, exc_info=True)
                 row['Observed power'] = np.nan
                 row['Required n (80% power)'] = np.nan
 
@@ -329,7 +333,9 @@ def run_full_pipeline(
                 signif_corrected = holm_bonferroni_correction(df_summary['p_value'].tolist(), alpha=0.05)
                 df_summary['Significant (Holm-Bonferroni)'] = signif_corrected
                 correction = 'Holm-Bonferroni'
-            except Exception:
+            except Exception as e:
+                import logging
+                logging.debug("Holm-Bonferroni correction failed: %s", e, exc_info=True)
                 df_summary['Significant (Holm-Bonferroni)'] = np.nan
                 correction = 'Unavailable'
             out_csv = os.path.join(results_dir, 'statistical_comparisons.csv')

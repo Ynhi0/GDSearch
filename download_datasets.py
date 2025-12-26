@@ -328,8 +328,9 @@ def main():
         import shutil
         total_size = sum(f.stat().st_size for f in data_dir.rglob('*') if f.is_file())
         print(f"Disk usage for {data_dir}: {total_size / (1024**2):.2f} MB")
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+        logging.debug("Could not compute disk usage for %s: %s", data_dir, e, exc_info=True)
 
 if __name__ == '__main__':
     main()

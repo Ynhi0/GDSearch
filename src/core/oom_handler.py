@@ -38,7 +38,8 @@ def oom_safe_train_step(
     targets: torch.Tensor,
     device: torch.device,
     max_retries: int = 3,
-    min_batch_size: int = 1
+    min_batch_size: int = 1,
+    allow_batchnorm_eval_fallback: bool = False
 ) -> Tuple[float, int, Any, bool]:
     """
     OOM-safe training step with automatic batch size reduction.
@@ -57,6 +58,10 @@ def oom_safe_train_step(
         device: torch.device
         max_retries: Maximum OOM recovery attempts
         min_batch_size: Minimum batch size before giving up
+        allow_batchnorm_eval_fallback: If True, allows fallback path that temporarily
+            switches model to eval() when batch size becomes too small for
+            BatchNorm training mode (this changes training semantics and taints the run).
+            Default: False (safer behaviour; prefer explicit opt-in).
         
     Returns:
         Tuple of (loss_value, actual_batch_size, outputs, tainted)
@@ -199,7 +204,14 @@ def oom_safe_train_step(
                 # Check BatchNorm compatibility BEFORE reduction
                 # CRITICAL FIX: Provide more graceful handling for BatchNorm constraints
                 if new_size < 2:
-                    # Try to switch model to eval mode as last resort
+                    # New size too small for BatchNorm in training mode
+                    if not allow_batchnorm_eval_fallback:
+                        logging.error(
+                            "OOM: New batch size %d is too small for BatchNorm in training mode and eval-mode fallback is disabled.",
+                            new_size
+                        )
+                        raise RuntimeError("Batch size too small for BatchNorm layers and eval-mode fallback is disabled")
+
                     # BatchNorm in eval mode uses running stats and doesn't require batch size >= 2
                     try:
                         was_training = model.training

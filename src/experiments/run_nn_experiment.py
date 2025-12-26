@@ -274,8 +274,8 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
             'cudnn_benchmark': getattr(torch.backends.cudnn, 'benchmark', None),
             'time_sec': 0.0,
         })
-    except Exception:
-        pass
+    except Exception as e:
+        logging.warning("Could not append meta row to history: %s", e, exc_info=True)
     # Convergence settings (optional)
     # Support both top-level keys (convergence_*), and nested config['convergence'] with keys
     conv_section = config.get('convergence', {}) if isinstance(config.get('convergence', {}), dict) else {}

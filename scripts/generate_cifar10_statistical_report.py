@@ -42,7 +42,9 @@ def _load_final(results_dir: str, optimizer: str, metric: str) -> Dict[int, floa
                 vals[seed] = float(df[metric].iloc[-1])
             elif metric == 'test_acc' and 'test_accuracy' in df.columns:
                 vals[seed] = float(df['test_accuracy'].iloc[-1])
-        except Exception:
+        except Exception as e:
+            import logging
+            logging.debug("Skipping unreadable or malformed CIFAR10 file %s: %s", f, e, exc_info=True)
             continue
     return vals
 

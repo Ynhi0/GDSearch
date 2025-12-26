@@ -27,7 +27,8 @@ def _collect_runs() -> pd.DataFrame:
     for p in RESULTS_DIR.glob('NN_*.csv'):
         try:
             df = pd.read_csv(p)
-        except Exception:
+        except Exception as e:
+            logging.debug("Could not read result file %s: %s", p, e, exc_info=True)
             continue
         # Try to parse naming convention
         stem = p.stem
@@ -43,12 +44,14 @@ def _collect_runs() -> pd.DataFrame:
             if part.startswith('lr'):
                 try:
                     lr = float(part[2:])
-                except Exception:
+                except Exception as e:
+                    logging.debug("Could not parse lr from %s: %s", part, e, exc_info=True)
                     lr = None
             if part.startswith('seed'):
                 try:
                     seed = int(part[4:])
-                except Exception:
+                except Exception as e:
+                    logging.debug("Could not parse seed from %s: %s", part, e, exc_info=True)
                     seed = None
         # Final metrics
         if 'test_acc' in df.columns:

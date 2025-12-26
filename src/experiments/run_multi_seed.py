@@ -29,11 +29,11 @@ def run_multi_seed_experiment(base_config: Dict[str, Any], seeds: List[int], res
     os.makedirs(results_dir, exist_ok=True)
     result_files = []
     
-    print(f"\n{'='*60}")
-    print(f"Running Multi-Seed Experiment")
-    print(f"Seeds: {seeds}")
-    print(f"Base config: {base_config['model']}/{base_config['dataset']}/{base_config['optimizer']}")
-    print(f"{'='*60}\n")
+    logging.info('\n%s', '='*60)
+    logging.info('Running Multi-Seed Experiment')
+    logging.info('Seeds: %s', seeds)
+    logging.info('Base config: %s/%s/%s', base_config['model'], base_config['dataset'], base_config['optimizer'])
+    logging.info('%s\n', '='*60)
     
     for seed in tqdm(seeds, desc="Seeds"):
         # Use deepcopy to prevent mutation of nested config structures
@@ -50,7 +50,7 @@ def run_multi_seed_experiment(base_config: Dict[str, Any], seeds: List[int], res
         df.to_csv(filepath, index=False)
         result_files.append(filepath)
         
-        print(f"  Seed {seed}: {filepath}")
+        logging.info("Seed %s: %s", seed, filepath)
     
     return result_files
 
@@ -78,7 +78,8 @@ def aggregate_results(result_files: List[str], metric: str = 'test_accuracy', ex
                 s = df['tainted'].astype(str).str.strip().str.lower()
                 # Map known true/false strings to bool
                 df['tainted'] = s.isin(['true', '1', 't', 'yes', 'y'])
-            except Exception:
+            except Exception as e:
+                logging.debug("Failed to parse tainted column in %s: %s", filepath, e, exc_info=True)
                 # If parsing fails, default to False (assume not tainted)
                 df['tainted'] = False
         # Skip tainted runs if requested

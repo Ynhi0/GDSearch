@@ -510,17 +510,34 @@ def create_tuner(objective_fn: Callable, use_optuna: Optional[bool] = None, **kw
         return RandomTuner(objective_fn=objective_fn, direction=kwargs.get('direction', 'maximize'), seed=kwargs.get('seed', 42))
 
 
+def _deep_merge_dicts(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a new dict that is a deep merge of a and b (b takes precedence).
+
+    Rules:
+      - If both values are dicts, merge recursively.
+      - Otherwise, b's value overrides a's value.
+      - Does not mutate inputs.
+    """
+    result = {} if a is None else dict(a)
+    for k, v in (b or {}).items():
+        if k in result and isinstance(result[k], dict) and isinstance(v, dict):
+            result[k] = _deep_merge_dicts(result[k], v)
+        else:
+            result[k] = v
+    return result
+
+
 def apply_best_params_to_config(config: Dict[str, Any], best_params: Dict[str, Any]) -> Dict[str, Any]:
     """
     Merge Optuna `best_params` into an experiment `config` dictionary.
 
-    - Overwrites keys in `config` with values from `best_params`.
+    - Performs a deep merge so nested configuration sections are preserved and
+      only the suggested keys are overwritten.
     - Normalizes optimizer names using `src.core.optimizer_registry.normalize_optimizer_name` if present.
     - Returns a new merged dict (does not mutate inputs).
     """
-    merged = config.copy() if isinstance(config, dict) else dict(config)
-    # Shallow merge: overwrite top-level keys
-    merged.update(best_params or {})
+    base = config.copy() if isinstance(config, dict) else dict(config)
+    merged = _deep_merge_dicts(base, best_params or {})
 
     # Normalize optimizer name if present
     if 'optimizer' in merged and isinstance(merged['optimizer'], str):

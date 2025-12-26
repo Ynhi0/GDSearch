@@ -22,6 +22,8 @@ from pathlib import Path
 from typing import Dict, List, Optional
 import warnings
 warnings.filterwarnings('ignore')
+import logging
+logging.basicConfig(level=logging.INFO)
 
 # Add project root to path
 project_root = Path(__file__).parent.parent.parent
@@ -168,9 +170,9 @@ class FinalDeliverablesGenerator:
                         save_path=str(output_path)
                     )
                     outputs.append(str(output_path))
-                    print(f"   ✓ Generated: {output_path.name}")
+                    logging.info("Generated loss landscape: %s", output_path.name)
                 except Exception as e:
-                    print(f"   ✗ Failed {func_name}: {e}")
+                    logging.error("Failed to generate loss landscape for %s: %s", func_name, e, exc_info=True)
         
         except ImportError as e:
             print(f"   Could not generate loss landscapes: {e}")
@@ -235,7 +237,7 @@ class FinalDeliverablesGenerator:
                         'iterations': len(train_df)
                     }
                 except Exception as e:
-                    print(f"   ✗ Failed to process {csv_file.name}: {e}")
+                    logging.error("Failed to process %s: %s", csv_file.name, e, exc_info=True)
                     continue
             
             if results_dict:
@@ -244,12 +246,12 @@ class FinalDeliverablesGenerator:
                     fig = plot_multi_optimizer_comparison(results_dict, title="Optimizer Comparison")
                     fig.write_html(str(output_path))
                     outputs.append(str(output_path))
-                    print(f"   ✓ Generated: {output_path.name}")
+                    logging.info("Generated interactive plot: %s", output_path.name)
                 except Exception as e:
-                    print(f"   ✗ Failed interactive plots: {e}")
+                    logging.error("Failed interactive plots: %s", e, exc_info=True)
         
         except Exception as e:
-            print(f"   Could not generate interactive plots: {e}")
+            logging.error("Could not generate interactive plots: %s", e, exc_info=True)
         
         return outputs
     
@@ -261,7 +263,7 @@ class FinalDeliverablesGenerator:
         csv_files = list(self.results_dir.glob("**/NN_*.csv"))
         
         if not csv_files:
-            print("   No NN results found for convergence analysis")
+            logging.info("No NN results found for convergence analysis")
             return outputs
         
         try:
@@ -271,7 +273,8 @@ class FinalDeliverablesGenerator:
                 try:
                     df = pd.read_csv(csv_file)
                     all_data.append(df)
-                except Exception:
+                except Exception as e:
+                    logging.debug("Failed to read CSV %s: %s", csv_file, e, exc_info=True)
                     continue
             
             if not all_data:
@@ -304,7 +307,7 @@ class FinalDeliverablesGenerator:
                 output_path = self.output_dir / "analysis" / "convergence_analysis.csv"
                 comparison_df.to_csv(output_path, index=False)
                 outputs.append(str(output_path))
-                print(f"   ✓ Generated: {output_path.name}")
+                logging.info("Generated convergence analysis CSV: %s", output_path.name)
                 
                 # Generate summary
                 summary_path = self.output_dir / "reports" / "convergence_summary.txt"
@@ -313,10 +316,10 @@ class FinalDeliverablesGenerator:
                     f.write("="*80 + "\n\n")
                     f.write(comparison_df.to_string())
                 outputs.append(str(summary_path))
-                print(f"   ✓ Generated: {summary_path.name}")
+                logging.info("Generated convergence summary: %s", summary_path.name)
         
         except Exception as e:
-            print(f"   Could not complete convergence analysis: {e}")
+            logging.error("Could not complete convergence analysis: %s", e, exc_info=True)
         
         return outputs
     
@@ -338,9 +341,9 @@ class FinalDeliverablesGenerator:
                 f.write("- Weight decay\n")
                 f.write("\nSee src/analysis/ablation_study.py for implementation.\n")
             outputs.append(str(output_path))
-            print(f"   ✓ Generated: {output_path.name}")
+            logging.info("Generated ablation study: %s", output_path.name)
         except Exception as e:
-            print(f"   Could not generate ablation study: {e}")
+            logging.error("Could not generate ablation study: %s", e, exc_info=True)
         
         return outputs
     
@@ -359,9 +362,9 @@ class FinalDeliverablesGenerator:
                 f.write("- Batch size: {32, 64, 128, 256}\n")
                 f.write("\nSee src/analysis/sensitivity_analysis.py for implementation.\n")
             outputs.append(str(output_path))
-            print(f"   ✓ Generated: {output_path.name}")
+            logging.info("Generated sensitivity analysis: %s", output_path.name)
         except Exception as e:
-            print(f"   Could not generate sensitivity analysis: {e}")
+            logging.error("Could not generate sensitivity analysis: %s", e, exc_info=True)
         
         return outputs
     
@@ -381,9 +384,9 @@ class FinalDeliverablesGenerator:
                 f.write("- AdamW: Verified equivalent\n")
                 f.write("\nSee src/analysis/baseline_comparison.py for implementation.\n")
             outputs.append(str(output_path))
-            print(f"   ✓ Generated: {output_path.name}")
+            logging.info("Generated baseline comparison: %s", output_path.name)
         except Exception as e:
-            print(f"   Could not generate baseline comparison: {e}")
+            logging.error("Could not generate baseline comparison: %s", e, exc_info=True)
         
         return outputs
     
@@ -395,7 +398,7 @@ class FinalDeliverablesGenerator:
         csv_files = list(self.results_dir.glob("**/NN_*.csv"))
         
         if not csv_files:
-            print("   No results found for statistical analysis")
+            logging.info("No results found for statistical analysis")
             return outputs
         
         try:
@@ -435,10 +438,10 @@ class FinalDeliverablesGenerator:
                     f.write("See results/ directory for detailed experiment data.\n")
                 
                 outputs.append(str(output_path))
-                print(f"   ✓ Generated: {output_path.name}")
+                logging.info("Generated statistical report: %s", output_path.name)
         
         except Exception as e:
-            print(f"   Could not generate statistical reports: {e}")
+            logging.error("Could not generate statistical reports: %s", e, exc_info=True)
         
         return outputs
     

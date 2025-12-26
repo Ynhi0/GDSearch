@@ -3,6 +3,8 @@ import json
 from typing import Dict, Any, Tuple, List
 
 import pandas as pd
+import logging
+logging.basicConfig(level=logging.INFO)
 
 from src.experiments.run_nn_experiment import train_and_evaluate, result_filename
 from src.visualization.plot_results import plot_generalization_gap, plot_layer_grad_norms
@@ -165,6 +167,16 @@ def tune_optimizer(base: Dict[str, Any], spec: Dict[str, Any]) -> Dict[str, Any]
             csvs_stage2.append(out)
     # pick best from stage2 (or from stage1 if none)
     candidate_csvs = csvs_stage2 if csvs_stage2 else csvs
+
+    # Fail-fast: require that at least one candidate has accompanying structured metadata.
+    # This prevents the pipeline from silently selecting runs that cannot be reliably reconstructed.
+    if not any(os.path.exists(p.replace('.csv', '_meta.json')) for p in candidate_csvs):
+        raise FileNotFoundError(
+            "Required metadata files not found for tuning candidates. Aborting to avoid applying potentially incorrect hyperparameters.\n"
+            "Ensure each tuning run writes the structured metadata JSON (see run_and_save in scripts/tune_nn.py) "
+            "or re-run the tuning stage with metadata enabled."
+        )
+
     best_path, _ = best_by_eval(candidate_csvs, prefer='accuracy')
     if best_path is None:
         # default best config
@@ -188,39 +200,22 @@ def tune_optimizer(base: Dict[str, Any], spec: Dict[str, Any]) -> Dict[str, Any]
             best_cfg['model'] = base['model']
             best_cfg['seed'] = base['seed']
             best_cfg['batch_size'] = base['batch_size']
+
+            # If metadata includes Optuna best params, apply them to the config using the canonical helper
+            try:
+                from src.core.optuna_tuner import apply_best_params_to_config
+                if isinstance(best_cfg, dict) and 'optuna_best_params' in best_cfg:
+                    best_cfg = apply_best_params_to_config(best_cfg, best_cfg.pop('optuna_best_params'))
+            except Exception as e:
+                # Non-fatal: proceed even if helper is unavailable (keeps backward compatibility)
+                logging.debug("Could not apply optuna best params to config: %s", e, exc_info=True)
         else:
-            # Fallback: reconstruct config from CSV (old brittle method)
-            import logging
-            logging.warning("Metadata file not found for %s, using fallback CSV reconstruction", best_path)
-            df = pd.read_csv(best_path)
-            best_cfg = {
-                'dataset': base['dataset'],
-                'model': base['model'],
-                'seed': base['seed'],
-                'batch_size': base['batch_size'],
-                'optimizer': spec['optimizer']
-            }
-            # best lr
-            if 'lr' in df.columns:
-                first_train = df[df.get('phase','')=='train']
-                if not first_train.empty:
-                    best_cfg['lr'] = float(first_train['lr'].iloc[0])
-            # mom/wd
-            if spec['optimizer'].upper().startswith('SGD'):
-                # cannot recover momentum from csv; infer from filename if present, fallback to 0.9
-                name = os.path.basename(best_path)
-                if 'mom' in name:
-                    try:
-                        frag = name.split('mom')[1]
-                        val = float(frag.split('_')[0].replace('.csv',''))
-                        best_cfg['momentum'] = val
-                    except Exception:
-                        best_cfg['momentum'] = 0.9
-                else:
-                    best_cfg['momentum'] = 0.9
-            else:
-                # Adam/AdamW
-                best_cfg['weight_decay'] = float(df.get('weight_decay', pd.Series([0.0])).iloc[0]) if 'weight_decay' in df.columns else 0.0
+            # Do not attempt brittle reconstruction from CSV filenames; fail fast to prevent applying invalid parameters.
+            raise FileNotFoundError(
+                f"Required metadata file not found for {best_path}. Aborting to avoid applying potentially incorrect hyperparameters.\n"
+                "Please ensure tuning run saved the structured metadata JSON (see run_and_save in scripts/tune_nn.py) "
+                "or rerun the tuning stage with metadata enabled."
+            )
 
     return best_cfg
 

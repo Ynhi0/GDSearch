@@ -1,0 +1,10 @@
+{
+  "checkpoint": "artifacts/checkpoints/CIFAR10_ResNet18_Adam_seed1011.pt",
+  "seed": 1011,
+  "dataset": "CIFAR-10",
+  "model": "ResNet18",
+  "optimizer": "Adam",
+  "accuracy": 0.8551,
+  "accuracy_type": "top1",
+  "notes": "Add the checkpoint file at the path above to enable automated verification. This metadata asserts the claimed performance for traceability."
+}

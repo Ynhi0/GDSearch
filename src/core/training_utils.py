@@ -85,8 +85,8 @@ def set_seed(seed: int, deterministic: bool = True):
         try:
             torch.backends.cudnn.deterministic = True
             torch.backends.cudnn.benchmark = False
-        except Exception:
-            pass
+        except Exception as e:
+            logging.debug("Could not set cudnn deterministic flags: %s", e, exc_info=True)
 
         try:
             torch.use_deterministic_algorithms(True)
@@ -94,16 +94,16 @@ def set_seed(seed: int, deterministic: bool = True):
             # Required for CUDA >= 10.2 when using deterministic algorithms
             if torch.cuda.is_available() and 'CUBLAS_WORKSPACE_CONFIG' not in os.environ:
                 os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
-        except Exception:
+        except Exception as e:
             # Older PyTorch versions may not support this
-            pass
+            logging.debug("Could not enable torch.use_deterministic_algorithms: %s", e, exc_info=True)
     else:
         # Preserve performance-related flags (do not override cudnn.benchmark)
         try:
             if hasattr(torch.backends, 'cudnn'):
                 logging.debug("set_seed(..., deterministic=False) preserving cudnn.benchmark=%s", getattr(torch.backends.cudnn, 'benchmark', None))
-        except Exception:
-            pass
+        except Exception as e:
+            logging.debug("Could not inspect cudnn backend flags: %s", e, exc_info=True)
 
 
 class LabelSmoothingCrossEntropy(nn.Module):
@@ -302,7 +302,25 @@ class AMPWrapper:
         self.device_type = 'cuda' if torch.cuda.is_available() and enabled else 'cpu'
         
         if self.enabled and torch.cuda.is_available():
-            self.scaler = torch.cuda.amp.GradScaler()
+            # Prefer the new public API `torch.amp.GradScaler` when available
+            # to avoid deprecation warnings for `torch.cuda.amp.GradScaler`
+            try:
+                # Newer PyTorch exposes torch.amp.GradScaler; call it while suppressing
+                # any known deprecation warnings about torch.cuda.amp.GradScaler usage.
+                import warnings as _warnings
+                with _warnings.catch_warnings():
+                    _warnings.filterwarnings('ignore', category=FutureWarning, message='.*GradScaler.*')
+                    self.scaler = torch.amp.GradScaler(device_type='cuda')
+            except Exception:
+                # Fall back to legacy API if running on older PyTorch
+                try:
+                    import warnings as _warnings
+                    with _warnings.catch_warnings():
+                        _warnings.filterwarnings('ignore', category=FutureWarning, message='.*GradScaler.*')
+                        self.scaler = torch.cuda.amp.GradScaler()
+                except Exception:
+                    logging.warning("Could not create AMP GradScaler; proceeding without scaler")
+                    self.scaler = None
         else:
             self.scaler = None
     

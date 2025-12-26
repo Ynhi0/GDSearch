@@ -10,9 +10,30 @@ Runs all experiments: MNIST, CIFAR-10, NLP, Medical Segmentation
 import os
 import sys
 import warnings
-import transformers
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
-from datasets import load_dataset
+# Delayed optional imports for heavy NLP/Transformer dependencies
+_optional_modules = {}
+def import_optional_nlp_dependencies():
+    """
+    Lazily import optional NLP dependencies (transformers, datasets).
+    Returns a dict with module objects or None if unavailable.
+    Call this function from entrypoints that require these modules.
+    """
+    if _optional_modules:
+        return _optional_modules
+    try:
+        import transformers as transformers_mod
+        from transformers import AutoTokenizer, AutoModelForSequenceClassification
+        from datasets import load_dataset
+        _optional_modules['transformers'] = transformers_mod
+        _optional_modules['AutoTokenizer'] = AutoTokenizer
+        _optional_modules['AutoModelForSequenceClassification'] = AutoModelForSequenceClassification
+        _optional_modules['load_dataset'] = load_dataset
+    except Exception as e:
+        import logging
+        logging.debug("Optional NLP dependencies unavailable: %s", e, exc_info=True)
+        # Mark as unavailable; callers should handle None gracefully
+        _optional_modules['transformers'] = None
+    return _optional_modules
 
 # Windows console encoding configuration (moved to function to avoid import-time side effects)
 def configure_windows_console_encoding():
@@ -32,8 +53,9 @@ def configure_windows_console_encoding():
         if hasattr(sys.stderr, 'buffer') and not isinstance(sys.stderr, io.TextIOWrapper):
             sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
         # Also set environment variables for subprocess compatibility
-        os.environ['PYTHONIOENCODING'] = 'utf-8'
-        os.environ['PYTHONUTF8'] = '1'
+        # Do not set these at import time — call configure_environment() in main
+        os.environ.setdefault('PYTHONIOENCODING', 'utf-8')
+        os.environ.setdefault('PYTHONUTF8', '1')
 
 def safe_print(*args, **kwargs):
     """
@@ -52,12 +74,14 @@ def safe_print(*args, **kwargs):
             safe_args.append(arg)
         print(*safe_args, **kwargs)
 
-# Suppress CUDA plugin registration warnings FIRST (before any imports)
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TensorFlow warnings
-os.environ['CUDA_VISIBLE_DEVICES_ORDER'] = 'PCI_BUS_ID'
-# Suppress protobuf/gRPC warnings
-os.environ['GRPC_VERBOSITY'] = 'ERROR'
-os.environ['GLOG_minloglevel'] = '2'
+# Environment configuration moved into a controlled setup function
+def configure_environment():
+    """Configure environment variables for experimental runs (call in main())."""
+    os.environ.setdefault('TF_CPP_MIN_LOG_LEVEL', '3')  # Suppress TensorFlow warnings
+    os.environ.setdefault('CUDA_VISIBLE_DEVICES_ORDER', 'PCI_BUS_ID')
+    # Suppress protobuf/gRPC warnings
+    os.environ.setdefault('GRPC_VERBOSITY', 'ERROR')
+    os.environ.setdefault('GLOG_minloglevel', '2')
 
 import time
 import functools
@@ -279,16 +303,15 @@ try:
 except ImportError as e:
     logging.debug("Statistical analysis not available: %s", e)
 
-# Try to import optional dependencies
-try:
-    from transformers import AutoTokenizer, AutoModelForSequenceClassification
-    from datasets import load_dataset
+# Try to import optional dependencies lazily
+_nlp = import_optional_nlp_dependencies()
+if _nlp.get('transformers') is not None:
     HAS_HF = True
-except ImportError:
+else:
     HAS_HF = False
     # Don't auto-install - provide clear instructions instead
     is_kaggle = os.path.exists('/kaggle') or os.environ.get('KAGGLE_KERNEL_RUN_TYPE') is not None
-    
+
     if is_kaggle:
         logging.warning(
             "transformers/datasets not available in Kaggle. NLP experiments will be simplified. "
@@ -828,8 +851,8 @@ def error_context(context: str, continue_on_error: bool = False):
             print('\n--- TRACEBACK (debug) ---')
             print(traceback_str)
             print('--- END TRACEBACK ---\n')
-        except Exception:
-            pass
+        except Exception as e:
+            logging.debug("Failed while attempting to print traceback for %s: %s", context, e, exc_info=True)
 
         if not continue_on_error:
             raise
@@ -1279,8 +1302,8 @@ def save_run_artifacts(base_results_dir: str, dataset: str, model_name: str, opt
                 tracker.log_artifact(str(meta_path), artifact_path=f"{dataset}/meta")
                 if model_path:
                     tracker.log_artifact(str(model_path), artifact_path=f"{dataset}/models")
-            except Exception:
-                logging.debug("Tracker artifact logging failed for %s", file_stem)
+            except Exception as e:
+                logging.debug("Tracker artifact logging failed for %s: %s", file_stem, e, exc_info=True)
 
         logging.info(f"Saved run artifacts: {csv_path} and {meta_path}")
         return str(csv_path), str(meta_path)
@@ -1297,8 +1320,8 @@ def _worker_init(worker_id, seed):
     random.seed(worker_seed)
     try:
         torch.manual_seed(worker_seed)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug("Failed to seed torch in worker_init (worker_id=%s): %s", worker_id, e, exc_info=True)
 
 
 def make_dataloader(dataset, batch_size=64, shuffle=False, seed: Optional[int] = None,
@@ -1333,7 +1356,8 @@ def make_dataloader(dataset, batch_size=64, shuffle=False, seed: Optional[int] =
             generator = torch.Generator()
             generator.manual_seed(int(seed))
             worker_init_fn = functools.partial(_worker_init, seed=seed)
-        except Exception:
+        except Exception as e:
+            logging.debug("Failed to create deterministic generator/worker_init_fn: %s", e, exc_info=True)
             generator = None
             worker_init_fn = None
 
@@ -1363,8 +1387,8 @@ def make_dataloader(dataset, batch_size=64, shuffle=False, seed: Optional[int] =
             pytorch_version = tuple(int(x) for x in torch.__version__.split('.')[:2])
             if pytorch_version >= (1, 7):
                 dl_kwargs['persistent_workers'] = True
-        except Exception:
-            pass  # Skip if version parsing fails
+        except Exception as e:
+            logging.debug("Could not parse PyTorch version for persistent_workers: %s", e, exc_info=True)  # Skip if version parsing fails
 
     loader = DataLoader(dataset, **dl_kwargs)
     
@@ -3717,6 +3741,15 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
             set_seed(seed)
 
             # Load tokenizer and model with robust error handling
+            nlp_deps = import_optional_nlp_dependencies()
+            AutoTokenizer = nlp_deps.get('AutoTokenizer')
+            AutoModelForSequenceClassification = nlp_deps.get('AutoModelForSequenceClassification')
+            load_dataset = nlp_deps.get('load_dataset')
+
+            if AutoTokenizer is None or AutoModelForSequenceClassification is None or load_dataset is None:
+                logging.warning("transformers/datasets not available. Falling back to simplified NLP experiment...")
+                return run_nlp_experiment_simple(results_dir, seeds, epochs, resume)
+
             try:
                 tokenizer = AutoTokenizer.from_pretrained(model_name)
                 model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2).to(device)
@@ -4156,9 +4189,12 @@ def run_nlp_experiment_simple(results_dir="results_nlp", seeds=None, epochs=10, 
     # Try to load IMDB data, fall back to synthetic if unavailable
     try:
         print("\n   Attempting to load IMDB dataset...")
-        from datasets import load_dataset
+        nlp_deps = import_optional_nlp_dependencies()
+        load_dataset = nlp_deps.get('load_dataset')
         import os
         import sys
+        if load_dataset is None:
+            raise ImportError("datasets not available")
         
         # Warn about Python 3.13 compatibility issue
         if sys.version_info >= (3, 13):
@@ -4213,6 +4249,15 @@ def run_nlp_experiment_simple(results_dir="results_nlp", seeds=None, epochs=10, 
         use_real_data = False
         
         # Generate synthetic sentiment data
+        # Ensure reproducibility by seeding RNGs deterministically using the provided seeds list
+        try:
+            from src.core.training_utils import set_seed
+            seed0 = seeds[0] if seeds else 42
+            set_seed(seed0)
+        except Exception:
+            # If seeding utilities unavailable, fall back to NumPy seeding
+            np.random.seed(42)
+
         positive_templates = [
             "This movie is amazing and wonderful",
             "Great acting and fantastic story",
@@ -7560,6 +7605,9 @@ def get_kaggle_t4_config():
 
 def main():
     """Main execution orchestrator with CLI argument parsing"""
+    # Configure environment & console encoding early for script execution
+    configure_environment()
+    configure_windows_console_encoding()
     import argparse
     
     parser = argparse.ArgumentParser(

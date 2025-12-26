@@ -51,7 +51,41 @@ def _load_final_metric(results_dir: str, optimizer: str, col: str) -> Dict[int, 
     for f in glob.glob(pattern):
         try:
             df = pd.read_csv(f)
-            val = float(df[col].iloc[-1])
+
+            # Robust column selection: accept synonyms and prefer requested col when present
+            col_candidates = [col]
+            # Common alternate names
+            if col.lower() in ("test_acc", "test_accuracy"):
+                col_candidates += ["test_accuracy", "test_acc", "accuracy", "acc"]
+            # Add any column that looks like a test accuracy/loss if not specified
+            if not any(c in df.columns for c in col_candidates if c is not None):
+                # look for column containing both 'test' and 'acc' or 'test' and 'loss'
+                found = None
+                for c in df.columns:
+                    lc = c.lower()
+                    if 'test' in lc and 'acc' in lc:
+                        found = c
+                        break
+                    if 'test' in lc and 'loss' in lc and 'loss' in (col or ''):
+                        found = c
+                        break
+                if found:
+                    col_candidates.insert(0, found)
+
+            chosen_col = None
+            for c in col_candidates:
+                if c in df.columns:
+                    chosen_col = c
+                    break
+
+            if chosen_col is None:
+                # No suitable column; skip file with a debug warning
+                import logging
+                logging.debug(f"Skipping file {f}: no column matching {col} or heuristics found; available columns: {list(df.columns)}")
+                continue
+
+            val = float(df[chosen_col].iloc[-1])
+
             # Extract seed from filename
             import re
             m = re.search(r"seed(\d+)", f)
@@ -59,7 +93,8 @@ def _load_final_metric(results_dir: str, optimizer: str, col: str) -> Dict[int, 
                 continue
             seed = int(m.group(1))
             data[seed] = val
-        except Exception:
+        except Exception as e:
+            logging.debug("Error reading or parsing file %s: %s", f, e, exc_info=True)
             continue
     return data
 

@@ -8,6 +8,8 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 import torch
+import logging
+logging.basicConfig(level=logging.INFO)
 
 from src.core.test_functions import Rosenbrock, IllConditionedQuadratic, SaddlePoint, Ackley2D
 from src.core.optimizers import SGD, SGDMomentum, SGDNesterov, RMSProp, Adam, AdamW, AMSGrad
@@ -81,10 +83,10 @@ def run_single_experiment(optimizer_config, function_config, initial_point, num_
         import math
         try:
             grad_norm = float(math.hypot(float(grad_x), float(grad_y)))
-        except Exception:
+        except Exception as e:
             # Robust fallback and logging
             grad_norm = float('inf')
-            print(f"Warning: gradient norm computation overflowed or invalid: grad_x={grad_x}, grad_y={grad_y}")
+            logging.warning("Gradient norm computation overflowed or invalid: grad_x=%s, grad_y=%s", grad_x, grad_y, exc_info=True)
         
         # Compute Hessian eigenvalues for curvature analysis
         hessian = test_function.hessian(current_x, current_y)
@@ -99,18 +101,19 @@ def run_single_experiment(optimizer_config, function_config, initial_point, num_
         # Guard against non-finite or explosively large updates
         try:
             if (not np.isfinite(new_x)) or (not np.isfinite(new_y)) or abs(new_x) > 1e12 or abs(new_y) > 1e12:
-                logging.warning(f"Optimizer produced invalid update: new=({new_x},{new_y}), skipping update and keeping previous parameters.")
+                logging.warning("Optimizer produced invalid update: new=(%s,%s), skipping update and keeping previous parameters.", new_x, new_y)
                 new_x, new_y = current_x, current_y
-        except Exception:
-            # Fallback: ensure numeric stability
+        except Exception as e:
+            # Log the unexpected exception with traceback; ensure we fail safe by reverting parameters
+            logging.error("Error while validating optimizer update; reverting to previous parameters.", exc_info=True)
             new_x, new_y = current_x, current_y
 
         # Calculate update norm (use hypot for robustness)
         try:
             update_norm = float(math.hypot(float(new_x - current_x), float(new_y - current_y)))
-        except Exception:
+        except Exception as e:
             update_norm = float('inf')
-            print(f"Warning: update norm computation overflowed or invalid: new=({new_x},{new_y}), old=({current_x},{current_y})")
+            logging.warning("Update norm computation overflowed or invalid: new=(%s,%s), old=(%s,%s)", new_x, new_y, current_x, current_y, exc_info=True)
 
         # Save information to history (including Hessian eigenvalues)
         history.append({
