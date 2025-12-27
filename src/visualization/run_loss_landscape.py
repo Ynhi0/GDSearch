@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
 from pathlib import Path
+from src.core.io_utils import torch_load_safe
 
 # Robust imports that work from any location
 try:
@@ -121,9 +122,9 @@ def load_checkpoint_model(checkpoint_path, config):
     # Load checkpoint
     print(f"Loading checkpoint from {checkpoint_path}...")
     try:
-        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+        checkpoint = torch_load_safe(checkpoint_path, map_location=device, weights_only=False)
     except TypeError:
-        checkpoint = torch.load(checkpoint_path, map_location=device)
+        checkpoint = torch_load_safe(checkpoint_path, map_location=device)
     
     if 'model' in checkpoint:
         model.load_state_dict(checkpoint['model'])

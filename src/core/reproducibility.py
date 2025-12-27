@@ -49,11 +49,23 @@ def verify_checkpoint_with_metadata(meta_path: str, tolerance: float = 0.01, dev
 
     # Load checkpoint
     try:
-        ckpt = torch.load(str(ckpt_path), map_location=device)
-        if isinstance(ckpt, dict) and 'model_state_dict' in ckpt:
-            state = ckpt['model_state_dict']
+        ckpt = torch_load_safe(str(ckpt_path), map_location=device)
+
+        # Accept multiple checkpoint formats for robustness:
+        # 1) {'model_state_dict': <state_dict>, ...}
+        # 2) {'model': <state_dict>, ...} (legacy / Kaggle scripts)
+        # 3) raw state_dict
+        if isinstance(ckpt, dict):
+            if 'model_state_dict' in ckpt:
+                state = ckpt['model_state_dict']
+            elif 'model' in ckpt:
+                state = ckpt['model']
+            else:
+                # If the dict looks like a state_dict (tensor values), attempt to load directly
+                state = ckpt
         else:
             state = ckpt
+
         model.load_state_dict(state)
     except Exception as e:
         return {'status': 'error', 'details': f'Failed to load checkpoint: {e}'}

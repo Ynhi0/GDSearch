@@ -19,6 +19,7 @@ from pathlib import Path
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
+from src.core.io_utils import torch_load_safe, torch_save_safe
 
 from src.core.pytorch_optimizers import (
     SGDMomentumWrapper,
@@ -157,13 +158,13 @@ class TestCrossProcessCheckpoint:
                 'optimizer': optimizer.state_dict(),
                 'test_data': {'x': x, 'y': y}
             }
-            torch.save(checkpoint, checkpoint_path)
+            torch_save_safe(checkpoint, checkpoint_path)
             
             # Get current model state for comparison
             params_before_save = [p.clone() for p in model.parameters()]
             
             # Phase 2: Load checkpoint in same process
-            loaded_checkpoint = torch.load(checkpoint_path, weights_only=False)
+            loaded_checkpoint = torch_load_safe(checkpoint_path, weights_only=False)
             new_model = create_simple_model()
             new_optimizer = optimizer_class(new_model.parameters(), **kwargs)
             
@@ -222,7 +223,7 @@ class TestCrossProcessCheckpoint:
                 'x': x,
                 'y': y
             }
-            torch.save(checkpoint, checkpoint_path)
+            torch_save_safe(checkpoint, checkpoint_path)
             
             # Take one more step in current process (reference)
             optimizer.zero_grad()
@@ -244,8 +245,7 @@ import numpy as np
 
 sys.path.insert(0, r'{Path(__file__).parent.parent}')
 from src.core.pytorch_optimizers import AdamWrapper
-
-# Define model architecture
+from src.core.io_utils import torch_load_safe
 model = nn.Sequential(
     nn.Linear(10, 20),
     nn.ReLU(),
@@ -253,7 +253,7 @@ model = nn.Sequential(
 )
 
 # Load checkpoint
-checkpoint = torch.load(r'{checkpoint_path}', weights_only=False)
+checkpoint = torch_load_safe(r'{checkpoint_path}', weights_only=False)
 optimizer = AdamWrapper(model.parameters(), lr=0.001)
 
 model.load_state_dict(checkpoint['model'])

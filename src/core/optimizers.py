@@ -12,7 +12,24 @@ class Optimizer:
     
     def __init__(self):
         """Initialize optimizer."""
-        # Base implementation does nothing
+        # History of parameters (for 2D / tuple case store list of (x,y), for arrays store copies)
+        self.history_params = []
+    
+    def _append_history(self, params):
+        """Append parameters to history in a safe, copy-on-write manner."""
+        try:
+            if isinstance(params, tuple):
+                x, y = params
+                self.history_params.append((float(x), float(y)))
+            else:
+                # For array-like params, store a copy
+                self.history_params.append(np.array(params, copy=True))
+        except Exception:
+            # Never raise during logging of history
+            try:
+                self.history_params.append(params)
+            except Exception:
+                pass
     
     def step(self, params, gradients):
         """
@@ -30,6 +47,7 @@ class Optimizer:
     def reset(self):
         """Reset internal optimizer state."""
         # Default: no state to reset
+        self.history_params = []
 
 
 class SGD(Optimizer):
@@ -58,6 +76,8 @@ class SGD(Optimizer):
             grad_x, grad_y = gradients
             new_x = x - self.lr * grad_x
             new_y = y - self.lr * grad_y
+            # Track history
+            self._append_history((new_x, new_y))
             return new_x, new_y
         else:
             # Handle array (for neural networks)
@@ -66,6 +86,7 @@ class SGD(Optimizer):
     def reset(self):
         """SGD has no internal state."""
         # Stateless optimizer
+        super().reset()
 
 
 class SGDMomentum(Optimizer):
@@ -109,7 +130,8 @@ class SGDMomentum(Optimizer):
             # Update parameters
             new_x = x - self.lr * self.v_x
             new_y = y - self.lr * self.v_y
-            
+            # Track history
+            self._append_history((new_x, new_y))
             return new_x, new_y
         else:
             # Handle array (for neural networks)
@@ -125,13 +147,16 @@ class SGDMomentum(Optimizer):
             self.v = self.beta * self.v + gradients
             
             # Update parameters
-            return params - self.lr * self.v
+            updated = params - self.lr * self.v
+            self._append_history(updated)
+            return updated
     
     def reset(self):
         """Reset velocity to 0."""
         self.v_x = 0.0
         self.v_y = 0.0
         self.v = None
+        super().reset()
 
 
 class SGDNesterov(Optimizer):
@@ -169,13 +194,16 @@ class SGDNesterov(Optimizer):
             d_y = grad_y + self.beta * self.v_y
             new_x = x - self.lr * d_x
             new_y = y - self.lr * d_y
+            self._append_history((new_x, new_y))
             return new_x, new_y
         else:
             if self.v is None:
                 self.v = np.zeros_like(params)
             self.v = self.beta * self.v + gradients
             d = gradients + self.beta * self.v
-            return params - self.lr * d
+            updated = params - self.lr * d
+            self._append_history(updated)
+            return updated
 
     def reset(self):
         self.v_x = 0.0
@@ -226,7 +254,7 @@ class RMSProp(Optimizer):
             # Update parameters with adaptive learning rate
             new_x = x - self.lr * grad_x / (np.sqrt(self.s_x) + self.epsilon)
             new_y = y - self.lr * grad_y / (np.sqrt(self.s_y) + self.epsilon)
-            
+            self._append_history((new_x, new_y))
             return new_x, new_y
         else:
             # Handle array (for neural networks)
@@ -237,7 +265,9 @@ class RMSProp(Optimizer):
             self.s = self.decay_rate * self.s + (1 - self.decay_rate) * gradients**2
             
             # Update parameters with adaptive learning rate
-            return params - self.lr * gradients / (np.sqrt(self.s) + self.epsilon)
+            updated = params - self.lr * gradients / (np.sqrt(self.s) + self.epsilon)
+            self._append_history(updated)
+            return updated
     
     def reset(self):
         """Reset squared gradient accumulator to 0."""
@@ -313,7 +343,7 @@ class Adam(Optimizer):
             # Update parameters
             new_x = x - self.lr * m_x_hat / (np.sqrt(v_x_hat) + self.epsilon)
             new_y = y - self.lr * m_y_hat / (np.sqrt(v_y_hat) + self.epsilon)
-            
+            self._append_history((new_x, new_y))
             return new_x, new_y
         else:
             # Handle array (for neural networks)
@@ -337,7 +367,9 @@ class Adam(Optimizer):
             v_hat = self.v / max(1 - self.beta2**self.t, 1e-8)
             
             # Update parameters
-            return params - self.lr * m_hat / (np.sqrt(v_hat) + self.epsilon)
+            updated = params - self.lr * m_hat / (np.sqrt(v_hat) + self.epsilon)
+            self._append_history(updated)
+            return updated
     
     def reset(self):
         """Reset moment estimates and timestep to 0."""
@@ -403,6 +435,7 @@ class AdamW(Optimizer):
 
             new_x = x - step_x
             new_y = y - step_y
+            self._append_history((new_x, new_y))
             return new_x, new_y
         else:
             if self.m is None or self.m.shape != params.shape:
@@ -483,6 +516,7 @@ class AMSGrad(Optimizer):
 
             new_x = x - self.lr * m_x_hat / (np.sqrt(self.vhat_max_x) + self.epsilon)
             new_y = y - self.lr * m_y_hat / (np.sqrt(self.vhat_max_y) + self.epsilon)
+            self._append_history((new_x, new_y))
             return new_x, new_y
         else:
             if self.m is None or self.m.shape != params.shape:

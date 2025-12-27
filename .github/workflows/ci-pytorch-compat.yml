@@ -1,0 +1,50 @@
+name: CI - PyTorch Compatibility Matrix
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-pytorch-matrix:
+    name: Test (Python ${{ matrix.python-version }}, PyTorch ${{ matrix.torch-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.8, 3.10]
+        # Test across an older pinned PyTorch (2.6.0) and the latest released PyTorch.
+        torch-version: ['2.6.0+cpu', 'latest']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      - name: Install PyTorch (CPU)
+        run: |
+          if [ "${{ matrix.torch-version }}" = "latest" ]; then
+            # Install latest CPU wheel
+            python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          else
+            # Install specific pinned CPU wheel (format: <version>+cpu)
+            python -m pip install "${{ matrix.torch-version }}" -f https://download.pytorch.org/whl/cpu/torch_stable.html
+          fi
+
+      - name: Install repo dependencies
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip install -e .
+
+      - name: Run tests
+        run: python -m pytest -q
+        env:
+          CI: true
+
+    timeout-minutes: 30

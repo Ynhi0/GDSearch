@@ -177,6 +177,38 @@ class FinalDeliverablesGenerator:
         except ImportError as e:
             print(f"   Could not generate loss landscapes: {e}")
         
+        # For each 2D result CSV, attempt to generate trajectory + step-size plots
+        try:
+            from src.visualization import plot_trajectory_and_step_size, plot_step_size_vs_iteration
+            for csv_file in csv_files:
+                try:
+                    df = pd.read_csv(csv_file)
+                    # Only handle if required columns exist
+                    if {'x', 'y'}.issubset(df.columns):
+                        base_name = csv_file.stem
+                        out_traj = self.output_dir / "visualizations" / f"{base_name}_trajectory_step_size.png"
+                        out_step = self.output_dir / "visualizations" / f"{base_name}_step_size.png"
+                        try:
+                            # Add dynamics if missing
+                            if 'step_size' not in df.columns:
+                                from src.analysis.dynamics import add_dynamics_metrics
+                                df, _ = add_dynamics_metrics(df, x_col='x', y_col='y')
+
+                            plot_trajectory_and_step_size(df, title=base_name, save_path=str(out_traj))
+                            outputs.append(str(out_traj))
+                        except Exception as e:
+                            logging.debug("Failed to generate trajectory+step-size for %s: %s", csv_file.name, e)
+                        try:
+                            plot_step_size_vs_iteration(df, title=f"step_size_{base_name}", save_path=str(out_step))
+                            outputs.append(str(out_step))
+                        except Exception as e:
+                            logging.debug("Failed to generate step-size plot for %s: %s", csv_file.name, e)
+                except Exception as e:
+                    logging.debug("Skipping %s for trajectory plots: %s", csv_file.name, e)
+        except ImportError:
+            # Visualization helpers not available - skip
+            pass
+
         return outputs
     
     def generate_interactive_plots(self) -> List[str]:

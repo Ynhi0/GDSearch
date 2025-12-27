@@ -1016,5 +1016,65 @@ def plot_final_metric_comparison(
         plt.show()
 
 
+def plot_step_size_vs_iteration(df, title='Step size vs Iteration', save_path=None):
+    """Plot step_size (||theta_{t+1}-theta_t||) vs iteration."""
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(figsize=(8,4))
+    if 'step_size' not in df.columns:
+        raise ValueError("DataFrame must contain 'step_size' column. Run dynamics.add_dynamics_metrics first.")
+    ax.plot(df['iteration'].values, df['step_size'].values, '-o', markersize=3)
+    ax.set_yscale('linear')
+    ax.set_xlabel('Iteration')
+    ax.set_ylabel('Step size')
+    ax.set_title(title)
+    ax.grid(True, alpha=0.3)
+    if save_path:
+        plt.savefig(save_path, dpi=200, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
+
+
+def plot_trajectory_and_step_size(df, test_function, title='Trajectory and Step Size', save_prefix=None):
+    """Create a two-panel figure: left = contour+trajectory, right = step_size vs iteration."""
+    (x_min, x_max), (y_min, y_max) = test_function.get_bounds()
+    x_grid = np.linspace(x_min, x_max, 200)
+    y_grid = np.linspace(y_min, y_max, 200)
+    X, Y = np.meshgrid(x_grid, y_grid)
+    Z = np.zeros_like(X)
+    for i in range(X.shape[0]):
+        for j in range(X.shape[1]):
+            Z[i, j] = test_function.compute(X[i, j], Y[i, j])
+
+    import matplotlib.pyplot as plt
+    fig, axes = plt.subplots(1,2,figsize=(14,5))
+    ax0, ax1 = axes
+    levels = np.logspace(np.log10(max(Z.min(),1e-10)), np.log10(Z.max()+1e-10), 30)
+    ax0.contour(X, Y, Z, levels=levels, cmap='viridis', alpha=0.6)
+    ax0.plot(df['x'].values, df['y'].values, '-r', linewidth=1.5)
+    ax0.scatter(df['x'].values[0], df['y'].values[0], c='g', s=40, label='Start')
+    ax0.scatter(df['x'].values[-1], df['y'].values[-1], c='m', s=50, label='End')
+    ax0.set_xlim([x_min, x_max]); ax0.set_ylim([y_min, y_max])
+    ax0.set_title('Trajectory')
+    ax0.legend()
+
+    if 'step_size' not in df.columns:
+        from src.analysis.dynamics import add_dynamics_metrics
+        df, _ = add_dynamics_metrics(df)
+
+    ax1.plot(df['iteration'].values, df['step_size'].values, '-o', markersize=3)
+    ax1.set_xlabel('Iteration'); ax1.set_ylabel('Step size')
+    ax1.set_title('Step size over iterations')
+    ax1.grid(True, alpha=0.3)
+
+    plt.suptitle(title)
+    plt.tight_layout()
+    if save_prefix:
+        fig.savefig(f"{save_prefix}.png", dpi=300, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
+
+
 if __name__ == '__main__':
     main()

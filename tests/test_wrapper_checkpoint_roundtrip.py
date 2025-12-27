@@ -16,6 +16,7 @@ import torch.nn as nn
 import tempfile
 import os
 from pathlib import Path
+from src.core.io_utils import torch_load_safe, torch_save_safe
 
 # Import wrappers to test
 from src.core.pytorch_optimizers import SAMWrapper, LookaheadWrapper
@@ -318,7 +319,7 @@ class TestCheckpointFileIO:
             train_n_steps(model1, lookahead1, n_steps=10)
             
             # Save to file
-            torch.save({
+            torch_save_safe({
                 'model': model1.state_dict(),
                 'optimizer': lookahead1.state_dict(),
                 'step_count': lookahead1.step_count
@@ -331,7 +332,7 @@ class TestCheckpointFileIO:
             base_opt2 = torch.optim.SGD(model2.parameters(), lr=0.01)
             lookahead2 = LookaheadWrapper(base_opt2, k=3, alpha=0.5)
             
-            checkpoint = torch.load(ckpt_path, weights_only=False)
+            checkpoint = torch_load_safe(ckpt_path, weights_only=False)
             model2.load_state_dict(checkpoint['model'])
             lookahead2.load_state_dict(checkpoint['optimizer'])
             

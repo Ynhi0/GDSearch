@@ -114,6 +114,37 @@ from src.core.retry import retry_with_backoff
 # Import centralized set_seed for consistency
 from src.core.training_utils import set_seed
 
+# Version-aware torch.load wrapper to maintain compatibility across PyTorch versions
+# Prefer centralized implementation in src.core.io_utils if available
+try:
+    from src.core.io_utils import torch_load_safe as _imported_torch_load_safe, torch_save_safe as _imported_torch_save_safe
+    def torch_load_safe(path_or_file, map_location=None, weights_only=None):
+        return _imported_torch_load_safe(path_or_file, map_location=map_location, weights_only=weights_only)
+    def torch_save_safe(obj, path_or_file, use_new_zipfile_serialization=True):
+        return _imported_torch_save_safe(obj, path_or_file, use_new_zipfile_serialization=use_new_zipfile_serialization)
+except Exception:
+    # Fallback implementations if io_utils is not importable at this point
+    def torch_load_safe(path_or_file, map_location=None, weights_only=None):
+        try:
+            if weights_only is not None:
+                return torch.load(path_or_file, map_location=map_location, weights_only=weights_only)
+            else:
+                return torch.load(path_or_file, map_location=map_location)
+        except TypeError:
+            logging.debug("torch.load does not support weights_only param on this PyTorch version; retrying without it")
+            return torch.load(path_or_file, map_location=map_location)
+
+    def torch_save_safe(obj, path_or_file, use_new_zipfile_serialization=True):
+        try:
+            if use_new_zipfile_serialization:
+                torch.save(obj, path_or_file, _use_new_zipfile_serialization=True)
+            else:
+                torch.save(obj, path_or_file)
+        except TypeError:
+            logging.debug("torch.save does not accept _use_new_zipfile_serialization on this PyTorch version; using default save")
+            torch.save(obj, path_or_file)
+
+
 # =============================================================================
 # Plot settings
 # =============================================================================
@@ -600,7 +631,7 @@ class RobustCheckpointManager:
                 # Use binary write file handle to ensure fsync works
                 # FIXED: Use new zipfile serialization to avoid inline_container errors with large models
                 with open(tmp_path, 'wb') as f:
-                    torch.save(checkpoint_data, f, _use_new_zipfile_serialization=True)
+                    torch_save_safe(checkpoint_data, f, use_new_zipfile_serialization=True)
                     f.flush()
                     os.fsync(f.fileno())
 
@@ -632,7 +663,8 @@ class RobustCheckpointManager:
         # Try primary checkpoint first
         if ckpt_path.exists():
             try:
-                checkpoint = torch.load(ckpt_path, map_location='cpu', weights_only=False)
+                # Use version-aware loader
+                checkpoint = torch_load_safe(ckpt_path, map_location='cpu', weights_only=False)
                 logging.info("Loaded checkpoint: %s", ckpt_path)
                 return checkpoint
             except (FileNotFoundError, OSError, RuntimeError) as e:
@@ -643,7 +675,7 @@ class RobustCheckpointManager:
             backup_path = self.base_dir / f"{filename}.backup_{i}"
             if backup_path.exists():
                 try:
-                    checkpoint = torch.load(backup_path, map_location='cpu', weights_only=False)
+                    checkpoint = torch_load_safe(backup_path, map_location='cpu', weights_only=False)
                     logging.info("Loaded backup checkpoint: %s", backup_path)
                     return checkpoint
                 except (FileNotFoundError, OSError, RuntimeError) as e:
@@ -704,7 +736,7 @@ class RobustCheckpointManager:
     def _validate_checkpoint(self, ckpt_path: Path, _expected_data: Dict) -> bool:
         """Validate checkpoint integrity"""
         try:
-            loaded = torch.load(ckpt_path, map_location='cpu', weights_only=False)
+            loaded = torch_load_safe(ckpt_path, map_location='cpu', weights_only=False)
             # Check for essential keys
             essential_keys = ['epoch', 'model']
             return all(key in loaded for key in essential_keys)
@@ -1266,7 +1298,7 @@ def save_run_artifacts(base_results_dir: str, dataset: str, model_name: str, opt
                 last_epoch = history[-1]
                 final_metrics = {k: v for k, v in last_epoch.items() if 'acc' in k or 'loss' in k}
             
-            torch.save({
+            torch_save_safe({
                 'model_state_dict': model.state_dict(),
                 'optimizer': optimizer_name,
                 'seed': seed,
@@ -2709,7 +2741,8 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
             # Optional: Set GDSEARCH_ULTRA_QUICK_LIMIT env var to limit optimizer count
             try:
                 ultra_quick_limit = int(os.environ.get('GDSEARCH_ULTRA_QUICK_LIMIT', '0'))
-            except Exception:
+            except Exception as e:
+                logging.debug("Could not parse GDSEARCH_ULTRA_QUICK_LIMIT: %s", e, exc_info=True)
                 ultra_quick_limit = 0
             
             if ultra_quick_limit > 0:
@@ -2848,8 +2881,8 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                         try:
                             if 'lr' not in optimizer.param_groups[0]:
                                 optimizer.param_groups[0]['lr'] = base_lr
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logging.debug("Could not set optimizer param_groups lr for %s: %s", opt_name, e, exc_info=True)
                         
                         # Create learning rate scheduler (cosine annealing)
                         scheduler = CosineAnnealingLR(optimizer, T_max=epochs, eta_min=base_lr*0.01)
@@ -3602,8 +3635,8 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
             'epochs': epochs,
             'batch_size': 128
         }, device=device, tracker=tracker)
-    except Exception:
-        logging.debug("Failed to save per-run CIFAR10 artifact")
+    except Exception as e:
+        logging.debug("Failed to save per-run CIFAR10 artifact: %s", e, exc_info=True)
 
     print(f"\nResults saved to {results_dir}/cifar10_results.csv")
     
@@ -4135,8 +4168,8 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
             try:
                 params = {'lr': lr, 'epochs': epochs, 'batch_size': batch_size, 'model_name': model_name}
                 save_run_artifacts(results_dir, 'IMDB', model_name.replace('/', '_'), opt_name, seed, history, params, device=device, tracker=tracker)
-            except Exception:
-                logging.debug("Failed to save per-run NLP artifact for %s seed %s", opt_name, seed)
+            except Exception as e:
+                logging.debug("Failed to save per-run NLP artifact for %s seed %s: %s", opt_name, seed, e, exc_info=True)
 
     # End profiling
     if profiler:
@@ -4254,7 +4287,8 @@ def run_nlp_experiment_simple(results_dir="results_nlp", seeds=None, epochs=10, 
             from src.core.training_utils import set_seed
             seed0 = seeds[0] if seeds else 42
             set_seed(seed0)
-        except Exception:
+        except Exception as e:
+            logging.debug("Could not use training_utils.set_seed, falling back to np.random.seed: %s", e, exc_info=True)
             # If seeding utilities unavailable, fall back to NumPy seeding
             np.random.seed(42)
 
@@ -5500,7 +5534,8 @@ def generate_basic_stats(results_dir):
                     'file': csv_file.name,
                     'metrics': json.dumps(metrics)
                 })
-        except Exception:
+        except Exception as e:
+            logging.debug("Skipping file during stats summary aggregation %s: %s", csv_file, e, exc_info=True)
             continue
     
     if stats_summary:
@@ -5970,8 +6005,8 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, resume=False):
                 try:
                     params = {'function': func_name, 'optimizer': opt_name, 'max_iter': max_iter}
                     save_run_artifacts(results_dir, '2D', func_name, opt_name, seed, history, params, device=None, tracker=None)
-                except Exception:
-                    logging.debug("Failed to save 2D artifact for %s %s seed %s", func_name, opt_name, seed)
+                except Exception as e:
+                    logging.debug("Failed to save 2D artifact for %s %s seed %s: %s", func_name, opt_name, seed, e, exc_info=True)
 
                 final_loss = history[-1]['loss'] if history else float('nan')
                 converged = final_loss < 1e-6 if history else False
@@ -6089,8 +6124,8 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, resume
             # Save per-run artifact for robustness run (fixed seed)
             try:
                 save_run_artifacts(results_dir, 'Robustness', 'Rosenbrock', opt_name, 42, [{'final_loss': loss.item(), 'iterations': i+1, 'initial_point': start_point}], {'converged': converged}, device=None, tracker=None)
-            except Exception:
-                logging.debug("Failed to save robustness artifact for start %s", start_point)
+            except Exception as e:
+                logging.debug("Failed to save robustness artifact for start %s: %s", start_point, e, exc_info=True)
 
             print(f"  Start {start_point}: Loss={loss.item():.6f}, Iters={i+1}, Converged={converged}")
 
@@ -6211,8 +6246,8 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=None, resum
         try:
             params = {'rho': rho, 'epochs': 3, 'batch_size': 256}
             save_run_artifacts(results_dir, 'MNIST', 'SimpleMLP', f'SAM_rho_{rho}', 42, [{'final_loss': epoch_loss}], params, device=device, tracker=None)
-        except Exception:
-            logging.debug("Failed to save SAM sensitivity artifact for rho %s", rho)
+        except Exception as e:
+            logging.debug("Failed to save SAM sensitivity artifact for rho %s: %s", rho, e, exc_info=True)
 
     # Save results
     os.makedirs(results_dir, exist_ok=True)
@@ -6321,8 +6356,8 @@ def run_ablation_study(results_dir="results_ablation", seeds=None, resume=False)
         try:
             params = params if isinstance(params, dict) else {'params': params}
             save_run_artifacts(results_dir, 'Ablation', '2D_Rosenbrock', opt_name, 42, [{'final_loss': loss.item(), 'iterations': i+1}], params, device=None, tracker=None)
-        except Exception:
-            logging.debug("Failed to save ablation artifact for %s", opt_name)
+        except Exception as e:
+            logging.debug("Failed to save ablation artifact for %s: %s", opt_name, e, exc_info=True)
 
         print(f"  Loss: {loss.item():.6f}, Iters: {i+1}, Converged: {loss.item() < 1e-6}")
 
@@ -6649,13 +6684,13 @@ def distributed_training_worker(rank, world_size, backend, results_dir):
             os.makedirs(results_dir, exist_ok=True)
             # FIXED: Use new zipfile serialization for large models
             # Include effective_batch_size in saved metadata
-            torch.save({
+            torch_save_safe({
                 'model_state_dict': model.module.state_dict(),
                 'world_size': world_size,
                 'epochs': epochs,
                 'effective_batch_size': effective_batch_size,
                 'per_device_batch_size': per_device_batch_size
-            }, f"{results_dir}/distributed_model.pt", _use_new_zipfile_serialization=True)
+            }, f"{results_dir}/distributed_model.pt", use_new_zipfile_serialization=True)
 
     except Exception as e:
         print(f"Worker {rank} failed: {e}")
@@ -7682,6 +7717,8 @@ Examples:
                         help='Enable Exponential Moving Average (EMA) of model weights for better generalization')
     parser.add_argument('--label-smoothing', type=float, default=0.0,
                         help='Label smoothing factor (0.0-1.0, default: 0.0 = disabled, typical: 0.1)')
+    parser.add_argument('--generate-deliverables', action='store_true',
+                        help='After experiments complete, run the final deliverables generator to produce plots and reports')
     
     args = parser.parse_args()
     
@@ -8036,7 +8073,7 @@ Examples:
             with tempfile.NamedTemporaryFile(suffix='.pt', delete=False) as f:
                 checkpoint_path = f.name
             
-            torch.save({
+            torch_save_safe({
                 'model_state_dict': model_split.state_dict(),
                 'optimizer_state_dict': opt_split.state_dict(),
                 'step': 5,
@@ -8044,7 +8081,7 @@ Examples:
             }, checkpoint_path)
             
             # Simulate restart: load checkpoint
-            checkpoint = torch.load(checkpoint_path, weights_only=False)
+            checkpoint = torch_load_safe(checkpoint_path, weights_only=False)
             sgd_params = get_default_hyperparameters('SGD', '2d_optimization')
             model_resumed = TinyTestModel()
             model_resumed.load_state_dict(checkpoint['model_state_dict'])
@@ -9070,6 +9107,18 @@ Examples:
         print(f"Could not generate universal plots: {str(e)[:100]} (non-critical)")
     print("="*80)
     
+    # Optionally generate final deliverables (plots, reports) after experiments
+    if getattr(args, 'generate_deliverables', False):
+        try:
+            from src.experiments.generate_final_deliverables import FinalDeliverablesGenerator
+            out_dir = Path(results_dir) / 'final_deliverables'
+            generator = FinalDeliverablesGenerator(results_dir=results_dir, output_dir=str(out_dir))
+            print("\nGenerating final deliverables (this may take a few minutes)...")
+            generator.generate_all()
+            print(f"Final deliverables saved to: {out_dir}")
+        except Exception as e:
+            logging.error("Failed to generate final deliverables: %s", e, exc_info=True)
+
     return experiment_results
 
 

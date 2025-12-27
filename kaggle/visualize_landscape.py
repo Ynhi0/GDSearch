@@ -11,6 +11,19 @@ import copy
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
+
+# Version-aware torch.load helper for standalone Kaggle script
+try:
+    from src.core.io_utils import torch_load_safe
+except Exception:
+    def torch_load_safe(path_or_file, map_location=None, weights_only=None):
+        try:
+            if weights_only is not None:
+                return torch.load(path_or_file, map_location=map_location, weights_only=weights_only)
+            else:
+                return torch.load(path_or_file, map_location=map_location)
+        except TypeError:
+            return torch.load(path_or_file, map_location=map_location)
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import datasets, transforms
@@ -85,7 +98,7 @@ def main():
     print(f"Loading model from {args.ckpt}...")
     model = SimpleMLP().to(device)
     try:
-        checkpoint = torch.load(args.ckpt, map_location=device, weights_only=False)
+        checkpoint = torch_load_safe(args.ckpt, map_location=device, weights_only=False)
         model.load_state_dict(checkpoint['model'])
         opt_name = checkpoint.get('opt', 'Unknown')
         print(f"Model loaded. Optimizer used: {opt_name}")

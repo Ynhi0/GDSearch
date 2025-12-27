@@ -127,7 +127,10 @@ def run_single_experiment(optimizer_config, function_config, initial_point, num_
             'grad_y': grad_y,
             'lambda_min': lambda_min,
             'lambda_max': lambda_max,
-            'condition_number': condition_number
+            'condition_number': condition_number,
+            # Metadata for reproducibility/aggregation
+            'seed': seed,
+            'optimizer': getattr(optimizer, 'name', str(opt_type))
         })
         
         # Update parameters
@@ -136,6 +139,15 @@ def run_single_experiment(optimizer_config, function_config, initial_point, num_
     # Convert history to DataFrame
     df = pd.DataFrame(history)
 
+    # Add dynamics metrics (step sizes, angles, oscillations)
+    try:
+        from src.analysis.dynamics import add_dynamics_metrics
+        df, dynamics_summary = add_dynamics_metrics(df, x_col='x', y_col='y')
+        # Optionally log or attach summary
+        logging.info("Dynamics summary: %s", dynamics_summary)
+    except Exception as e:
+        logging.debug("dynamics analysis unavailable: %s", e, exc_info=True)
+
     # End timing and record GPU statistics
     elapsed_time = time.time() - start_time
     peak_memory = torch.cuda.max_memory_allocated() / (1024 ** 2) if torch.cuda.is_available() else None
@@ -143,6 +155,13 @@ def run_single_experiment(optimizer_config, function_config, initial_point, num_
     # Add timing and memory info to DataFrame (constant for all rows)
     df['elapsed_time'] = elapsed_time
     df['peak_memory_MB'] = peak_memory
+
+    # Compute PL mu estimates for points where applicable
+    try:
+        from src.analysis.pl_condition import pl_mu_estimate
+        df['pl_mu_hat'] = df.apply(lambda r: pl_mu_estimate(r['loss'], (r['grad_norm'] ** 2), f_star=0.0), axis=1)
+    except Exception as e:
+        logging.debug("PL condition helper unavailable: %s", e, exc_info=True)
 
     return df
 

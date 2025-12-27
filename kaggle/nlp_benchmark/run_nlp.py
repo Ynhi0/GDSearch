@@ -21,6 +21,28 @@ from scipy import stats
 import torch
 from torch.utils.data import DataLoader
 
+# Version-aware torch.save / torch.load helpers - try to reuse repo utility if available
+try:
+    from src.core.io_utils import torch_load_safe, torch_save_safe
+except Exception:
+    def torch_load_safe(path_or_file, map_location=None, weights_only=None):
+        try:
+            if weights_only is not None:
+                return torch.load(path_or_file, map_location=map_location, weights_only=weights_only)
+            else:
+                return torch.load(path_or_file, map_location=map_location)
+        except TypeError:
+            return torch.load(path_or_file, map_location=map_location)
+
+    def torch_save_safe(obj, path_or_file, use_new_zipfile_serialization: bool = True):
+        try:
+            if use_new_zipfile_serialization:
+                torch.save(obj, path_or_file, _use_new_zipfile_serialization=True)
+            else:
+                torch.save(obj, path_or_file)
+        except TypeError:
+            torch.save(obj, path_or_file)
+
 
 def set_seed(seed: int):
     import random
@@ -253,7 +275,7 @@ def run_single(opt_name: str, seed: int, lr: float, epochs: int, batch_size: int
     # Resume logic
     if resume and ckpt_file.exists():
         try:
-            state = torch.load(ckpt_file, map_location=device, weights_only=False)
+            state = torch_load_safe(ckpt_file, map_location=device, weights_only=False)
             model.load_state_dict(state['model'], strict=False)
             if state.get('opt_name', '').upper().startswith('ADAMW') and isinstance(optimizer, torch.optim.AdamW):
                 optimizer.load_state_dict(state['optimizer'])
@@ -277,7 +299,7 @@ def run_single(opt_name: str, seed: int, lr: float, epochs: int, batch_size: int
         # Save checkpoint each epoch (last-writer-wins)
         try:
             # FIXED: Use new zipfile serialization to avoid inline_container errors
-            torch.save({
+            torch_save_safe({
                 'model': model.state_dict(),
                 'optimizer': optimizer.state_dict(),
                 'epoch': epoch,
@@ -286,7 +308,7 @@ def run_single(opt_name: str, seed: int, lr: float, epochs: int, batch_size: int
                 'seed': seed,
                 'lr': lr,
                 'model_name': model_name,
-            }, ckpt_file, _use_new_zipfile_serialization=True)
+            }, ckpt_file, use_new_zipfile_serialization=True)
         except Exception as e:
             logging.warning('Failed to save checkpoint: %s', e)
 

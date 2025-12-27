@@ -15,6 +15,7 @@ import torch.optim as optim
 import tempfile
 import os
 from pathlib import Path
+from src.core.io_utils import torch_load_safe, torch_save_safe
 
 
 class SimpleModel(nn.Module):
@@ -156,14 +157,14 @@ class TestCheckpointCompleteness:
                     'current_lr': optimizer.param_groups[0]['lr']
                 }
             }
-            torch.save(checkpoint, ckpt_path)
+            torch_save_safe(checkpoint, ckpt_path)
             
             # Create new model and restore
             new_model = SimpleModel()
             new_optimizer = optim.SGD(new_model.parameters(), lr=0.1, momentum=0.9)
             new_scheduler = optim.lr_scheduler.StepLR(new_optimizer, step_size=5, gamma=0.1)
             
-            loaded_ckpt = torch.load(ckpt_path, weights_only=False)
+            loaded_ckpt = torch_load_safe(ckpt_path, weights_only=False)
             new_model.load_state_dict(loaded_ckpt['model'])
             new_optimizer.load_state_dict(loaded_ckpt['optimizer'])
             new_scheduler.load_state_dict(loaded_ckpt['scheduler'])

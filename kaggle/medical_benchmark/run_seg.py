@@ -20,6 +20,28 @@ from PIL import Image
 from scipy import stats
 
 import torch
+
+# Version-aware torch.save / torch.load helpers for standalone Kaggle script
+try:
+    from src.core.io_utils import torch_load_safe, torch_save_safe
+except Exception:
+    def torch_load_safe(path_or_file, map_location=None, weights_only=None):
+        try:
+            if weights_only is not None:
+                return torch.load(path_or_file, map_location=map_location, weights_only=weights_only)
+            else:
+                return torch.load(path_or_file, map_location=map_location)
+        except TypeError:
+            return torch.load(path_or_file, map_location=map_location)
+
+    def torch_save_safe(obj, path_or_file, use_new_zipfile_serialization: bool = True):
+        try:
+            if use_new_zipfile_serialization:
+                torch.save(obj, path_or_file, _use_new_zipfile_serialization=True)
+            else:
+                torch.save(obj, path_or_file)
+        except TypeError:
+            torch.save(obj, path_or_file)
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
@@ -219,7 +241,7 @@ def run_single(opt_name: str, seed: int, epochs: int, batch_size: int, data_root
     start_epoch = 1
     if resume and ckpt_file.exists():
         try:
-            state = torch.load(ckpt_file, map_location=device, weights_only=False)
+            state = torch_load_safe(ckpt_file, map_location=device, weights_only=False)
             model.load_state_dict(state['model'], strict=False)
             if isinstance(optimizer, torch.optim.SGD) and state.get('opt', {}).get('type') == 'SGD':
                 optimizer.load_state_dict(state['optimizer'])
@@ -227,9 +249,9 @@ def run_single(opt_name: str, seed: int, epochs: int, batch_size: int, data_root
                 optimizer.load_state_dict(state['optimizer'])
             start_epoch = int(state.get('epoch', 0)) + 1
             history = state.get('history', [])
-            print(f"Resuming from epoch {start_epoch}: {ckpt_file}")
+            logging.info("Resuming from epoch %d: %s", start_epoch, ckpt_file)
         except Exception as e:
-            print('Resume failed:', e)
+            logging.warning('Resume failed: %s', e, exc_info=True)
     if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
     start = time.time()
@@ -240,14 +262,14 @@ def run_single(opt_name: str, seed: int, epochs: int, batch_size: int, data_root
         print(f'seed={seed} {opt_name} [{epoch}/{epochs}] loss={tr_loss:.4f} val_dice={val_dice:.3f}')
         try:
             # FIXED: Use new zipfile serialization to avoid inline_container errors
-            torch.save({
+            torch_save_safe({
                 'model': model.state_dict(),
                 'optimizer': optimizer.state_dict(),
                 'epoch': epoch,
                 'history': history,
                 'opt': {'type': 'Adam' if isinstance(optimizer, torch.optim.Adam) else 'SGD'},
                 'seed': seed,
-            }, ckpt_file, _use_new_zipfile_serialization=True)
+            }, ckpt_file, use_new_zipfile_serialization=True)
         except Exception as e:
             logging.warning('Failed to save checkpoint: %s', e)
     elapsed = time.time() - start

@@ -2,6 +2,16 @@ import torch
 import numpy as np
 from typing import Tuple, List
 
+# Matplotlib-based plotting helpers used by the deliverables generator
+import matplotlib
+# Use a non-interactive backend to make plotting/animation safe in CI and headless environments
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from matplotlib import animation
+from matplotlib.animation import PillowWriter
+import os
+import tempfile
+
 
 def _flatten_params(model: torch.nn.Module) -> torch.Tensor:
     return torch.cat([p.detach().view(-1) for p in model.parameters()])
@@ -86,3 +96,256 @@ def probe_loss_2d(model: torch.nn.Module,
     _set_params_from_vector(model, base)
     A, B = np.meshgrid(alphas, betas, indexing='ij')
     return A, B, Z
+
+
+# Visualization helpers
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+from matplotlib import cm
+from pathlib import Path
+
+
+def plot_loss_landscape(test_function, x_range=(-2, 2), y_range=(-2, 2), num_points=200, save_path=None, cmap='viridis'):
+    """Create a 2D contour plot (heatmap) of the provided test function.
+
+    Args:
+        test_function: Callable that accepts a 2D array-like of shape (2,) and returns scalar loss
+        x_range: (min, max) tuple for x axis
+        y_range: (min, max) tuple for y axis
+        num_points: grid resolution
+        save_path: if provided, save figure to this path and return it
+        cmap: matplotlib colormap name
+
+    Returns:
+        Matplotlib Figure object or saved path
+    """
+    x = np.linspace(x_range[0], x_range[1], num_points)
+    y = np.linspace(y_range[0], y_range[1], num_points)
+    X, Y = np.meshgrid(x, y)
+    Z = np.zeros_like(X)
+    for i in range(num_points):
+        for j in range(num_points):
+            Z[i, j] = test_function(np.array([X[i, j], Y[i, j]]))
+
+    fig, ax = plt.subplots(figsize=(6, 5))
+    cs = ax.contourf(X, Y, Z, levels=60, cmap=cmap)
+    fig.colorbar(cs, ax=ax)
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    ax.set_title('Loss landscape')
+
+    if save_path:
+        p = Path(save_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(str(p), dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        return str(p)
+
+    return fig
+
+
+def create_loss_landscape_animation(test_function, trajectory, x_range=(-2, 2), y_range=(-2, 2), num_points=200, save_path=None, fps=10):
+    """Create an animation showing trajectory points moving over the loss landscape.
+
+    Args:
+        test_function: callable f([x,y])->scalar
+        trajectory: array-like shape (T,2)
+        x_range, y_range, num_points: plot grid
+        save_path: path for GIF or MP4 (extension decides writer)
+        fps: frames per second
+
+    Returns:
+        Matplotlib Animation object or path to saved file
+    """
+    X_lin = np.linspace(x_range[0], x_range[1], num_points)
+    Y_lin = np.linspace(y_range[0], y_range[1], num_points)
+    X, Y = np.meshgrid(X_lin, Y_lin)
+    Z = np.zeros_like(X)
+    for i in range(num_points):
+        for j in range(num_points):
+            Z[i, j] = test_function(np.array([X[i, j], Y[i, j]]))
+
+    fig, ax = plt.subplots(figsize=(6, 5))
+    cs = ax.contourf(X, Y, Z, levels=60, cmap=cmap)
+    ax.set_xlim(x_range)
+    ax.set_ylim(y_range)
+
+    # Plot trajectory line
+    traj = np.asarray(trajectory)
+    line, = ax.plot([], [], 'o-', color='red', markersize=4)
+
+    def init():
+        line.set_data([], [])
+        return (line,)
+
+    def update(frame):
+        line.set_data(traj[:frame + 1, 0], traj[:frame + 1, 1])
+        return (line,)
+
+    anim = animation.FuncAnimation(fig, update, frames=len(traj), init_func=init, blit=True)
+
+    if save_path:
+        p = Path(save_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        if str(p).lower().endswith('.gif'):
+            writer = animation.PillowWriter(fps=fps)
+            anim.save(str(p), writer=writer)
+        else:
+            # Default to ffmpeg if available
+            try:
+                writer = animation.FFMpegWriter(fps=fps)
+                anim.save(str(p), writer=writer)
+            except Exception:
+                # Fallback to Pillow gif
+                writer = animation.PillowWriter(fps=fps)
+                anim.save(str(p.with_suffix('.gif')), writer=writer)
+                return str(p.with_suffix('.gif'))
+        plt.close(fig)
+        return str(p)
+
+    return anim
+
+
+def plot_loss_landscape(test_function,
+                        x_range: Tuple[float, float] = (-2, 2),
+                        y_range: Tuple[float, float] = (-2, 2),
+                        num_points: int = 100,
+                        save_path: str | None = None,
+                        cmap: str = 'viridis',
+                        contour: bool = True):
+    """Create a 2D loss landscape contour (matplotlib).
+
+    Args:
+        test_function: callable taking a 2D numpy array-like [x, y] -> scalar
+        x_range, y_range: bounds for grid
+        num_points: resolution per axis
+        save_path: if provided, saves figure to this path and returns the path
+        cmap: matplotlib colormap
+        contour: whether to use contourf (True) or pcolormesh (False)
+
+    Returns:
+        matplotlib.Figure or saved path (str)
+    """
+    x = np.linspace(x_range[0], x_range[1], num_points)
+    y = np.linspace(y_range[0], y_range[1], num_points)
+    X, Y = np.meshgrid(x, y)
+    Z = np.zeros_like(X, dtype=np.float32)
+    for i in range(num_points):
+        for j in range(num_points):
+            Z[i, j] = float(test_function(np.array([X[i, j], Y[i, j]])))
+
+    fig, ax = plt.subplots(figsize=(6, 5))
+    if contour:
+        cs = ax.contourf(X, Y, Z, 50, cmap=cmap)
+    else:
+        cs = ax.pcolormesh(X, Y, Z, shading='auto', cmap=cmap)
+
+    fig.colorbar(cs, ax=ax)
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    ax.set_title(getattr(test_function, '__name__', 'loss_landscape'))
+
+    if save_path:
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(save_path) or '.', exist_ok=True)
+        fig.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        return str(save_path)
+
+    return fig
+
+
+def create_loss_landscape_animation(test_function,
+                                    trajectory=None,
+                                    x_range: Tuple[float, float] = (-2, 2),
+                                    y_range: Tuple[float, float] = (-2, 2),
+                                    num_points: int = 100,
+                                    n_frames: int = 30,
+                                    save_path: str | None = None,
+                                    cmap: str = 'viridis',
+                                    interval: int = 100,
+                                    fps: int | None = None):
+    """Create an animation of the loss landscape.
+
+    Two modes are supported:
+      - If `trajectory` is provided (array-like shape (T,2)), an animation shows the
+        trajectory points moving over a static loss landscape.
+      - If `trajectory` is None, a conservative sweep animation is created (suitable
+        for CI environments using PillowWriter).
+
+    Args:
+        test_function: callable taking a 2D numpy array-like [x, y] -> scalar
+        trajectory: optional array-like of shape (T,2) giving points to animate
+        x_range, y_range: bounds for grid
+        num_points: resolution per axis
+        n_frames: number of frames in the sweep mode
+        save_path: if provided, saved animated GIF/MP4 path is returned
+        interval: ms between frames (used to compute fps for PillowWriter)
+
+    Returns:
+        matplotlib.animation.FuncAnimation or saved path (str)
+    """
+    X_lin = np.linspace(x_range[0], x_range[1], num_points)
+    Y_lin = np.linspace(y_range[0], y_range[1], num_points)
+    X, Y = np.meshgrid(X_lin, Y_lin)
+
+    if trajectory is not None:
+        # Static landscape, animate trajectory marker
+        Z = np.zeros_like(X, dtype=np.float32)
+        for i in range(num_points):
+            for j in range(num_points):
+                Z[i, j] = float(test_function(np.array([X[i, j], Y[i, j]])))
+
+        fig, ax = plt.subplots(figsize=(6, 5))
+        cs = ax.contourf(X, Y, Z, levels=60, cmap=cmap)
+        ax.set_xlim(x_range)
+        ax.set_ylim(y_range)
+
+        traj = np.asarray(trajectory)
+        line, = ax.plot([], [], 'o-', color='red', markersize=4)
+
+        def init():
+            line.set_data([], [])
+            return (line,)
+
+        def update(frame):
+            line.set_data(traj[:frame + 1, 0], traj[:frame + 1, 1])
+            return (line,)
+
+        anim = animation.FuncAnimation(fig, update, frames=len(traj), init_func=init, blit=True)
+    else:
+        # Sweep mode (no trajectory) - produce a simple animated variation
+        Zs = []
+        for t in range(n_frames):
+            shift = 0.3 * np.sin(2 * np.pi * t / max(1, n_frames))
+            Z = np.zeros_like(X, dtype=np.float32)
+            for i in range(num_points):
+                for j in range(num_points):
+                    pt = np.array([X[i, j] + shift, Y[i, j]])
+                    Z[i, j] = float(test_function(pt))
+            Zs.append(Z)
+
+        fig, ax = plt.subplots(figsize=(6, 5))
+        cs = ax.contourf(X, Y, Zs[0], 50, cmap=cmap)
+        fig.colorbar(cs, ax=ax)
+
+        def update(frame_idx):
+            ax.clear()
+            ax.contourf(X, Y, Zs[frame_idx], 50, cmap=cmap)
+            ax.set_xlabel('x')
+            ax.set_ylabel('y')
+            ax.set_title(f'frame: {frame_idx}')
+            return []
+
+        anim = animation.FuncAnimation(fig, update, frames=n_frames, interval=interval)
+
+    if save_path:
+        os.makedirs(os.path.dirname(save_path) or '.', exist_ok=True)
+        # determine fps to use
+        fps_use = fps if (fps is not None) else max(1, int(1000 // max(1, interval)))
+        writer = PillowWriter(fps=fps_use)
+        anim.save(save_path, writer=writer)
+        plt.close(fig)
+        return str(save_path)
+
+    return anim

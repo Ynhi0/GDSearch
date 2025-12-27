@@ -51,6 +51,7 @@ A comprehensive Python framework for comparing gradient descent algorithms on 2D
 - **Baseline Comparisons:** Compare custom implementations with PyTorch built-ins
 - **GPU Validation:** Kaggle experiments for large-scale training (ResNet-18: 85.51% on CIFAR-10)
 - **CI/CD:** Automated config validation, budget parity checks, tuning safety lint
+  - **Compatibility matrix:** GitHub Actions job runs the test suite across PyTorch 2.6.0 and the latest PyTorch to catch cross-version compatibility issues early
 
 ## Supported Datasets
 

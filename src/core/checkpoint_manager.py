@@ -14,6 +14,29 @@ from typing import Dict, Optional
 import numpy as np
 import torch
 
+# Import compatibility helpers for cross-version torch I/O
+try:
+    from src.core.io_utils import torch_load_safe, torch_save_safe
+except Exception:
+    # Provide local fallbacks to avoid NameError when io_utils cannot be imported
+    def torch_load_safe(path_or_file, map_location=None, weights_only=None):
+        try:
+            if weights_only is not None:
+                return torch.load(path_or_file, map_location=map_location, weights_only=weights_only)
+            else:
+                return torch.load(path_or_file, map_location=map_location)
+        except TypeError:
+            return torch.load(path_or_file, map_location=map_location)
+
+    def torch_save_safe(obj, path_or_file, use_new_zipfile_serialization=True):
+        try:
+            if use_new_zipfile_serialization:
+                torch.save(obj, path_or_file, _use_new_zipfile_serialization=True)
+            else:
+                torch.save(obj, path_or_file)
+        except TypeError:
+            torch.save(obj, path_or_file)
+
 
 class RobustCheckpointManager:
     """
@@ -119,26 +142,14 @@ class RobustCheckpointManager:
             try:
                 # Use binary write file handle to ensure fsync works
                 with open(tmp_path, 'wb') as f:
-                    # CRITICAL FIX: Version-aware save with fallback
-                    try:
-                        # Try new zipfile serialization (PyTorch >= 1.6)
-                        torch.save(
-                            checkpoint_data,
-                            f,
-                            _use_new_zipfile_serialization=True
-                        )
-                    except TypeError:
-                        # Fallback for older PyTorch versions
-                        logging.warning(
-                            "_use_new_zipfile_serialization not supported, "
-                            "using default serialization"
-                        )
-                        torch.save(checkpoint_data, f)
+                    # Use version-safe save helper to handle serialization flag across torch versions
+                    torch_save_safe(checkpoint_data, f, use_new_zipfile_serialization=True)
                     f.flush()
                     os.fsync(f.fileno())
 
                 # Atomically replace
                 os.replace(str(tmp_path), str(ckpt_path))
+
             finally:
                 if tmp_path.exists():
                     try:
@@ -322,10 +333,17 @@ class RobustCheckpointManager:
         """
         try:
             # Version-aware load with fallback
+            # Use version-aware loader
             try:
-                loaded = torch.load(ckpt_path, map_location='cpu', weights_only=False)
-            except TypeError:
-                loaded = torch.load(ckpt_path, map_location='cpu')
+                from src.core.io_utils import torch_load_safe
+                loaded = torch_load_safe(ckpt_path, map_location='cpu', weights_only=False)
+            except Exception:
+                # Fallback to direct torch.load without weights_only
+                try:
+                    loaded = torch.load(ckpt_path, map_location='cpu')
+                except Exception as e:
+                    logging.debug("Failed to load checkpoint during validation: %s", e)
+                    return False
             # Basic validation: check that it's a dict and has some keys
             if not isinstance(loaded, dict):
                 return False
