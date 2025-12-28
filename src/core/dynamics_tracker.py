@@ -310,12 +310,16 @@ class TrainingDynamicsTracker:
         if len(self.losses) == 0:
             return {}
         
+        # Safely compute statistics, guarding against empty or None lists
+        grad_arr = np.array(self.grad_norms) if self.grad_norms is not None and len(self.grad_norms) > 0 else np.array([])
+        update_arr = np.array(self.update_magnitudes) if self.update_magnitudes is not None and len(self.update_magnitudes) > 0 else np.array([])
+
         stats = {
             'final_loss': self.losses[-1],
-            'mean_grad_norm': float(np.mean(self.grad_norms)),
-            'std_grad_norm': float(np.std(self.grad_norms)),
-            'mean_update_mag': float(np.mean(self.update_magnitudes)),
-            'std_update_mag': float(np.std(self.update_magnitudes)),
+            'mean_grad_norm': float(np.mean(grad_arr)) if grad_arr.size else 0.0,
+            'std_grad_norm': float(np.std(grad_arr)) if grad_arr.size else 0.0,
+            'mean_update_mag': float(np.mean(update_arr)) if update_arr.size else 0.0,
+            'std_update_mag': float(np.std(update_arr)) if update_arr.size else 0.0,
             'final_param_distance': self.param_distances[-1] if self.param_distances else 0.0,
         }
         

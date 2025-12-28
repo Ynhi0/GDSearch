@@ -273,27 +273,35 @@ class TorchSAM(Optimizer):
     def first_step(self, zero_grad=False):
         """
         First step: compute and apply adversarial perturbation.
-        
+
         Args:
             zero_grad: Whether to zero gradients after this step
+
+        Notes:
+            To mitigate GPU OOM when using SAM on large models, we store the
+            saved copy of parameters on CPU when the parameter tensor lives on CUDA.
         """
         # Compute gradient norm
         grad_norm = self._grad_norm()
-        
+
         for group in self.param_groups:
             scale = group['rho'] / (grad_norm + 1e-12)
-            
+
             for p in group['params']:
                 if p.grad is None:
                     continue
-                
-                # Save original parameters
-                self.state[p]['old_p'] = p.data.clone()
-                
-                # Adversarial perturbation
+
+                # Save original parameters (keep on CPU when possible to reduce peak GPU memory)
+                old_p = p.data.detach().clone()
+                if p.is_cuda:
+                    # Move saved copy to CPU to avoid doubling GPU memory usage
+                    old_p = old_p.cpu()
+                self.state[p]['old_p'] = old_p
+
+                # Adversarial perturbation (in-place)
                 e_w = p.grad * scale
                 p.add_(e_w)  # Move to perturbed location
-        
+
         if zero_grad:
             self.zero_grad()
     
@@ -301,21 +309,36 @@ class TorchSAM(Optimizer):
     def second_step(self, zero_grad=False):
         """
         Second step: update parameters using gradient at perturbed location.
-        
+
         Args:
             zero_grad: Whether to zero gradients after this step
+
+        Ensures that any saved copies (`old_p`) are removed from state after use
+        to avoid holding extra memory longer than necessary.
         """
         for group in self.param_groups:
             for p in group['params']:
                 if p.grad is None:
                     continue
-                
-                # Restore original parameters
-                p.data = self.state[p]['old_p']
-        
+
+                # Restore original parameters (move saved copy back to param device)
+                old = self.state[p].get('old_p', None)
+                if old is not None:
+                    if old.device != p.data.device:
+                        # Move old back to parameter device and ensure same dtype
+                        p.data = old.to(p.data.device)
+                    else:
+                        p.data = old
+                    # Free the saved copy promptly
+                    try:
+                        del self.state[p]['old_p']
+                    except Exception:
+                        # Be conservative: do not raise on cleanup failure
+                        pass
+
         # Update using base optimizer
         self.base_optimizer.step()
-        
+
         if zero_grad:
             self.zero_grad()
     
@@ -323,18 +346,32 @@ class TorchSAM(Optimizer):
         """
         Single step combining both SAM phases.
         Requires closure for re-computing gradients.
+
+        This implementation is defensive: if the second closure raises (e.g., OOM)
+        we ensure the saved parameter copies are removed to avoid leaks.
         """
         if closure is None:
             raise ValueError("SAM requires closure for gradient re-computation")
-        
+
         # First forward-backward pass (for perturbation)
         loss = closure()
         self.first_step(zero_grad=True)
-        
+
         # Second forward-backward pass (at perturbed location)
-        closure()
-        self.second_step()
-        
+        try:
+            closure()
+            self.second_step()
+        finally:
+            # Ensure we always free saved copies even if closure() raised
+            for group in self.param_groups:
+                for p in group['params']:
+                    try:
+                        if 'old_p' in self.state.get(p, {}):
+                            del self.state[p]['old_p']
+                    except Exception:
+                        # Don't mask the original exception; best-effort cleanup
+                        pass
+
         return loss
     
     def _grad_norm(self):

@@ -6,17 +6,25 @@ import os
 import logging
 import warnings
 import numpy as np
-from typing import Optional
+from typing import Optional, Union, Sequence, Protocol, Tuple
+from numpy.typing import ArrayLike
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib import cm
 # Removed unused imports: Axes3D, mcolors
+from src.utils.plot_helpers import arr_to_numpy_float
+
+
+class TwoDTestFunction(Protocol):
+    def get_bounds(self) -> Tuple[Tuple[float, float], Tuple[float, float]]: ...
+    def compute(self, x: float, y: float) -> float: ...
 
 warnings.filterwarnings('ignore', category=FutureWarning, module='matplotlib')
 warnings.filterwarnings('ignore', category=FutureWarning, module='seaborn')
 
 from src.core.test_functions import Rosenbrock, IllConditionedQuadratic, SaddlePoint
 from src.experiments.run_experiment import run_single_experiment
+from src.utils.plot_helpers import arr_to_numpy_float
 
 
 def _validate_dataframe(df: pd.DataFrame, required_columns: list, func_name: str):
@@ -44,7 +52,9 @@ def _validate_dataframe(df: pd.DataFrame, required_columns: list, func_name: str
         )
 
 
-def plot_generalization_curves(df, title, save_path=None):
+from src.utils.type_guards import ensure_dataframe
+
+def plot_generalization_curves(df: Union[pd.DataFrame, ArrayLike, Sequence[dict]], title: str, save_path: Optional[str] = None) -> None:
     """
     Plot generalization curves for neural network training runs.
     Shows (1) train_loss (avg per epoch) vs epochs along with test_loss
@@ -55,6 +65,8 @@ def plot_generalization_curves(df, title, save_path=None):
     
     Added validation for empty/missing data.
     """
+    # Coerce to DataFrame to satisfy static analysis and downstream indexing
+    df = ensure_dataframe(df)
     if df is None or df.empty:
         warnings.warn(
             "plot_generalization_curves: Received empty DataFrame, skipping plot",
@@ -99,7 +111,7 @@ def plot_generalization_curves(df, title, save_path=None):
         plt.show()
 
 
-def plot_generalization_gap(nn_df: pd.DataFrame, title: str = "Generalization Gap & Test Accuracy", save_path: Optional[str] = None):
+def plot_generalization_gap(nn_df: Union[pd.DataFrame, ArrayLike], title: str = "Generalization Gap & Test Accuracy", save_path: Optional[str] = None) -> None:
     """
     Plot two lines over epochs.
     Line 1 (left y-axis): Generalization Gap = Test Loss - Train Loss (per epoch)
@@ -108,6 +120,8 @@ def plot_generalization_gap(nn_df: pd.DataFrame, title: str = "Generalization Ga
     Expects a DataFrame with rows where phase in train or eval and columns:
     epoch, train_loss (train), test_loss, test_accuracy (eval)
     """
+    from src.utils.type_guards import ensure_dataframe
+    nn_df = ensure_dataframe(nn_df)
     if nn_df is None or len(nn_df) == 0:
         print("[plot_generalization_gap] Empty DataFrame, nothing to plot.")
         return
@@ -150,12 +164,14 @@ def plot_generalization_gap(nn_df: pd.DataFrame, title: str = "Generalization Ga
     plt.close(fig)
 
 
-def plot_layer_grad_norms(nn_df: pd.DataFrame, epochs: Optional[list] = None, title: str = "Per-layer Gradient Norms", save_path: Optional[str] = None):
+def plot_layer_grad_norms(nn_df: Union[pd.DataFrame, ArrayLike], epochs: Optional[list] = None, title: str = "Per-layer Gradient Norms", save_path: Optional[str] = None) -> None:
     """
     Bar chart of per-layer L2 gradient norms captured at specific epochs.
     Expects DataFrame rows with phase layer_grad and columns: epoch, layer, layer_grad_norm
     If epochs is None, use all available in ascending order.
     """
+    from src.utils.type_guards import ensure_dataframe
+    nn_df = ensure_dataframe(nn_df)
     layer_df = nn_df[nn_df['phase'] == 'layer_grad'].copy()
     if len(layer_df) == 0:
         print("[plot_layer_grad_norms] No per-layer gradient entries found. Ensure capture_layer_grad_epochs was set.")
@@ -187,7 +203,7 @@ def plot_layer_grad_norms(nn_df: pd.DataFrame, epochs: Optional[list] = None, ti
     plt.close(fig)
 
 
-def plot_trajectory(df, test_function, title, save_path=None):
+def plot_trajectory(df: Union[pd.DataFrame, ArrayLike], test_function: TwoDTestFunction, title: str, save_path: Optional[str] = None) -> None:
     """
     Plot optimization trajectory on 2D contour of test function.
     
@@ -197,6 +213,8 @@ def plot_trajectory(df, test_function, title, save_path=None):
         title: Title for the plot
         save_path: Path to save figure (if None then only display)
     """
+    from src.utils.type_guards import ensure_dataframe
+    df = ensure_dataframe(df)
     # Get plot limits from test function
     (x_min, x_max), (y_min, y_max) = test_function.get_bounds()
     
@@ -224,13 +242,12 @@ def plot_trajectory(df, test_function, title, save_path=None):
     cbar.set_label('Function value', rotation=270, labelpad=20)
     
     # Draw trajectory
-    x_traj = df['x'].values
-    y_traj = df['y'].values
+    x_traj = arr_to_numpy_float(df['x'])
+    y_traj = arr_to_numpy_float(df['y'])
     
-    if len(x_traj) == 0 or len(y_traj) == 0:
+    if x_traj.size == 0 or y_traj.size == 0:
         logging.warning("Empty trajectory data, skipping plot")
-        return
-    
+        return    
     # Draw trajectory line
     ax.plot(x_traj, y_traj, 'r-', linewidth=2, alpha=0.7, label='Trajectory')
     
@@ -261,9 +278,9 @@ def plot_trajectory(df, test_function, title, save_path=None):
 
 def _compute_curvature_angles(df):
     """Compute curvature (turning angle in degrees) along a 2D trajectory from df columns x,y."""
-    x = df['x'].values
-    y = df['y'].values
-    if len(x) < 3:
+    x = arr_to_numpy_float(df['x'])
+    y = arr_to_numpy_float(df['y'])
+    if x.size < 3:
         return np.array([])
     # update vectors u_t = p_{t+1} - p_t for t=0..n-2
     u = np.stack([np.diff(x), np.diff(y)], axis=1)  # (n-1, 2)
@@ -280,15 +297,20 @@ def _compute_curvature_angles(df):
     return angles_full
 
 
-def plot_dynamics_triplet(df, title, save_path=None):
+def plot_dynamics_triplet(df: Union[pd.DataFrame, ArrayLike], title: str, save_path: Optional[str] = None) -> None:
     """
     Plot Update Norm, Gradient Norm, and Trajectory Curvature vs Iteration for GD logs.
     Curvature is the turning angle between consecutive update vectors.
     """
-    iterations = df['iteration'].values
-    update = df['update_norm'].values
-    grad = df['grad_norm'].values
-    curvature = _compute_curvature_angles(df)
+    df = ensure_dataframe(df)
+    if df is None or len(df) == 0:
+        logging.warning("Empty dynamics DataFrame, skipping plot")
+        return
+
+    iterations = arr_to_numpy_float(df['iteration'])
+    update = arr_to_numpy_float(df['update_norm'])
+    grad = arr_to_numpy_float(df['grad_norm'])
+    curvature = arr_to_numpy_float(_compute_curvature_angles(df))
 
     fig, axes = plt.subplots(3, 1, figsize=(12, 10), sharex=True)
 
@@ -318,8 +340,13 @@ def plot_dynamics_triplet(df, title, save_path=None):
         plt.show()
 
 
-def plot_trajectory_3d(df, test_function, title, save_path=None):
+def plot_trajectory_3d(df: Union[pd.DataFrame, ArrayLike], test_function: TwoDTestFunction, title: str, save_path: Optional[str] = None) -> None:
     """Plot 3D loss surface with trajectory overlay for a test function (e.g., Rosenbrock)."""
+    df = ensure_dataframe(df)
+    if df is None or len(df) == 0:
+        logging.warning("Empty trajectory DataFrame for 3D plot, skipping")
+        return
+
     (x_min, x_max), (y_min, y_max) = test_function.get_bounds()
     x_grid = np.linspace(x_min, x_max, 150)
     y_grid = np.linspace(y_min, y_max, 150)
@@ -329,11 +356,11 @@ def plot_trajectory_3d(df, test_function, title, save_path=None):
         for j in range(X.shape[1]):
             Z[i, j] = test_function.compute(X[i, j], Y[i, j])
 
-    x_traj = df['x'].values
-    y_traj = df['y'].values
-    z_traj = np.array([test_function.compute(x, y) for x, y in zip(x_traj, y_traj)])
+    x_traj = arr_to_numpy_float(df['x'])
+    y_traj = arr_to_numpy_float(df['y'])
+    z_traj = arr_to_numpy_float([test_function.compute(x, y) for x, y in zip(x_traj, y_traj)])
 
-    if len(x_traj) == 0 or len(y_traj) == 0 or len(z_traj) == 0:
+    if x_traj.size == 0 or y_traj.size == 0 or z_traj.size == 0:
         logging.warning("Empty trajectory data in 3D plot, skipping")
         return
 
@@ -388,9 +415,12 @@ def trajectory_grid_adam(beta1_values, beta2_values, lr=0.01, a=1, b=100, initia
             )
             levels = np.logspace(np.log10(Z.min()+1e-10), np.log10(Z.max()+1), 30)
             ax.contour(X, Y, Z, levels=levels, cmap='viridis', alpha=0.5, linewidths=0.5)
-            ax.plot(df['x'].values, df['y'].values, 'r-', linewidth=1.5)
-            ax.plot(df['x'].values[0], df['y'].values[0], 'go', ms=6)
-            ax.plot(df['x'].values[-1], df['y'].values[-1], 'r*', ms=10)
+            df = ensure_dataframe(df)
+            xvals = arr_to_numpy_float(df['x'])
+            yvals = arr_to_numpy_float(df['y'])
+            ax.plot(xvals, yvals, 'r-', linewidth=1.5)
+            ax.plot(xvals[0], yvals[0], 'go', ms=6)
+            ax.plot(xvals[-1], yvals[-1], 'r*', ms=10)
             ax.set_xlim([x_min, x_max])
             ax.set_ylim([y_min, y_max])
             ax.set_title(f"β1={beta1}, β2={beta2}")
@@ -433,9 +463,12 @@ def trajectory_series_momentum(betas, lr=0.01, a=1, b=100, initial=(-1.5, 2.0), 
         )
         levels = np.logspace(np.log10(Z.min()+1e-10), np.log10(Z.max()+1), 30)
         ax.contour(X, Y, Z, levels=levels, cmap='viridis', alpha=0.5, linewidths=0.5)
-        ax.plot(df['x'].values, df['y'].values, 'r-', linewidth=1.5)
-        ax.plot(df['x'].values[0], df['y'].values[0], 'go', ms=6)
-        ax.plot(df['x'].values[-1], df['y'].values[-1], 'r*', ms=10)
+        df = ensure_dataframe(df)
+        xvals = arr_to_numpy_float(df['x'])
+        yvals = arr_to_numpy_float(df['y'])
+        ax.plot(xvals, yvals, 'r-', linewidth=1.5)
+        ax.plot(xvals[0], yvals[0], 'go', ms=6)
+        ax.plot(xvals[-1], yvals[-1], 'r*', ms=10)
         ax.set_xlim([x_min, x_max])
         ax.set_ylim([y_min, y_max])
         ax.set_title(f"β={beta}")
@@ -478,9 +511,12 @@ def trajectory_series_nesterov(betas, lr=0.01, a=1, b=100, initial=(-1.5, 2.0), 
         )
         levels = np.logspace(np.log10(Z.min()+1e-10), np.log10(Z.max()+1), 30)
         ax.contour(X, Y, Z, levels=levels, cmap='viridis', alpha=0.5, linewidths=0.5)
-        ax.plot(df['x'].values, df['y'].values, 'r-', linewidth=1.5)
-        ax.plot(df['x'].values[0], df['y'].values[0], 'go', ms=6)
-        ax.plot(df['x'].values[-1], df['y'].values[-1], 'r*', ms=10)
+        df = ensure_dataframe(df)
+        xvals = arr_to_numpy_float(df['x'])
+        yvals = arr_to_numpy_float(df['y'])
+        ax.plot(xvals, yvals, 'r-', linewidth=1.5)
+        ax.plot(xvals[0], yvals[0], 'go', ms=6)
+        ax.plot(xvals[-1], yvals[-1], 'r*', ms=10)
         ax.set_xlim([x_min, x_max])
         ax.set_ylim([y_min, y_max])
         ax.set_title(f"β={beta}")
@@ -523,9 +559,12 @@ def trajectory_series_adamw(weight_decays, lr=0.01, a=1, b=100, initial=(-1.5, 2
         )
         levels = np.logspace(np.log10(Z.min()+1e-10), np.log10(Z.max()+1), 30)
         ax.contour(X, Y, Z, levels=levels, cmap='viridis', alpha=0.5, linewidths=0.5)
-        ax.plot(df['x'].values, df['y'].values, 'r-', linewidth=1.5)
-        ax.plot(df['x'].values[0], df['y'].values[0], 'go', ms=6)
-        ax.plot(df['x'].values[-1], df['y'].values[-1], 'r*', ms=10)
+        df = ensure_dataframe(df)
+        xvals = arr_to_numpy_float(df['x'])
+        yvals = arr_to_numpy_float(df['y'])
+        ax.plot(xvals, yvals, 'r-', linewidth=1.5)
+        ax.plot(xvals[0], yvals[0], 'go', ms=6)
+        ax.plot(xvals[-1], yvals[-1], 'r*', ms=10)
         ax.set_xlim([x_min, x_max])
         ax.set_ylim([y_min, y_max])
         ax.set_title(f"wd={wd}")
@@ -548,22 +587,27 @@ def plot_metrics(df, title, save_path=None):
       Test function results with columns iteration, loss, grad_norm, update_norm
       Neural network results with columns phase train and global_step, train_loss, grad_norm, update_norm
     """
+    df = ensure_dataframe(df)
+    if df is None or len(df) == 0:
+        logging.warning("plot_metrics: Empty DataFrame, skipping")
+        return
+
     fig, axes = plt.subplots(3, 1, figsize=(12, 10))
 
     if 'global_step' in df.columns and 'phase' in df.columns:
         # NN logs - use train phase and global_step
         train_df = df[df['phase'] == 'train']
-        xvals = train_df['global_step'].values
-        loss_vals = train_df['train_loss'].values
-        grad_vals = train_df['grad_norm'].values
-        upd_vals = train_df['update_norm'].values
+        xvals = arr_to_numpy_float(train_df['global_step'])
+        loss_vals = arr_to_numpy_float(train_df['train_loss'])
+        grad_vals = arr_to_numpy_float(train_df['grad_norm'])
+        upd_vals = arr_to_numpy_float(train_df['update_norm'])
         x_label = 'Global Step'
     else:
         # GD logs - use iteration
-        xvals = df['iteration'].values
-        loss_vals = df['loss'].values
-        grad_vals = df['grad_norm'].values
-        upd_vals = df['update_norm'].values
+        xvals = arr_to_numpy_float(df['iteration'])
+        loss_vals = arr_to_numpy_float(df['loss'])
+        grad_vals = arr_to_numpy_float(df['grad_norm'])
+        upd_vals = arr_to_numpy_float(df['update_norm'])
         x_label = 'Iteration'
 
     # Subplot 1: Loss
@@ -842,7 +886,9 @@ def plot_multiseed_comparison(
         # Optionally exclude tainted runs
         filtered_dfs = []
         for df in dfs:
-            if exclude_tainted and 'tainted' in df.columns and df['tainted'].any():
+            # Explicitly cast .any() result to bool to satisfy static checkers
+            tainted_any = bool(df['tainted'].any()) if 'tainted' in df.columns else False
+            if exclude_tainted and tainted_any:
                 continue
             filtered_dfs.append(df)
 
@@ -864,11 +910,12 @@ def plot_multiseed_comparison(
             all_values.append(y)
         
         # Convert to array (seeds x iterations)
-        all_values = np.array(all_values)
+        all_values = np.asarray(all_values)
         
-        # Compute mean and std
-        mean_values = np.mean(all_values, axis=0)
-        std_values = np.std(all_values, axis=0)
+        # Compute mean and std and ensure ArrayLike numeric types for plotting
+        x_values = np.asarray(x_values, dtype=float)
+        mean_values = np.asarray(np.mean(all_values, axis=0), dtype=float)
+        std_values = np.asarray(np.std(all_values, axis=0), dtype=float)
         
         # Plot mean line
         ax.plot(x_values, mean_values, linewidth=2.5, label=opt_name, 
@@ -941,7 +988,8 @@ def plot_final_metric_comparison(
         finals = []
         for df in dfs:
             # Skip tainted runs by default
-            if exclude_tainted and 'tainted' in df.columns and df['tainted'].any():
+            tainted_any = bool(df['tainted'].any()) if 'tainted' in df.columns else False
+            if exclude_tainted and tainted_any:
                 continue
             if metric in ('test_accuracy', 'test_loss') and 'phase' in df.columns:
                 eval_df = df[df['phase'] == 'eval']
@@ -968,12 +1016,14 @@ def plot_final_metric_comparison(
             logging.warning(f"No valid data for {opt_name}, skipping from plot")
             continue
         
-        means.append(np.mean(finals))
-        stds.append(np.std(finals))
+        means.append(float(np.mean(finals)))
+        stds.append(float(np.std(finals)))
         individual_vals.append(finals)
     
-    # Bar plot
+    # Bar plot (ensure numeric arrays)
     x = np.arange(len(opt_names))
+    means = np.asarray(means, dtype=float)
+    stds = np.asarray(stds, dtype=float)
     _bars = ax.bar(x, means, yerr=stds, capsize=10, alpha=0.7, 
                    color=cmap(np.linspace(0, 1, len(opt_names))))
     
@@ -1035,8 +1085,16 @@ def plot_step_size_vs_iteration(df, title='Step size vs Iteration', save_path=No
         plt.show()
 
 
-def plot_trajectory_and_step_size(df, test_function, title='Trajectory and Step Size', save_prefix=None):
-    """Create a two-panel figure: left = contour+trajectory, right = step_size vs iteration."""
+def plot_trajectory_and_step_size(df, test_function, title='Trajectory and Step Size', save_prefix=None, save_path: str | None = None):
+    """Create a two-panel figure: left = contour+trajectory, right = step_size vs iteration.
+
+    Args:
+        df: DataFrame containing 'x', 'y', and optional 'step_size'
+        test_function: Test function instance (provides `get_bounds()` and `compute()`)
+        title: Figure title
+        save_prefix: if provided, save to f"{save_prefix}.png"
+        save_path: if provided, save to this exact path (takes precedence over `save_prefix`)
+    """
     (x_min, x_max), (y_min, y_max) = test_function.get_bounds()
     x_grid = np.linspace(x_min, x_max, 200)
     y_grid = np.linspace(y_min, y_max, 200)
@@ -1069,7 +1127,12 @@ def plot_trajectory_and_step_size(df, test_function, title='Trajectory and Step 
 
     plt.suptitle(title)
     plt.tight_layout()
-    if save_prefix:
+    # save_path takes precedence over save_prefix for backward compatibility
+    if save_path:
+        os.makedirs(os.path.dirname(save_path) or '.', exist_ok=True)
+        fig.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.close()
+    elif save_prefix:
         fig.savefig(f"{save_prefix}.png", dpi=300, bbox_inches='tight')
         plt.close()
     else:

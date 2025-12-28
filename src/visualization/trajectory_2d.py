@@ -97,7 +97,8 @@ def plot_contour_with_trajectories(
     
     for i in range(X.shape[0]):
         for j in range(X.shape[1]):
-            Z[i, j] = func(X[i, j], Y[i, j])
+            ii = int(i); jj = int(j)
+            Z[ii, jj] = func(X[ii, jj], Y[ii, jj])
     
     # Create figure
     _, ax = plt.subplots(figsize=(10, 8))
@@ -153,16 +154,110 @@ def plot_contour_with_trajectories(
     logging.info("Saved trajectory plot: %s", output_path)
 
 
+def plot_vector_field_overlay(
+    func: Callable,
+    grad_func: Callable,
+    xlim: Tuple[float, float],
+    ylim: Tuple[float, float],
+    output_path: Path,
+    density: int = 20,
+    normalize: bool = True,
+    scale: float | None = None,
+    cmap: str = 'plasma'
+):
+    """
+    Plot gradient vector field (quiver) overlaid on contour of the function.
+
+    Args:
+        func: 2D function f(x, y)
+        grad_func: gradient function returning (gx, gy)
+        xlim, ylim: plot bounds
+        output_path: Path to save the figure
+        density: number of grid points along each axis
+        normalize: whether to normalize vectors for consistent lengths
+        scale: matplotlib quiver scale parameter
+        cmap: colormap for background (magnitude)
+    """
+    x = np.linspace(xlim[0], xlim[1], density)
+    y = np.linspace(ylim[0], ylim[1], density)
+    X, Y = np.meshgrid(x, y)
+
+    U = np.zeros_like(X, dtype=float)
+    V = np.zeros_like(Y, dtype=float)
+    M = np.zeros_like(X, dtype=float)
+
+    for i in range(X.shape[0]):
+        for j in range(X.shape[1]):
+            gx, gy = grad_func(X[i, j], Y[i, j])
+            U[i, j] = -gx  # plot negative gradient (descent direction)
+            V[i, j] = -gy
+            M[i, j] = np.sqrt(U[i, j]**2 + V[i, j]**2)
+
+    # Optionally normalize vectors to show direction more clearly
+    if normalize:
+        nonzero = M > 1e-12
+        U[nonzero] = U[nonzero] / M[nonzero]
+        V[nonzero] = V[nonzero] / M[nonzero]
+
+    # Create a contour background of function magnitude
+    XX = np.linspace(xlim[0], xlim[1], 200)
+    YY = np.linspace(ylim[0], ylim[1], 200)
+    XXg, YYg = np.meshgrid(XX, YY)
+    ZZ = np.zeros_like(XXg, dtype=float)
+    for i in range(XXg.shape[0]):
+        for j in range(XXg.shape[1]):
+            ZZ[i, j] = func(XXg[i, j], YYg[i, j])
+
+    # Plot
+    _, ax = plt.subplots(figsize=(10, 8))
+    cf = ax.contourf(XXg, YYg, ZZ, levels=30, cmap='viridis', alpha=0.35)
+    if normalize:
+        # Plot direction-only arrows in a single color
+        q = ax.quiver(X, Y, U, V, color='black', scale=scale, alpha=0.8)
+    else:
+        # Color by magnitude
+        q = ax.quiver(X, Y, U, V, M, cmap=cmap, scale=scale)
+        plt.colorbar(q, ax=ax, label='Gradient magnitude')
+    plt.colorbar(cf, ax=ax, label='Function value')
+
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    ax.set_title('Gradient vector field (descent direction)')
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    # Ensure parent directory exists
+    try:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        # Best-effort: if path isn't a Path (e.g., string), ignore
+        pass
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.close()
+
+    logging.info("Saved vector field plot: %s", output_path)
+
+
 def compare_momentum_beta_trajectories(
     test_function: str = 'rosenbrock',
-    beta_values: List[float] = None,
-    save_dir: str = 'results/trajectory_visualization'
+    beta_values: Optional[List[float]] = None,
+    save_dir: str = 'results/trajectory_visualization',
+    output_dir: str | None = None
 ):
     """
     Visualize effect of momentum β on trajectories.
+
+    Notes:
+        Accepts either `save_dir` or `output_dir` for backward compatibility with callers.
     
     Key research question: How does β shape the trajectory smoothness?
     """
+    # Allow callers to pass `output_dir=` (used elsewhere in the codebase)
+    if output_dir is not None:
+        save_dir = output_dir
+
     if beta_values is None:
         beta_values = [0.0, 0.5, 0.9, 0.99]
     
@@ -212,13 +307,21 @@ def compare_momentum_beta_trajectories(
 def compare_adam_beta_trajectories(
     test_function: str = 'rosenbrock',
     beta_configs: List[Tuple[float, float]] = None,
-    save_dir: str = 'results/trajectory_visualization'
+    save_dir: str = 'results/trajectory_visualization',
+    output_dir: str | None = None
 ):
     """
     Visualize effect of Adam β1, β2 on trajectories.
-    
+
+    Notes:
+        Accepts either `save_dir` or `output_dir` for backward compatibility with callers.
+
     Key research question: How do β1, β2 shape the optimization dynamics?
     """
+    # Allow callers to pass `output_dir=` (used elsewhere in the codebase)
+    if output_dir is not None:
+        save_dir = output_dir
+
     if beta_configs is None:
         beta_configs = [(0.9, 0.999), (0.5, 0.99), (0.95, 0.9999)]
     
@@ -256,13 +359,21 @@ def compare_adam_beta_trajectories(
 
 def compare_optimizer_families(
     test_function: str = 'rosenbrock',
-    save_dir: str = 'results/trajectory_visualization'
+    save_dir: str = 'results/trajectory_visualization',
+    output_dir: str | None = None
 ):
     """
     Compare SGD, Momentum, Nesterov, Adam on same 2D function.
-    
+
+    Notes:
+        Accepts either `save_dir` or `output_dir` for backward compatibility with callers.
+
     Provides side-by-side visual comparison for research presentation.
     """
+    # Allow callers to pass `output_dir=` (used elsewhere in the codebase)
+    if output_dir is not None:
+        save_dir = output_dir
+
     Path(save_dir).mkdir(parents=True, exist_ok=True)
     
     # Select test function

@@ -127,6 +127,8 @@ class IMDBDataset(Dataset):
         return len(self.texts)
     
     def __getitem__(self, idx):
+        # Cast idx to int to avoid issues with numpy scalar indices
+        idx = int(idx)
         text = self.texts[idx]
         label = self.labels[idx]
         

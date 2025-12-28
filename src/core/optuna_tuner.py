@@ -14,13 +14,29 @@ Supports:
 """
 
 import os
-import optuna
-from optuna.pruners import MedianPruner, PercentilePruner
-from optuna.samplers import TPESampler, RandomSampler, GridSampler
+# Optuna is an optional dependency. Import lazily to avoid import-time failures
+try:
+    import optuna
+    from optuna.pruners import MedianPruner, PercentilePruner
+    from optuna.samplers import TPESampler, RandomSampler, GridSampler
+    HAS_OPTUNA = True
+except Exception:
+    optuna = None
+    MedianPruner = None
+    PercentilePruner = None
+    TPESampler = None
+    RandomSampler = None
+    GridSampler = None
+    HAS_OPTUNA = False
+
 import torch
 import numpy as np
 import logging
-from typing import Dict, Any, Callable, Optional, List, Tuple
+from typing import Dict, Any, Callable, Optional, List, Tuple, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # Import for static typing only (Optuna may be unavailable at runtime)
+    import optuna  # type: ignore
 import json
 from pathlib import Path
 
@@ -64,7 +80,14 @@ class OptunaHyperparameterTuner:
         self.direction = direction
         self.study_name = study_name
         self.seed = seed
-        
+
+        # Fail fast if Optuna is not available
+        if optuna is None:
+            raise RuntimeError(
+                "Optuna is not available in this environment. Install it with `pip install optuna` "
+                "or call `create_tuner(..., use_optuna=False)` to use the dependency-free RandomTuner fallback."
+            )
+
         # Create sampler
         if sampler == "tpe":
             self.sampler = TPESampler(seed=seed, n_startup_trials=n_startup_trials)
@@ -265,7 +288,7 @@ class OptunaHyperparameterTuner:
         print(f"Saved results to {filepath}")
 
 
-def suggest_optimizer_params(trial: optuna.Trial, optimizer_name: str) -> Dict[str, Any]:
+def suggest_optimizer_params(trial: 'optuna.Trial', optimizer_name: str) -> Dict[str, Any]:
     """
     Suggest hyperparameters for optimizers.
     
@@ -303,7 +326,7 @@ def suggest_optimizer_params(trial: optuna.Trial, optimizer_name: str) -> Dict[s
     return params
 
 
-def suggest_lr_scheduler_params(trial: optuna.Trial, scheduler_name: str, max_epochs: int) -> Dict[str, Any]:
+def suggest_lr_scheduler_params(trial: 'optuna.Trial', scheduler_name: str, max_epochs: int) -> Dict[str, Any]:
     """
     Suggest hyperparameters for LR schedulers.
     
@@ -368,7 +391,7 @@ def suggest_lr_scheduler_params(trial: optuna.Trial, scheduler_name: str, max_ep
     return params
 
 
-def suggest_model_params(trial: optuna.Trial, model_type: str) -> Dict[str, Any]:
+def suggest_model_params(trial: 'optuna.Trial', model_type: str) -> Dict[str, Any]:
     """
     Suggest hyperparameters for models.
     
@@ -551,7 +574,7 @@ def apply_best_params_to_config(config: Dict[str, Any], best_params: Dict[str, A
     return merged
 
 
-def suggest_training_params(trial: optuna.Trial) -> Dict[str, Any]:
+def suggest_training_params(trial: 'optuna.Trial') -> Dict[str, Any]:
     """
     Suggest training hyperparameters.
     
@@ -570,7 +593,7 @@ def suggest_training_params(trial: optuna.Trial) -> Dict[str, Any]:
 
 
 # Visualization utilities
-def plot_optimization_history(study: optuna.Study, save_path: Optional[str] = None):
+def plot_optimization_history(study: 'optuna.Study', save_path: Optional[str] = None):
     """Plot optimization history."""
     try:
         fig = optuna.visualization.plot_optimization_history(study)
@@ -583,7 +606,7 @@ def plot_optimization_history(study: optuna.Study, save_path: Optional[str] = No
         print(f"Could not plot optimization history: {e}")
 
 
-def plot_param_importances(study: optuna.Study, save_path: Optional[str] = None):
+def plot_param_importances(study: 'optuna.Study', save_path: Optional[str] = None):
     """Plot parameter importances."""
     try:
         fig = optuna.visualization.plot_param_importances(study)
@@ -596,7 +619,7 @@ def plot_param_importances(study: optuna.Study, save_path: Optional[str] = None)
         print(f"Could not plot parameter importances: {e}")
 
 
-def plot_slice(study: optuna.Study, save_path: Optional[str] = None):
+def plot_slice(study: 'optuna.Study', save_path: Optional[str] = None):
     """Plot parameter slice plots."""
     try:
         fig = optuna.visualization.plot_slice(study)
@@ -609,7 +632,7 @@ def plot_slice(study: optuna.Study, save_path: Optional[str] = None):
         print(f"Could not plot slice: {e}")
 
 
-def plot_contour(study: optuna.Study, params: Optional[List[str]] = None, save_path: Optional[str] = None):
+def plot_contour(study: 'optuna.Study', params: Optional[List[str]] = None, save_path: Optional[str] = None):
     """Plot contour plot of parameter interactions."""
     try:
         fig = optuna.visualization.plot_contour(study, params=params)
@@ -643,8 +666,8 @@ if __name__ == '__main__':
         pruner=None
     )
     
-    # Run optimization
-    results = tuner.optimize(n_trials=50, show_progress_bar=True)
+    # Run optimization (demo mode: disable strict validation enforcement)
+    results = tuner.optimize(n_trials=50, show_progress_bar=True, enforce_validation=False)
     
     print("\nDemo complete!")
     print(f"Optimum found: x={results['best_params']['x']:.4f}, y={results['best_params']['y']:.4f}")

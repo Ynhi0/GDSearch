@@ -74,12 +74,17 @@ class TestCheckpointCompleteness:
         
         model = SimpleModel().cuda()
         optimizer = optim.Adam(model.parameters())
-        scaler = torch.amp.GradScaler('cuda')
+        # Use compatibility wrappers to avoid import errors across torch versions
+        from src.core.training_utils import _GradScaler as GradScaler, _autocast as autocast
+        scaler = GradScaler('cuda') if callable(GradScaler) else None
+        
+        if scaler is None:
+            pytest.skip("AMP GradScaler not available in this PyTorch build for test")
         
         # Simulate training with AMP
         for _ in range(5):
             optimizer.zero_grad()
-            with torch.amp.autocast('cuda'):
+            with autocast('cuda'):
                 loss = model(torch.randn(5, 10).cuda()).sum()
             scaler.scale(loss).backward()
             scaler.step(optimizer)
@@ -99,7 +104,7 @@ class TestCheckpointCompleteness:
         assert 'scale' in checkpoint['scaler'] or '_scale' in checkpoint['scaler']
         
         # Verify we can restore it
-        new_scaler = torch.amp.GradScaler('cuda')
+        new_scaler = GradScaler('cuda')
         new_scaler.load_state_dict(checkpoint['scaler'])
         
         # Scale should match

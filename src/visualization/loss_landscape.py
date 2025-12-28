@@ -90,9 +90,10 @@ def probe_loss_2d(model: torch.nn.Module,
     Z = np.zeros((len(alphas), len(betas)), dtype=np.float32)
     for i, a in enumerate(alphas):
         for j, b in enumerate(betas):
-            new_vec = base + float(a) * dir1 + float(b) * dir2
+            ii = int(i); jj = int(j)
+            new_vec = base + float(alphas[ii]) * dir1 + float(betas[jj]) * dir2
             _set_params_from_vector(model, new_vec)
-            Z[i, j] = evaluate_loss(model, loader, criterion, device, max_batches=max_batches)
+            Z[ii, jj] = evaluate_loss(model, loader, criterion, device, max_batches=max_batches)
     _set_params_from_vector(model, base)
     A, B = np.meshgrid(alphas, betas, indexing='ij')
     return A, B, Z
@@ -103,107 +104,11 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib import cm
 from pathlib import Path
+import logging
+import json
 
 
-def plot_loss_landscape(test_function, x_range=(-2, 2), y_range=(-2, 2), num_points=200, save_path=None, cmap='viridis'):
-    """Create a 2D contour plot (heatmap) of the provided test function.
 
-    Args:
-        test_function: Callable that accepts a 2D array-like of shape (2,) and returns scalar loss
-        x_range: (min, max) tuple for x axis
-        y_range: (min, max) tuple for y axis
-        num_points: grid resolution
-        save_path: if provided, save figure to this path and return it
-        cmap: matplotlib colormap name
-
-    Returns:
-        Matplotlib Figure object or saved path
-    """
-    x = np.linspace(x_range[0], x_range[1], num_points)
-    y = np.linspace(y_range[0], y_range[1], num_points)
-    X, Y = np.meshgrid(x, y)
-    Z = np.zeros_like(X)
-    for i in range(num_points):
-        for j in range(num_points):
-            Z[i, j] = test_function(np.array([X[i, j], Y[i, j]]))
-
-    fig, ax = plt.subplots(figsize=(6, 5))
-    cs = ax.contourf(X, Y, Z, levels=60, cmap=cmap)
-    fig.colorbar(cs, ax=ax)
-    ax.set_xlabel('x')
-    ax.set_ylabel('y')
-    ax.set_title('Loss landscape')
-
-    if save_path:
-        p = Path(save_path)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(str(p), dpi=150, bbox_inches='tight')
-        plt.close(fig)
-        return str(p)
-
-    return fig
-
-
-def create_loss_landscape_animation(test_function, trajectory, x_range=(-2, 2), y_range=(-2, 2), num_points=200, save_path=None, fps=10):
-    """Create an animation showing trajectory points moving over the loss landscape.
-
-    Args:
-        test_function: callable f([x,y])->scalar
-        trajectory: array-like shape (T,2)
-        x_range, y_range, num_points: plot grid
-        save_path: path for GIF or MP4 (extension decides writer)
-        fps: frames per second
-
-    Returns:
-        Matplotlib Animation object or path to saved file
-    """
-    X_lin = np.linspace(x_range[0], x_range[1], num_points)
-    Y_lin = np.linspace(y_range[0], y_range[1], num_points)
-    X, Y = np.meshgrid(X_lin, Y_lin)
-    Z = np.zeros_like(X)
-    for i in range(num_points):
-        for j in range(num_points):
-            Z[i, j] = test_function(np.array([X[i, j], Y[i, j]]))
-
-    fig, ax = plt.subplots(figsize=(6, 5))
-    cs = ax.contourf(X, Y, Z, levels=60, cmap=cmap)
-    ax.set_xlim(x_range)
-    ax.set_ylim(y_range)
-
-    # Plot trajectory line
-    traj = np.asarray(trajectory)
-    line, = ax.plot([], [], 'o-', color='red', markersize=4)
-
-    def init():
-        line.set_data([], [])
-        return (line,)
-
-    def update(frame):
-        line.set_data(traj[:frame + 1, 0], traj[:frame + 1, 1])
-        return (line,)
-
-    anim = animation.FuncAnimation(fig, update, frames=len(traj), init_func=init, blit=True)
-
-    if save_path:
-        p = Path(save_path)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        if str(p).lower().endswith('.gif'):
-            writer = animation.PillowWriter(fps=fps)
-            anim.save(str(p), writer=writer)
-        else:
-            # Default to ffmpeg if available
-            try:
-                writer = animation.FFMpegWriter(fps=fps)
-                anim.save(str(p), writer=writer)
-            except Exception:
-                # Fallback to Pillow gif
-                writer = animation.PillowWriter(fps=fps)
-                anim.save(str(p.with_suffix('.gif')), writer=writer)
-                return str(p.with_suffix('.gif'))
-        plt.close(fig)
-        return str(p)
-
-    return anim
 
 
 def plot_loss_landscape(test_function,
@@ -232,7 +137,8 @@ def plot_loss_landscape(test_function,
     Z = np.zeros_like(X, dtype=np.float32)
     for i in range(num_points):
         for j in range(num_points):
-            Z[i, j] = float(test_function(np.array([X[i, j], Y[i, j]])))
+            ii = int(i); jj = int(j)
+            Z[ii, jj] = float(test_function(np.array([X[ii, jj], Y[ii, jj]])))
 
     fig, ax = plt.subplots(figsize=(6, 5))
     if contour:
@@ -321,8 +227,9 @@ def create_loss_landscape_animation(test_function,
             Z = np.zeros_like(X, dtype=np.float32)
             for i in range(num_points):
                 for j in range(num_points):
-                    pt = np.array([X[i, j] + shift, Y[i, j]])
-                    Z[i, j] = float(test_function(pt))
+                    ii = int(i); jj = int(j)
+                    pt = np.array([X[ii, jj] + shift, Y[ii, jj]])
+                    Z[ii, jj] = float(test_function(pt))
             Zs.append(Z)
 
         fig, ax = plt.subplots(figsize=(6, 5))

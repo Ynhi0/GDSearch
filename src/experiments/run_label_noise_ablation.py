@@ -28,6 +28,7 @@ import pandas as pd
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any
 import logging
+from src.utils.safe_len import len_sized
 from dataclasses import dataclass
 
 from src.core.training_utils import set_seed
@@ -41,8 +42,8 @@ logger = logging.getLogger(__name__)
 @dataclass
 class LabelNoiseConfig:
     """Configuration for label noise experiments."""
-    noise_rates: List[float] = None  # e.g., [0.0, 0.1, 0.2, 0.4]
-    seeds: List[int] = None  # e.g., [42, 123, 456]
+    noise_rates: Optional[List[float]] = None  # e.g., [0.0, 0.1, 0.2, 0.4]
+    seeds: Optional[List[int]] = None  # e.g., [42, 123, 456]
     epochs: int = 50
     batch_size: int = 128
     num_workers: int = 2
@@ -78,7 +79,7 @@ class NoisyLabelDataset(Dataset):
     def _generate_noisy_labels(self) -> np.ndarray:
         """Generate corrupted labels with reproducible randomness."""
         rng = np.random.default_rng(self.seed)
-        labels = np.array([self.dataset[i][1] for i in range(len(self.dataset))])
+        labels = np.array([self.dataset[i][1] for i in range(len_sized(self.dataset))])
         
         if self.noise_rate == 0.0:
             return labels
@@ -99,7 +100,7 @@ class NoisyLabelDataset(Dataset):
         return noisy_labels
     
     def __len__(self) -> int:
-        return len(self.dataset)
+        return len_sized(self.dataset)
     
     def __getitem__(self, idx: int) -> Tuple[Any, int]:
         image, _ = self.dataset[idx]  # Ignore original label
@@ -107,7 +108,7 @@ class NoisyLabelDataset(Dataset):
     
     def get_clean_accuracy(self) -> float:
         """Compute fraction of labels that remain correct."""
-        original_labels = np.array([self.dataset[i][1] for i in range(len(self.dataset))])
+        original_labels = np.array([self.dataset[i][1] for i in range(len_sized(self.dataset))])
         return (original_labels == self.noisy_labels).mean()
 
 
@@ -357,24 +358,28 @@ def run_label_noise_ablation(
     if config is None:
         config = LabelNoiseConfig()
     
+    # Normalize optionals to concrete lists for static typing
+    noise_rates = list(config.noise_rates) if config.noise_rates is not None else []
+    seeds = list(config.seeds) if config.seeds is not None else []
+    
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     
     all_results = []
     
     total_experiments = (
-        len(config.noise_rates) * len(config.seeds) * len(optimizers_config)
+        len(noise_rates) * len(seeds) * len(optimizers_config)
     )
     experiment_count = 0
     
     logger.info(f"Starting label noise ablation: {total_experiments} total experiments")
     logger.info(f"Dataset: {dataset_name}, Model: {model_name}")
-    logger.info(f"Noise rates: {config.noise_rates}")
-    logger.info(f"Seeds: {config.seeds}")
+    logger.info(f"Noise rates: {noise_rates}")
+    logger.info(f"Seeds: {seeds}")
     logger.info(f"Optimizers: {list(optimizers_config.keys())}")
     
-    for noise_rate in config.noise_rates:
-        for seed in config.seeds:
+    for noise_rate in noise_rates:
+        for seed in seeds:
             # Create dataloaders with noise
             train_loader, val_loader, test_loader, num_classes = create_noisy_dataloaders(
                 dataset_name, noise_rate, seed, config.batch_size, config.num_workers

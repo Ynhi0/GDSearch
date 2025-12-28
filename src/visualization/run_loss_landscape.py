@@ -43,23 +43,15 @@ def train_quick(config):
     
     # Build model and data - handle potential val_split
     val_split = config.get('val_split', None)
-    if val_split is not None:
-        model, train_loader, val_loader, test_loader = build_model_and_data(
-            dataset=config['dataset'],
-            model_name='SimpleMLP' if config['model'].lower() in ('mlp', 'simplemlp') else config['model'],
-            batch_size=config.get('batch_size', 128),
-            device=device,
-            seed=seed,
-            val_split=val_split
-        )
-    else:
-        model, train_loader, test_loader = build_model_and_data(
-            dataset=config['dataset'],
-            model_name='SimpleMLP' if config['model'].lower() in ('mlp', 'simplemlp') else config['model'],
-            batch_size=config.get('batch_size', 128),
-            device=device,
-            seed=seed
-        )
+    # build_model_and_data now returns a 4-tuple (model, train_loader, val_loader, test_loader)
+    model, train_loader, val_loader, test_loader = build_model_and_data(
+        dataset=config['dataset'],
+        model_name='SimpleMLP' if config['model'].lower() in ('mlp', 'simplemlp') else config['model'],
+        batch_size=config.get('batch_size', 128),
+        device=device,
+        seed=seed,
+        val_split=val_split
+    )
 
     criterion = nn.CrossEntropyLoss()
     optimizer = build_optimizer(
@@ -101,23 +93,14 @@ def load_checkpoint_model(checkpoint_path, config):
     
     # Build model architecture - handle potential val_split
     val_split = config.get('val_split', None)
-    if val_split is not None:
-        model, _train_loader, _val_loader, test_loader = build_model_and_data(
-            dataset=config['dataset'],
-            model_name='SimpleMLP' if config['model'].lower() in ('mlp', 'simplemlp') else config['model'],
-            batch_size=config.get('batch_size', 128),
-            device=device,
-            seed=seed,
-            val_split=val_split
-        )
-    else:
-        model, _train_loader, test_loader = build_model_and_data(
-            dataset=config['dataset'],
-            model_name='SimpleMLP' if config['model'].lower() in ('mlp', 'simplemlp') else config['model'],
-            batch_size=config.get('batch_size', 128),
-            device=device,
-            seed=seed
-        )
+    model, _train_loader, _val_loader, test_loader = build_model_and_data(
+        dataset=config['dataset'],
+        model_name='SimpleMLP' if config['model'].lower() in ('mlp', 'simplemlp') else config['model'],
+        batch_size=config.get('batch_size', 128),
+        device=device,
+        seed=seed,
+        val_split=val_split
+    )
     
     # Load checkpoint
     print(f"Loading checkpoint from {checkpoint_path}...")

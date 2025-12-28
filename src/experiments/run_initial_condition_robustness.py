@@ -237,8 +237,8 @@ def run_robustness_experiment(
     # Plot success rate comparison
     fig, ax = plt.subplots(figsize=(10, 6))
     
-    optimizers = df_agg['optimizer'].values
-    success_rates = df_agg['success_rate'].values
+    optimizers = df_agg['optimizer'].astype(str).tolist()
+    success_rates = df_agg['success_rate'].to_numpy(dtype=float)
     
     bars = ax.bar(range(len(optimizers)), success_rates, color='steelblue', alpha=0.8)
     ax.set_xticks(range(len(optimizers)))

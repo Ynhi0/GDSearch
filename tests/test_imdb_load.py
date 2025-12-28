@@ -1,6 +1,7 @@
 """Test IMDB dataset loading with different methods."""
 import pytest
 import sys
+from src.utils.safe_len import len_sized
 
 # Skip on Python 3.13 only (known fsspec incompatibility)
 skip_python313 = pytest.mark.skipif(
@@ -20,7 +21,7 @@ def test_imdb_standard_load():
         if "Invalid pattern: '**' can only be an entire path component" in str(e):
             pytest.skip("Skipping due to fsspec glob pattern incompatibility in this environment")
         raise
-    assert len(data) == 10
+    assert len_sized(data) == 10
 
 
 @skip_python313
@@ -33,7 +34,7 @@ def test_imdb_force_redownload():
         if "Invalid pattern: '**' can only be an entire path component" in str(e):
             pytest.skip("Skipping due to fsspec glob pattern incompatibility in this environment")
         raise
-    assert len(data) == 10
+    assert len_sized(data) == 10
 
 
 @skip_python313
@@ -46,7 +47,7 @@ def test_imdb_stanfordnlp_version():
         if "Invalid pattern: '**' can only be an entire path component" in str(e):
             pytest.skip("Skipping due to fsspec glob pattern incompatibility in this environment")
         raise
-    assert len(data) == 10
+    assert len_sized(data) == 10
 
 
 @skip_python313
@@ -59,5 +60,5 @@ def test_imdb_trust_remote_code():
         if "Invalid pattern: '**' can only be an entire path component" in str(e):
             pytest.skip("Skipping due to fsspec glob pattern incompatibility in this environment")
         raise
-    assert len(data) == 10
+    assert len_sized(data) == 10
 

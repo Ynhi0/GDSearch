@@ -42,7 +42,7 @@ except ImportError:
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     from src.visualization.ablation_plots import generate_all_ablation_plots
 import json
-
+from src.utils.plot_helpers import arr_to_numpy_float
 try:
     from src.core.pytorch_optimizers import LookaheadWrapper
     HAS_LOOKAHEAD = True
@@ -239,8 +239,9 @@ def ablation_momentum_effect(
         logging.warning(f"Visualization generation failed: {e}")
     
     # Statistical comparison
-    sgd_accs = df[df['optimizer'] == 'SGD']['final_test_accuracy'].values
-    mom_accs = df[df['optimizer'] == 'SGD_Momentum']['final_test_accuracy'].values
+    from src.utils.plot_helpers import arr_to_numpy_float
+    sgd_accs = arr_to_numpy_float(df[df['optimizer'] == 'SGD']['final_test_accuracy'])
+    mom_accs = arr_to_numpy_float(df[df['optimizer'] == 'SGD_Momentum']['final_test_accuracy'])
     
     improvement = mom_accs.mean() - sgd_accs.mean()
     logging.info(f"\nResults:")
@@ -342,8 +343,8 @@ def ablation_adaptive_lr(
         logging.warning(f"Visualization generation failed: {e}")
     
     # Statistical comparison
-    sgd_accs = df[df['optimizer'] == 'SGD_Momentum']['final_test_accuracy'].values
-    adam_accs = df[df['optimizer'] == 'Adam']['final_test_accuracy'].values
+    sgd_accs = arr_to_numpy_float(df[df['optimizer'] == 'SGD_Momentum']['final_test_accuracy'])
+    adam_accs = arr_to_numpy_float(df[df['optimizer'] == 'Adam']['final_test_accuracy'])
     
     improvement = adam_accs.mean() - sgd_accs.mean()
     logging.info(f"\nResults:")
@@ -445,8 +446,8 @@ def ablation_weight_decay(
         logging.warning(f"Visualization generation failed: {e}")
     
     # Statistical comparison
-    adam_accs = df[df['optimizer'] == 'Adam']['final_test_accuracy'].values
-    adamw_accs = df[df['optimizer'] == 'AdamW']['final_test_accuracy'].values
+    adam_accs = arr_to_numpy_float(df[df['optimizer'] == 'Adam']['final_test_accuracy'])
+    adamw_accs = arr_to_numpy_float(df[df['optimizer'] == 'AdamW']['final_test_accuracy'])
     
     improvement = adamw_accs.mean() - adam_accs.mean()
     logging.info(f"\nResults:")

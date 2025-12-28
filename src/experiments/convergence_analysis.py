@@ -10,10 +10,11 @@ Provides comprehensive empirical convergence analysis including:
 
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Any, Sequence
 from scipy import stats
 import warnings
 import logging
+from numpy.typing import ArrayLike
 
 
 class ConvergenceAnalyzer:
@@ -31,10 +32,10 @@ class ConvergenceAnalyzer:
         self.window_size = window_size
     
     def analyze_trajectory(
-        self, 
-        losses: np.ndarray,
-        grad_norms: Optional[np.ndarray] = None
-    ) -> Dict[str, any]:
+        self,
+        losses: ArrayLike,
+        grad_norms: Optional[ArrayLike] = None
+    ) -> Dict[str, Any]:
         """
         Analyze a single optimization trajectory.
         
@@ -153,9 +154,10 @@ class ConvergenceAnalyzer:
         
         return df
     
-    def _find_convergence_iteration(self, values: np.ndarray) -> Optional[int]:
+    def _find_convergence_iteration(self, values: ArrayLike) -> Optional[int]:
         """Find first iteration where value < tolerance."""
-        converged_mask = values < self.tolerance
+        vals = np.asarray(values)
+        converged_mask = vals < self.tolerance
         if np.any(converged_mask):
             return int(np.argmax(converged_mask))
         return None
@@ -212,24 +214,33 @@ class ConvergenceAnalyzer:
                 slope, intercept, r_value, p_value, std_err = stats.linregress(
                     iters, log_losses
                 )
-                
+
+                # Cast regression outputs to scalars to satisfy static typing
+                slope = self._to_scalar(slope)
+                p_value = self._to_scalar(p_value)
+                r_value = self._to_scalar(r_value)
+
                 # Check if slope is significantly negative
                 if p_value < 0.05 and slope < -1e-6:
                     # Linear convergence rate: ρ = exp(slope)
-                    rho = np.exp(slope)
+                    rho = float(np.exp(slope))
                     if 0 < rho < 1:
-                        return 'linear', abs(slope)
+                        return 'linear', float(abs(slope))
                     else:
-                        return 'superlinear', abs(slope)
-                
+                        return 'superlinear', float(abs(slope))
+
                 # Try sublinear fit: loss ~ c / k
                 inv_iters = 1.0 / (iters + 1)
                 slope_sub, _, r_value_sub, p_value_sub, _ = stats.linregress(
                     inv_iters, window_losses
                 )
-                
+
+                slope_sub = self._to_scalar(slope_sub)
+                p_value_sub = self._to_scalar(p_value_sub)
+                r_value_sub = self._to_scalar(r_value_sub)
+
                 if p_value_sub < 0.05 and r_value_sub**2 > 0.7:
-                    return 'sublinear', abs(slope_sub)
+                    return 'sublinear', float(abs(slope_sub))
                 
         except Exception as e:
             logging.debug("Convergence detection failed: %s", e, exc_info=True)
@@ -237,6 +248,35 @@ class ConvergenceAnalyzer:
         
         return 'unknown', np.nan
     
+    def _to_scalar(self, x) -> float:
+        """Safely convert a variety of numeric-like inputs to a Python float.
+
+        Handles numpy scalars, 0-d arrays, 1-element iterables and objects with
+        __float__ defined. Raises TypeError if conversion isn't possible.
+        """
+        if isinstance(x, (float, int, np.floating, np.integer)):
+            return float(x)
+        # Prefer __float__ if available
+        if hasattr(x, "__float__"):
+            try:
+                return float(x)
+            except Exception:
+                pass
+        # Try numpy conversion
+        try:
+            arr = np.asarray(x)
+            if arr.size == 1:
+                return float(arr.item())
+        except Exception:
+            pass
+        # Fallback: treat as iterable and take first element
+        try:
+            it = iter(x)
+            first = next(it)
+            return float(first)
+        except Exception as e:
+            raise TypeError(f"Cannot convert object of type {type(x)} to float") from e
+
     def _detect_stagnation(
         self,
         losses: np.ndarray,
@@ -391,23 +431,38 @@ def analyze_non_convex_convergence(
     
     # Group by optimizer and seed
     trajectories = {}
-    
-    for opt in results_df[optimizer_col].unique():
+
+    opt_values = results_df[optimizer_col]
+    if isinstance(opt_values, pd.Series):
+        unique_opts = opt_values.unique()
+    else:
+        unique_opts = pd.Series(opt_values).unique()
+
+    for opt in unique_opts:
         opt_data = results_df[results_df[optimizer_col] == opt]
         traj_list = []
-        
-        for seed in opt_data[seed_col].unique():
-            seed_data = opt_data[opt_data[seed_col] == seed].sort_values('epoch')
+
+        seed_values = opt_data[seed_col]
+        if isinstance(seed_values, pd.Series):
+            unique_seeds = seed_values.unique()
+        else:
+            unique_seeds = pd.Series(seed_values).unique()
+
+        for seed in unique_seeds:
+            subset = opt_data[opt_data[seed_col] == seed]
+            if not isinstance(subset, pd.DataFrame):
+                subset = pd.DataFrame(subset)
+            seed_data = subset.sort_values(by='epoch')
             losses = seed_data[loss_col].values
-            
+
             traj = {'losses': losses}
-            
+
             # Add gradient norms if available
             if 'grad_norm' in seed_data.columns:
                 traj['grad_norms'] = seed_data['grad_norm'].values
-            
+
             traj_list.append(traj)
-        
+
         trajectories[opt] = traj_list
     
     # Compare optimizers

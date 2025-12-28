@@ -26,6 +26,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from typing import Dict, List, Optional, Tuple
+from src.core.dataloader_utils import make_dataloader
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -190,9 +191,9 @@ def run_single_optimizer_with_dynamics(
 
 def run_cross_optimizer_dynamics_comparison(
     dataset: str = 'MNIST',
-    optimizers: List[str] = None,
+    optimizers: Optional[List[str]] = None,
     epochs: int = 50,
-    seeds: List[int] = None,
+    seeds: Optional[List[int]] = None,
     quick: bool = False,
     results_dir: str = "results/cross_optimizer_dynamics"
 ) -> pd.DataFrame:
@@ -216,7 +217,8 @@ def run_cross_optimizer_dynamics_comparison(
     
     if not HAS_DYNAMICS:
         print("Dynamics modules not available - cannot run comparison")
-        return None
+        # Return empty DataFrame so callers receive a consistent object
+        return pd.DataFrame()
     
     # Default configurations
     if optimizers is None:

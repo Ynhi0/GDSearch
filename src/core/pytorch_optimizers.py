@@ -971,6 +971,17 @@ class LookaheadWrapper(Optimizer):
         """Perform Lookahead update step."""
         loss = self.base_optimizer.step(closure)
         
+        # Handle None returns gracefully: many PyTorch optimizers (e.g., SGD) return None
+        # We normalize to numeric scalar for downstream consumers
+        if loss is None:
+            logging.debug("LookaheadWrapper: base optimizer.step returned None; normalizing to tensor(0.0)")
+            try:
+                loss_value = torch.tensor(0.0)
+            except Exception:
+                loss_value = 0.0
+        else:
+            loss_value = loss
+        
         # Increment step counter
         self.step_count += 1
         
@@ -985,7 +996,7 @@ class LookaheadWrapper(Optimizer):
                     p.data.copy_(self.slow_params[idx])
                     idx += 1
         
-        return loss
+        return loss_value
     
     def state_dict(self):
         """Return state dict including base optimizer and slow params state."""

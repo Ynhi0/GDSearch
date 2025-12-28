@@ -110,6 +110,7 @@ def run_learning_rate_ablation(
             try:
                 from src.experiments.run_nn_experiment import train_and_evaluate
                 df = train_and_evaluate(config_with_seed)
+                df = pd.DataFrame(df)
                 
                 # Save individual result
                 filename = f"{config_name}_seed{seed}.csv"
@@ -161,10 +162,11 @@ def analyze_learning_rate_results(
             if config_name not in results:
                 continue
             
-            df = results[config_name]
+            from src.utils.type_guards import ensure_dataframe
+            df = ensure_dataframe(results[config_name])
             
             # Extract final test accuracies from all seeds
-            eval_df = df[df['phase'] == 'eval']
+            eval_df = ensure_dataframe(df[df['phase'] == 'eval'])
             
             if eval_df.empty:
                 continue
@@ -207,13 +209,14 @@ def plot_learning_rate_trends(
     optimizers = summary_df['Optimizer'].unique()
     colors = plt.cm.tab10(np.linspace(0, 1, len(optimizers)))
     
+    from src.utils.plot_helpers import arr_to_numpy_float
     for i, optimizer in enumerate(optimizers):
         opt_df = summary_df[summary_df['Optimizer'] == optimizer]
         opt_df = opt_df.sort_values('Learning Rate')
         
-        lrs = opt_df['Learning Rate'].values
-        means = opt_df['Mean Accuracy'].values
-        stds = opt_df['Std Accuracy'].values
+        lrs = arr_to_numpy_float(opt_df['Learning Rate'])
+        means = arr_to_numpy_float(opt_df['Mean Accuracy'])
+        stds = arr_to_numpy_float(opt_df['Std Accuracy'])
         
         # Plot line with error bars
         ax.errorbar(lrs, means, yerr=stds, 

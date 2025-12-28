@@ -29,7 +29,6 @@ def import_optional_nlp_dependencies():
         _optional_modules['AutoModelForSequenceClassification'] = AutoModelForSequenceClassification
         _optional_modules['load_dataset'] = load_dataset
     except Exception as e:
-        import logging
         logging.debug("Optional NLP dependencies unavailable: %s", e, exc_info=True)
         # Mark as unavailable; callers should handle None gracefully
         _optional_modules['transformers'] = None
@@ -99,7 +98,6 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 import random
 from tqdm import tqdm
-import warnings
 import argparse
 import logging
 
@@ -124,25 +122,27 @@ try:
         return _imported_torch_save_safe(obj, path_or_file, use_new_zipfile_serialization=use_new_zipfile_serialization)
 except Exception:
     # Fallback implementations if io_utils is not importable at this point
-    def torch_load_safe(path_or_file, map_location=None, weights_only=None):
+    def torch_load_safe(path_or_file: Union[str, Path], map_location=None, weights_only=None):
+        path_or_file_str = str(path_or_file)
         try:
             if weights_only is not None:
-                return torch.load(path_or_file, map_location=map_location, weights_only=weights_only)
+                return torch.load(path_or_file_str, map_location=map_location, weights_only=weights_only)
             else:
-                return torch.load(path_or_file, map_location=map_location)
+                return torch.load(path_or_file_str, map_location=map_location)
         except TypeError:
             logging.debug("torch.load does not support weights_only param on this PyTorch version; retrying without it")
-            return torch.load(path_or_file, map_location=map_location)
+            return torch.load(path_or_file_str, map_location=map_location)
 
-    def torch_save_safe(obj, path_or_file, use_new_zipfile_serialization=True):
+    def torch_save_safe(obj, path_or_file: Union[str, Path], use_new_zipfile_serialization=True):
+        path_or_file_str = str(path_or_file)
         try:
             if use_new_zipfile_serialization:
-                torch.save(obj, path_or_file, _use_new_zipfile_serialization=True)
+                torch.save(obj, path_or_file_str, _use_new_zipfile_serialization=True)
             else:
-                torch.save(obj, path_or_file)
+                torch.save(obj, path_or_file_str)
         except TypeError:
             logging.debug("torch.save does not accept _use_new_zipfile_serialization on this PyTorch version; using default save")
-            torch.save(obj, path_or_file)
+            torch.save(obj, path_or_file_str)
 
 
 # =============================================================================
@@ -180,7 +180,7 @@ warnings.filterwarnings('ignore', message='.*cuFFT.*')
 warnings.filterwarnings('ignore', message='.*cuDNN.*')
 warnings.filterwarnings('ignore', message='.*cuBLAS.*')
 warnings.filterwarnings('ignore', message='.*register factory.*')
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Union
 import traceback
 import os
 from datetime import datetime
@@ -204,13 +204,13 @@ except ImportError as e:
     print(f"CRITICAL: Failed to import core modules from {project_root / 'src'}")
     print(f"{'='*80}")
     print(f"Error: {e}")
-    print(f"\nDEBUGGING STEPS:")
+    print("\nDEBUGGING STEPS:")
     print(f"  1. Verify you're in the project root: {project_root}")
     print(f"  2. Check src/ directory exists: {(project_root / 'src').exists()}")
-    print(f"  3. Install in editable mode: pip install -e .")
-    print(f"  4. Check dependencies: pip install -r requirements.txt")
+    print("  3. Install in editable mode: pip install -e .")
+    print("  4. Check dependencies: pip install -r requirements.txt")
     if os.environ.get('KAGGLE_KERNEL_RUN_TYPE') or os.path.exists('/kaggle'):
-        print(f"     NOTE: Detected Kaggle runtime — prefer `pip install -r kaggle/requirements_kaggle.txt` or skip numpy/pandas to use Kaggle's prebuilt binaries")
+        print("     NOTE: Detected Kaggle runtime — prefer `pip install -r kaggle/requirements_kaggle.txt` or skip numpy/pandas to use Kaggle's prebuilt binaries")
     print(f"  5. Verify Python version: {sys.version}")
     print(f"\nCurrent sys.path (first 5): {sys.path[:5]}")
     print(f"{'='*80}\n")
@@ -488,7 +488,7 @@ class ExperimentTracker:
                 mlflow.set_tracking_uri(tracking_uri)
             mlflow.set_experiment(experiment_name)
 
-    def start_run(self, run_name: str = None):
+    def start_run(self, run_name: Optional[str] = None) -> Optional[str]:
         """Start a new MLflow run, using nested runs if a run is already active"""
         if HAS_MLFLOW:
             if self.current_run is not None:
@@ -1063,7 +1063,7 @@ def get_system_info() -> Dict[str, Any]:
     return info
 
 
-def is_experiment_completed(results_dir: str, dataset: str, model_name: str, optimizer_name: str, seed: int) -> bool:
+def is_experiment_completed(results_dir: Union[str, Path], dataset: str, model_name: str, optimizer_name: str, seed: int) -> bool:
     """Check if an experiment has already been completed by looking for result files.
     
     Args:
@@ -1076,6 +1076,8 @@ def is_experiment_completed(results_dir: str, dataset: str, model_name: str, opt
     Returns:
         bool: True if the experiment result file exists and is valid
     """
+    # Accept either str or Path for portability; coerce to Path immediately
+    results_dir = Path(results_dir)
     try:
         results_base = Path(results_dir) / "experiments" / dataset.lower()
         file_stem = f"{dataset}_{model_name}_{optimizer_name}_seed{seed}"
@@ -1252,10 +1254,12 @@ def get_provenance_info() -> Dict[str, Any]:
     return provenance
 
 
-def save_run_artifacts(base_results_dir: str, dataset: str, model_name: str, optimizer_name: str,
+def save_run_artifacts(base_results_dir: Union[str, Path], dataset: str, model_name: str, optimizer_name: str,
                        seed: int, history: List[Dict[str, Any]], params: Dict[str, Any],
                        device: Optional[torch.device] = None, tracker: Optional[ExperimentTracker] = None,
                        model: Optional[torch.nn.Module] = None, save_model: bool = True):
+    # Accept str or Path for base_results_dir and coerce to Path for file ops
+    base_results_dir = Path(base_results_dir)
     """Save per-run CSV and metadata sidecar using a canonical filename.
 
     Filename pattern: <dataset>_<model>_<optimizer>_seed<seed>.csv
@@ -1324,7 +1328,7 @@ def save_run_artifacts(base_results_dir: str, dataset: str, model_name: str, opt
             'provenance': get_provenance_info()
         }
 
-        with open(meta_path, 'w') as f:
+        with open(meta_path, 'w', encoding='utf-8') as f:
             json.dump(meta, f, indent=2)
 
         # Optional tracker artifact upload
@@ -1356,7 +1360,7 @@ def _worker_init(worker_id, seed):
         logging.debug("Failed to seed torch in worker_init (worker_id=%s): %s", worker_id, e, exc_info=True)
 
 
-def make_dataloader(dataset, batch_size=64, shuffle=False, seed: Optional[int] = None,
+def make_dataloader(dataset, batch_size=64, shuffle: Union[bool, int] = False, seed: Optional[int] = None,
                     num_workers: int = 0, pin_memory: bool = False, collate_fn=None,
                     sampler=None, drop_last: bool = False, persistent_workers: bool = False,
                     split_type: Optional[str] = None):
@@ -1372,6 +1376,8 @@ def make_dataloader(dataset, batch_size=64, shuffle=False, seed: Optional[int] =
     multiprocessing issues. This ensures testing works on Windows while still
     allowing full multiprocessing on Kaggle/Linux.
     """
+    # Coerce shuffle to bool to silence static typing when callers pass ints (e.g., 0/1 from CLI)
+    shuffle = bool(shuffle)
     # AUDIT FIX: Force num_workers=0 on Windows to prevent hanging/crashes
     import platform
     if platform.system() == 'Windows' and num_workers > 0:
@@ -1516,6 +1522,23 @@ def find_optimal_lr(model, train_loader, criterion, device,
         return default_lr
 
 
+def _numel_safe(x) -> int:
+    """Return a safe integer count of elements for arrays/tensors (works with numpy arrays, torch tensors, lists)."""
+    try:
+        if hasattr(x, 'numel'):
+            return int(x.numel())
+        if hasattr(x, 'shape') and getattr(x, 'shape') is not None:
+            # Numpy arrays and similar objects
+            return int(np.prod(x.shape))
+        if hasattr(x, 'size'):
+            return int(x.size)
+        # Fallback: try converting to numpy
+        import numpy as _np
+        return int(_np.asarray(x).size)
+    except Exception:
+        return 0
+
+
 def get_adaptive_batch_size(model, sample_input, device, base_batch_size=128):
     """
     Get memory-aware batch size using MemoryAwareBatchSizer.
@@ -1538,7 +1561,7 @@ def get_adaptive_batch_size(model, sample_input, device, base_batch_size=128):
     try:
         sizer = MemoryAwareBatchSizer()
         # Use the correct method name
-        optimal_bs = sizer.get_recommended_batch_size('mnist' if sample_input.numel() < 3000 else 'resnet18')
+        optimal_bs = sizer.get_recommended_batch_size('mnist' if _numel_safe(sample_input) < 3000 else 'resnet18')
         
         if optimal_bs is None or optimal_bs < 4:
             print(f"   Memory sizer returned invalid batch size, using: {base_batch_size}")
@@ -1619,7 +1642,7 @@ def get_dataloader_kwargs():
 # ABLATION STUDIES (INTERNAL)
 # ==============================================================================
 
-def run_batch_ablation(dataset_name='MNIST', results_dir='results/batch_ablation'):
+def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path] = 'results/batch_ablation'):
     """
     Ablation Study A: Impact of Batch Size on Convergence
     
@@ -1629,8 +1652,10 @@ def run_batch_ablation(dataset_name='MNIST', results_dir='results/batch_ablation
     
     Args:
         dataset_name: 'MNIST' or 'CIFAR10'
-        results_dir: Output directory for ablation results
+        results_dir: Output directory for ablation results (Path or str)
     """
+    results_dir = Path(results_dir)
+    results_dir.mkdir(parents=True, exist_ok=True)
     print("\n" + "="*80)
     print("ABLATION STUDY A: Batch Size Impact (Linear LR Scaling)")
     print("="*80)
@@ -1739,7 +1764,8 @@ def run_batch_ablation(dataset_name='MNIST', results_dir='results/batch_ablation
                     
                     # AUDIT FIX: SAM requires closure for step()
                     # Check if optimizer requires closure (SAM, L-BFGS, etc.)
-                    if hasattr(optimizer, 'requires_closure') and optimizer.requires_closure:
+                    requires_closure = bool(getattr(optimizer, 'requires_closure', False))
+                    if requires_closure:
                         def closure():
                             optimizer.zero_grad()
                             output = model(data)
@@ -1853,7 +1879,7 @@ def run_batch_ablation(dataset_name='MNIST', results_dir='results/batch_ablation
     return df
 
 
-def run_scheduler_ablation(dataset_name='MNIST', results_dir='results/scheduler_ablation'):
+def run_scheduler_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path] = 'results/scheduler_ablation'):
     """
     Ablation Study B: Learning Rate Scheduler Impact
     
@@ -1862,7 +1888,7 @@ def run_scheduler_ablation(dataset_name='MNIST', results_dir='results/scheduler_
     
     Args:
         dataset_name: 'MNIST' or 'CIFAR10'
-        results_dir: Output directory for ablation results
+        results_dir: Output directory for ablation results (Path or str)
     """
     print("\n" + "="*80)
     print("ABLATION STUDY B: LR Scheduler Impact (2×2 Grid)")
@@ -1871,7 +1897,8 @@ def run_scheduler_ablation(dataset_name='MNIST', results_dir='results/scheduler_
     # Device initialization
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    os.makedirs(results_dir, exist_ok=True)
+    results_dir = Path(results_dir)
+    results_dir.mkdir(parents=True, exist_ok=True)
     
     # Hardcoded pairs: (optimizer_name, scheduler_name)
     pairs = [
@@ -2712,8 +2739,17 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
             # Build optimizers with tuned or default parameters
             optimizers_config = []
             for opt_name in ['SGD', 'SGD_Momentum', 'Adam', 'AdamW', 'AMSGrad', 'SAM_SGD', 'SAM_Adam', 'Lookahead_SGD', 'Lookahead_Adam', 'AdaBound', 'RAdam', 'LAMB']:
-                params = tuned_params.get(opt_name, get_default_hyperparameters(opt_name))
-                
+                # Apply tuned parameters if available, merging into defaults to preserve missing fields
+                if opt_name in tuned_params:
+                    try:
+                        from src.core.optuna_tuner import apply_best_params_to_config
+                        params = apply_best_params_to_config(get_default_hyperparameters(opt_name), tuned_params[opt_name])
+                    except Exception as e:
+                        logging.warning(f"Could not apply best params to config for {opt_name}: {e}")
+                        params = tuned_params.get(opt_name, get_default_hyperparameters(opt_name))
+                else:
+                    params = get_default_hyperparameters(opt_name)
+
                 # Log when falling back to default hyperparameters
                 if opt_name not in tuned_params:
                     logging.info(f"Using default hyperparameters for {opt_name} (tuning was skipped or failed)")
@@ -4315,11 +4351,13 @@ def run_nlp_experiment_simple(results_dir="results_nlp", seeds=None, epochs=10, 
         train_labels = []
         for _ in range(1000):
             if np.random.random() > 0.5:
-                train_texts.append(positive_templates[np.random.randint(len(positive_templates))] + 
+                idx = int(np.random.randint(len(positive_templates)))
+                train_texts.append(positive_templates[idx] + 
                                    f" {np.random.choice(['excellent', 'superb', 'great', 'wonderful'])}")
                 train_labels.append(1)
             else:
-                train_texts.append(negative_templates[np.random.randint(len(negative_templates))] + 
+                idx = int(np.random.randint(len(negative_templates)))
+                train_texts.append(negative_templates[idx] + 
                                    f" {np.random.choice(['horrible', 'bad', 'awful', 'terrible'])}")
                 train_labels.append(0)
         
@@ -4327,10 +4365,12 @@ def run_nlp_experiment_simple(results_dir="results_nlp", seeds=None, epochs=10, 
         test_labels = []
         for _ in range(200):
             if np.random.random() > 0.5:
-                test_texts.append(positive_templates[np.random.randint(len(positive_templates))])
+                idx = int(np.random.randint(len(positive_templates)))
+                test_texts.append(positive_templates[idx])
                 test_labels.append(1)
             else:
-                test_texts.append(negative_templates[np.random.randint(len(negative_templates))])
+                idx = int(np.random.randint(len(negative_templates)))
+                test_texts.append(negative_templates[idx])
                 test_labels.append(0)
     
     # Build vocabulary
@@ -7670,7 +7710,10 @@ Examples:
   python run_all_kaggle.py --kaggle-t4 --results-dir /kaggle/working/results
         """
     )
-    
+
+    # Defensive initialization to satisfy static analyzers
+    optimizer = None
+
     parser.add_argument('--quick', action='store_true',
                         help='Quick mode: fewer epochs, smaller datasets')
     parser.add_argument('--ultra-quick', action='store_true',

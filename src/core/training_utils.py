@@ -13,6 +13,18 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional, Dict, Any
+import contextlib
+
+# Compatibility imports for mixed precision APIs across torch versions
+# Try new public API `torch.amp` first, fallback to `torch.cuda.amp` when needed
+try:
+    from torch.amp import GradScaler as _GradScaler, autocast as _autocast  # type: ignore
+except Exception:
+    try:
+        from torch.cuda.amp import GradScaler as _GradScaler, autocast as _autocast  # type: ignore
+    except Exception:
+        _GradScaler = None  # type: ignore
+        _autocast = None  # type: ignore
 import copy
 import numpy as np
 import random
@@ -305,22 +317,22 @@ class AMPWrapper:
             # Prefer the new public API `torch.amp.GradScaler` when available
             # to avoid deprecation warnings for `torch.cuda.amp.GradScaler`
             try:
-                # Newer PyTorch exposes torch.amp.GradScaler; call it while suppressing
-                # any known deprecation warnings about torch.cuda.amp.GradScaler usage.
-                import warnings as _warnings
-                with _warnings.catch_warnings():
-                    _warnings.filterwarnings('ignore', category=FutureWarning, message='.*GradScaler.*')
-                    self.scaler = torch.amp.GradScaler(device_type='cuda')
-            except Exception:
-                # Fall back to legacy API if running on older PyTorch
-                try:
+                # Prefer the detected GradScaler implementation
+                if callable(_GradScaler):
                     import warnings as _warnings
                     with _warnings.catch_warnings():
                         _warnings.filterwarnings('ignore', category=FutureWarning, message='.*GradScaler.*')
-                        self.scaler = torch.cuda.amp.GradScaler()
-                except Exception:
-                    logging.warning("Could not create AMP GradScaler; proceeding without scaler")
+                        # Some implementations accept device_type; guard with try/except
+                        try:
+                            self.scaler = _GradScaler(device_type='cuda')
+                        except TypeError:
+                            self.scaler = _GradScaler()
+                else:
+                    # No scaler implementation available in this torch build
                     self.scaler = None
+            except Exception:
+                logging.warning("Could not create AMP GradScaler; proceeding without scaler")
+                self.scaler = None
         else:
             self.scaler = None
     
@@ -331,11 +343,11 @@ class AMPWrapper:
         Returns:
             Autocast context manager
         """
-        if self.enabled and torch.cuda.is_available():
-            return torch.amp.autocast(self.device_type, dtype=self.dtype)
+        if self.enabled and torch.cuda.is_available() and _autocast is not None:
+            return _autocast(self.device_type, dtype=self.dtype)
         else:
-            # Return no-op context manager for CPU
-            return torch.amp.autocast('cpu', enabled=False)
+            # Return no-op context manager for CPU or when autocast not available
+            return contextlib.nullcontext()
     
     def backward(self, loss: torch.Tensor, optimizer: torch.optim.Optimizer):
         """

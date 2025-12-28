@@ -114,6 +114,8 @@ def run_batch_size_ablation(
             try:
                 from src.experiments.run_nn_experiment import train_and_evaluate
                 df = train_and_evaluate(config_with_seed)
+                # Coerce to DataFrame to satisfy type checker and ensure consistent API
+                df = pd.DataFrame(df)
                 
                 # Save individual result
                 filename = f"{config_name}_seed{seed}.csv"
@@ -158,6 +160,8 @@ def analyze_batch_size_results(
     """
     summary_data = []
     
+    from src.utils.type_guards import ensure_dataframe
+
     for optimizer in optimizers:
         for batch_size in batch_sizes:
             config_name = f"{optimizer}_batch{batch_size}"
@@ -165,10 +169,10 @@ def analyze_batch_size_results(
             if config_name not in results:
                 continue
             
-            df = results[config_name]
+            df = ensure_dataframe(results[config_name])
             
             # Extract final test accuracies from all seeds
-            eval_df = df[df['phase'] == 'eval']
+            eval_df = ensure_dataframe(df[df['phase'] == 'eval'])
             
             if eval_df.empty:
                 continue
@@ -211,13 +215,14 @@ def plot_batch_size_trends(
     optimizers = summary_df['Optimizer'].unique()
     colors = plt.cm.tab10(np.linspace(0, 1, len(optimizers)))
     
+    from src.utils.plot_helpers import arr_to_numpy_float
     for i, optimizer in enumerate(optimizers):
         opt_df = summary_df[summary_df['Optimizer'] == optimizer]
         opt_df = opt_df.sort_values('Batch Size')
         
-        batch_sizes = opt_df['Batch Size'].values
-        means = opt_df['Mean Accuracy'].values
-        stds = opt_df['Std Accuracy'].values
+        batch_sizes = arr_to_numpy_float(opt_df['Batch Size'])
+        means = arr_to_numpy_float(opt_df['Mean Accuracy'])
+        stds = arr_to_numpy_float(opt_df['Std Accuracy'])
         
         # Plot line with error bars
         ax.errorbar(batch_sizes, means, yerr=stds, 
@@ -330,6 +335,8 @@ def perform_batch_size_comparisons(
             continue
         
         baseline_df = results[baseline_name]
+        # Ensure DataFrame for safe attribute access
+        baseline_df = pd.DataFrame(baseline_df)
         baseline_eval = baseline_df[baseline_df['phase'] == 'eval']
         
         # Extract final accuracies per seed
@@ -354,6 +361,8 @@ def perform_batch_size_comparisons(
                 continue
             
             df = results[config_name]
+            # Ensure DataFrame for safe attribute access
+            df = pd.DataFrame(df)
             eval_df = df[df['phase'] == 'eval']
             
             # Extract final accuracies

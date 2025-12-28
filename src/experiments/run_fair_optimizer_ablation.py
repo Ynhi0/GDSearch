@@ -128,7 +128,7 @@ def run_fair_optimizer_ablation_published_defaults(
     test_function,
     initial_point: Tuple[float, float],
     max_iterations: int = 10000,
-    seeds: List[int] = None,
+    seeds: Optional[List[int]] = None,
     results_dir: str = 'results/fair_ablation',
     plots_dir: str = 'results/fair_ablation/plots'
 ) -> pd.DataFrame:

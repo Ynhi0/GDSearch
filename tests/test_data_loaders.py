@@ -10,6 +10,7 @@ This is critical for preventing runtime unpacking errors in experiments.
 import pytest
 import torch
 from src.core.data_utils import get_mnist_loaders, get_cifar10_loaders
+from src.utils.safe_len import len_sized
 
 
 def test_mnist_loaders_without_val_split():
@@ -48,8 +49,8 @@ def test_mnist_loaders_with_val_split():
     assert len(test_loader) > 0
     
     # Verify val split roughly correct (within 20% tolerance)
-    total_train_val = len(train_loader.dataset) + len(val_loader.dataset)
-    val_fraction = len(val_loader.dataset) / total_train_val
+    total_train_val = len_sized(train_loader.dataset) + len_sized(val_loader.dataset)
+    val_fraction = len_sized(val_loader.dataset) / total_train_val
     assert 0.08 <= val_fraction <= 0.12, f"Val split {val_fraction:.2f} not close to 0.1"
 
 
@@ -89,8 +90,8 @@ def test_cifar10_loaders_with_val_split():
     assert len(test_loader) > 0
     
     # Verify val split roughly correct (within 20% tolerance)
-    total_train_val = len(train_loader.dataset) + len(val_loader.dataset)
-    val_fraction = len(val_loader.dataset) / total_train_val
+    total_train_val = len_sized(train_loader.dataset) + len_sized(val_loader.dataset)
+    val_fraction = len_sized(val_loader.dataset) / total_train_val
     assert 0.08 <= val_fraction <= 0.12, f"Val split {val_fraction:.2f} not close to 0.1"
 
 
@@ -129,8 +130,8 @@ def test_mnist_val_split_fractions(val_split):
     """Test MNIST validation split with various fractions."""
     train_loader, val_loader, test_loader = get_mnist_loaders(batch_size=32, val_split=val_split)
     
-    total_train_val = len(train_loader.dataset) + len(val_loader.dataset)
-    actual_val_fraction = len(val_loader.dataset) / total_train_val
+    total_train_val = len_sized(train_loader.dataset) + len_sized(val_loader.dataset)
+    actual_val_fraction = len_sized(val_loader.dataset) / total_train_val
     
     # Allow 20% tolerance
     expected_min = val_split * 0.8
@@ -145,8 +146,8 @@ def test_cifar10_val_split_fractions(val_split):
     """Test CIFAR-10 validation split with various fractions."""
     train_loader, val_loader, test_loader = get_cifar10_loaders(batch_size=32, val_split=val_split)
     
-    total_train_val = len(train_loader.dataset) + len(val_loader.dataset)
-    actual_val_fraction = len(val_loader.dataset) / total_train_val
+    total_train_val = len_sized(train_loader.dataset) + len_sized(val_loader.dataset)
+    actual_val_fraction = len_sized(val_loader.dataset) / total_train_val
     
     # Allow 20% tolerance
     expected_min = val_split * 0.8

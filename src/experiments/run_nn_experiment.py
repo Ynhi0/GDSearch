@@ -79,8 +79,7 @@ def build_model_and_data(
     device: torch.device, 
     seed: int, 
     val_split: Optional[float] = None
-) -> Union[Tuple[torch.nn.Module, torch.utils.data.DataLoader, torch.utils.data.DataLoader],
-           Tuple[torch.nn.Module, torch.utils.data.DataLoader, torch.utils.data.DataLoader, torch.utils.data.DataLoader]]:
+) -> Tuple[torch.nn.Module, torch.utils.data.DataLoader, Optional[torch.utils.data.DataLoader], torch.utils.data.DataLoader]:
     """Build model and data loaders with optional validation split.
     
     Args:
@@ -126,8 +125,10 @@ def build_model_and_data(
         train_loader, val_loader, test_loader = loaders
         return model, train_loader, val_loader, test_loader
     else:
+        # Ensure we return a consistent 4-tuple signature: (model, train_loader, val_loader, test_loader)
         train_loader, test_loader = loaders
-        return model, train_loader, test_loader
+        val_loader = None
+        return model, train_loader, val_loader, test_loader
 
 
 def build_optimizer(optimizer_name: str, model: torch.nn.Module, lr: float, weight_decay: float = 0.0, momentum: float = 0.0):
@@ -228,15 +229,10 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
     epochs = int(config.get('epochs', 5))
     val_split = config.get('val_split', None)
 
-    if val_split is not None:
-        model, train_loader, val_loader, test_loader = build_model_and_data(
-            dataset, model_name, batch_size, device, seed, val_split=val_split
-        )
-    else:
-        model, train_loader, test_loader = build_model_and_data(
-            dataset, model_name, batch_size, device, seed
-        )
-        val_loader = None
+    # Build model and data loaders. build_model_and_data always returns a 4-tuple
+    model, train_loader, val_loader, test_loader = build_model_and_data(
+        dataset, model_name, batch_size, device, seed, val_split=val_split
+    )
     
     criterion = nn.CrossEntropyLoss()
     optimizer = build_optimizer(

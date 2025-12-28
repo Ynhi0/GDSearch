@@ -357,9 +357,11 @@ class Adam(Optimizer):
                 return params
             
             # Update biased first moment estimate
+            assert self.m is not None
             self.m = self.beta1 * self.m + (1 - self.beta1) * gradients
             
             # Update biased second moment estimate
+            assert self.v is not None
             self.v = self.beta2 * self.v + (1 - self.beta2) * gradients**2
             
             # Compute bias-corrected moment estimates
@@ -447,6 +449,8 @@ class AdamW(Optimizer):
                 logging.warning("AdamW: Non-finite gradients detected, skipping update")
                 return params
             
+            assert self.m is not None
+            assert self.v is not None
             self.m = self.beta1 * self.m + (1 - self.beta1) * gradients
             self.v = self.beta2 * self.v + (1 - self.beta2) * (gradients ** 2)
             m_hat = self.m / max(1 - self.beta1 ** self.t, 1e-8)
@@ -523,6 +527,9 @@ class AMSGrad(Optimizer):
                 self.m = np.zeros_like(params)
                 self.v = np.zeros_like(params)
                 self.vhat_max = np.zeros_like(params)
+            assert self.m is not None
+            assert self.v is not None
+            assert self.vhat_max is not None
             self.m = self.beta1 * self.m + (1 - self.beta1) * gradients
             self.v = self.beta2 * self.v + (1 - self.beta2) * (gradients ** 2)
             m_hat = self.m / max(1 - self.beta1 ** self.t, 1e-8)
@@ -881,6 +888,8 @@ class AdaBound(Optimizer):
                 self.m = np.zeros_like(params)
                 self.v = np.zeros_like(params)
             
+            assert self.m is not None
+            assert self.v is not None
             self.m = self.beta1 * self.m + (1 - self.beta1) * gradients
             self.v = self.beta2 * self.v + (1 - self.beta2) * gradients ** 2
             
@@ -978,6 +987,8 @@ class RAdam(Optimizer):
                 self.m = np.zeros_like(params)
                 self.v = np.zeros_like(params)
             
+            assert self.m is not None
+            assert self.v is not None
             self.m = self.beta1 * self.m + (1 - self.beta1) * gradients
             self.v = self.beta2 * self.v + (1 - self.beta2) * gradients ** 2
             

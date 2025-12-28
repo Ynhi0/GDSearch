@@ -32,6 +32,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from typing import Dict, List, Optional, Tuple
+from src.core.dataloader_utils import make_dataloader
 import os
 import json
 from tqdm import tqdm
@@ -288,7 +289,7 @@ def train_with_beta(
 
 
 def run_momentum_beta_sensitivity(
-    beta_values: List[float] = None,
+    beta_values: Optional[List[float]] = None,
     epochs: int = 20,
     seeds: List[int] = [42, 123, 456],
     lr: float = 0.01,
@@ -364,7 +365,7 @@ def run_momentum_beta_sensitivity(
 
 
 def run_adam_beta_sensitivity(
-    beta1_values: List[float] = None,
+    beta1_values: Optional[List[float]] = None,
     beta2: float = 0.999,
     epochs: int = 20,
     seeds: List[int] = [42, 123, 456],
@@ -446,7 +447,7 @@ def run_adam_beta_sensitivity(
 
 def run_adam_beta2_sensitivity(
     beta1: float = 0.9,
-    beta2_values: List[float] = None,
+    beta2_values: Optional[List[float]] = None,
     epochs: int = 20,
     seeds: List[int] = [42, 123, 456],
     lr: float = 0.001,
@@ -574,8 +575,8 @@ def run_adam_beta2_sensitivity(
 
 
 def run_adam_beta1_beta2_grid(
-    beta1_values: List[float] = None,
-    beta2_values: List[float] = None,
+    beta1_values: Optional[List[float]] = None,
+    beta2_values: Optional[List[float]] = None,
     epochs: int = 15,
     seeds: List[int] = [42, 123],
     lr: float = 0.001,

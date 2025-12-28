@@ -9,6 +9,7 @@ import copy
 from typing import List, Dict, Any
 import pandas as pd
 import numpy as np
+import logging
 from tqdm import tqdm
 
 from src.experiments.run_nn_experiment import train_and_evaluate, result_filename
@@ -43,6 +44,8 @@ def run_multi_seed_experiment(base_config: Dict[str, Any], seeds: List[int], res
         
         # Run experiment
         df = train_and_evaluate(config)
+        # Coerce to DataFrame to satisfy type checker and ensure consistent API
+        df = pd.DataFrame(df)
         
         # Save result
         filename = result_filename(config)
@@ -83,7 +86,9 @@ def aggregate_results(result_files: List[str], metric: str = 'test_accuracy', ex
                 # If parsing fails, default to False (assume not tainted)
                 df['tainted'] = False
         # Skip tainted runs if requested
-        if exclude_tainted and 'tainted' in df.columns and df['tainted'].any():
+        # Use explicit bool() to avoid Series truth-value ambiguity for static type checkers
+        tainted_any = bool(df['tainted'].any()) if 'tainted' in df.columns else False
+        if exclude_tainted and tainted_any:
             continue
         eval_df = df[df['phase'] == 'eval']
         if not eval_df.empty:

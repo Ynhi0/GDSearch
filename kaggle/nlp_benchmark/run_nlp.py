@@ -14,12 +14,15 @@ import argparse
 import logging
 from pathlib import Path
 
+
 import numpy as np
 import pandas as pd
 from scipy import stats
 
 import torch
 from torch.utils.data import DataLoader
+from typing import Any, Mapping, Protocol, Sequence, List, cast, Iterator, Union, Dict
+import warnings
 
 # Version-aware torch.save / torch.load helpers - try to reuse repo utility if available
 try:
@@ -68,9 +71,18 @@ def _try_import_hf():
         ) from e
 
 
+class HasDatasetLike(Protocol):
+    def shuffle(self, seed: int) -> "HasDatasetLike": ...
+    def select(self, indices: Sequence[int]) -> "HasDatasetLike": ...
+    def __len__(self) -> int: ...
+    def __iter__(self): ...
+    @property
+    def column_names(self) -> List[str]: ...
+    def remove_columns(self, columns: List[str]) -> "HasDatasetLike": ...
+
+
 def collate_fn_builder(tokenizer):
     def collate_fn(examples):
-        import torch
         input_ids = [torch.tensor(ex["input_ids"]) for ex in examples]
         attention_mask = [torch.tensor(ex.get("attention_mask", [])) for ex in examples]
         labels = [torch.tensor(ex["label"]) for ex in examples]
@@ -137,11 +149,9 @@ def run_single(opt_name: str, seed: int, lr: float, epochs: int, batch_size: int
     set_seed(seed)
     
     # Set environment variables to avoid warnings
-    import os
     os.environ['TOKENIZERS_PARALLELISM'] = 'false'
     
     # Suppress unnecessary transformers warnings
-    import warnings
     warnings.filterwarnings('ignore', message='Some weights.*were not initialized')
     
     import transformers
@@ -169,7 +179,6 @@ def run_single(opt_name: str, seed: int, lr: float, epochs: int, batch_size: int
             print("Falling back to SYNTHETIC sentiment data for compatibility")
             use_synthetic = True
             # Generate synthetic sentiment data
-            import numpy as np
             np.random.seed(seed)
             positive_templates = [
                 "This movie is amazing and wonderful",
@@ -184,18 +193,22 @@ def run_single(opt_name: str, seed: int, lr: float, epochs: int, batch_size: int
             train_texts, train_labels = [], []
             for _ in range(min(train_size, 1000)):
                 if np.random.random() > 0.5:
-                    train_texts.append(positive_templates[np.random.randint(len(positive_templates))])
+                    idx = int(np.random.randint(len(positive_templates)))
+                    train_texts.append(positive_templates[idx])
                     train_labels.append(1)
                 else:
-                    train_texts.append(negative_templates[np.random.randint(len(negative_templates))])
+                    idx = int(np.random.randint(len(negative_templates)))
+                    train_texts.append(negative_templates[idx])
                     train_labels.append(0)
             test_texts, test_labels = [], []
             for _ in range(min(test_size, 250)):
                 if np.random.random() > 0.5:
-                    test_texts.append(positive_templates[np.random.randint(len(positive_templates))])
+                    idx = int(np.random.randint(len(positive_templates)))
+                    test_texts.append(positive_templates[idx])
                     test_labels.append(1)
                 else:
-                    test_texts.append(negative_templates[np.random.randint(len(negative_templates))])
+                    idx = int(np.random.randint(len(negative_templates)))
+                    test_texts.append(negative_templates[idx])
                     test_labels.append(0)
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
@@ -212,18 +225,52 @@ def run_single(opt_name: str, seed: int, lr: float, epochs: int, batch_size: int
         val_encodings = tokenizer(val_texts, truncation=True, padding=False, max_length=256)
         test_encodings = tokenizer(test_texts, truncation=True, padding=False, max_length=256)
         # Create simple dict datasets
+
         class SimpleDataset:
-            def __init__(self, encodings, labels):
+            """Lightweight dataset compatible with HF datasets for this script.
+
+            Provides `column_names` and `remove_columns` to match the subset
+            operations used later in the code and implements `__iter__`.
+            """
+            def __init__(self, encodings: Dict[str, List[Any]], labels: List[int]):
                 self.encodings = encodings
                 self.labels = labels
-            def __len__(self):
+
+            def __len__(self) -> int:
                 return len(self.labels)
+
             def __getitem__(self, idx):
+                # Ensure idx is an int to avoid static analysis warnings and numpy scalar issues
+                idx = int(idx)
+                input_ids = self.encodings['input_ids'][idx]
+                if 'attention_mask' in self.encodings:
+                    attention_mask = self.encodings['attention_mask'][idx]
+                else:
+                    # default attention mask of ones matching input length
+                    attention_mask = [1] * len(input_ids)
                 return {
-                    'input_ids': self.encodings['input_ids'][idx],
-                    'attention_mask': self.encodings.get('attention_mask', [[1]*len(self.encodings['input_ids'][idx])])[idx],
-                    'label': self.labels[idx]
+                    'input_ids': input_ids,
+                    'attention_mask': attention_mask,
+                    'label': int(self.labels[idx])
                 }
+
+            @property
+            def column_names(self) -> List[str]:
+                # Mirror HF datasets interface: include label as a column
+                cols = list(self.encodings.keys())
+                if 'label' not in cols:
+                    cols.append('label')
+                return cols
+
+            def remove_columns(self, columns: List[str]) -> 'SimpleDataset':
+                # Return a new SimpleDataset with requested columns removed
+                new_enc = {k: v for k, v in self.encodings.items() if k not in columns}
+                return SimpleDataset(new_enc, self.labels)
+
+            def __iter__(self):
+                for i in range(len(self)):
+                    yield self[i]
+
         train_ds = SimpleDataset(train_encodings, train_labels)
         val_ds = SimpleDataset(val_encodings, val_labels)
         test_ds = SimpleDataset(test_encodings, test_labels)
@@ -231,16 +278,56 @@ def run_single(opt_name: str, seed: int, lr: float, epochs: int, batch_size: int
         def preprocess(examples):
             return tokenizer(examples['text'], truncation=True, padding=False, max_length=256)
 
-        tokenized = raw.map(preprocess, batched=True)
+        tokenized = cast(Mapping[str, Union[HasDatasetLike, Sequence[Any]]], raw.map(preprocess, batched=True))
         # Create proper train/val split from training data
-        full_train = tokenized['train'].shuffle(seed=seed)
+        train_split = tokenized['train']
+        try:
+            full_train = train_split.shuffle(seed=seed)
+        except AttributeError:
+            # Fallback: when using non-HF datasets, wrap sequence-like data in a thin adapter
+            class ListAsDataset:
+                def __init__(self, items: Sequence[dict]):
+                    self._items = list(items)
+
+                def shuffle(self, seed: int) -> 'ListAsDataset':
+                    import random
+                    new = self._items.copy()
+                    rng = random.Random(seed)
+                    rng.shuffle(new)
+                    return ListAsDataset(new)
+
+                def select(self, indices: Sequence[int]) -> 'ListAsDataset':
+                    return ListAsDataset([self._items[int(i)] for i in indices])
+
+                def __len__(self) -> int:
+                    return len(self._items)
+
+                def __iter__(self) -> Iterator[dict]:
+                    for x in self._items:
+                        yield x
+
+                @property
+                def column_names(self):
+                    if not self._items:
+                        return []
+                    return list(self._items[0].keys())
+
+                def remove_columns(self, columns: Sequence[str]):
+                    return ListAsDataset([{k: v for k, v in item.items() if k not in columns} for item in self._items])
+
+            full_train = ListAsDataset(list(train_split))
         train_size_actual = min(train_size, len(full_train))
         val_size = max(int(train_size_actual * 0.15), 100)
         train_size_actual = train_size_actual - val_size
         
         train_ds = full_train.select(range(train_size_actual))
         val_ds = full_train.select(range(train_size_actual, train_size_actual + val_size))
-        test_ds = tokenized['test'].shuffle(seed=seed).select(range(min(test_size, len(tokenized['test']))))
+        test_split = tokenized['test']
+        try:
+            test_ds = test_split.shuffle(seed=seed).select(range(min(test_size, len(tokenized['test']))))
+        except AttributeError:
+            # Wrap non-HF test split similarly
+            test_ds = ListAsDataset(list(test_split)).select(range(min(test_size, len(tokenized['test']))))
 
     # keep only needed columns (only for HF datasets)
     if not use_synthetic:
@@ -254,9 +341,9 @@ def run_single(opt_name: str, seed: int, lr: float, epochs: int, batch_size: int
 
     collate_fn = collate_fn_builder(tokenizer)
     # Use num_workers=0 to avoid tokenizer parallelism issues
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, collate_fn=collate_fn, num_workers=0)
-    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_fn, num_workers=0)
-    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, collate_fn=collate_fn, num_workers=0)
+    train_loader = DataLoader(cast(Any, train_ds), batch_size=batch_size, shuffle=True, collate_fn=collate_fn, num_workers=0)
+    val_loader = DataLoader(cast(Any, val_ds), batch_size=batch_size, shuffle=False, collate_fn=collate_fn, num_workers=0)
+    test_loader = DataLoader(cast(Any, test_ds), batch_size=batch_size, shuffle=False, collate_fn=collate_fn, num_workers=0)
 
     model = AutoModel.from_pretrained(model_name, num_labels=2).to(device)
 
@@ -331,7 +418,9 @@ def run_single(opt_name: str, seed: int, lr: float, epochs: int, batch_size: int
     return out
 
 
-def compute_statistics(results_dir: str):
+def compute_statistics(results_dir: Union[str, Path]):
+    # Accept Path or str for results_dir
+    results_dir = str(results_dir)
     import glob, re
     patterns = {
         'AdamW': f"{results_dir}/NN_DistilBERT_IMDB_AdamW_*_benchmark.csv",
@@ -364,15 +453,18 @@ def compute_statistics(results_dir: str):
         _, pB = stats.shapiro(b)
         if pA > 0.05 and pB > 0.05:
             test = 'Paired t-test'
-            stat, p = stats.ttest_rel(a, b)
+            _, p = stats.ttest_rel(a, b)
             eff_name = "Cohen's d"
             eff = (a - b).mean() / (a - b).std(ddof=1)
         else:
             test = 'Wilcoxon'
             W, p = stats.wilcoxon(a, b)
+            # coerce to python floats robustly (handles arrays/tuples returned by different scipy versions)
+            W = float(np.asarray(W).item())
+            p = float(np.asarray(p).item())
             n = len(a)
             eff_name = 'Rank-biserial r'
-            eff = 1 - (2 * W) / (n * (n + 1))
+            eff = 1 - (2.0 * W) / (n * (n + 1))
         rows.append({
             'Optimizer A': A, 'Optimizer B': B, 'n': len(common),
             'Mean A': float(a.mean()), 'Mean B': float(b.mean()), 'Test': test,

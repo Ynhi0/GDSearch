@@ -8,6 +8,7 @@ sys.path.insert(0, 'src')
 
 import logging
 logging.basicConfig(level=logging.INFO, format='%(message)s')
+from src.utils.safe_len import len_sized
 
 def test_medical_utils():
     """Test medical data utilities module."""
@@ -30,7 +31,7 @@ def test_medical_utils():
     img, mask = train_ds[0]
     assert img.shape == (1, 64, 64), f"Expected shape (1, 64, 64), got {img.shape}"
     assert mask.shape == (1, 64, 64), f"Expected shape (1, 64, 64), got {mask.shape}"
-    print(f"  ✓ Synthetic dataset: {len(train_ds)} train, {len(test_ds)} test")
+    print(f"  ✓ Synthetic dataset: {len_sized(train_ds)} train, {len_sized(test_ds)} test")
     
     # Test get_medical_datasets with medmnist (default)
     print("\n2. Testing get_medical_datasets (medmnist as default)...")
@@ -52,9 +53,9 @@ def test_medical_utils():
             img_size=128,
             seed=42
         )
-    assert len(train_ds) >= 10
-    assert len(test_ds) >= 5
-    print(f"  ✓ get_medical_datasets: {len(train_ds)} train, {len(test_ds)} test")
+    assert len_sized(train_ds) >= 10
+    assert len_sized(test_ds) >= 5
+    print(f"  ✓ get_medical_datasets: {len_sized(train_ds)} train, {len_sized(test_ds)} test")
     
     # Test MedMNIST (will gracefully fail if not installed)
     print("\n3. Testing load_medmnist_dataset...")

@@ -4,9 +4,10 @@ Reproducibility helpers: verify claimed results using metadata and checkpoints.
 from pathlib import Path
 import json
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 import torch
+from src.core.io_utils import torch_load_safe
 from torch.utils.data import DataLoader, Subset
 
 from src.core.models import ResNet18
@@ -19,7 +20,7 @@ def load_metadata(path: str) -> Dict[str, Any]:
         return json.load(f)
 
 
-def verify_checkpoint_with_metadata(meta_path: str, tolerance: float = 0.01, device: torch.device = None) -> Dict[str, Any]:
+def verify_checkpoint_with_metadata(meta_path: str, tolerance: float = 0.01, device: Optional[torch.device] = None) -> Dict[str, Any]:
     """Verify a checkpoint against metadata.
 
     Returns a dict with keys:

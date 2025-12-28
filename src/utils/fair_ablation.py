@@ -363,8 +363,9 @@ def compute_statistical_significance(
             )
             continue
         
-        baseline_values = merged['baseline_metric'].values
-        opt_values = merged['opt_metric'].values
+        from src.utils.plot_helpers import arr_to_numpy_float
+        baseline_values = arr_to_numpy_float(merged['baseline_metric'])
+        opt_values = arr_to_numpy_float(merged['opt_metric'])
         
         # Validate equal length (should be guaranteed by merge)
         assert len(baseline_values) == len(opt_values), "Sample length mismatch after merge"

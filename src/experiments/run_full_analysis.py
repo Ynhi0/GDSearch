@@ -159,7 +159,8 @@ def run_full_pipeline(
                     try:
                         df = pd.read_csv(f)
                         # Skip runs that were tainted (OOM recovery)
-                        if 'tainted' in df.columns and df['tainted'].any():
+                        tainted_any = bool(df['tainted'].any()) if 'tainted' in df.columns else False
+                        if tainted_any:
                             logging.info("Skipping tainted run for %s, seed=%s", opt_A, s)
                             continue
                         ev = df[df['phase'] == 'eval']
@@ -175,7 +176,8 @@ def run_full_pipeline(
                     try:
                         df = pd.read_csv(f)
                         # Skip runs that were tainted (OOM recovery)
-                        if 'tainted' in df.columns and df['tainted'].any():
+                        tainted_any = bool(df['tainted'].any()) if 'tainted' in df.columns else False
+                        if tainted_any:
                             logging.info("Skipping tainted run for %s, seed=%s", opt_B, s)
                             continue
                         ev = df[df['phase'] == 'eval']

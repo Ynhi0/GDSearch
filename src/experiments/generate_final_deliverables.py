@@ -23,6 +23,7 @@ from typing import Dict, List, Optional
 import warnings
 warnings.filterwarnings('ignore')
 import logging
+import json
 logging.basicConfig(level=logging.INFO)
 
 # Add project root to path
@@ -38,9 +39,9 @@ try:
         plot_multi_optimizer_comparison
     )
     from src.experiments.convergence_analysis import ConvergenceAnalyzer, analyze_non_convex_convergence
-    from src.analysis.ablation_study import run_ablation_analysis
-    from src.analysis.sensitivity_analysis import run_sensitivity_analysis
-    from src.analysis.baseline_comparison import compare_with_pytorch_optimizers
+    from src.analysis.ablation_study import run_ablation_study
+    from src.analysis.sensitivity_analysis import run_sensitivity_experiment
+    from src.analysis.baseline_comparison import run_baseline_comparison as compare_with_pytorch_optimizers
     from src.analysis.statistical_analysis import (
         compare_two_optimizers,
         compare_multiple_optimizers,
@@ -182,7 +183,12 @@ class FinalDeliverablesGenerator:
             from src.visualization import plot_trajectory_and_step_size, plot_step_size_vs_iteration
             for csv_file in csv_files:
                 try:
+                    from src.utils.type_guards import ensure_dataframe
+                    from src.utils.plot_helpers import arr_to_numpy_float
+
                     df = pd.read_csv(csv_file)
+                    df = ensure_dataframe(df)
+
                     # Only handle if required columns exist
                     if {'x', 'y'}.issubset(df.columns):
                         base_name = csv_file.stem
@@ -224,6 +230,8 @@ class FinalDeliverablesGenerator:
         
         try:
             from src.visualization.interactive_plots import plot_multi_optimizer_comparison
+            from src.utils.type_guards import ensure_dataframe
+            from src.utils.plot_helpers import arr_to_numpy_float
             
             # Aggregate data into correct format for plot_multi_optimizer_comparison
             # Expected: Dict[str, Dict[str, np.ndarray]] with keys: loss_history, grad_norm_history, final_loss, iterations
@@ -248,7 +256,7 @@ class FinalDeliverablesGenerator:
                     
                     # Fallback to column in CSV
                     if opt_name == 'Unknown' and 'optimizer' in df.columns:
-                        opt_name = df['optimizer'].iloc[0] if not df.empty else 'Unknown'
+                        opt_name = df['optimizer'].iloc[0] if not ensure_dataframe(df).empty else 'Unknown'
                     
                     # Last resort: parse from filename
                     if opt_name == 'Unknown':
@@ -257,16 +265,16 @@ class FinalDeliverablesGenerator:
                         opt_name = parts[3] if len(parts) > 3 else 'Unknown'
                     
                     # Extract training data
-                    train_df = df[df['phase'] == 'train']
+                    train_df = ensure_dataframe(df[df['phase'] == 'train'])
                     if train_df.empty:
                         continue
                     
                     # Build data structure
                     results_dict[opt_name] = {
-                        'loss_history': train_df['train_loss'].values if 'train_loss' in train_df.columns else np.array([]),
-                        'grad_norm_history': train_df['grad_norm'].values if 'grad_norm' in train_df.columns else np.array([]),
-                        'final_loss': train_df['train_loss'].iloc[-1] if 'train_loss' in train_df.columns and not train_df.empty else 0.0,
-                        'iterations': len(train_df)
+                        'loss_history': arr_to_numpy_float(train_df['train_loss']) if 'train_loss' in train_df.columns else np.array([]),
+                        'grad_norm_history': arr_to_numpy_float(train_df['grad_norm']) if 'grad_norm' in train_df.columns else np.array([]),
+                        'final_loss': float(arr_to_numpy_float(train_df['train_loss'])[-1]) if 'train_loss' in train_df.columns and not train_df.empty else 0.0,
+                        'iterations': int(len(train_df))
                     }
                 except Exception as e:
                     logging.error("Failed to process %s: %s", csv_file.name, e, exc_info=True)
@@ -304,6 +312,8 @@ class FinalDeliverablesGenerator:
             for csv_file in csv_files:
                 try:
                     df = pd.read_csv(csv_file)
+                    # Coerce to DataFrame to satisfy static type checker and guard against ndarray-like inputs
+                    df = pd.DataFrame(df)
                     all_data.append(df)
                 except Exception as e:
                     logging.debug("Failed to read CSV %s: %s", csv_file, e, exc_info=True)

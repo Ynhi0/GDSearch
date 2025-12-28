@@ -32,7 +32,7 @@ import torch.nn as nn
 
 def oom_safe_train_step(
     model: nn.Module,
-    optimizer: torch.optim.Optimizer,
+    optimizer: Any,  # Accept optimizer wrappers and custom optimizer-like objects
     criterion: Callable,
     inputs: torch.Tensor,
     targets: torch.Tensor,
@@ -73,26 +73,56 @@ def oom_safe_train_step(
     Raises:
         RuntimeError: If OOM recovery fails after max_retries or batch too small
     """
-    # CRITICAL FIX: Use explicit optimizer capability flag instead of fragile string matching
-    # Check if optimizer has requires_closure flag (set in optimizer wrappers)
-    is_sam_optimizer = getattr(optimizer, 'requires_closure', False)
-    
-    # AUDIT FIX: Add assertion to catch missing requires_closure attribute on closure-based optimizers
-    # If optimizer name suggests closure requirement but attribute is missing, fail-fast
-    optimizer_name = type(optimizer).__name__
-    if any(keyword in optimizer_name.upper() for keyword in ['SAM', 'LBFGS']) and not hasattr(optimizer, 'requires_closure'):
-        raise AttributeError(
-            f"CRITICAL: Optimizer '{optimizer_name}' appears to be closure-based but lacks 'requires_closure' attribute. "
-            f"All closure-based optimizers must set self.requires_closure=True in their __init__ method. "
-            f"This is required for OOM handler safety. Fix the optimizer wrapper."
-        )
-    
-    if is_sam_optimizer:
+    # Determine whether optimizer requires a closure using explicit capability flag when present
+    requires_closure_attr = getattr(optimizer, 'requires_closure', None)
+    if requires_closure_attr is not None:
+        is_closure_based = bool(requires_closure_attr)
+    else:
+        # Default to False; only set to True for known closure-based optimizers or when attribute explicitly present
+        is_closure_based = False
+        # Heuristic 1: Inspect optimizer.step signature for a 'closure' parameter.
+        try:
+            import inspect
+            sig = inspect.signature(optimizer.step)
+            param = sig.parameters.get('closure')
+            # If optimizer.step exposes a 'closure' parameter, only raise for optimizers
+            # that are likely closure-based (name heuristics: SAM, LBFGS). Many optimizers
+            # include an optional `closure=None` param but do not require it (e.g., SGD, Adam).
+            if param is not None:
+                cls_name = optimizer.__class__.__name__.upper()
+                closure_like = any(x in cls_name for x in ('SAM', 'LBFGS', 'L_BFGS', 'L-BFGS'))
+                if closure_like:
+                    raise AttributeError(
+                        "Closure-detect: optimizer.step accepts a 'closure' parameter but the optimizer instance does not declare 'requires_closure'.\n"
+                        "Please set optimizer.requires_closure=True (e.g., for SAM/LBFGS) to opt out of OOM retry logic."
+                    )
+                else:
+                    # Optional closure parameter present but optimizer doesn't appear to be SAM/LBFGS.
+                    # Treat as benign optional closure and continue.
+                    logging.debug("Optimizer.step has optional 'closure' parameter but class '%s' not flagged as closure-based; continuing.", cls_name)
+        except AttributeError:
+            # Surface the attribute error to callers to force explicit opt-in/opt-out for closure-based optimizers
+            raise
+        except Exception:
+            # If signature inspection fails, fall back to conservative LBFGS detection
+            try:
+                is_closure_based = isinstance(optimizer, torch.optim.LBFGS) or optimizer.__class__.__name__.upper().startswith('LBFGS')
+            except Exception:
+                is_closure_based = False
+            if is_closure_based:
+                # Set attribute to help downstream checks and log a warning
+                try:
+                    setattr(optimizer, 'requires_closure', True)
+                except Exception:
+                    pass
+                logging.warning("Optimizer appears to be closure-based (LBFGS); setting 'requires_closure=True' for safety.")
+
+    if is_closure_based:
         logging.warning(
-            "CRITICAL: SAM optimizer detected (requires_closure=True). OOM retry disabled to prevent state corruption. "
+            "CRITICAL: Closure-based optimizer detected (requires_closure=True). OOM retry disabled to prevent state corruption. "
             "If OOM occurs, the run will fail immediately. Reduce batch size manually."
         )
-        # Bypass retry logic - execute SAM step directly
+        # Bypass retry logic - execute closure-based step directly
         inputs_device = inputs.to(device)
         targets_device = targets.to(device)
         
@@ -137,30 +167,29 @@ def oom_safe_train_step(
             current_inputs = current_inputs.to(device)
             current_targets = current_targets.to(device)
             
-            # Handle SAM-like optimizers that require closure
-            if is_sam_optimizer:
+            # Handle closure-based optimizers (SAM, LBFGS, etc.) that require a closure
+            if is_closure_based:
                 def closure():
                     optimizer.zero_grad()
                     outputs = model(current_inputs)
                     loss = criterion(outputs, current_targets)
                     loss.backward()
                     return loss
-                
-                # CRITICAL FIX: SAM requires the actual closure, not a dummy lambda
-                # SAM will call closure() internally to compute adversarial gradients
+
+                # Use the closure in optimizer.step
                 loss = optimizer.step(closure)
-                
+
                 # Validate closure return type
                 if loss is None:
                     raise RuntimeError(
-                        f"SAM optimizer step returned None. Expected loss tensor. "
-                        f"Check SAM implementation: {type(optimizer).__name__}"
+                        f"Closure-based optimizer step returned None. Expected loss tensor. "
+                        f"Check implementation: {type(optimizer).__name__}"
                     )
-                
-                # Get outputs after SAM step (parameters have been updated)
+
+                # Get outputs after step (parameters may have been updated)
                 with torch.no_grad():
                     outputs = model(current_inputs)
-                
+
                 # Extract scalar loss value with proper type handling
                 if isinstance(loss, torch.Tensor):
                     loss_value = float(loss.item())
@@ -168,10 +197,10 @@ def oom_safe_train_step(
                     loss_value = float(loss)
                 else:
                     raise TypeError(
-                        f"SAM step returned unexpected type: {type(loss)}. "
+                        f"Closure-based step returned unexpected type: {type(loss)}. "
                         f"Expected torch.Tensor or numeric scalar."
                     )
-                
+
                 return loss_value, current_inputs.size(0), outputs, tainted
             
             else:
@@ -260,7 +289,7 @@ def oom_safe_train_step(
                         )
                         raise RuntimeError(
                             "Batch size too small for BatchNorm layers and eval mode fallback failed"
-                        ) from e
+                        ) from eval_error
                 
                 if new_size < min_batch_size:
                     logging.error(

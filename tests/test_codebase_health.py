@@ -10,6 +10,7 @@ sys.path.insert(0, 'src')
 
 import logging
 logging.basicConfig(level=logging.INFO, format='%(message)s')
+from src.utils.safe_len import len_sized
 
 def test_requirements():
     """Verify requirements files have necessary dependencies."""
@@ -122,9 +123,9 @@ def test_medical_datasets():
         seed=42
     )
     
-    assert len(train_ds) == 50, f"Expected 50 train samples, got {len(train_ds)}"
-    assert len(test_ds) == 25, f"Expected 25 test samples, got {len(test_ds)}"
-    print(f"  ✓ Synthetic dataset correct size: {len(train_ds)} train, {len(test_ds)} test")
+    assert len_sized(train_ds) == 50, f"Expected 50 train samples, got {len_sized(train_ds)}"
+    assert len_sized(test_ds) == 25, f"Expected 25 test samples, got {len_sized(test_ds)}"
+    print(f"  ✓ Synthetic dataset correct size: {len_sized(train_ds)} train, {len_sized(test_ds)} test")
     
     # Test shapes
     img, mask = train_ds[0]

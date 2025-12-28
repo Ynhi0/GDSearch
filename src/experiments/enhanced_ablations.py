@@ -12,7 +12,7 @@ This enables stronger generalization claims and cross-domain validation.
 import argparse
 import logging
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -114,8 +114,8 @@ def create_data_fraction_subset(
 def run_data_efficiency_ablation(
     dataset_name: str = 'mnist',
     optimizer_name: str = 'Adam',
-    data_fractions: List[float] = None,
-    seeds: List[int] = None,
+    data_fractions: Optional[List[float]] = None,
+    seeds: Optional[List[int]] = None,
     epochs: int = 10,
     device: str = 'cuda'
 ) -> pd.DataFrame:
@@ -276,9 +276,9 @@ def run_data_efficiency_ablation(
 def run_model_scaling_ablation(
     dataset_name: str = 'mnist',
     optimizer_name: str = 'Adam',
-    width_mults: List[float] = None,
-    depth_layers: List[int] = None,
-    seeds: List[int] = None,
+    width_mults: Optional[List[float]] = None,
+    depth_layers: Optional[List[int]] = None,
+    seeds: Optional[List[int]] = None,
     epochs: int = 10,
     device: str = 'cuda'
 ) -> pd.DataFrame:

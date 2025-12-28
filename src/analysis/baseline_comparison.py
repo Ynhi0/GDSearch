@@ -382,7 +382,8 @@ def perform_statistical_tests(results: Dict):
         
         for df in impl_dict['custom']:
             # Skip tainted runs
-            if 'tainted' in df.columns and df['tainted'].any():
+            tainted_any = bool(df['tainted'].any()) if 'tainted' in df.columns else False
+            if tainted_any:
                 continue
             eval_df = df[df['phase'] == 'eval']
             if not eval_df.empty:
@@ -390,7 +391,8 @@ def perform_statistical_tests(results: Dict):
         
         for df in impl_dict['pytorch']:
             # Skip tainted runs
-            if 'tainted' in df.columns and df['tainted'].any():
+            tainted_any = bool(df['tainted'].any()) if 'tainted' in df.columns else False
+            if tainted_any:
                 continue
             eval_df = df[df['phase'] == 'eval']
             if not eval_df.empty:

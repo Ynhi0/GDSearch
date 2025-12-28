@@ -175,6 +175,7 @@ GDSearch/
 │   ├── check_search_budget_parity.py
 │   ├── compute_tradeoffs.py
 │   ├── demo_highdim_optimization.py  # High-dimensional function optimization
+│   ├── demo_saddle_point.py      # Saddle-point escape + vector-field demo
 │   ├── demo_lr_schedulers.py   # LR scheduler demonstration
 │   ├── demo_imdb_training.py   # IMDB sentiment analysis demo
 │   ├── diagnose_adam.py

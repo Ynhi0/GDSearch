@@ -29,6 +29,7 @@ from src.experiments.run_label_noise_ablation import (
     analyze_robustness_to_noise
 )
 from src.core.models import SimpleMLP
+from src.utils.safe_len import len_sized
 
 
 class TestNoisyLabelDataset:
@@ -45,7 +46,7 @@ class TestNoisyLabelDataset:
         noisy_dataset = NoisyLabelDataset(dataset, noise_rate=0.0, num_classes=5, seed=42)
         
         # Verify all labels unchanged
-        for i in range(len(dataset)):
+        for i in range(len_sized(dataset)):
             _, original_label = dataset[i]
             _, noisy_label = noisy_dataset[i]
             assert noisy_label == original_label
@@ -68,7 +69,7 @@ class TestNoisyLabelDataset:
             corrupted = (original_labels != noisy_labels).sum()
             
             # Should be approximately noise_rate * len(dataset)
-            expected = int(noise_rate * len(dataset))
+            expected = int(noise_rate * len_sized(dataset))
             assert abs(corrupted - expected) <= 2, f"Expected ~{expected} corruptions, got {corrupted}"
             
             # Clean accuracy should match

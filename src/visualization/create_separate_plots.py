@@ -20,6 +20,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import os
+import logging
 from pathlib import Path
 
 def create_separate_plots(
@@ -57,11 +58,11 @@ def create_separate_plots(
     stats_df = pd.read_csv(stats_csv)
     detailed_df = pd.read_csv(detailed_csv)
     
-    # Extract data
-    optimizers = summary_df['Optimizer'].values
-    losses = summary_df['Mean Loss'].values
-    stds = summary_df['Std Loss'].values
-    distances = summary_df['Mean Distance'].values
+    # Extract data (convert to native Python/numpy types for plotting)
+    optimizers = summary_df['Optimizer'].astype(str).tolist()  # ensure list[str] for tick labels
+    losses = summary_df['Mean Loss'].to_numpy(dtype=float)
+    stds = summary_df['Std Loss'].to_numpy(dtype=float)
+    distances = summary_df['Mean Distance'].to_numpy(dtype=float)
     
     # Color scheme
     colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A']
@@ -78,7 +79,8 @@ def create_separate_plots(
         bar.set_color(color)
     
     plt.yscale('log')
-    plt.xticks(range(len(optimizers)), optimizers, rotation=0, fontsize=12, fontweight='bold')
+    from src.utils.plot_helpers import labels_to_str_sequence
+    plt.xticks(range(len(optimizers)), labels_to_str_sequence(optimizers), rotation=0, fontsize=12, fontweight='bold')
     plt.ylabel('Final Loss (log scale)', fontsize=12, fontweight='bold')
     plt.title('Final Loss Comparison with Error Bars\n(Lower is Better)', 
               fontsize=14, fontweight='bold', pad=20)
@@ -101,6 +103,7 @@ def create_separate_plots(
     # Calculate std from detailed data
     dist_stds = [detailed_df[detailed_df['optimizer'] == opt]['distance_to_optimum'].std() 
                  for opt in optimizers]
+    dist_stds = np.asarray(dist_stds, dtype=float)
     
     bars = plt.bar(range(len(optimizers)), distances, yerr=dist_stds, 
                    capsize=5, alpha=0.7, edgecolor='black', linewidth=1.5)
@@ -171,7 +174,9 @@ def create_separate_plots(
     box_data = [detailed_df[detailed_df['optimizer'] == opt]['final_loss'].values 
                 for opt in optimizers]
     
-    bp = plt.boxplot(box_data, tick_labels=optimizers, patch_artist=True, 
+    # Use labels=optimizers for matplotlib compatibility; convert data to numpy arrays
+    box_data = [np.asarray(d) for d in box_data]
+    bp = plt.boxplot(box_data, patch_artist=True, 
                      showmeans=True, meanline=True,
                      boxprops=dict(linewidth=1.5),
                      whiskerprops=dict(linewidth=1.5),
@@ -183,12 +188,17 @@ def create_separate_plots(
         patch.set_facecolor(color)
         patch.set_alpha(0.7)
     
+    # Ensure tick labels are strings and set them explicitly
+    ax = plt.gca()
+    from src.utils.plot_helpers import labels_to_str_sequence
+    ax.set_xticks(np.arange(1, len(optimizers) + 1))
+    ax.set_xticklabels(labels_to_str_sequence(optimizers), rotation=0, fontsize=12, fontweight='bold')
+    
     plt.yscale('log')
     plt.ylabel('Final Loss (log scale)', fontsize=12, fontweight='bold')
     plt.xlabel('Optimizer', fontsize=12, fontweight='bold')
     plt.title('Loss Distribution Across Seeds\n(Red=Median, Blue=Mean)', 
               fontsize=14, fontweight='bold', pad=20)
-    plt.xticks(fontsize=12, fontweight='bold')
     plt.grid(axis='y', alpha=0.3)
     
     plt.tight_layout()
@@ -278,7 +288,8 @@ def create_separate_plots(
     plt.axhline(y=0.8, color='red', linestyle='--', alpha=0.5, label='Large (0.8)')
     plt.axhline(y=-0.8, color='red', linestyle='--', alpha=0.5)
     
-    plt.xticks(range(len(comparisons)), comparisons, rotation=0, fontsize=10)
+    from src.utils.plot_helpers import labels_to_str_sequence
+    plt.xticks(range(len(comparisons)), labels_to_str_sequence(comparisons), rotation=0, fontsize=10)
     plt.ylabel("Cohen's d (Effect Size)", fontsize=12, fontweight='bold')
     plt.title("Effect Sizes for Pairwise Comparisons\n(Negative = First optimizer is better)", 
               fontsize=14, fontweight='bold', pad=20)

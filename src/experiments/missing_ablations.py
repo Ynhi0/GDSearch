@@ -171,7 +171,7 @@ def evaluate(model, loader, criterion, device):
 
 
 def run_gradient_clipping_ablation(
-    clip_values: List[float] = None,
+    clip_values: Optional[List[float]] = None,
     epochs: int = 10,
     seeds: List[int] = [42, 123, 456],
     lr: float = 0.01,
@@ -243,7 +243,7 @@ def run_gradient_clipping_ablation(
 
 
 def run_label_smoothing_ablation(
-    smoothing_values: List[float] = None,
+    smoothing_values: Optional[List[float]] = None,
     epochs: int = 10,
     seeds: List[int] = [42, 123, 456],
     lr: float = 0.01,
@@ -319,7 +319,7 @@ def run_label_smoothing_ablation(
 
 
 def run_data_augmentation_ablation(
-    augmentation_configs: List[Dict] = None,
+    augmentation_configs: Optional[List[Dict]] = None,
     epochs: int = 10,
     seeds: List[int] = [42, 123, 456],
     lr: float = 0.01,
@@ -393,7 +393,7 @@ def run_data_augmentation_ablation(
 
 
 def run_model_architecture_ablation(
-    hidden_sizes: List[int] = None,
+    hidden_sizes: Optional[List[int]] = None,
     epochs: int = 10,
     seeds: List[int] = [42, 123, 456],
     lr: float = 0.01,
@@ -468,7 +468,7 @@ def run_model_architecture_ablation(
 
 
 def run_dropout_ablation(
-    dropout_rates: List[float] = None,
+    dropout_rates: Optional[List[float]] = None,
     epochs: int = 10,
     seeds: List[int] = [42, 123, 456],
     lr: float = 0.01,

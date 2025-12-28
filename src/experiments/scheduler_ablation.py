@@ -120,6 +120,7 @@ def run_scheduler_ablation(
             try:
                 from src.experiments.run_nn_experiment import train_and_evaluate
                 df = train_and_evaluate(config_with_seed)
+                df = pd.DataFrame(df)
                 
                 # Save individual result
                 filename = f"{config_name}_seed{seed}.csv"
@@ -171,10 +172,11 @@ def analyze_scheduler_results(
             if config_name not in results:
                 continue
             
-            df = results[config_name]
+            from src.utils.type_guards import ensure_dataframe
+            df = ensure_dataframe(results[config_name])
             
             # Extract final test accuracies from all seeds
-            eval_df = df[df['phase'] == 'eval']
+            eval_df = ensure_dataframe(df[df['phase'] == 'eval'])
             
             if eval_df.empty:
                 continue

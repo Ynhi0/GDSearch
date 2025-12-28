@@ -47,10 +47,11 @@ def create_ablation_bar_plot(
     
     # Group and sort
     grouped = df.groupby(group_col)[value_col].agg(['mean', 'std', 'count'])
-    grouped = grouped.sort_values('mean', ascending=False)
+    # Use explicit keyword args for clarity and typing
+    grouped = grouped.sort_values(by='mean', ascending=False)
     
     x_pos = np.arange(len(grouped))
-    bars = ax.bar(x_pos, grouped['mean'], yerr=grouped['std'],
+    bars = ax.bar(x_pos, np.asarray(grouped['mean'], dtype=float), yerr=np.asarray(grouped['std'], dtype=float),
                   capsize=5, alpha=0.7, edgecolor='black')
     
     # Color coding
@@ -70,7 +71,7 @@ def create_ablation_bar_plot(
         bar.set_color(color)
     
     ax.set_xticks(x_pos)
-    ax.set_xticklabels(grouped.index, rotation=45, ha='right')
+    ax.set_xticklabels([str(x) for x in grouped.index], rotation=45, ha='right')
     ax.set_ylabel(ylabel, fontsize=12)
     ax.set_title(title, fontsize=14, fontweight='bold')
     ax.grid(axis='y', alpha=0.3)
@@ -101,11 +102,12 @@ def create_box_plot(
     fig, ax = plt.subplots(figsize=figsize)
     
     # Prepare data
-    groups = df[group_col].unique()
-    box_data = [df[df[group_col] == group][value_col].values for group in groups]
+    from src.utils.plot_helpers import arr_to_numpy_float
+    groups = [str(g) for g in df[group_col].unique()]
+    box_data = [arr_to_numpy_float(df[df[group_col] == group][value_col]) for group in groups]
     
-    # CRITICAL FIX: Use tick_labels instead of deprecated labels parameter (Matplotlib 3.9+)
-    bp = ax.boxplot(box_data, tick_labels=groups, patch_artist=True,
+    # Use labels=groups and ensure numeric arrays for plotting
+    bp = ax.boxplot(box_data, patch_artist=True,
                    showmeans=True, meanline=True)
     
     # Style boxes
@@ -113,10 +115,13 @@ def create_box_plot(
         patch.set_facecolor('#3498db')
         patch.set_alpha(0.6)
     
+    # Ensure tick labels are strings and set them explicitly
+    ax.set_xticks(np.arange(1, len(groups) + 1))
+    ax.set_xticklabels([str(g) for g in groups], rotation=45, ha='right')
+    
     ax.set_ylabel(ylabel, fontsize=12)
     ax.set_title(title, fontsize=14, fontweight='bold')
     ax.grid(axis='y', alpha=0.3)
-    plt.xticks(rotation=45, ha='right')
     plt.tight_layout()
     plt.savefig(f"{output_path}.png", dpi=300, bbox_inches='tight')
     plt.savefig(f"{output_path}.pdf", bbox_inches='tight')
