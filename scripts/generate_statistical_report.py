@@ -45,6 +45,88 @@ OPTIMIZER_PATTERNS = {
 }
 
 
+from typing import Any
+
+def _to_float(x: Any) -> float:
+    """Safely coerce a value or array-like to a Python float.
+
+    Handles tuples/lists, numpy scalars, 0-d arrays, 1-D arrays (taking first element),
+    pandas Series/Index, and plain Python numbers/strings. Returns NaN on failure.
+    """
+    # Fast path for numeric scalars
+    try:
+        if isinstance(x, (int, float, np.integer, np.floating)):
+            return float(x)
+    except Exception:
+        pass
+
+    # Pandas scalars/Series handling
+    try:
+        import pandas as _pd
+        if isinstance(x, (_pd.Series, _pd.Index)):
+            s = x.dropna()
+            arr = np.asarray(s)
+            if arr.size == 0:
+                return float(np.nan)
+            # take last non-NA element
+            val = arr.ravel()[-1]
+            return _to_float(val)
+    except Exception:
+        pass
+
+    # Unwrap common Python containers first
+    try:
+        if isinstance(x, (tuple, list)):
+            if len(x) == 0:
+                return float(np.nan)
+            return _to_float(x[0])
+    except Exception:
+        pass
+
+    # Numpy arrays and other array-likes
+    try:
+        arr = np.asarray(x)
+        if arr.size == 0:
+            return float(np.nan)
+        # If scalar or single-element, take that element
+        if arr.shape == () or arr.size == 1:
+            val = arr.item()
+            if isinstance(val, (int, float, np.integer, np.floating, str)):
+                try:
+                    return float(val)
+                except Exception:
+                    return float(np.nan)
+            if hasattr(val, "__float__"):
+                try:
+                    return float(val)
+                except Exception:
+                    return float(np.nan)
+            return float(np.nan)
+        # Otherwise prefer first element (recurse to handle nested containers)
+        try:
+            return _to_float(arr.ravel()[0])
+        except Exception:
+            return float(np.nan)
+    except Exception:
+        pass
+
+    # String or other fallback - only call float on types that support it
+    try:
+        from src.utils.num_utils import safe_to_float
+        if isinstance(x, (int, float, np.integer, np.floating, str)) or hasattr(x, "__float__"):
+            return safe_to_float(x)
+        # Try one-element array-like extraction as a last resort
+        arr = np.asarray(x)
+        if getattr(arr, "size", 0) == 1:
+            try:
+                return safe_to_float(arr.item())
+            except Exception:
+                return float(np.nan)
+        return float(np.nan)
+    except Exception:
+        return float(np.nan)
+
+
 def _load_final_metric(results_dir: str, optimizer: str, col: str) -> Dict[int, float]:
     pattern = str(Path(results_dir) / "experiments" / "mnist" / "experiments" / "mnist" / OPTIMIZER_PATTERNS[optimizer])
     data: Dict[int, float] = {}
@@ -84,15 +166,66 @@ def _load_final_metric(results_dir: str, optimizer: str, col: str) -> Dict[int, 
                 logging.debug(f"Skipping file {f}: no column matching {col} or heuristics found; available columns: {list(df.columns)}")
                 continue
 
-            val = float(df[chosen_col].iloc[-1])
+            # Retrieve final value (prefer last epoch row) and coerce to float
+            series_or_val = df[chosen_col]
+            # If it's a Series-like, pick the last non-nan element safely
+            val = np.nan
+            try:
+                if hasattr(series_or_val, 'dropna'):
+                    s = series_or_val.dropna()
+                    arr = np.asarray(s)
+                    if arr.size == 0:
+                        val = float(np.nan)
+                    else:
+                        last_arr = np.asarray(arr.ravel())
+                        if last_arr.size == 0:
+                            val = float(np.nan)
+                        else:
+                            last = last_arr.ravel()[-1]
+                            # Unwrap common containers
+                            if isinstance(last, (list, tuple, np.ndarray)):
+                                try:
+                                    last_val_arr = np.asarray(last).ravel()
+                                    last_val = last_val_arr[-1] if last_val_arr.size > 0 else float(np.nan)
+                                except Exception:
+                                    last_val = last[0] if len(last) > 0 else float(np.nan)
+                                val = _to_float(last_val)
+                            else:
+                                val = _to_float(last)
+                else:
+                    # ndarray or scalar
+                    arr = np.asarray(series_or_val)
+                    if arr.size == 0:
+                        val = float(np.nan)
+                    else:
+                        val = _to_float(arr.ravel()[0])
+            except Exception:
+                # Fallback: try a best-effort extraction
+                try:
+                    if isinstance(series_or_val, (list, tuple)):
+                        val = _to_float(series_or_val[0])
+                    elif isinstance(series_or_val, np.ndarray) and series_or_val.size > 0:
+                        val = _to_float(series_or_val.ravel()[0])
+                    else:
+                        val = _to_float(series_or_val)
+                except Exception:
+                    val = float(np.nan)
 
-            # Extract seed from filename
-            import re
-            m = re.search(r"seed(\d+)", f)
-            if not m:
-                continue
-            seed = int(m.group(1))
-            data[seed] = val
+            # Extract seed id from filename (pattern: 'seed<digits>') as integer key
+            seed = None
+            try:
+                import re
+                m = re.search(r"seed(\d+)", Path(f).name)
+                if m:
+                    seed = int(m.group(1))
+            except Exception:
+                seed = None
+
+            if seed is None:
+                # fallback: use incremental index to avoid collisions
+                seed = len(data) + 1
+
+            data[seed] = float(val)
         except Exception as e:
             logging.debug("Error reading or parsing file %s: %s", f, e, exc_info=True)
             continue
@@ -115,25 +248,47 @@ def _paired_compare(a_vals: np.ndarray, b_vals: np.ndarray, name_a: str, name_b:
         effect_name = "Cohen's d"
     else:
         # Wilcoxon signed-rank
-        W, p_val = stats.wilcoxon(a_vals, b_vals, zero_method='wilcox', correction=False, alternative='two-sided', mode='auto')
+        W, p_val = stats.wilcoxon(a_vals, b_vals, zero_method='wilcox', correction=False, alternative='two-sided')
+        # Some SciPy versions return scalars, others return scalar-like tuples; normalize to float
+        if isinstance(W, (tuple, list, np.ndarray)):
+            # Extract the statistic if a tuple-like is returned
+            W_val = np.asarray(W).ravel()[0]
+        else:
+            W_val = W
+        # Normalize W_val to a Python float
+        W_val = _to_float(W_val)
         n = len(a_vals)
-        # Rank-biserial correlation as effect size
-        eff = 1 - (2 * W) / (n * (n + 1))
+        # Rank-biserial correlation as effect size (use normalized W_val)
+        eff = 1 - (2 * W_val) / (n * (n + 1))
         t_stat = np.nan
         test = 'Wilcoxon signed-rank'
         effect_name = 'Rank-biserial r'
 
+    # Normalize and coerce numeric outputs to Python floats to satisfy callers and static type checks
+    p_val_s = _to_float(p_val)
+
+    def _sh_p(sh):
+        try:
+            if isinstance(sh, (tuple, list, np.ndarray)):
+                return _to_float(sh[1])
+            return _to_float(getattr(sh, 'pvalue', np.nan))
+        except Exception:
+            return float(np.nan)
+
+    sh_a_p = _sh_p(sh_a)
+    sh_b_p = _sh_p(sh_b)
+
     return {
-        'name_A': name_a, 'name_B': name_b,
-        'n': len(a_vals),
+        'name_A': str(name_a), 'name_B': str(name_b),
+        'n': int(len(a_vals)),
         'mean_A': float(a_vals.mean()), 'std_A': float(a_vals.std(ddof=1)),
         'mean_B': float(b_vals.mean()), 'std_B': float(b_vals.std(ddof=1)),
-        'test': test,
+        'test': str(test),
         'statistic': float(t_stat) if not np.isnan(t_stat) else np.nan,
-        'p_value': float(p_val),
-        'shapiro_p_A': float(sh_a[1]) if isinstance(sh_a, tuple) else np.nan,
-        'shapiro_p_B': float(sh_b[1]) if isinstance(sh_b, tuple) else np.nan,
-        'effect_size_name': effect_name,
+        'p_value': p_val_s,
+        'shapiro_p_A': sh_a_p,
+        'shapiro_p_B': sh_b_p,
+        'effect_size_name': str(effect_name),
         'effect_size': float(eff),
     }
 
@@ -215,8 +370,10 @@ def main():
         "|---|---:|---:|---:|---:|---|---:|:---:|---:|---:|",
     ]
     for _, r in df.sort_values('p_value').iterrows():
+        sig_bool = bool(r.get('significant_holm', False))
+        power_val = r.get('power_achieved', np.nan)
         lines.append(
-            f"| {r['name_A']} | {r['name_B']} | {int(r['n'])} | {r['mean_A']:.4f} | {r['mean_B']:.4f} | {r['test']} | {r['p_value']:.3g} | {'✅' if r['significant_holm'] else '—'} | {r['effect_size_name']}={r['effect_size']:.3f} | {r.get('power_achieved', np.nan):.2f} |"
+            f"| {r['name_A']} | {r['name_B']} | {int(r['n'])} | {r['mean_A']:.4f} | {r['mean_B']:.4f} | {r['test']} | {r['p_value']:.3g} | {'✅' if sig_bool else '—'} | {r['effect_size_name']}={r['effect_size']:.3f} | {power_val:.2f} |"
         )
     report_path = Path(args.results_dir) / 'analysis' / 'nn_statistical_report.md'
     Path(report_path).write_text("\n".join(lines), encoding='utf-8')

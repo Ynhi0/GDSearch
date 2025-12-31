@@ -302,7 +302,7 @@ class LRFinder:
         plt.tight_layout()
         
         if save_path:
-            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
             logging.info(f"LR Finder plot saved to {save_path}")
         
         if show:
@@ -1174,11 +1174,11 @@ def auto_tune_training_config(
         print("=" * 50)
     
     # Memory-aware batch sizing
+    # Always construct a sizer instance so both branches have access to it
+    sizer = MemoryAwareBatchSizer()
     if find_batch_size:
         if verbose:
             print("\nFinding optimal batch size...")
-        
-        sizer = MemoryAwareBatchSizer()
         config['gpu_info'] = sizer.get_gpu_info()
         
         # Get a sample from the loader

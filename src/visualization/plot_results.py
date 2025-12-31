@@ -67,6 +67,7 @@ def plot_generalization_curves(df: Union[pd.DataFrame, ArrayLike, Sequence[dict]
     """
     # Coerce to DataFrame to satisfy static analysis and downstream indexing
     df = ensure_dataframe(df)
+    assert isinstance(df, pd.DataFrame)
     if df is None or df.empty:
         warnings.warn(
             "plot_generalization_curves: Received empty DataFrame, skipping plot",
@@ -85,9 +86,9 @@ def plot_generalization_curves(df: Union[pd.DataFrame, ArrayLike, Sequence[dict]
 
     # Loss curves
     if not train_epoch_loss.empty:
-        ax1.plot(train_epoch_loss.index, train_epoch_loss.values, 'b-o', label='Train Loss', alpha=0.8)
+        ax1.plot(train_epoch_loss.index, arr_to_numpy_float(train_epoch_loss), 'b-o', label='Train Loss', alpha=0.8)
     if not eval_epoch_loss.empty:
-        ax1.plot(eval_epoch_loss.index, eval_epoch_loss.values, 'r-s', label='Test Loss', alpha=0.8)
+        ax1.plot(eval_epoch_loss.index, arr_to_numpy_float(eval_epoch_loss), 'r-s', label='Test Loss', alpha=0.8)
     ax1.set_ylabel('Loss')
     ax1.set_title('Loss vs Epochs')
     ax1.grid(True, alpha=0.3)
@@ -95,7 +96,7 @@ def plot_generalization_curves(df: Union[pd.DataFrame, ArrayLike, Sequence[dict]
 
     # Accuracy curve
     if not eval_epoch_acc.empty:
-        ax2.plot(eval_epoch_acc.index, eval_epoch_acc.values, 'g-^', label='Test Accuracy', alpha=0.9)
+        ax2.plot(eval_epoch_acc.index, arr_to_numpy_float(eval_epoch_acc), 'g-^', label='Test Accuracy', alpha=0.9)
     ax2.set_xlabel('Epoch')
     ax2.set_ylabel('Accuracy')
     ax2.set_title('Accuracy vs Epochs')
@@ -105,7 +106,7 @@ def plot_generalization_curves(df: Union[pd.DataFrame, ArrayLike, Sequence[dict]
     fig.suptitle(title, fontsize=14, fontweight='bold')
     plt.tight_layout()
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
         plt.close()
     else:
         plt.show()
@@ -122,27 +123,30 @@ def plot_generalization_gap(nn_df: Union[pd.DataFrame, ArrayLike], title: str = 
     """
     from src.utils.type_guards import ensure_dataframe
     nn_df = ensure_dataframe(nn_df)
+    assert isinstance(nn_df, pd.DataFrame)
     if nn_df is None or len(nn_df) == 0:
         print("[plot_generalization_gap] Empty DataFrame, nothing to plot.")
         return
 
-    eval_df = nn_df[nn_df['phase'] == 'eval'].copy()
+    from typing import cast
+    eval_df = cast(pd.DataFrame, nn_df[nn_df['phase'] == 'eval'].copy())
     # Train loss per epoch: average over training batches
-    train_df = nn_df[nn_df['phase'] == 'train'].copy()
-    train_epoch = train_df.groupby('epoch', as_index=False)['train_loss'].mean().rename(columns={'train_loss': 'train_loss_epoch'})
+    train_df = cast(pd.DataFrame, nn_df[nn_df['phase'] == 'train'].copy())
+    # Aggregate train loss per epoch into a DataFrame with explicit column name to satisfy type-checkers
+    train_epoch = cast(pd.DataFrame, train_df.groupby('epoch', as_index=False).agg(train_loss_epoch=('train_loss', 'mean')))
     merged = pd.merge(eval_df, train_epoch, on='epoch', how='left')
     merged['gen_gap'] = merged['test_loss'] - merged['train_loss_epoch']
 
     fig, ax1 = plt.subplots(figsize=(7, 4.5))
     ax2 = ax1.twinx()
 
-    ax1.plot(merged['epoch'], merged['gen_gap'], marker='o', color='tab:red', label='Generalization Gap (loss)')
+    ax1.plot(arr_to_numpy_float(merged['epoch']), arr_to_numpy_float(merged['gen_gap']), marker='o', color='tab:red', label='Generalization Gap (loss)')
     ax1.set_xlabel('Epoch')
     ax1.set_ylabel('Test Loss - Train Loss', color='tab:red')
     ax1.tick_params(axis='y', labelcolor='tab:red')
 
     if 'test_accuracy' in merged.columns:
-        ax2.plot(merged['epoch'], merged['test_accuracy'] * 100.0, marker='s', color='tab:blue', label='Test Accuracy')
+        ax2.plot(arr_to_numpy_float(merged['epoch']), arr_to_numpy_float(merged['test_accuracy'] * 100.0), marker='s', color='tab:blue', label='Test Accuracy')
         ax2.set_ylabel('Test Accuracy (%)', color='tab:blue')
         ax2.tick_params(axis='y', labelcolor='tab:blue')
 
@@ -160,7 +164,7 @@ def plot_generalization_gap(nn_df: Union[pd.DataFrame, ArrayLike], title: str = 
     fig.tight_layout()
 
     if save_path:
-        plt.savefig(save_path, dpi=150)
+        plt.savefig(str(save_path), dpi=150)
     plt.close(fig)
 
 
@@ -172,15 +176,20 @@ def plot_layer_grad_norms(nn_df: Union[pd.DataFrame, ArrayLike], epochs: Optiona
     """
     from src.utils.type_guards import ensure_dataframe
     nn_df = ensure_dataframe(nn_df)
+    assert isinstance(nn_df, pd.DataFrame)
     layer_df = nn_df[nn_df['phase'] == 'layer_grad'].copy()
+    assert isinstance(layer_df, pd.DataFrame)
     if len(layer_df) == 0:
         print("[plot_layer_grad_norms] No per-layer gradient entries found. Ensure capture_layer_grad_epochs was set.")
         return
 
+    from typing import cast
     if epochs is None:
-        epochs = sorted(layer_df['epoch'].unique().tolist())
+        epoch_ser = pd.Series(layer_df['epoch'])
+        epochs = sorted(epoch_ser.unique().tolist())
 
-    pivoted = layer_df[layer_df['epoch'].isin(epochs)].pivot_table(index='layer', columns='epoch', values='layer_grad_norm', aggfunc='mean')
+    epoch_mask = pd.Series(layer_df['epoch']).isin(epochs)
+    pivoted = cast(pd.DataFrame, layer_df[epoch_mask].pivot_table(index='layer', columns='epoch', values='layer_grad_norm', aggfunc='mean'))
     pivoted = pivoted.fillna(0.0)
 
     layers = list(pivoted.index)
@@ -190,7 +199,7 @@ def plot_layer_grad_norms(nn_df: Union[pd.DataFrame, ArrayLike], epochs: Optiona
 
     fig, ax = plt.subplots(figsize=(max(8, len(layers) * 0.8), 5))
     for i, ep in enumerate(ep_cols):
-        ax.bar(x + i * width, pivoted[ep].values, width=width, label=f'Epoch {int(ep)}')
+        ax.bar(x + i * width, arr_to_numpy_float(pivoted[ep]), width=width, label=f'Epoch {int(ep)}')
 
     ax.set_xticks(x + width * (len(ep_cols) - 1) / 2)
     ax.set_xticklabels(layers, rotation=45, ha='right')
@@ -199,7 +208,7 @@ def plot_layer_grad_norms(nn_df: Union[pd.DataFrame, ArrayLike], epochs: Optiona
     ax.legend()
     fig.tight_layout()
     if save_path:
-        plt.savefig(save_path, dpi=150)
+        plt.savefig(str(save_path), dpi=150)
     plt.close(fig)
 
 
@@ -251,18 +260,9 @@ def plot_trajectory(df: Union[pd.DataFrame, ArrayLike], test_function: TwoDTestF
     # Draw trajectory line
     ax.plot(x_traj, y_traj, 'r-', linewidth=2, alpha=0.7, label='Trajectory')
     
-    # Mark start and end points
-    ax.plot(x_traj[0], y_traj[0], 'go', markersize=12, label='Start point', zorder=5)
-    ax.plot(x_traj[-1], y_traj[-1], 'r*', markersize=15, label='End point', zorder=5)
-    
-    # Draw some intermediate points
-    step = max(1, len(x_traj) // 10)
-    ax.plot(x_traj[::step], y_traj[::step], 'ko', markersize=4, alpha=0.5, zorder=4)
-    
-    # Set up labels and titles
-    ax.set_xlabel('x', fontsize=12)
-    ax.set_ylabel('y', fontsize=12)
-    ax.set_title(title, fontsize=14, fontweight='bold')
+    # Mark start and end points (use scalar floats for markers)
+    ax.plot(float(x_traj[0]), float(y_traj[0]), 'go', markersize=12, label='Start point', zorder=5)
+    ax.plot(float(x_traj[-1]), float(y_traj[-1]), 'r*', markersize=15, label='End point', zorder=5)
     ax.legend(loc='best')
     ax.grid(True, alpha=0.3)
     
@@ -270,7 +270,7 @@ def plot_trajectory(df: Union[pd.DataFrame, ArrayLike], test_function: TwoDTestF
     
     # Save or display
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
         plt.close()
     else:
         plt.show()
@@ -303,6 +303,7 @@ def plot_dynamics_triplet(df: Union[pd.DataFrame, ArrayLike], title: str, save_p
     Curvature is the turning angle between consecutive update vectors.
     """
     df = ensure_dataframe(df)
+    assert isinstance(df, pd.DataFrame)
     if df is None or len(df) == 0:
         logging.warning("Empty dynamics DataFrame, skipping plot")
         return
@@ -334,7 +335,7 @@ def plot_dynamics_triplet(df: Union[pd.DataFrame, ArrayLike], title: str, save_p
     fig.suptitle(title, fontsize=14, fontweight='bold')
     plt.tight_layout()
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
         plt.close()
     else:
         plt.show()
@@ -368,8 +369,9 @@ def plot_trajectory_3d(df: Union[pd.DataFrame, ArrayLike], test_function: TwoDTe
     ax = fig.add_subplot(111, projection='3d')
     ax.plot_surface(X, Y, Z, cmap='viridis', alpha=0.7, linewidth=0, antialiased=True)
     ax.plot3D(x_traj, y_traj, z_traj, 'r-', linewidth=2)
-    ax.scatter3D([x_traj[0]], [y_traj[0]], [z_traj[0]], color='g', s=50, label='Start')
-    ax.scatter3D([x_traj[-1]], [y_traj[-1]], [z_traj[-1]], color='r', s=60, label='End')
+    # Use plot to mark single points in 3D to avoid static typing ambiguity with scatter signatures
+    ax.plot([float(x_traj[0])], [float(y_traj[0])], [float(z_traj[0])], marker='o', color='g', markersize=8, label='Start')
+    ax.plot([float(x_traj[-1])], [float(y_traj[-1])], [float(z_traj[-1])], marker='*', color='r', markersize=10, label='End')
     ax.set_xlabel('x')
     ax.set_ylabel('y')
     ax.set_zlabel('f(x,y)')
@@ -377,7 +379,7 @@ def plot_trajectory_3d(df: Union[pd.DataFrame, ArrayLike], test_function: TwoDTe
     ax.legend()
     plt.tight_layout()
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
         plt.close()
     else:
         plt.show()
@@ -419,17 +421,17 @@ def trajectory_grid_adam(beta1_values, beta2_values, lr=0.01, a=1, b=100, initia
             xvals = arr_to_numpy_float(df['x'])
             yvals = arr_to_numpy_float(df['y'])
             ax.plot(xvals, yvals, 'r-', linewidth=1.5)
-            ax.plot(xvals[0], yvals[0], 'go', ms=6)
-            ax.plot(xvals[-1], yvals[-1], 'r*', ms=10)
+            ax.plot(float(xvals[0]), float(yvals[0]), 'go', ms=6)
+            ax.plot(float(xvals[-1]), float(yvals[-1]), 'r*', ms=10)
             ax.set_xlim([x_min, x_max])
-            ax.set_ylim([y_min, y_max])
+            ax.set_ylim((y_min, y_max))
             ax.set_title(f"β1={beta1}, β2={beta2}")
             ax.grid(True, alpha=0.2)
 
     fig.suptitle(f"Adam Trajectory Grid on Rosenbrock (lr={lr})", fontsize=14, fontweight='bold')
     plt.tight_layout()
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
         plt.close()
     else:
         plt.show()
@@ -469,15 +471,15 @@ def trajectory_series_momentum(betas, lr=0.01, a=1, b=100, initial=(-1.5, 2.0), 
         ax.plot(xvals, yvals, 'r-', linewidth=1.5)
         ax.plot(xvals[0], yvals[0], 'go', ms=6)
         ax.plot(xvals[-1], yvals[-1], 'r*', ms=10)
-        ax.set_xlim([x_min, x_max])
-        ax.set_ylim([y_min, y_max])
+        ax.set_xlim((x_min, x_max))
+        ax.set_ylim((y_min, y_max))
         ax.set_title(f"β={beta}")
         ax.grid(True, alpha=0.2)
 
     fig.suptitle(f"SGD Momentum Trajectories on Rosenbrock (lr={lr})", fontsize=14, fontweight='bold')
     plt.tight_layout()
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
         plt.close()
     else:
         plt.show()
@@ -517,15 +519,15 @@ def trajectory_series_nesterov(betas, lr=0.01, a=1, b=100, initial=(-1.5, 2.0), 
         ax.plot(xvals, yvals, 'r-', linewidth=1.5)
         ax.plot(xvals[0], yvals[0], 'go', ms=6)
         ax.plot(xvals[-1], yvals[-1], 'r*', ms=10)
-        ax.set_xlim([x_min, x_max])
-        ax.set_ylim([y_min, y_max])
+        ax.set_xlim((x_min, x_max))
+        ax.set_ylim((y_min, y_max))
         ax.set_title(f"β={beta}")
         ax.grid(True, alpha=0.2)
 
     fig.suptitle(f"SGD Nesterov Trajectories on Rosenbrock (lr={lr})", fontsize=14, fontweight='bold')
     plt.tight_layout()
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
         plt.close()
     else:
         plt.show()
@@ -565,15 +567,15 @@ def trajectory_series_adamw(weight_decays, lr=0.01, a=1, b=100, initial=(-1.5, 2
         ax.plot(xvals, yvals, 'r-', linewidth=1.5)
         ax.plot(xvals[0], yvals[0], 'go', ms=6)
         ax.plot(xvals[-1], yvals[-1], 'r*', ms=10)
-        ax.set_xlim([x_min, x_max])
-        ax.set_ylim([y_min, y_max])
+        ax.set_xlim((x_min, x_max))
+        ax.set_ylim((y_min, y_max))
         ax.set_title(f"wd={wd}")
         ax.grid(True, alpha=0.2)
 
     fig.suptitle(f"AdamW Trajectories on Rosenbrock (lr={lr})", fontsize=14, fontweight='bold')
     plt.tight_layout()
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
         plt.close()
     else:
         plt.show()
@@ -677,18 +679,18 @@ def plot_comparison(list_of_dfs, labels, metric, title, save_path=None):
     for i, (df, label) in enumerate(zip(list_of_dfs, labels)):
         if is_eval_metric and 'phase' in df.columns:
             eval_df = df[df['phase'] == 'eval']
-            x = eval_df['epoch'].values
-            y = eval_df[metric].values
+            x = arr_to_numpy_float(eval_df['epoch'])
+            y = arr_to_numpy_float(eval_df[metric])
             ax.plot(x, y, linewidth=2, label=label, color=colors[i], alpha=0.9)
         else:
             # Prefer NN train logs when available, else GD logs
             if 'global_step' in df.columns and 'phase' in df.columns:
                 train_df = df[df['phase'] == 'train']
-                x = train_df['global_step'].values
-                y = train_df.get(metric, pd.Series(index=train_df.index, dtype=float)).values if metric in train_df.columns else train_df['train_loss'].values
+                x = arr_to_numpy_float(train_df['global_step'])
+                y = arr_to_numpy_float(train_df.get(metric, pd.Series(index=train_df.index, dtype=float))) if metric in train_df.columns else arr_to_numpy_float(train_df['train_loss'])
             else:
-                x = df['iteration'].values
-                y = df[metric].values
+                x = arr_to_numpy_float(df['iteration'])
+                y = arr_to_numpy_float(df[metric])
             ax.semilogy(x, y, linewidth=2, label=label, color=colors[i], alpha=0.8)
 
     # Set up labels
@@ -852,7 +854,7 @@ def plot_multiseed_comparison(
     results_dict: dict,
     metric: str = 'test_accuracy',
     title: str = "Multi-Seed Comparison",
-    save_path: str = None,
+    save_path: Optional[str] = None,
     exclude_tainted: bool = True
 ):
     """
@@ -895,15 +897,15 @@ def plot_multiseed_comparison(
         for df in filtered_dfs:
             if is_eval and 'phase' in df.columns:
                 eval_df = df[df['phase'] == 'eval']
-                x = eval_df['epoch'].values
-                y = eval_df[metric].values
+                x = arr_to_numpy_float(eval_df['epoch'])
+                y = arr_to_numpy_float(eval_df[metric])
             elif 'global_step' in df.columns and 'phase' in df.columns:
                 train_df = df[df['phase'] == 'train']
-                x = train_df['global_step'].values
-                y = train_df.get(metric, train_df['train_loss']).values
+                x = arr_to_numpy_float(train_df['global_step'])
+                y = arr_to_numpy_float(train_df.get(metric, train_df['train_loss']))
             else:
-                x = df['iteration'].values
-                y = df[metric].values
+                x = arr_to_numpy_float(df['iteration'])
+                y = arr_to_numpy_float(df[metric])
             
             if x_values is None:
                 x_values = x
@@ -951,7 +953,7 @@ def plot_multiseed_comparison(
     plt.tight_layout()
     
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
         print(f"Multi-seed comparison plot saved to: {save_path}")
         plt.close()
     else:
@@ -962,7 +964,7 @@ def plot_final_metric_comparison(
     results_dict: dict,
     metric: str = 'test_accuracy',
     title: str = "Final Metric Comparison",
-    save_path: str = None,
+    save_path: Optional[str] = None,
     exclude_tainted: bool = True
 ):
     """
@@ -1072,7 +1074,7 @@ def plot_step_size_vs_iteration(df, title='Step size vs Iteration', save_path=No
     fig, ax = plt.subplots(figsize=(8,4))
     if 'step_size' not in df.columns:
         raise ValueError("DataFrame must contain 'step_size' column. Run dynamics.add_dynamics_metrics first.")
-    ax.plot(df['iteration'].values, df['step_size'].values, '-o', markersize=3)
+    ax.plot(arr_to_numpy_float(df['iteration']), arr_to_numpy_float(df['step_size']), '-o', markersize=3)
     ax.set_yscale('linear')
     ax.set_xlabel('Iteration')
     ax.set_ylabel('Step size')
@@ -1109,10 +1111,10 @@ def plot_trajectory_and_step_size(df, test_function, title='Trajectory and Step 
     ax0, ax1 = axes
     levels = np.logspace(np.log10(max(Z.min(),1e-10)), np.log10(Z.max()+1e-10), 30)
     ax0.contour(X, Y, Z, levels=levels, cmap='viridis', alpha=0.6)
-    ax0.plot(df['x'].values, df['y'].values, '-r', linewidth=1.5)
-    ax0.scatter(df['x'].values[0], df['y'].values[0], c='g', s=40, label='Start')
-    ax0.scatter(df['x'].values[-1], df['y'].values[-1], c='m', s=50, label='End')
-    ax0.set_xlim([x_min, x_max]); ax0.set_ylim([y_min, y_max])
+    ax0.plot(arr_to_numpy_float(df['x']), arr_to_numpy_float(df['y']), '-r', linewidth=1.5)
+    ax0.scatter(float(arr_to_numpy_float(df['x'])[0]), float(arr_to_numpy_float(df['y'])[0]), c='g', s=40, label='Start')
+    ax0.scatter(float(arr_to_numpy_float(df['x'])[-1]), float(arr_to_numpy_float(df['y'])[-1]), c='m', s=50, label='End')
+    ax0.set_xlim((x_min, x_max)); ax0.set_ylim((y_min, y_max))
     ax0.set_title('Trajectory')
     ax0.legend()
 
@@ -1120,7 +1122,7 @@ def plot_trajectory_and_step_size(df, test_function, title='Trajectory and Step 
         from src.analysis.dynamics import add_dynamics_metrics
         df, _ = add_dynamics_metrics(df)
 
-    ax1.plot(df['iteration'].values, df['step_size'].values, '-o', markersize=3)
+    ax1.plot(arr_to_numpy_float(df['iteration']), arr_to_numpy_float(df['step_size']), '-o', markersize=3)
     ax1.set_xlabel('Iteration'); ax1.set_ylabel('Step size')
     ax1.set_title('Step size over iterations')
     ax1.grid(True, alpha=0.3)

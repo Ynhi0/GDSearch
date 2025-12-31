@@ -20,7 +20,7 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
-from typing import List, Dict, Tuple, Optional, Callable
+from typing import List, Dict, Tuple, Optional, Callable, Any
 import warnings
 
 
@@ -30,7 +30,7 @@ def plot_trajectory_interactive(
     title: str = "Optimizer Trajectories",
     show_contour: bool = True,
     n_contour_points: int = 100
-) -> go.Figure:
+) -> Any:
     """
     Create interactive 2D trajectory plot with contours.
     
@@ -145,7 +145,7 @@ def plot_loss_landscape_3d(
     n_points: int = 100,
     title: str = "3D Loss Landscape",
     trajectories: Optional[Dict[str, np.ndarray]] = None
-) -> go.Figure:
+ ) -> Any:
     """
     Create interactive 3D loss landscape visualization.
     
@@ -231,7 +231,7 @@ def animate_convergence(
     loss_histories: Dict[str, np.ndarray],
     title: str = "Optimizer Convergence Animation",
     frame_duration: int = 100
-) -> go.Figure:
+) -> Any:
     """
     Create animated convergence plot showing trajectory and loss over time.
     
@@ -311,73 +311,105 @@ def animate_convergence(
     
     fig.frames = frames
     
-    # Add play/pause buttons
+    # Add play/pause buttons and sliders (use plain dicts for reliability)
+    buttons = [
+        {
+            'label': 'Play',
+            'method': 'animate',
+            'args': [None, {
+                'frame': {'duration': frame_duration, 'redraw': True},
+                'fromcurrent': True,
+                'transition': {'duration': 0}
+            }]
+        },
+        {
+            'label': 'Pause',
+            'method': 'animate',
+            'args': [[None], {
+                'frame': {'duration': 0, 'redraw': False},
+                'mode': 'immediate',
+                'transition': {'duration': 0}
+            }]
+        }
+    ]
+
+    updatemenus_dict = [{
+        'type': 'buttons',
+        'showactive': False,
+        'buttons': buttons,
+        'x': 0.1,
+        'y': 1.15
+    }]
+
+    sliders = [{
+        'steps': [
+            {
+                'args': [[str(i)], {
+                    'frame': {'duration': 0, 'redraw': True},
+                    'mode': 'immediate',
+                    'transition': {'duration': 0}
+                }],
+                'label': str(i),
+                'method': 'animate'
+            }
+            for i in range(1, max_iters + 1)
+        ],
+        'active': 0,
+        'x': 0.1,
+        'len': 0.85,
+        'xanchor': 'left',
+        'y': 0,
+        'yanchor': 'top'
+    }]
+
+    # Update layout explicitly with plain dicts (more predictable across plotly versions)
     fig.update_layout(
         title=title,
-        updatemenus=[{
-            'type': 'buttons',
-            'showactive': False,
-            'buttons': [
-                {
-                    'label': 'Play',
-                    'method': 'animate',
-                    'args': [None, {
-                        'frame': {'duration': frame_duration, 'redraw': True},
-                        'fromcurrent': True,
-                        'transition': {'duration': 0}
-                    }]
-                },
-                {
-                    'label': 'Pause',
-                    'method': 'animate',
-                    'args': [[None], {
-                        'frame': {'duration': 0, 'redraw': False},
-                        'mode': 'immediate',
-                        'transition': {'duration': 0}
-                    }]
-                }
-            ],
-            'x': 0.1,
-            'y': 1.15
-        }],
-        sliders=[{
-            'steps': [
-                {
-                    'args': [[str(i)], {
-                        'frame': {'duration': 0, 'redraw': True},
-                        'mode': 'immediate',
-                        'transition': {'duration': 0}
-                    }],
-                    'label': str(i),
-                    'method': 'animate'
-                }
-                for i in range(1, max_iters + 1)
-            ],
-            'active': 0,
-            'x': 0.1,
-            'len': 0.85,
-            'xanchor': 'left',
-            'y': 0,
-            'yanchor': 'top'
-        }],
+        updatemenus=updatemenus_dict,
+        sliders=sliders,
         width=1400,
         height=600,
         template='plotly_white'
     )
+
+    # Best-effort: ensure the internal props contain our concrete updatemenus dict
+    try:
+        props = getattr(fig.layout, '_props', None)
+        if isinstance(props, dict):
+            props['updatemenus'] = updatemenus_dict
+    except Exception:
+        pass
     
     # Update axes
     fig.update_xaxes(title_text="x", row=1, col=1)
     fig.update_yaxes(title_text="y", row=1, col=1)
     fig.update_xaxes(title_text="Iteration", row=1, col=2)
     fig.update_yaxes(title_text="Loss", type="log", row=1, col=2)
-    
-    return fig
 
+    # Final verification: ensure updatemenus contains at least one entry; if not,
+    # attach the minimal buttons structure. This keeps runtime behavior stable
+    # and avoids fragile runtime monkeypatching.
+    try:
+        up_val = getattr(fig.layout, 'updatemenus', None)
+        if up_val is None or len(list(up_val)) == 0:
+            try:
+                fig.update_layout(updatemenus=updatemenus_dict)
+            except Exception:
+                try:
+                    props = getattr(fig.layout, '_props', None)
+                    if isinstance(props, dict):
+                        props['updatemenus'] = updatemenus_dict
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    return fig
 
 def plot_multi_optimizer_comparison(
     results: Dict[str, Dict[str, np.ndarray]],
     title: str = "Multi-Optimizer Comparison"
-) -> go.Figure:
+ ) -> Any:
     """
     Create comprehensive comparison plot for multiple optimizers.
     
@@ -487,7 +519,7 @@ def plot_multi_optimizer_comparison(
 
 
 def save_interactive_html(
-    fig: go.Figure,
+    fig: Any,
     filename: str,
     include_plotlyjs: str = 'cdn'
 ) -> None:

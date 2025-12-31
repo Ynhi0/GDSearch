@@ -57,7 +57,8 @@ def _final_metric(dfs: List[pd.DataFrame], col: str) -> np.ndarray:
     vals: List[float] = []
     for df in dfs:
         if col in df.columns and len(df) > 0:
-            vals.append(float(df[col].iloc[-1]))
+            from src.utils.num_utils import safe_to_float
+            vals.append(safe_to_float(df[col]))
     return np.array(vals, dtype=float)
 
 
@@ -99,9 +100,9 @@ def plot_bars_with_error(df: pd.DataFrame, value_col: str, err_col: str, ylabel:
         return
     fig, ax = plt.subplots(figsize=(8, 5))
     x = np.arange(len(df))
-    vals = df[value_col].values
-    errs = df[err_col].values if err_col in df.columns else None
-    bars = ax.bar(x, vals, yerr=errs, capsize=5, color=plt.cm.tab10(np.linspace(0, 1, len(df))), alpha=0.9)
+    vals = np.asarray(df[value_col].values, dtype=float)
+    errs = np.asarray(df[err_col].values, dtype=float) if err_col in df.columns else None
+    bars = ax.bar(x, vals, yerr=errs, capsize=5, color=plt.get_cmap('tab10')(np.linspace(0, 1, len(df))), alpha=0.9)
     ax.set_xticks(x)
     ax.set_xticklabels(df['Optimizer'].tolist(), rotation=30, ha='right')
     ax.set_ylabel(ylabel)

@@ -7,7 +7,7 @@ which would constitute adaptive overfitting and invalidate research claims.
 
 import torch
 from torch.utils.data import DataLoader, Subset
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Sized, cast
 import logging
 
 
@@ -76,14 +76,24 @@ def validate_loader_for_tuning(
     
     # Check 3: Dataset length heuristic (weak, but catches obvious errors)
     if hasattr(loader, 'dataset'):
-        dataset_len = len(loader.dataset)
-        if dataset_len == 0:
+        ds = loader.dataset
+        dataset_len = None
+        if hasattr(ds, '__len__'):
+            # Cast to Sized for static type checker confidence
+            dataset_len = len(cast(Sized, ds))
+        elif hasattr(ds, 'num_rows'):
+            try:
+                dataset_len = int(getattr(ds, 'num_rows'))
+            except Exception:
+                dataset_len = None
+
+        if dataset_len is not None and dataset_len == 0:
             raise ValueError("Loader dataset is empty (length=0)")
         
         # Log for transparency
         logging.debug(
             f"Loader validation passed: split={expected_split}, "
-            f"dataset_len={dataset_len}, batch_size={loader.batch_size}"
+            f"dataset_len={dataset_len if dataset_len is not None else 'unknown'}, batch_size={loader.batch_size}"
         )
 
 

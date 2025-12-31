@@ -44,14 +44,20 @@ def run_single_experiment(config, seed, output_dir):
     set_seed(seed)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
-    # Build model and data
-    model, train_loader, test_loader = build_model_and_data(
+    # Build model and data (support both 3-tuple and 4-tuple return shapes)
+    model_and_data = build_model_and_data(
         dataset=config['dataset'],
         model_name=config['model'],
         batch_size=config.get('batch_size', 128),
         device=device,
         seed=seed
     )
+    # Support (model, train_loader, test_loader) and (model, train_loader, val_loader, test_loader)
+    if isinstance(model_and_data, tuple) and len(model_and_data) == 4:
+        model, train_loader, val_loader, test_loader = model_and_data
+    else:
+        model, train_loader, test_loader = model_and_data  # type: ignore[assignment]
+        val_loader = None
     
     # Build optimizer
     optimizer = build_optimizer(
@@ -95,6 +101,8 @@ def run_single_experiment(config, seed, output_dir):
     model.eval()
     correct = 0
     total = 0
+    # test_loader should always be provided; assert to narrow type for static analyzer
+    assert test_loader is not None, "test_loader must be provided by build_model_and_data"
     with torch.no_grad():
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)

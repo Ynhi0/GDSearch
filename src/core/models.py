@@ -2,7 +2,7 @@
 Neural network models for MNIST and CIFAR-10 using PyTorch.
 """
 
-from typing import Tuple
+from typing import Tuple, Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -122,7 +122,7 @@ class BasicBlock(nn.Module):
     """
     expansion = 1  # Output channels = input channels * expansion
     
-    def __init__(self, in_channels: int, out_channels: int, stride: int = 1, downsample: nn.Module = None):
+    def __init__(self, in_channels: int, out_channels: int, stride: int = 1, downsample: Optional[nn.Module] = None):
         super().__init__()
         
         # Main path

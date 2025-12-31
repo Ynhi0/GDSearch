@@ -47,8 +47,11 @@ def create_ablation_bar_plot(
     
     # Group and sort
     grouped = df.groupby(group_col)[value_col].agg(['mean', 'std', 'count'])
+    from typing import cast
+    grouped = cast(pd.DataFrame, grouped)
     # Use explicit keyword args for clarity and typing
-    grouped = grouped.sort_values(by='mean', ascending=False)
+    from typing import cast
+    grouped = cast(pd.DataFrame, grouped).sort_values(by=['mean'], ascending=False)
     
     x_pos = np.arange(len(grouped))
     bars = ax.bar(x_pos, np.asarray(grouped['mean'], dtype=float), yerr=np.asarray(grouped['std'], dtype=float),

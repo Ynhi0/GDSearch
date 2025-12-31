@@ -14,6 +14,9 @@ import torch
 import torchvision
 import torchvision.transforms as transforms
 from pathlib import Path
+# Kaggle API downloads have been intentionally removed to avoid embedding credentials
+# If you need datasets from Kaggle, download them separately and place them under /kaggle/working/data or
+# provide a local dataset path to functions that accept a `kaggle_path` argument.
 
 def download_mnist():
     """Download MNIST dataset."""
@@ -100,7 +103,17 @@ def download_imdb():
 
         # Load full IMDB dataset (works on Kaggle Python 3.10)
         dataset = load_dataset('imdb')
-        print(f"IMDB: {len(dataset['train'])} train, {len(dataset['test'])} test samples")
+        from collections.abc import Sized
+        # Only attempt __getitem__ when dataset is a mapping-like object
+        if isinstance(dataset, dict) and 'train' in dataset and isinstance(dataset['train'], Sized):
+            train_len = len(dataset['train'])
+        else:
+            train_len = '<unknown>'
+        if isinstance(dataset, dict) and 'test' in dataset and isinstance(dataset['test'], Sized):
+            test_len = len(dataset['test'])
+        else:
+            test_len = '<unknown>'
+        print(f"IMDB: {train_len} train, {test_len} test samples")
         return True
     except Exception as e:
         print(f"IMDB failed: {e}")
@@ -124,27 +137,9 @@ def download_medmnist(dataset_name: str = 'pathmnist') -> bool:
         return False
 
 
-def download_medical_real_kaggle(dataset_slug: str = 'paultimothymooney/chest-xray-pneumonia', dest: Path | str = Path('/kaggle/working/data/medical')) -> bool:
-    """Try to download a real medical dataset via Kaggle API if possible (Kaggle environment may already have datasets)."""
-    print("Attempting optional Kaggle medical dataset download...")
-    try:
-        from kaggle.api.kaggle_api_extended import KaggleApi
-    except Exception:
-        print("   Kaggle API not available in this environment. Skipping optional medical Kaggle download.")
-        return False
-
-    try:
-        dest = Path(dest)
-        dest.mkdir(parents=True, exist_ok=True)
-        api = KaggleApi()
-        api.authenticate()
-        print(f"   Downloading {dataset_slug} to {dest} (this may take a while)...")
-        api.dataset_download_files(dataset_slug, path=str(dest), unzip=True, quiet=False)
-        print(f"Medical dataset '{dataset_slug}' downloaded to {dest}")
-        return True
-    except Exception as e:
-        print(f"Kaggle medical download failed: {e}")
-        return False
+# The Kaggle API-based download function was removed for security reasons (encouraging embedding credentials). If you need
+# to download datasets from Kaggle, please use the Kaggle web UI or run the official kaggle CLI separately. For reproducible
+# CI/production runs, prefer packaging datasets as part of artifacts or providing explicit data paths in the configuration.
 
 
 def main():
@@ -158,14 +153,13 @@ def main():
     data_dir.mkdir(parents=True, exist_ok=True)
     print(f"Data directory: {data_dir}")
 
-    # Download datasets (including optional medical datasets)
+    # Download datasets (excluding Kaggle API downloads which are deprecated in this script)
     datasets = [
         ("MNIST", download_mnist),
         ("CIFAR-10", download_cifar10),
         ("FashionMNIST", download_fashion_mnist),
         ("IMDB", download_imdb),
         ("MedMNIST", download_medmnist),
-        ("Medical (Kaggle)", download_medical_real_kaggle),
     ]
 
     results = []
@@ -174,7 +168,6 @@ def main():
         print(f"Downloading {name}")
         print('='*40)
         results.append((name, download_func()))
-
     # Summary
     print(f"\n{'='*60}")
     print("DOWNLOAD SUMMARY")

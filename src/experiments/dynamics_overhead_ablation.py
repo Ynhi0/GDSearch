@@ -93,7 +93,7 @@ def train_with_optional_tracking(
     # Initialize tracker if requested
     tracker = None
     if use_dynamics_tracker and HAS_DYNAMICS_TRACKER:
-        tracker = TrainingDynamicsTracker(output_dir=output_dir or "dynamics_tmp")
+        tracker = TrainingDynamicsTracker()  # output paths handled at save time
     
     # Memory tracking
     process = psutil.Process()
@@ -117,12 +117,12 @@ def train_with_optional_tracking(
             
             # Track dynamics if enabled
             if tracker is not None:
-                tracker.track_step(
-                    step=epoch * len(train_loader) + batch_idx,
-                    loss=loss.item(),
-                    model=model
-                )
-    
+                    tracker.track_step(
+                        iteration=epoch * len(train_loader) + batch_idx,
+                        loss=loss.item(),
+                        model=model,
+                        optimizer=optimizer,
+                    )
     # Final evaluation
     model.eval()
     correct = 0
@@ -145,7 +145,11 @@ def train_with_optional_tracking(
     # Save tracker visualizations if enabled
     if tracker is not None:
         try:
-            tracker.save_summary(prefix="ablation_study")
+            out_dir = Path(output_dir or "dynamics_tmp")
+            out_dir.mkdir(parents=True, exist_ok=True)
+            # Save CSV of dynamics and plots
+            tracker.save_dynamics(str(out_dir / "dynamics.csv"))
+            tracker.plot_dynamics(str(out_dir / "plots"), optimizer_name=optimizer.__class__.__name__)
         except Exception as e:
             print(f"   Tracker save failed: {e}")
     
@@ -335,7 +339,10 @@ def run_dynamics_overhead_ablation(
     
     # Statistical test with proper seed alignment
     from scipy import stats
-    # CRITICAL FIX: Merge on seed to ensure proper pairing for paired t-test
+    # Ensure DataFrame types and Merge on seed to ensure proper pairing for paired t-test
+    from src.utils.type_guards import ensure_dataframe
+    baseline_df = ensure_dataframe(baseline_df)
+    tracked_df = ensure_dataframe(tracked_df)
     merged = pd.merge(
         baseline_df[['seed', 'time_seconds', 'accuracy']],
         tracked_df[['seed', 'time_seconds', 'accuracy']],

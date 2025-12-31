@@ -17,7 +17,7 @@ import sys
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional, cast
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -126,8 +126,10 @@ def run_batch_size_ablation(
                 
                 # Print final accuracy
                 eval_df = df[df['phase'] == 'eval']
+                from src.utils.type_guards import ensure_dataframe, ensure_series
+                eval_df = ensure_dataframe(eval_df)
                 if not eval_df.empty:
-                    final_acc = eval_df['test_accuracy'].iloc[-1]
+                    final_acc = ensure_series(eval_df['test_accuracy']).iloc[-1]
                     print(f"Test Acc: {final_acc:.4f}")
                 else:
                     print("Done")
@@ -179,13 +181,14 @@ def analyze_batch_size_results(
             
             # Group by seed and get final accuracy
             final_accs = []
-            for seed in eval_df['seed'].unique():
-                seed_df = eval_df[eval_df['seed'] == seed]
+            from src.utils.type_guards import ensure_dataframe, ensure_series
+            for seed in ensure_series(eval_df['seed']).unique():
+                seed_df = ensure_dataframe(eval_df[eval_df['seed'] == seed])
                 if not seed_df.empty:
                     # Skip tainted runs
-                    if 'tainted' in seed_df.columns and seed_df['tainted'].any():
+                    if 'tainted' in seed_df.columns and bool(ensure_series(seed_df['tainted']).any()):
                         continue
-                    final_accs.append(seed_df['test_accuracy'].iloc[-1])
+                    final_accs.append(ensure_series(seed_df['test_accuracy']).iloc[-1])
             
             if final_accs:
                 summary_data.append({
@@ -205,7 +208,7 @@ def analyze_batch_size_results(
 
 def plot_batch_size_trends(
     summary_df: pd.DataFrame,
-    save_path: str = None
+    save_path: Optional[str] = None
 ):
     """
     Plot batch size vs accuracy trends for all optimizers.
@@ -213,12 +216,12 @@ def plot_batch_size_trends(
     fig, ax = plt.subplots(figsize=(12, 7))
     
     optimizers = summary_df['Optimizer'].unique()
-    colors = plt.cm.tab10(np.linspace(0, 1, len(optimizers)))
+    colors = plt.get_cmap('tab10')(np.linspace(0, 1, len(optimizers)))
     
     from src.utils.plot_helpers import arr_to_numpy_float
     for i, optimizer in enumerate(optimizers):
         opt_df = summary_df[summary_df['Optimizer'] == optimizer]
-        opt_df = opt_df.sort_values('Batch Size')
+        opt_df = cast(pd.DataFrame, opt_df).sort_values(by=['Batch Size'])
         
         batch_sizes = arr_to_numpy_float(opt_df['Batch Size'])
         means = arr_to_numpy_float(opt_df['Mean Accuracy'])
@@ -242,7 +245,7 @@ def plot_batch_size_trends(
     plt.tight_layout()
     
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
         print(f"Batch size trend plot saved to: {save_path}")
         plt.close()
     else:
@@ -251,7 +254,7 @@ def plot_batch_size_trends(
 
 def plot_batch_size_heatmap(
     summary_df: pd.DataFrame,
-    save_path: str = None
+    save_path: Optional[str] = None
 ):
     """
     Plot heatmap of accuracy across optimizers and batch sizes.
@@ -276,7 +279,7 @@ def plot_batch_size_heatmap(
     plt.tight_layout()
     
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
         print(f"Batch size heatmap saved to: {save_path}")
         plt.close()
     else:
@@ -295,7 +298,7 @@ def print_batch_size_summary(summary_df: pd.DataFrame):
         print(f"\n{optimizer}:")
         print("-" * 80)
         opt_df = summary_df[summary_df['Optimizer'] == optimizer]
-        opt_df = opt_df.sort_values('Batch Size')
+        opt_df = cast(pd.DataFrame, opt_df).sort_values(by=['Batch Size'])
         
         for _, row in opt_df.iterrows():
             print(f"  Batch Size {int(row['Batch Size']):4d}: "
@@ -341,13 +344,16 @@ def perform_batch_size_comparisons(
         
         # Extract final accuracies per seed
         baseline_accs = []
-        for seed in baseline_eval['seed'].unique():
-            seed_df = baseline_eval[baseline_eval['seed'] == seed]
-            if not seed_df.empty:
+        from src.utils.type_guards import ensure_series, ensure_dataframe
+        for seed in ensure_series(baseline_eval['seed']).unique():
+            seed_df = ensure_dataframe(baseline_eval[baseline_eval['seed'] == seed])
+            if seed_df.shape[0] > 0:
                 # Skip tainted seeds
-                if 'tainted' in seed_df.columns and seed_df['tainted'].any():
+                from src.utils.type_guards import ensure_series
+                tainted_any = bool(ensure_series(seed_df['tainted']).any()) if 'tainted' in seed_df.columns else False
+                if tainted_any:
                     continue
-                baseline_accs.append(seed_df['test_accuracy'].iloc[-1])
+                baseline_accs.append(ensure_series(seed_df['test_accuracy']).iloc[-1])
         
         baseline_accs = np.array(baseline_accs)
         
@@ -367,13 +373,16 @@ def perform_batch_size_comparisons(
             
             # Extract final accuracies
             accs = []
-            for seed in eval_df['seed'].unique():
-                seed_df = eval_df[eval_df['seed'] == seed]
-                if not seed_df.empty:
+            from src.utils.type_guards import ensure_series, ensure_dataframe
+            for seed in ensure_series(eval_df['seed']).unique():
+                seed_df = ensure_dataframe(eval_df[eval_df['seed'] == seed])
+                if seed_df.shape[0] > 0:
                     # Skip tainted seeds
-                    if 'tainted' in seed_df.columns and seed_df['tainted'].any():
+                    from src.utils.type_guards import ensure_series
+                    tainted_any = bool(ensure_series(seed_df['tainted']).any()) if 'tainted' in seed_df.columns else False
+                    if tainted_any:
                         continue
-                    accs.append(seed_df['test_accuracy'].iloc[-1])
+                    accs.append(ensure_series(seed_df['test_accuracy']).iloc[-1])
             
             accs = np.array(accs)
             

@@ -14,7 +14,6 @@ import pandas as pd
 from src.core.config import ExperimentConfig
 from src.core.models import SimpleMLP
 from src.core.data_utils import get_mnist_loaders
-from src.core.pytorch_optimizers import get_optimizer
 
 
 def run_mnist_experiment(

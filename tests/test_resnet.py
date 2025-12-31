@@ -23,7 +23,7 @@ class TestBasicBlock:
         output = block(x)
         
         assert output.shape == x.shape
-        assert not torch.isnan(output).any()
+        assert not bool(torch.isnan(output).any())
     
     def test_projection_shortcut(self):
         """Test basic block with projection shortcut."""
@@ -42,7 +42,7 @@ class TestBasicBlock:
         
         # Should halve spatial dimensions and double channels
         assert output.shape == (2, 128, 16, 16)
-        assert not torch.isnan(output).any()
+        assert not bool(torch.isnan(output).any())
     
     def test_gradient_flow(self):
         """Test that gradients flow through residual connection."""
@@ -57,7 +57,7 @@ class TestBasicBlock:
         
         # Check gradients exist
         assert x.grad is not None
-        assert not torch.isnan(x.grad).any()
+        assert not bool(torch.isnan(x.grad).any())
 
 
 class TestResNet18:
@@ -84,8 +84,8 @@ class TestResNet18:
         
         # Check output shape
         assert output.shape == (batch_size, 10)
-        assert not torch.isnan(output).any()
-        assert not torch.isinf(output).any()
+        assert not bool(torch.isnan(output).any())
+        assert not bool(torch.isinf(output).any())
     
     def test_backward_pass(self):
         """Test backward pass and gradient computation."""
@@ -104,7 +104,7 @@ class TestResNet18:
         # Check gradients exist for all parameters
         for name, param in model.named_parameters():
             assert param.grad is not None, f"No gradient for {name}"
-            assert not torch.isnan(param.grad).any(), f"NaN gradient in {name}"
+            assert not bool(torch.isnan(param.grad).any()), f"NaN gradient in {name}"
     
     def test_parameter_count(self):
         """Test parameter counting."""
@@ -160,7 +160,7 @@ class TestResNet18:
         
         # Input should have gradient (proves gradient flows back)
         assert x.grad is not None
-        assert not torch.isnan(x.grad).any()
+        assert not bool(torch.isnan(x.grad).any())
         
         # Gradient should not vanish (not all zeros)
         assert x.grad.abs().max() > 1e-6

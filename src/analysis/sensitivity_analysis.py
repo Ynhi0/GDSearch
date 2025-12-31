@@ -16,12 +16,23 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from typing import Dict, List, Tuple, Optional
+
+
+def _to_int(x) -> Optional[int]:
+    """Safely coerce scalar-like values to int, returning None when conversion fails."""
+    try:
+        return int(np.asarray(x).item())
+    except Exception:
+        try:
+            return int(x)
+        except Exception:
+            return None
 from pathlib import Path
 
 # Add parent directories to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from src.experiments.run_nn_experiment import train_and_evaluate
+from src.experiments.run_nn_experiment import train_and_evaluate, result_filename
 
 
 def generate_sensitivity_grid(
@@ -96,14 +107,31 @@ def run_sensitivity_experiment(
             # Extract final metrics
             eval_df = df[df['phase'] == 'eval']
             if not eval_df.empty:
-                final_test_acc = eval_df['test_accuracy'].iloc[-1]
-                final_test_loss = eval_df['test_loss'].iloc[-1]
-                
+                series_acc = eval_df['test_accuracy']
+                series_loss = eval_df['test_loss']
+                iloc_acc = getattr(series_acc, 'iloc', None)
+                iloc_loss = getattr(series_loss, 'iloc', None)
+                if iloc_acc is not None:
+                    final_test_acc = iloc_acc[-1]
+                else:
+                    final_test_acc = series_acc[-1]
+                if iloc_loss is not None:
+                    final_test_loss = iloc_loss[-1]
+                else:
+                    final_test_loss = series_loss[-1]
+
                 # Calculate generalization gap
                 train_df = df[df['phase'] == 'train']
-                final_epoch = int(eval_df['epoch'].iloc[-1])
-                train_epoch_loss = train_df[train_df['epoch'] == final_epoch]['train_loss'].mean()
-                gen_gap = final_test_loss - train_epoch_loss if not pd.isna(train_epoch_loss) else None
+                epoch_series = eval_df['epoch']
+                iloc_epoch = getattr(epoch_series, 'iloc', None)
+                epoch_val = iloc_epoch[-1] if iloc_epoch is not None else epoch_series[-1]
+                final_epoch = _to_int(epoch_val)
+                if final_epoch is None:
+                    train_epoch_loss = None
+                else:
+                    train_epoch_loss = train_df[train_df['epoch'] == final_epoch]['train_loss'].mean()
+                # Guard against pandas/ndarray truthiness by coercing pd.isna to a bool
+                gen_gap = final_test_loss - train_epoch_loss if (train_epoch_loss is not None and not bool(pd.isna(train_epoch_loss))) else None
                 
                 results.append({
                     'param_name': param_name,
@@ -196,8 +224,9 @@ def plot_sensitivity(
     
     # Plot 2: Generalization Gap
     ax2 = axes[1]
-    gen_gap_df = success_df.dropna(subset=['generalization_gap'])
-    if not gen_gap_df.empty:
+    # Filter for non-missing generalization_gap to avoid dropna signature issues
+    gen_gap_df = success_df[pd.notna(success_df['generalization_gap'])]
+    if len(gen_gap_df) > 0:
         ax2.plot(gen_gap_df['param_value'], gen_gap_df['generalization_gap'],
                 'o-', linewidth=2, markersize=8, color='orange', label='Gen Gap')
         ax2.axvline(center_value, color='red', linestyle='--', linewidth=2,
@@ -222,7 +251,7 @@ def plot_sensitivity(
     plt.tight_layout()
     
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
         logging.info(f"Saved sensitivity plot: {save_path}")
     else:
         plt.show()

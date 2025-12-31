@@ -102,7 +102,8 @@ def train_epoch(model, train_loader, optimizer, criterion, device):
             loss.backward()
             optimizer.step()
         
-        total_loss += loss.item()
+        from src.utils.num_utils import safe_to_float
+        total_loss += safe_to_float(loss)
         pred = output.argmax(dim=1, keepdim=True)
         correct += pred.eq(target.view_as(pred)).sum().item()
         total += target.size(0)
@@ -235,6 +236,7 @@ def main():
         
         # Create optimizer
         print(f"⚙️  Creating {args.optimizer} Optimizer...")
+        optimizer = None
         if args.optimizer == 'Adam':
             optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
         elif args.optimizer == 'SAM_SGD':
@@ -243,6 +245,8 @@ def main():
         elif args.optimizer == 'SAM_Adam':
             base_opt = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
             optimizer = SAMWrapper(base_opt, rho=rho)
+        if optimizer is None:
+            raise ValueError(f"Unsupported optimizer: {args.optimizer}")
         
         print(f"✓ Learning rate: {LEARNING_RATE}")
         if 'SAM' in args.optimizer:

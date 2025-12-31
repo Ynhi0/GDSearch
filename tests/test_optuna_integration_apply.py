@@ -25,7 +25,10 @@ def test_integration_apply_best_params_and_build_optimizer():
 
     # Build model and check optimizer produced honors tuned params
     device = torch.device('cpu')
-    model, train_loader, test_loader = build_model_and_data('MNIST', 'SimpleMLP', batch_size=16, device=device, seed=42)
+    res = build_model_and_data('MNIST', 'SimpleMLP', batch_size=16, device=device, seed=42)
+    assert len(res) == 4, f"Expected 4 returns from build_model_and_data, got {len(res)}"
+    model, train_loader, val_loader, test_loader = res
+    assert val_loader is None, "val_loader should be None when val_split not provided"
 
     opt = build_optimizer(
         optimizer_name=merged['optimizer'],

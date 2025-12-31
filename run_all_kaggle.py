@@ -73,6 +73,65 @@ def safe_print(*args, **kwargs):
             safe_args.append(arg)
         print(*safe_args, **kwargs)
 
+
+from typing import Any, Optional, Union
+from pathlib import Path
+
+def _int_if_possible(x: Any) -> int:
+    try:
+        return int(x)
+    except Exception:
+        return 0
+
+
+def _safe_len(obj: object) -> int:
+    """Return the length of obj when available, otherwise 0.
+
+    This implementation tries builtin len() first and falls back to calling
+    any callable __len__ attribute. It avoids directly accessing special
+    attributes on unknown objects where possible to satisfy static analysis.
+    """
+    if obj is None:
+        return 0
+    # Common Python sized containers
+    if isinstance(obj, (str, bytes, list, tuple, dict, set, range)):
+        try:
+            return int(len(obj))
+        except Exception:
+            return 0
+
+    # numpy arrays
+    try:
+        import numpy as _np
+        if isinstance(obj, _np.ndarray):
+            try:
+                return int(obj.size)
+            except Exception:
+                return 0
+    except Exception:
+        pass
+
+    # torch tensors
+    try:
+        import torch as _torch
+        if isinstance(obj, _torch.Tensor):
+            try:
+                return _int_if_possible(obj.numel())
+            except Exception:
+                return 0
+    except Exception:
+        pass
+
+    # Last resort: callable __len__
+    le = getattr(obj, '__len__', None)
+    if callable(le):
+        try:
+            return _int_if_possible(le())
+        except Exception:
+            return 0
+
+    return 0
+
 # Environment configuration moved into a controlled setup function
 def configure_environment():
     """Configure environment variables for experimental runs (call in main())."""
@@ -116,33 +175,44 @@ from src.core.training_utils import set_seed
 # Prefer centralized implementation in src.core.io_utils if available
 try:
     from src.core.io_utils import torch_load_safe as _imported_torch_load_safe, torch_save_safe as _imported_torch_save_safe
-    def torch_load_safe(path_or_file, map_location=None, weights_only=None):
-        return _imported_torch_load_safe(path_or_file, map_location=map_location, weights_only=weights_only)
-    def torch_save_safe(obj, path_or_file, use_new_zipfile_serialization=True):
-        return _imported_torch_save_safe(obj, path_or_file, use_new_zipfile_serialization=use_new_zipfile_serialization)
 except Exception:
-    # Fallback implementations if io_utils is not importable at this point
-    def torch_load_safe(path_or_file: Union[str, Path], map_location=None, weights_only=None):
-        path_or_file_str = str(path_or_file)
-        try:
-            if weights_only is not None:
-                return torch.load(path_or_file_str, map_location=map_location, weights_only=weights_only)
-            else:
-                return torch.load(path_or_file_str, map_location=map_location)
-        except TypeError:
-            logging.debug("torch.load does not support weights_only param on this PyTorch version; retrying without it")
-            return torch.load(path_or_file_str, map_location=map_location)
+    _imported_torch_load_safe = None
+    _imported_torch_save_safe = None
 
-    def torch_save_safe(obj, path_or_file: Union[str, Path], use_new_zipfile_serialization=True):
-        path_or_file_str = str(path_or_file)
-        try:
-            if use_new_zipfile_serialization:
-                torch.save(obj, path_or_file_str, _use_new_zipfile_serialization=True)
-            else:
-                torch.save(obj, path_or_file_str)
-        except TypeError:
-            logging.debug("torch.save does not accept _use_new_zipfile_serialization on this PyTorch version; using default save")
+
+def torch_load_safe(path_or_file: Union[str, Path], map_location=None, weights_only=None):
+    """Compatibility wrapper around torch.load with version-aware arguments.
+
+    If the project provides a centralized implementation in src.core.io_utils we delegate to it.
+    Otherwise we attempt to call torch.load and gracefully handle older signatures.
+    """
+    if _imported_torch_load_safe is not None:
+        return _imported_torch_load_safe(path_or_file, map_location=map_location, weights_only=weights_only)
+
+    path_or_file_str = str(path_or_file)
+    try:
+        if weights_only is not None:
+            return torch.load(path_or_file_str, map_location=map_location, weights_only=weights_only)
+        else:
+            return torch.load(path_or_file_str, map_location=map_location)
+    except TypeError:
+        logging.debug("torch.load does not support weights_only param on this PyTorch version; retrying without it")
+        return torch.load(path_or_file_str, map_location=map_location)
+
+
+def torch_save_safe(obj, path_or_file: Any, use_new_zipfile_serialization=True):
+    if _imported_torch_save_safe is not None:
+        return _imported_torch_save_safe(obj, path_or_file, use_new_zipfile_serialization=use_new_zipfile_serialization)
+
+    path_or_file_str = str(path_or_file)
+    try:
+        if use_new_zipfile_serialization:
+            torch.save(obj, path_or_file_str, _use_new_zipfile_serialization=True)
+        else:
             torch.save(obj, path_or_file_str)
+    except TypeError:
+        logging.debug("torch.save does not accept _use_new_zipfile_serialization on this PyTorch version; using default save")
+        torch.save(obj, path_or_file_str)
 
 
 # =============================================================================
@@ -175,6 +245,9 @@ except ImportError:
     # Fallback to matplotlib's built-in style
     plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'ggplot')
 
+# Plot helpers
+from src.utils.plot_helpers import arr_to_numpy_float
+
 # Filter CUDA and XLA warnings
 warnings.filterwarnings('ignore', message='.*cuFFT.*')
 warnings.filterwarnings('ignore', message='.*cuDNN.*')
@@ -182,7 +255,6 @@ warnings.filterwarnings('ignore', message='.*cuBLAS.*')
 warnings.filterwarnings('ignore', message='.*register factory.*')
 from typing import Dict, List, Optional, Any, Union
 import traceback
-import os
 from datetime import datetime
 warnings.filterwarnings('ignore')
 
@@ -292,7 +364,6 @@ try:
         LRFinder,
         MemoryAwareBatchSizer,
         SelfHealingTrainer,
-        DiskSpaceGuardian,
         TimeBudgetManager,
         HessianAnalyzer,
         auto_tune_training_config
@@ -305,7 +376,7 @@ except ImportError as e:
 try:
     # Note: plotly + narwhals can be slow to import in Python 3.13
     # If this hangs, it's a known issue with narwhals lazy loading
-    import warnings
+    # Use module-level warnings (already imported) to avoid reimporting
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         from src.visualization.interactive_plots import (
@@ -364,10 +435,14 @@ except ImportError:
 
 try:
     import mlflow
-    import mlflow.pytorch
+    try:
+        import mlflow.pytorch as mlflow_pytorch
+    except Exception:
+        mlflow_pytorch = None
     HAS_MLFLOW = True
 except ImportError:
     HAS_MLFLOW = False
+    mlflow_pytorch = None
     logging.warning("mlflow not available. Experiment tracking will be limited.")
 
 # ==============================================================================
@@ -378,10 +453,10 @@ class PerformanceProfiler:
     """Performance profiling utilities for memory, time, and compute tracking"""
 
     def __init__(self):
-        self.start_time = None
-        self.start_memory = None
-        self.gpu_memory_start = None
-        self.metrics = {}
+        self.start_time: Optional[float] = None
+        self.start_memory: Optional[float] = None
+        self.gpu_memory_start: Optional[float] = None
+        self.metrics: Dict[str, Dict[str, float | None]] = {}
 
     def start_profiling(self, experiment_name: str):
         """Start performance profiling"""
@@ -402,6 +477,9 @@ class PerformanceProfiler:
         """End profiling and return metrics"""
         end_time = time.time()
         end_memory = psutil.Process().memory_info().rss / 1024 / 1024  # MB
+
+        if self.start_time is None or self.start_memory is None:
+            raise RuntimeError("PerformanceProfiler.end_profiling called before start_profiling")
 
         duration = end_time - self.start_time
         memory_delta = end_memory - self.start_memory
@@ -429,7 +507,7 @@ class PerformanceProfiler:
         self.metrics[experiment_name].update(metrics)
         return metrics
 
-    def log_performance(self, experiment_name: str, additional_metrics: Dict = None):
+    def log_performance(self, experiment_name: str, additional_metrics: Optional[Dict[str, Any]] = None):
         """Log performance metrics"""
         if experiment_name in self.metrics:
             m = self.metrics[experiment_name]
@@ -477,7 +555,7 @@ class ExperimentTracker:
     """Experiment tracking with MLflow integration"""
 
     def __init__(self, experiment_name: str = "GDSearch_Benchmark",
-                 tracking_uri: str = None):
+                 tracking_uri: Optional[str] = None):
         self.experiment_name = experiment_name
         self.tracking_uri = tracking_uri
         self.current_run = None
@@ -526,13 +604,30 @@ class ExperimentTracker:
         if HAS_MLFLOW and self.current_run:
             for k, v in params.items():
                 # Handle numpy/torch types explicitly
-                if isinstance(v, (np.ndarray, torch.Tensor)):
-                    if hasattr(v, 'numel') and v.numel() <= 100:
-                        v = v.tolist()
-                    elif hasattr(v, 'size') and np.prod(v.shape) <= 100:
-                        v = v.tolist()
+                if isinstance(v, (np.ndarray,)):
+                    try:
+                        elem_count = int(v.size)
+                    except Exception:
+                        elem_count = None
+                    if elem_count is not None and elem_count <= 100:
+                        try:
+                            v = v.tolist()
+                        except Exception:
+                            v = str(v)
                     else:
-                        v = f"<{type(v).__name__} shape={v.shape}>"
+                        v = f"<{type(v).__name__} shape={getattr(v, 'shape', None)}>"
+                elif isinstance(v, torch.Tensor):
+                    try:
+                        elem_count = int(v.numel())
+                    except Exception:
+                        elem_count = None
+                    if elem_count is not None and elem_count <= 100:
+                        try:
+                            v = v.tolist()
+                        except Exception:
+                            v = str(v)
+                    else:
+                        v = f"<{type(v).__name__} shape={getattr(v, 'shape', None)}>"
                 # Convert non-serializable types
                 elif isinstance(v, (list, tuple)):
                     v = str(v)  # Convert sequences to string
@@ -545,10 +640,10 @@ class ExperimentTracker:
                 
                 try:
                     mlflow.log_param(k, v)
-                except (ValueError, mlflow.exceptions.MlflowException) as e:
+                except (ValueError, Exception) as e:
                     logging.warning("Failed to log param %s=%s: %s", k, v, e)
 
-    def log_metrics(self, metrics: Dict[str, float], step: int = None):
+    def log_metrics(self, metrics: Dict[str, float], step: Optional[int] = None):
         """Log metrics"""
         if HAS_MLFLOW and self.current_run:
             for k, v in metrics.items():
@@ -557,9 +652,15 @@ class ExperimentTracker:
     def log_model(self, model: torch.nn.Module, model_name: str = "model"):
         """Log model"""
         if HAS_MLFLOW and self.current_run:
-            mlflow.pytorch.log_model(model, model_name)
+            try:
+                if mlflow_pytorch is not None:
+                    mlflow_pytorch.log_model(model, model_name)
+                else:
+                    logging.warning("mlflow.pytorch not available; skipping model logging")
+            except Exception as e:
+                logging.warning("Failed to log model to MLflow: %s", e)
 
-    def log_artifact(self, local_path: str, artifact_path: str = None):
+    def log_artifact(self, local_path: str, artifact_path: Optional[str] = None):
         """Log artifact file"""
         if HAS_MLFLOW and self.current_run:
             mlflow.log_artifact(local_path, artifact_path)
@@ -577,14 +678,14 @@ class RobustCheckpointManager:
         self._disk_guardian = None
         if HAS_TRAINING_ENHANCEMENTS:
             try:
-                from src.core.training_enhancements import DiskSpaceGuardian
-                self._disk_guardian = DiskSpaceGuardian(
-                    self.base_dir, 
-                    min_free_gb=min_free_gb, 
+                from src.core.training_enhancements import DiskSpaceGuardian as _DiskSpaceGuardian  # type: ignore[redefinition]
+                self._disk_guardian = _DiskSpaceGuardian(
+                    self.base_dir,
+                    min_free_gb=min_free_gb,
                     max_checkpoints=max_backups * 3
                 )
-            except (ImportError, AttributeError) as e:
-                logging.debug("DiskSpaceGuardian not available: %s", e)
+            except (ImportError, AttributeError) as exc:
+                logging.debug("DiskSpaceGuardian not available: %s", exc)
 
     def save_checkpoint(self, checkpoint_data: Dict, filename: str,
                         experiment_name: str) -> bool:
@@ -656,7 +757,7 @@ class RobustCheckpointManager:
             logging.error("Failed to save checkpoint %s: %s", filename, e)
             return False
 
-    def load_checkpoint(self, filename: str, _experiment_name: str = None) -> Optional[Dict]:
+    def load_checkpoint(self, filename: str, _experiment_name: Optional[str] = None) -> Optional[Dict]:
         """Load checkpoint with fallback to backup"""
         ckpt_path = self.base_dir / filename
 
@@ -863,18 +964,18 @@ def error_context(context: str, continue_on_error: bool = False):
     """Context manager for better error handling with tracking"""
     try:
         yield
-    except Exception as e:
-        error_msg = f"Error in {context}: {str(e)}"
+    except Exception as exc:
+        error_msg = f"Error in {context}: {str(exc)}"
         logging.error(error_msg)
         # Only print traceback once, avoid duplicate printing
         traceback_str = traceback.format_exc()
         # Print a condensed error message
-        print(f"\nFAILED: {context} - {str(e)[:200]}")
+        print(f"\nFAILED: {context} - {str(exc)[:200]}")
         
         # Track failed experiments using context object instead of global
         _experiment_context.record_failure(
             experiment_name=context,
-            error=str(e)[:500],
+            error=str(exc)[:500],
             traceback_str=traceback_str
         )
 
@@ -883,8 +984,8 @@ def error_context(context: str, continue_on_error: bool = False):
             print('\n--- TRACEBACK (debug) ---')
             print(traceback_str)
             print('--- END TRACEBACK ---\n')
-        except Exception as e:
-            logging.debug("Failed while attempting to print traceback for %s: %s", context, e, exc_info=True)
+        except Exception as exc:
+            logging.debug("Failed while attempting to print traceback for %s: %s", context, exc, exc_info=True)
 
         if not continue_on_error:
             raise
@@ -954,9 +1055,8 @@ def check_system_requirements():
     else:
         print(f"Python {python_version.major}.{python_version.minor}.{python_version.micro}")
 
-    # Check PyTorch
+    # Check PyTorch (use top-level import if available)
     try:
-        import torch
         torch_version = torch.__version__
         cuda_available = torch.cuda.is_available()
         print(f"PyTorch {torch_version}")
@@ -973,14 +1073,13 @@ def check_system_requirements():
         else:
             recommendations.append("No GPU detected - experiments will run on CPU (slower)")
 
-    except ImportError:
-        issues.append("PyTorch not installed")
+    except Exception:
+        issues.append("PyTorch not installed or not functioning")
 
-    # Check torchvision
+    # Check torchvision (use top-level import)
     try:
-        import torchvision
         print(f"Torchvision {torchvision.__version__}")
-    except ImportError:
+    except Exception:
         issues.append("Torchvision not installed")
 
     # Check optional dependencies
@@ -998,15 +1097,14 @@ def check_system_requirements():
         except ImportError:
             print(f"{description} - optional, some experiments will be skipped")
 
-    # Check memory
+    # Check memory (use top-level psutil)
     try:
-        import psutil
         memory_gb = psutil.virtual_memory().total / (1024**3)
         print(f"System memory: {memory_gb:.1f}GB")
 
         if memory_gb < 8:
             recommendations.append("System memory < 8GB - consider running with --quick flag")
-    except ImportError:
+    except Exception:
         print("psutil not available - cannot check system memory")
 
     # Summary
@@ -1036,7 +1134,7 @@ def get_system_info() -> Dict[str, Any]:
     """Get comprehensive system information"""
     info = {
         'python_version': sys.version,
-        'torch_version': torch.__version__,
+        'torch_version': getattr(torch, '__version__', 'unknown'),
         'cuda_available': torch.cuda.is_available(),
         'cpu_count': os.cpu_count(),
         'total_memory_gb': psutil.virtual_memory().total / (1024**3)
@@ -1046,7 +1144,7 @@ def get_system_info() -> Dict[str, Any]:
         info.update({
             'gpu_name': torch.cuda.get_device_name(0),
             'gpu_memory_gb': torch.cuda.get_device_properties(0).total_memory / (1024**3),
-            'cuda_version': torch.version.cuda
+            'cuda_version': getattr(getattr(torch, 'version', None), 'cuda', 'unknown')
         })
 
     # Try to get GPU utilization
@@ -1107,7 +1205,7 @@ def is_experiment_completed(results_dir: Union[str, Path], dataset: str, model_n
         return False
 
 
-def load_experiment_config(config_path: str = None) -> Dict[str, Any]:
+def load_experiment_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     """Load experiment configuration from JSON file.
     
     ZOMBIE CONFIGURATION FIX
@@ -1233,7 +1331,7 @@ def get_provenance_info() -> Dict[str, Any]:
             provenance['gpu_count'] = torch.cuda.device_count()
             props = torch.cuda.get_device_properties(0)
             provenance['gpu_memory_gb'] = props.total_memory / (1024 ** 3)
-            provenance['cuda_version'] = torch.version.cuda
+            provenance['cuda_version'] = getattr(getattr(torch, 'version', None), 'cuda', None)
         except (RuntimeError, AttributeError) as e:
             provenance['gpu_error'] = str(e)
     else:
@@ -1258,19 +1356,19 @@ def save_run_artifacts(base_results_dir: Union[str, Path], dataset: str, model_n
                        seed: int, history: List[Dict[str, Any]], params: Dict[str, Any],
                        device: Optional[torch.device] = None, tracker: Optional[ExperimentTracker] = None,
                        model: Optional[torch.nn.Module] = None, save_model: bool = True):
-    # Accept str or Path for base_results_dir and coerce to Path for file ops
-    base_results_dir = Path(base_results_dir)
     """Save per-run CSV and metadata sidecar using a canonical filename.
 
     Filename pattern: <dataset>_<model>_<optimizer>_seed<seed>.csv
     Sidecar metadata: same name + .meta.json
-    
+
     Optionally save final model weights to results/models/
-    
+
     Args:
         model: PyTorch model to save (optional)
         save_model: Whether to save model weights (default: True)
     """
+    # Accept str or Path for base_results_dir and coerce to Path for file ops
+    base_results_dir = Path(base_results_dir)
     try:
         # Organized directory structure: results/experiments/{dataset}/
         results_base = Path(base_results_dir) / "experiments" / dataset.lower()
@@ -1327,6 +1425,12 @@ def save_run_artifacts(base_results_dir: Union[str, Path], dataset: str, model_n
             'system': get_system_info(),
             'provenance': get_provenance_info()
         }
+        if device is not None:
+            # Record the device used for training to aid reproducibility
+            try:
+                meta['device'] = str(device)
+            except Exception:
+                meta['device'] = repr(device)
 
         with open(meta_path, 'w', encoding='utf-8') as f:
             json.dump(meta, f, indent=2)
@@ -1399,7 +1503,7 @@ def make_dataloader(dataset, batch_size=64, shuffle: Union[bool, int] = False, s
             generator = None
             worker_init_fn = None
 
-    dl_kwargs = dict(
+    dl_kwargs: Dict[str, Any] = dict(
         batch_size=batch_size,
         shuffle=shuffle if sampler is None else False,
         num_workers=num_workers,
@@ -1447,10 +1551,10 @@ def make_dataloader(dataset, batch_size=64, shuffle: Union[bool, int] = False, s
 # AUTO-LR AND ADAPTIVE-BATCH WIRING
 # =============================================================================
 
-def find_optimal_lr(model, train_loader, criterion, device, 
-                    optimizer_class=torch.optim.SGD, 
-                    start_lr=1e-7, end_lr=10, num_iter=100,
-                    opt_name="SGD"):
+def find_optimal_lr(model, train_loader, criterion, device,
+                    optimizer_class: Any = torch.optim.SGD,
+                    start_lr: float = 1e-7, end_lr: float = 10.0, num_iter: int = 100,
+                    opt_name: str = "SGD") -> float:
     """
     Find optimal learning rate using LRFinder.
     
@@ -1490,8 +1594,20 @@ def find_optimal_lr(model, train_loader, criterion, device,
         model_copy = copy.deepcopy(model)
         model_copy = model_copy.to(device)
         
-        # Create temporary optimizer
-        temp_optimizer = optimizer_class(model_copy.parameters(), lr=start_lr)
+        # Create temporary optimizer (be defensive in case optimizer_class has non-standard signature)
+        import inspect
+        temp_optimizer = None
+        try:
+            # Inspect signature and call safely
+            sig = inspect.signature(optimizer_class)
+            if 'lr' in sig.parameters:
+                temp_optimizer = optimizer_class(model_copy.parameters(), lr=start_lr)
+            else:
+                # Fallback to positional usage
+                temp_optimizer = optimizer_class(model_copy.parameters(), start_lr)
+        except Exception:
+            # As a conservative fallback, use SGD with the requested LR
+            temp_optimizer = torch.optim.SGD(model_copy.parameters(), lr=start_lr)
         
         # Initialize LRFinder
         lr_finder = LRFinder(model_copy, temp_optimizer, criterion, device)
@@ -1533,8 +1649,7 @@ def _numel_safe(x) -> int:
         if hasattr(x, 'size'):
             return int(x.size)
         # Fallback: try converting to numpy
-        import numpy as _np
-        return int(_np.asarray(x).size)
+        return int(np.asarray(x).size)
     except Exception:
         return 0
 
@@ -1723,7 +1838,7 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
         raise ValueError(f"Unsupported dataset: {dataset_name}")
     
     # Run grid
-    results = []
+    batch_results = []
     for batch_size in batch_sizes:
         # Linear LR Scaling: lr = base_lr * (batch_size / 256)
         scaled_lr = base_lr * (batch_size / 256.0)
@@ -1744,13 +1859,16 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
             # Create model
             model = SimpleMLP(input_dim=input_dim, hidden_dims=[128, 64], num_classes=num_classes).to(device)
             
-            # Create optimizer
+            # Create optimizer (ensure defined before usage)
+            optimizer = None
             if opt_name == 'SGD':
                 optimizer = torch.optim.SGD(model.parameters(), lr=scaled_lr, momentum=0.9)
             elif opt_name == 'SAM':
-                from src.core.pytorch_optimizers import SAM as SAMWrapper
                 base_opt = torch.optim.SGD(model.parameters(), lr=scaled_lr, momentum=0.9)
                 optimizer = SAMWrapper(base_opt, rho=0.05)
+            else:
+                raise ValueError(f"Unsupported optimizer for batch ablation: {opt_name}")
+            assert optimizer is not None
             
             criterion = nn.CrossEntropyLoss()
             
@@ -1758,23 +1876,33 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
             for epoch in range(5):
                 model.train()
                 total_loss = 0.0
-                for batch_idx, (data, target) in enumerate(train_loader):
+                for _, (data, target) in enumerate(train_loader):
                     data, target = data.to(device), target.to(device)
                     data = data.view(data.size(0), -1)  # Flatten for MLP
                     
                     # AUDIT FIX: SAM requires closure for step()
                     # Check if optimizer requires closure (SAM, L-BFGS, etc.)
+                    assert optimizer is not None
                     requires_closure = bool(getattr(optimizer, 'requires_closure', False))
                     if requires_closure:
-                        def closure():
-                            optimizer.zero_grad()
-                            output = model(data)
-                            loss = criterion(output, target)
+                        # Capture loop-local variables to avoid cell-var issues in closures
+                        _opt = optimizer
+                        _model = model
+                        _data = data
+                        _target = target
+                        _criterion = criterion
+
+                        def closure(_data=_data, _target=_target, _model=_model, _criterion=_criterion, _opt=_opt):
+                            _opt.zero_grad()
+                            output = _model(_data)
+                            loss = _criterion(output, _target)
                             loss.backward()
                             return loss
-                        
-                        loss = optimizer.step(closure)
-                        loss_value = loss.item() if hasattr(loss, 'item') else float(loss)
+
+                        loss = _opt.step(closure)
+                        # Use centralized coercion helper to avoid type issues
+                        from src.utils.num_utils import safe_to_float
+                        loss_value = safe_to_float(loss)
                         total_loss += loss_value
                     else:
                         optimizer.zero_grad()
@@ -1804,7 +1932,7 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
                         pred = output.argmax(dim=1)
                         correct += pred.eq(target).sum().item()
                 
-                val_accuracy = 100.0 * correct / len(val_dataset)
+                val_accuracy = 100.0 * correct / max(1, _safe_len(val_dataset))
                 print(f"    Epoch {epoch+1}/5: Loss={avg_loss:.4f}, Val Acc={val_accuracy:.2f}%")
             
             # Final test evaluation (only after training completes)
@@ -1821,12 +1949,12 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
                     pred = output.argmax(dim=1)
                     test_correct += pred.eq(target).sum().item()
             
-            final_test_accuracy = 100.0 * test_correct / len(test_dataset)
+            final_test_accuracy = 100.0 * test_correct / max(1, _safe_len(test_dataset))
             final_test_loss = test_loss_total / len(test_loader)
             print(f"    Final Test: Loss={final_test_loss:.4f}, Acc={final_test_accuracy:.2f}%")
             
             # Save result
-            results.append({
+            batch_results.append({
                 'dataset': dataset_name,
                 'optimizer': opt_name,
                 'batch_size': batch_size,
@@ -1837,15 +1965,15 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
             })
     
     # Save to CSV
-    df = pd.DataFrame(results)
+    df = pd.DataFrame(batch_results)
     csv_path = os.path.join(results_dir, f'{dataset_name}_batch_ablation.csv')
     df.to_csv(csv_path, index=False)
     print(f"\nBatch ablation results saved to {csv_path}")
     
     # Try to create visualization (Kaggle-safe)
     try:
-        import matplotlib.pyplot as plt
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+        # Use module-level matplotlib (imported at top)
+        _, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
         
         for opt_name in optimizers_to_test:
             subset = df[df['optimizer'] == opt_name]
@@ -1960,7 +2088,7 @@ def run_scheduler_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, 
     val_loader = DataLoader(val_dataset, batch_size=256, shuffle=False, num_workers=2, pin_memory=True)
     test_loader = DataLoader(test_dataset, batch_size=256, shuffle=False, num_workers=2, pin_memory=True)
     
-    results = []
+    scheduler_results = []
     for opt_name, sched_name in pairs:
         print(f"\nTesting {opt_name} + {sched_name}")
         
@@ -2040,7 +2168,7 @@ def run_scheduler_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, 
         print(f"  Final Test: Loss={final_test_loss:.4f}, Acc={final_test_accuracy:.2f}%")
         
         # Save result
-        results.append({
+        scheduler_results.append({
             'dataset': dataset_name,
             'optimizer': opt_name,
             'scheduler': sched_name,
@@ -2049,18 +2177,18 @@ def run_scheduler_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, 
         })
     
     # Save to CSV
-    df = pd.DataFrame(results)
+    df = pd.DataFrame(scheduler_results)
     csv_path = os.path.join(results_dir, f'{dataset_name}_scheduler_ablation.csv')
     df.to_csv(csv_path, index=False)
     print(f"\nScheduler ablation results saved to {csv_path}")
     
     # Try visualization (Kaggle-safe)
     try:
-        import matplotlib.pyplot as plt
-        fig, ax = plt.subplots(1, 1, figsize=(10, 6))
+        _, ax = plt.subplots(1, 1, figsize=(10, 6))
         
         x_labels = [f"{opt}\n{sched}" for opt, sched in pairs]
-        accuracies = df['final_accuracy'].values
+        # Coerce to numpy float array for plotting and to satisfy static typing
+        accuracies = np.asarray(df['final_accuracy'].to_numpy(), dtype=float)
         
         bars = ax.bar(range(len(x_labels)), accuracies, color=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'])
         ax.set_xticks(range(len(x_labels)))
@@ -2070,7 +2198,7 @@ def run_scheduler_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, 
         ax.grid(True, axis='y', alpha=0.3)
         
         # Add value labels on bars
-        for i, (bar, acc) in enumerate(zip(bars, accuracies)):
+        for bar, acc in zip(bars, accuracies):
             ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5,
                    f'{acc:.2f}%', ha='center', va='bottom', fontsize=9)
         
@@ -2211,7 +2339,13 @@ class UNet2D(nn.Module):
 
         # Decoder
         for idx, decoder in enumerate(self.decoder):
-            x = decoder[0](x)  # Upsample
+            # decoder is an nn.Sequential; access children defensively to satisfy static typing
+            decoder_children = list(decoder.children())
+            if not decoder_children:
+                continue
+
+            # First child typically performs upsampling (ConvTranspose2d)
+            x = decoder_children[0](x)
             skip_connection = skip_connections[idx]
 
             if x.shape != skip_connection.shape:
@@ -2219,7 +2353,7 @@ class UNet2D(nn.Module):
 
             x = torch.cat((skip_connection, x), dim=1)
             # Apply remaining decoder layers after concatenation
-            for layer in decoder[1:]:
+            for layer in decoder_children[1:]:
                 x = layer(x)
 
         return self.final_conv(x)
@@ -2289,18 +2423,18 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader
     try:
         from src.core.loader_validation import enforce_no_test_in_tuning
         enforce_no_test_in_tuning(val_loader)
-    except ImportError:
+    except ImportError as exc:
         # Fallback to basic check if validation module not available
         loader_name = getattr(val_loader, 'name', '')
         split_type = getattr(val_loader, '_split_type', '')
-        
+
         if 'test' in str(loader_name).lower() or split_type == 'test':
             raise ValueError(
                 f"CRITICAL: val_loader appears to be test data (name='{loader_name}', split='{split_type}'). "
                 "Hyperparameter tuning MUST use validation data only. "
                 "Using test data for tuning invalidates generalization claims."
-            )
-        
+            ) from exc
+
         # Additional check: dataset identity validation
         if hasattr(val_loader, '_test_dataset_ref'):
             test_ref = val_loader._test_dataset_ref
@@ -2308,13 +2442,13 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader
                 raise ValueError(
                     "CRITICAL: val_loader dataset is identical to test dataset reference. "
                     "This constitutes test set leakage and invalidates research."
-                )
-        
+                ) from exc
+
         logging.debug(f"Loader validation: name='{loader_name}', split='{split_type}', len={len(val_loader.dataset)}")
     
     logging.info(f"  Tuning {optimizer_name} ({n_trials} trials, {epochs} epochs each)")
     
-    def objective(trial):
+    def objective(trial) -> float:
         set_seed(seed + trial.number)
         model = model_fn().to(device)
         
@@ -2343,13 +2477,13 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader
             beta2 = trial.suggest_float('beta2', 0.9, 0.9999)
             optimizer = optim.Adam(model.parameters(), lr=lr, betas=(beta1, beta2), amsgrad=True)
         elif optimizer_name == 'SAM_SGD':
-            from src.core.pytorch_optimizers import SAMWrapper
+            # Use module-level SAMWrapper (imported at top) to avoid reimporting
             lr = trial.suggest_float('lr', 1e-4, 1e-1, log=True)
             rho = trial.suggest_float('rho', 0.01, 0.2)
             base_opt = optim.SGD(model.parameters(), lr=lr)
             optimizer = SAMWrapper(base_opt, rho=rho)
         elif optimizer_name == 'SAM_Adam':
-            from src.core.pytorch_optimizers import SAMWrapper
+            # Use module-level SAMWrapper (imported at top) to avoid reimporting
             lr = trial.suggest_float('lr', 1e-5, 1e-2, log=True)
             rho = trial.suggest_float('rho', 0.01, 0.2)
             base_opt = optim.Adam(model.parameters(), lr=lr)
@@ -2394,12 +2528,15 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader
             # CRITICAL FIX: LAMBWrapper expects beta1, beta2 separately (not betas tuple)
             optimizer = LAMBWrapper(model.parameters(), lr=lr, beta1=beta1, beta2=beta2, weight_decay=wd)
         else:
-            return get_default_hyperparameters(optimizer_name)
+            # Fallback: use default hyperparameters and SGD if optimizer name is unrecognized
+            params = get_default_hyperparameters(optimizer_name)
+            lr = float(params.get('lr', 0.001))
+            optimizer = optim.SGD(model.parameters(), lr=lr)
         
         criterion = nn.CrossEntropyLoss()
         
         # Detect if optimizer requires closure (SAM, etc)
-        from src.core.pytorch_optimizers import SAMWrapper
+        # Use module-level SAMWrapper imported at top level
         requires_closure = isinstance(optimizer, SAMWrapper)
         
         # Quick training
@@ -2410,10 +2547,10 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader
                 
                 if requires_closure:
                     # SAMWrapper requires closure for adversarial gradient computation
-                    def closure():
+                    def closure(_inputs=inputs, _targets=targets):
                         optimizer.zero_grad()
-                        outputs = model(inputs)
-                        loss = criterion(outputs, targets)
+                        outputs = model(_inputs)
+                        loss = criterion(outputs, _targets)
                         loss.backward()
                         return loss
                     loss = optimizer.step(closure)
@@ -2664,10 +2801,9 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
             
             results = []
 
-            # Import all custom optimizer wrappers including SAMWrapper
+            # Import required custom optimizer wrappers (SAMWrapper is available top-level)
             from src.core.pytorch_optimizers import (
-                AdaBoundWrapper, RAdamWrapper, LAMBWrapper, 
-                LookaheadWrapper, SAMWrapper
+                AdaBoundWrapper, RAdamWrapper, LAMBWrapper, LookaheadWrapper
             )
             
             # CRITICAL FIX: Create factory that reads params at call-time, not definition-time
@@ -3030,7 +3166,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                                         val_correct += predicted.eq(targets).sum().item()
 
                                 val_loss /= max(1, len(val_loader))  # Protect against empty loader
-                                val_acc = 100. * val_correct / len(val_loader.dataset)
+                                val_acc = 100. * val_correct / max(1, len(getattr(val_loader, 'dataset', [])))
                                 
                                 # Learning rate scheduling (called after full training epoch)
                                 # Verified scheduler.step() is after optimizer.step() in training loop
@@ -3148,7 +3284,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                                 test_correct_final += predicted.eq(targets).sum().item()
 
                         test_loss_final = test_loss_final / max(1, len(test_loader))
-                        test_acc_final = 100.0 * test_correct_final / max(1, len(test_loader.dataset))
+                        test_acc_final = 100.0 * test_correct_final / max(1, len(getattr(test_loader, 'dataset', [])))
 
                         # Save per-run artifacts (CSV history + metadata)
                         # Include tainted status in params
@@ -3226,7 +3362,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
             try:
                 mnist_csvs = list(Path(results_dir).glob("*.csv"))
                 if mnist_csvs:
-                    create_experiment_visualizations('MNIST', str(results_dir.parent.parent), mnist_csvs)
+                    create_experiment_visualizations('MNIST', str(Path(results_dir).parent.parent), mnist_csvs)
             except Exception as viz_e:
                 logging.warning(f"Could not create MNIST visualizations: {viz_e}")
             
@@ -3667,10 +3803,11 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
     # Also save a per-run artifact (use first seed as representative if multiple provided)
     seed0 = seeds[0] if seeds else None
     try:
-        save_run_artifacts(results_dir, 'CIFAR10', 'ResNet18', 'Adam', seed0, all_results, params={
-            'epochs': epochs,
-            'batch_size': 128
-        }, device=device, tracker=tracker)
+        if seed0 is not None:
+            save_run_artifacts(results_dir, 'CIFAR10', 'ResNet18', 'Adam', seed0, all_results, params={
+                'epochs': epochs,
+                'batch_size': 128
+            }, device=device, tracker=tracker)
     except Exception as e:
         logging.debug("Failed to save per-run CIFAR10 artifact: %s", e, exc_info=True)
 
@@ -3680,7 +3817,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
     try:
         cifar10_csvs = list(Path(results_dir).glob("*.csv"))
         if cifar10_csvs:
-            create_experiment_visualizations('CIFAR10', str(results_dir.parent.parent), cifar10_csvs)
+            create_experiment_visualizations('CIFAR10', str(Path(results_dir).parent.parent), cifar10_csvs)
     except Exception as viz_e:
         logging.warning(f"Could not create CIFAR10 visualizations: {viz_e}")
     
@@ -3934,6 +4071,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                     print(f"Auto-LR failed: {e}, using default lr={lr:.2e}")
 
             # Setup optimizer with checkpoint validation
+            optimizer = None
             if opt_name == 'AdamW':
                 optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
             elif opt_name == 'Adam':
@@ -3946,7 +4084,8 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                 optimizer = RAdamWrapper(model.parameters(), lr=lr)
             elif opt_name == 'LAMB':
                 optimizer = LAMBWrapper(model.parameters(), lr=lr)
-            
+            if optimizer is None:
+                raise ValueError(f"Unsupported optimizer: {opt_name}")            
             # Create learning rate scheduler
             from src.core.lr_schedulers import CosineAnnealingLR
             scheduler = CosineAnnealingLR(optimizer, T_max=epochs, eta_min=lr*0.01)
@@ -4045,7 +4184,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                     train_loss /= max(1, train_total)
 
                     # Sanity check: Verify train_total matches expected batch count
-                    expected_samples = len(train_loader.dataset)
+                    expected_samples = _safe_len(getattr(train_loader, 'dataset', None))
                     if train_total < expected_samples * 0.9:
                         logging.warning(f"SANITY CHECK: Only processed {train_total}/{expected_samples} training samples")
 
@@ -4226,13 +4365,13 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
     try:
         nlp_csvs = list(Path(results_dir).glob("*.csv"))
         if nlp_csvs:
-            create_experiment_visualizations('NLP', str(results_dir.parent.parent), nlp_csvs)
+            create_experiment_visualizations('NLP', str(Path(results_dir).parent.parent), nlp_csvs)
     except Exception as viz_e:
         logging.warning(f"Could not create NLP visualizations: {viz_e}")
     
     return df
 
-def run_nlp_experiment_simple(results_dir="results_nlp", seeds=None, epochs=10, resume=False):
+def run_nlp_experiment_simple(results_dir: Union[str, Path] = "results_nlp", seeds: Optional[List[int]] = None, epochs: int = 10, resume: bool = False):
     if seeds is None:
         seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
     """Robust NLP experiment using local LSTM/RNN models with synthetic or IMDB data
@@ -4260,8 +4399,6 @@ def run_nlp_experiment_simple(results_dir="results_nlp", seeds=None, epochs=10, 
         print("\n   Attempting to load IMDB dataset...")
         nlp_deps = import_optional_nlp_dependencies()
         load_dataset = nlp_deps.get('load_dataset')
-        import os
-        import sys
         if load_dataset is None:
             raise ImportError("datasets not available")
         
@@ -4661,7 +4798,6 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
     
     # Determine which dataset to use (env var or default to MedMNIST)
     # Set MEDICAL_DATASET_TYPE='synthetic' or 'kaggle' to override
-    import os
     dataset_type = os.environ.get('MEDICAL_DATASET_TYPE', 'medmnist')
     medmnist_name = os.environ.get('MEDMNIST_NAME', 'pathmnist')
     kaggle_path = os.environ.get('KAGGLE_MEDICAL_PATH', './data/medical')
@@ -4713,13 +4849,16 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
             
             # Create train/validation split
             val_split = 0.10
-            train_size = int((1 - val_split) * len(train_ds))
-            val_size = len(train_ds) - train_size
+            # Safe length access for datasets (some dataset objects may not expose typing to static analyzers)
+            ds_len = getattr(train_ds, '__len__', lambda: 0)()
+            train_size = int((1 - val_split) * ds_len)
+            val_size = ds_len - train_size
             train_ds_split, val_ds = torch.utils.data.random_split(
                 train_ds, [train_size, val_size],
                 generator=torch.Generator().manual_seed(seed)
             )
-            logging.info(f"Split: Train={train_size}, Val={val_size}, Test={len(test_ds)}")
+            test_len = getattr(test_ds, '__len__', lambda: 0)()
+            logging.info(f"Split: Train={train_size}, Val={val_size}, Test={test_len}")
 
             train_loader = make_dataloader(train_ds_split, batch_size=train_bs, shuffle=True,
                                            seed=seed, **dl_kwargs)
@@ -4732,6 +4871,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
             model = UNet2D(in_channels=1, out_channels=1, features=[32, 64, 128]).to(device)
 
             # Setup optimizer with all variants
+            optimizer = None
             if opt_name == 'Adam':
                 optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=0.0001)
             elif opt_name == 'AdamW':
@@ -4744,7 +4884,8 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                 optimizer = RAdamWrapper(model.parameters(), lr=lr)
             elif opt_name == 'LAMB':
                 optimizer = LAMBWrapper(model.parameters(), lr=lr)
-
+            if optimizer is None:
+                raise ValueError(f"Unsupported optimizer: {opt_name}")
             # Loss function
             criterion = nn.BCEWithLogitsLoss()
             
@@ -4846,7 +4987,8 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                         optimizer.step()
 
                     # Safely extract loss value (works for both Tensor and float)
-                    loss_value = float(loss.item()) if hasattr(loss, 'item') else float(loss)
+                    from src.utils.num_utils import safe_to_float
+                    loss_value = safe_to_float(loss)
                     train_loss += loss_value * images.size(0)
                     train_dice += dice_coefficient(torch.sigmoid(outputs), masks).item() * images.size(0)
                     train_total += images.size(0)
@@ -5011,7 +5153,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
     try:
         medical_csvs = list(Path(results_dir).glob("*.csv"))
         if medical_csvs:
-            create_experiment_visualizations('Medical', str(results_dir.parent.parent), medical_csvs)
+            create_experiment_visualizations('Medical', str(Path(results_dir).parent.parent), medical_csvs)
     except Exception as viz_e:
         logging.warning(f"Could not create Medical visualizations: {viz_e}")
     
@@ -5091,7 +5233,7 @@ def analyze_with_integrated_stats(df, results_dir, plots_dir):
                 final_accs = opt_data.groupby('seed')[acc_col].last().values
             else:
                 final_accs = [opt_data[acc_col].iloc[-1]]
-            optimizer_results[opt] = final_accs.tolist()
+            optimizer_results[opt] = np.asarray(final_accs).tolist()
     
     if len(optimizer_results) >= 2:
         try:
@@ -5170,14 +5312,15 @@ def run_convergence_analysis_on_results(results_dir):
                 continue
             
             loss_col = 'test_loss' if 'test_loss' in df.columns else 'train_loss'
-            losses = df[loss_col].values
+            # Coerce to numpy float array for analysis
+            losses = np.asarray(df[loss_col].to_numpy(), dtype=float)
             
             # Skip if too few data points
             if len(losses) < 10:
                 continue
             
-            # Analyze convergence
-            metrics = analyzer.analyze_trajectory({'losses': losses})
+            # Analyze convergence (pass plain python list to satisfy static type expectations)
+            metrics = analyzer.analyze_trajectory(losses.tolist())
             
             # Extract metadata from filename
             stem = csv_file.stem
@@ -5185,10 +5328,10 @@ def run_convergence_analysis_on_results(results_dir):
             
             result = {
                 'file': csv_file.name,
-                'convergence_rate': metrics['convergence_rate'],
-                'converged_epoch': metrics['convergence_epoch'],
-                'final_loss': metrics['final_loss'],
-                'stagnation_detected': metrics['stagnation_detected'],
+                'convergence_rate': metrics.get('convergence_rate_value', np.nan),
+                'converged_epoch': metrics.get('convergence_iter', None),
+                'final_loss': metrics.get('final_loss', np.nan),
+                'stagnation_detected': metrics.get('stagnation_detected', False),
             }
             
             # Try to extract optimizer/model info
@@ -5274,7 +5417,7 @@ def create_experiment_visualizations(experiment_name, results_dir, csv_files):
     has_optimizer = 'optimizer' in combined_df.columns
     
     # === STATIC PLOTS (using matplotlib) ===
-    import matplotlib.pyplot as plt
+    # Using module-level matplotlib (imported at top of module)
     
     # 1. Training/Test Loss Curves
     if has_epoch and has_optimizer and 'train_loss' in combined_df.columns:
@@ -5285,13 +5428,13 @@ def create_experiment_visualizations(experiment_name, results_dir, csv_files):
                 if 'seed' in opt_data.columns:
                     # Plot mean with std band
                     grouped = opt_data.groupby('epoch')['train_loss'].agg(['mean', 'std'])
-                    plt.plot(grouped.index, grouped['mean'], label=opt, linewidth=2)
-                    plt.fill_between(grouped.index, 
-                                   grouped['mean'] - grouped['std'],
-                                   grouped['mean'] + grouped['std'],
+                    plt.plot(arr_to_numpy_float(grouped.index), arr_to_numpy_float(grouped['mean']), label=opt, linewidth=2)
+                    plt.fill_between(arr_to_numpy_float(grouped.index), 
+                                   arr_to_numpy_float(grouped['mean'] - grouped['std']),
+                                   arr_to_numpy_float(grouped['mean'] + grouped['std']),
                                    alpha=0.2)
                 else:
-                    plt.plot(opt_data['epoch'], opt_data['train_loss'], label=opt, linewidth=2)
+                    plt.plot(arr_to_numpy_float(opt_data['epoch']), arr_to_numpy_float(opt_data['train_loss']), label=opt, linewidth=2)
             
             plt.xlabel('Epoch', fontsize=12)
             plt.ylabel('Training Loss', fontsize=12)
@@ -5319,13 +5462,13 @@ def create_experiment_visualizations(experiment_name, results_dir, csv_files):
                 opt_data = combined_df[combined_df['optimizer'] == opt]
                 if 'seed' in opt_data.columns:
                     grouped = opt_data.groupby('epoch')[acc_col].agg(['mean', 'std'])
-                    plt.plot(grouped.index, grouped['mean'] * 100, label=opt, linewidth=2)
-                    plt.fill_between(grouped.index,
-                                   (grouped['mean'] - grouped['std']) * 100,
-                                   (grouped['mean'] + grouped['std']) * 100,
+                    plt.plot(arr_to_numpy_float(grouped.index), arr_to_numpy_float(grouped['mean'] * 100), label=opt, linewidth=2)
+                    plt.fill_between(arr_to_numpy_float(grouped.index),
+                                   arr_to_numpy_float((grouped['mean'] - grouped['std']) * 100),
+                                   arr_to_numpy_float((grouped['mean'] + grouped['std']) * 100),
                                    alpha=0.2)
                 else:
-                    plt.plot(opt_data['epoch'], opt_data[acc_col] * 100, label=opt, linewidth=2)
+                    plt.plot(arr_to_numpy_float(opt_data['epoch']), arr_to_numpy_float(opt_data[acc_col] * 100), label=opt, linewidth=2)
             
             plt.xlabel('Epoch', fontsize=12)
             plt.ylabel('Test Accuracy (%)', fontsize=12)
@@ -5349,7 +5492,7 @@ def create_experiment_visualizations(experiment_name, results_dir, csv_files):
             x = range(len(final_results))
             plt.bar(x, final_results['mean'] * 100, yerr=final_results['std'] * 100,
                    capsize=5, alpha=0.7, edgecolor='black', linewidth=1.5)
-            plt.xticks(x, final_results.index, rotation=45, ha='right')
+            plt.xticks(x, list(map(str, final_results.index)), rotation=45, ha='right')
             plt.ylabel('Final Test Accuracy (%)', fontsize=12)
             plt.title(f'{experiment_name} - Final Performance Comparison', fontsize=14, fontweight='bold')
             plt.grid(axis='y', alpha=0.3)
@@ -5731,8 +5874,30 @@ def aggregate_cross_experiment_results(results_dir: Path, experiment_results: Di
         # Print rankings
         print("\n   Optimizer Rankings (by avg accuracy):")
         for i, row in ranking_df.iterrows():
-            acc_str = f"{row['avg_accuracy']:.2f}%" if pd.notna(row.get('avg_accuracy')) else "N/A"
-            print(f"      {row['optimizer']:20s}: {acc_str} (across {int(row['experiments_count'])} experiments)")
+            avg_val = row.get('avg_accuracy', None)
+            # pd.isna may return an array or NDFrame; normalize to a boolean
+            is_na = pd.isna(avg_val)
+            if isinstance(is_na, (np.ndarray, pd.Series, pd.DataFrame)):
+                is_na_bool = bool(is_na.any())
+            else:
+                is_na_bool = bool(is_na)
+
+            if is_na_bool or avg_val is None:
+                acc_str = "N/A"
+            else:
+                try:
+                    acc_str = f"{float(avg_val):.2f}%"
+                except Exception:
+                    acc_str = "N/A"
+            exp_count = row.get('experiments_count', 0)
+            if exp_count is None:
+                exp_count_int = 0
+            else:
+                try:
+                    exp_count_int = int(exp_count)
+                except Exception:
+                    exp_count_int = 0
+            print(f"      {row['optimizer']:20s}: {acc_str} (across {exp_count_int} experiments)")
     
     # Statistical comparison across experiments (if scipy available)
     if HAS_SCIPY and len(optimizer_performance) >= 2:
@@ -5960,7 +6125,9 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, resume=False):
     for opt_name in ['SGD', 'Adam', 'SAM_SGD']:
         hyperparams = get_default_hyperparameters(opt_name, "2d_optimization")
         if opt_name == 'SAM_SGD':
-            optimizers_2d.append((opt_name, lambda params, hp=hyperparams: SAMWrapper(params, optim.SGD, **hp)))
+            optimizers_2d.append((opt_name, lambda params, hp=hyperparams: SAMWrapper(
+                optim.SGD(params, lr=hp.get('lr', 0.01)), rho=float(hp.get('rho', 0.05))
+            )))
         elif opt_name == 'SGD':
             optimizers_2d.append((opt_name, lambda params, hp=hyperparams: optim.SGD(params, **hp)))
         elif opt_name == 'Adam':
@@ -6063,7 +6230,7 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, resume=False):
     try:
         twod_csvs = list(Path(results_dir).glob("*.csv"))
         if twod_csvs:
-            create_experiment_visualizations('2D_Optimization', str(results_dir.parent.parent), twod_csvs)
+            create_experiment_visualizations('2D_Optimization', str(Path(results_dir).parent.parent), twod_csvs)
     except Exception as viz_e:
         logging.warning(f"Could not create 2D visualizations: {viz_e}")
     
@@ -6093,7 +6260,14 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, resume
     for opt_name in ['SGD', 'Adam', 'SAM_SGD']:
         hyperparams = get_default_hyperparameters(opt_name, "2d_optimization")
         if opt_name == 'SAM_SGD':
-            optimizers_robust.append((opt_name, lambda params, hp=hyperparams: SAMWrapper(params, optim.SGD, **hp)))
+            # Construct a SAMWrapper wrapping a concrete base optimizer instance
+            def _sam_factory(params, hp=hyperparams):
+                try:
+                    base_opt = optim.SGD(params, **hp)
+                except TypeError:
+                    base_opt = optim.SGD(params, lr=hp.get('lr', 0.01))
+                return SAMWrapper(base_opt, rho=hp.get('rho', 0.05), adaptive=hp.get('adaptive', False))
+            optimizers_robust.append((opt_name, _sam_factory))
         elif opt_name == 'SGD':
             optimizers_robust.append((opt_name, lambda params, hp=hyperparams: optim.SGD(params, **hp)))
         elif opt_name == 'Adam':
@@ -6180,7 +6354,7 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, resume
     try:
         robustness_csvs = list(Path(results_dir).glob("*.csv"))
         if robustness_csvs:
-            create_experiment_visualizations('Robustness', str(results_dir.parent.parent), robustness_csvs)
+            create_experiment_visualizations('Robustness', str(Path(results_dir).parent.parent), robustness_csvs)
     except Exception as viz_e:
         logging.warning(f"Could not create Robustness visualizations: {viz_e}")
     
@@ -6271,7 +6445,8 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=None, resum
 
                 # CRITICAL FIX: Pass actual closure to SAM
                 loss = optimizer.step(closure)
-                loss_value = float(loss.item()) if hasattr(loss, 'item') else float(loss)
+                from src.utils.num_utils import safe_to_float
+                loss_value = safe_to_float(loss)
                 epoch_loss += loss_value
 
             epoch_loss /= len(train_loader)
@@ -6300,7 +6475,7 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=None, resum
     try:
         sam_csvs = list(Path(results_dir).glob("*.csv"))
         if sam_csvs:
-            create_experiment_visualizations('SAM_Sensitivity', str(results_dir.parent.parent), sam_csvs)
+            create_experiment_visualizations('SAM_Sensitivity', str(Path(results_dir).parent.parent), sam_csvs)
     except Exception as viz_e:
         logging.warning(f"Could not create SAM visualizations: {viz_e}")
     
@@ -6353,6 +6528,7 @@ def run_ablation_study(results_dir="results_ablation", seeds=None, resume=False)
         set_seed(seed)
         x = torch.tensor(initial_point, dtype=torch.float32, requires_grad=True)
 
+        optimizer = None
         if opt_name == 'SGD':
             optimizer = optim.SGD([x], **params)
         elif opt_name == 'SGD_Momentum':
@@ -6363,7 +6539,8 @@ def run_ablation_study(results_dir="results_ablation", seeds=None, resume=False)
             # SAMWrapper wraps a base optimizer instance
             base_opt = optim.SGD([x], **params)
             optimizer = SAMWrapper(base_opt, rho=params.get('rho', 0.05))
-
+        if optimizer is None:
+            raise ValueError(f"Unsupported optimizer: {opt_name}")
         max_iter = 1000
         for i in range(max_iter):
             optimizer.zero_grad()
@@ -6412,7 +6589,7 @@ def run_ablation_study(results_dir="results_ablation", seeds=None, resume=False)
     try:
         ablation_csvs = list(Path(results_dir).glob("*.csv"))
         if ablation_csvs:
-            create_experiment_visualizations('Ablation', str(results_dir.parent.parent), ablation_csvs)
+            create_experiment_visualizations('Ablation', str(Path(results_dir).parent.parent), ablation_csvs)
     except Exception as viz_e:
         logging.warning(f"Could not create Ablation visualizations: {viz_e}")
     
@@ -6639,13 +6816,17 @@ def run_distributed_experiment(results_dir="results_distributed", world_size=2, 
         # Set actual world size based on available GPUs
         world_size = min(world_size, gpu_count)
 
-        # Spawn processes
-        mp.spawn(
-            distributed_training_worker,
-            args=(world_size, backend, results_dir),
-            nprocs=world_size,
-            join=True
-        )
+        # Spawn processes (use dynamic getattr to avoid static analyzer warnings)
+        spawn_fn = getattr(mp, 'spawn', None)
+        if callable(spawn_fn):
+            spawn_fn(
+                distributed_training_worker,
+                args=(world_size, backend, results_dir),
+                nprocs=world_size,
+                join=True
+            )
+        else:
+            raise RuntimeError("torch.multiprocessing.spawn is not available on this platform")
 
         print("Distributed training completed successfully")
         return {"status": "success", "world_size": world_size, "backend": backend}
@@ -6687,11 +6868,16 @@ def distributed_training_worker(rank, world_size, backend, results_dir):
         # BUG FIX (Dec 2025): Changed download=False → download=True for Kaggle compatibility
         # On fresh Kaggle kernels, dataset may not exist, causing immediate failure
         train_dataset = torchvision.datasets.CIFAR10('./data', train=True, download=True, transform=transform)
-        train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset, num_replicas=world_size, rank=rank)
         
-        # Track per-device batch size for effective batch size computation
+        # Use distributed sampler when available (guarded for static type checkers)
         per_device_batch_size = 128
-        train_loader = DataLoader(train_dataset, batch_size=per_device_batch_size, sampler=train_sampler)
+        dist_module = getattr(torch.utils.data, 'distributed', None)
+        if dist_module is not None and hasattr(dist_module, 'DistributedSampler'):
+            train_sampler = dist_module.DistributedSampler(train_dataset, num_replicas=world_size, rank=rank)
+            train_loader = DataLoader(train_dataset, batch_size=per_device_batch_size, sampler=train_sampler)
+        else:
+            # Fall back to standard DataLoader with shuffling for single-process runs
+            train_loader = DataLoader(train_dataset, batch_size=per_device_batch_size, shuffle=True)
 
         # Optimizer and loss
         optimizer = optim.Adam(model.parameters(), lr=0.001)
@@ -7347,13 +7533,14 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
                 loss.backward()
                 optimizer.step()
 
-            loss_value = float(loss.item()) if hasattr(loss, 'item') else float(loss)
+            from src.utils.num_utils import safe_to_float
+            loss_value = safe_to_float(loss)
             train_loss += loss_value
             _, predicted = outputs.max(1)
             train_correct += predicted.eq(targets).sum().item()
 
-        train_loss /= len(train_loader)
-        train_acc = 100. * train_correct / len(train_dataset_split)
+        train_loss /= max(1, _safe_len(train_loader))
+        train_acc = 100. * train_correct / max(1, _safe_len(train_dataset_split))
 
         # Sanity check: Verify all batches were processed
         if epoch > 1 and train_acc < 10.0:
@@ -7437,7 +7624,7 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
         tracker.end_run()
     # Save a per-run artifact (representative seed)
     try:
-        seed0 = seeds[0] if seeds else None
+        seed0 = int(seeds[0]) if seeds else 0
         params = {'epochs': epochs, 'batch_size': 128}
         save_run_artifacts(results_dir, 'ResNet18', 'ResNet18', 'Adam', seed0, results, params, device=device, tracker=tracker)
     except Exception:
@@ -7449,7 +7636,7 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
     try:
         resnet_csvs = list(Path(results_dir).glob("*.csv"))
         if resnet_csvs:
-            create_experiment_visualizations('ResNet18', str(results_dir.parent.parent), resnet_csvs)
+            create_experiment_visualizations('ResNet18', str(Path(results_dir).parent.parent), resnet_csvs)
     except Exception as viz_e:
         logging.warning(f"Could not create ResNet visualizations: {viz_e}")
     
@@ -7500,7 +7687,13 @@ def run_highdim_experiment(results_dir="results_highdim", seeds=None, quick=Fals
     for opt_name in ['SGD', 'Adam', 'SAM_SGD']:
         hyperparams = get_default_hyperparameters(opt_name, "highdim_optimization")
         if opt_name == 'SAM_SGD':
-            optimizers_config.append((opt_name, lambda params, hp=hyperparams: SAMWrapper(params, optim.SGD, **hp)))
+            def _sam_factory(params, hp=hyperparams):
+                try:
+                    base_opt = optim.SGD(params, **hp)
+                except TypeError:
+                    base_opt = optim.SGD(params, lr=hp.get('lr', 0.01))
+                return SAMWrapper(base_opt, rho=hp.get('rho', 0.05), adaptive=hp.get('adaptive', False))
+            optimizers_config.append((opt_name, _sam_factory))
         elif opt_name == 'SGD':
             optimizers_config.append((opt_name, lambda params, hp=hyperparams: optim.SGD(params, **hp)))
         elif opt_name == 'Adam':
@@ -7603,7 +7796,7 @@ def run_highdim_experiment(results_dir="results_highdim", seeds=None, quick=Fals
     try:
         highdim_csvs = list(Path(results_dir).glob("*.csv"))
         if highdim_csvs:
-            create_experiment_visualizations('HighDim', str(results_dir.parent.parent), highdim_csvs)
+            create_experiment_visualizations('HighDim', str(Path(results_dir).parent.parent), highdim_csvs)
     except Exception as viz_e:
         logging.warning(f"Could not create HighDim visualizations: {viz_e}")
     
@@ -8515,7 +8708,7 @@ Examples:
                     for test_fn in ['rosenbrock', 'ackley']:
                         momentum_beta_sweep(
                             test_function=test_fn,
-                            beta_values=[0.0, 0.5, 0.9, 0.99] if args.quick else [0.0, 0.5, 0.7, 0.9, 0.95, 0.99],
+                            beta_values=np.asarray([0.0, 0.5, 0.9, 0.99]) if args.quick else np.asarray([0.0, 0.5, 0.7, 0.9, 0.95, 0.99]),
                             output_dir=sensitivity_dir
                         )
                     
@@ -9155,7 +9348,7 @@ Examples:
         try:
             from src.experiments.generate_final_deliverables import FinalDeliverablesGenerator
             out_dir = Path(results_dir) / 'final_deliverables'
-            generator = FinalDeliverablesGenerator(results_dir=results_dir, output_dir=str(out_dir))
+            generator = FinalDeliverablesGenerator(results_dir=str(results_dir), output_dir=str(out_dir))
             print("\nGenerating final deliverables (this may take a few minutes)...")
             generator.generate_all()
             print(f"Final deliverables saved to: {out_dir}")

@@ -314,7 +314,7 @@ def run_optimizer_ablation(
     ax.set_ylabel('Iterations to Loss < 1e-3', fontsize=11)
     ax.set_title('Convergence Speed', fontsize=12, fontweight='bold')
     ax.grid(axis='y', alpha=0.3)
-    ax.set_ylim([0, max_iterations * 1.1])
+    ax.set_ylim((0.0, float(max_iterations) * 1.1))
     
     # Annotate bars
     for i, (_name, it) in enumerate(zip(opt_names, iters_to_converge)):

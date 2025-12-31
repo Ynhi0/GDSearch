@@ -46,7 +46,9 @@ def get_environment_info() -> Dict:
         'hardware': {
             'cpu_count': os.cpu_count(),
             'cuda_available': torch.cuda.is_available(),
-            'cuda_version': torch.version.cuda if torch.cuda.is_available() else 'N/A',
+            'cuda_version': (lambda: (
+                (getattr(getattr(torch, 'version', None), 'cuda', 'N/A')) if torch.cuda.is_available() else 'N/A'
+            ))(),
             'cuda_device_count': torch.cuda.device_count() if torch.cuda.is_available() else 0
         }
     }
@@ -68,7 +70,7 @@ def collect_all_hyperparameters(results_dir: str = 'results') -> pd.DataFrame:
         fname = csv_path.stem
         parts = fname.split('_')
         
-        config = {'filename': fname}
+        config: Dict[str, object] = {'filename': fname}
         
         # Parse model, dataset, optimizer
         if len(parts) >= 4:
@@ -94,8 +96,29 @@ def collect_all_hyperparameters(results_dir: str = 'results') -> pd.DataFrame:
             df = pd.read_csv(csv_path)
             eval_df = df[df['phase'] == 'eval']
             if not eval_df.empty:
-                config['final_test_accuracy'] = eval_df['test_accuracy'].iloc[-1]
-                config['final_test_loss'] = eval_df['test_loss'].iloc[-1]
+                # Safely extract last non-NA element from candidate columns
+                try:
+                    col = eval_df.get('test_accuracy', np.array([]))
+                    arr = np.asarray(col)
+                    try:
+                        if hasattr(col, 'dropna'):
+                            arr = np.asarray(col.dropna())
+                    except Exception:
+                        pass
+                    config['final_test_accuracy'] = float(arr.ravel()[-1]) if arr.size > 0 and not pd.isna(arr.ravel()[-1]) else None
+                except Exception:
+                    config['final_test_accuracy'] = None
+                try:
+                    col = eval_df.get('test_loss', np.array([]))
+                    arr = np.asarray(col)
+                    try:
+                        if hasattr(col, 'dropna'):
+                            arr = np.asarray(col.dropna())
+                    except Exception:
+                        pass
+                    config['final_test_loss'] = float(arr.ravel()[-1]) if arr.size > 0 and not pd.isna(arr.ravel()[-1]) else None
+                except Exception:
+                    config['final_test_loss'] = None
         except Exception as e:
             config['final_test_accuracy'] = None
             config['final_test_loss'] = None
@@ -173,18 +196,75 @@ def generate_appendix_markdown(output_path: str = 'APPENDIX.md'):
                         
                         # Learning rates tested
                         if 'lr' in opt_df.columns:
-                            lrs = opt_df['lr'].dropna().unique()
+                            col = opt_df['lr']
+                            drop = getattr(col, 'dropna', None)
+                            if callable(drop):
+                                try:
+                                    s = drop()
+                                    arr = np.asarray(s)
+                                    try:
+                                        arr = arr[~pd.isna(arr)]
+                                    except Exception:
+                                        pass
+                                    lrs = np.unique(arr) if arr.size > 0 else np.array([])
+                                except Exception:
+                                    lrs = np.array([])
+                            else:
+                                arr = np.asarray(col)
+                                try:
+                                    arr = arr[~pd.isna(arr)]
+                                except Exception:
+                                    pass
+                                lrs = np.unique(arr) if arr.size > 0 else np.array([])
                             if len(lrs) > 0:
                                 f.write(f"**Learning rates tested:** {sorted(lrs)}\n\n")
                         
                         # Other parameters
                         if 'momentum' in opt_df.columns:
-                            moms = opt_df['momentum'].dropna().unique()
+                            col = opt_df['momentum']
+                            drop = getattr(col, 'dropna', None)
+                            if callable(drop):
+                                try:
+                                    s = drop()
+                                    arr = np.asarray(s)
+                                    try:
+                                        arr = arr[~pd.isna(arr)]
+                                    except Exception:
+                                        pass
+                                    moms = np.unique(arr) if arr.size > 0 else np.array([])
+                                except Exception:
+                                    moms = np.array([])
+                            else:
+                                arr = np.asarray(col)
+                                try:
+                                    arr = arr[~pd.isna(arr)]
+                                except Exception:
+                                    pass
+                                moms = np.unique(arr) if arr.size > 0 else np.array([])
                             if len(moms) > 0:
                                 f.write(f"**Momentum values tested:** {sorted(moms)}\n\n")
                         
                         if 'weight_decay' in opt_df.columns:
-                            wds = opt_df['weight_decay'].dropna().unique()
+                            col = opt_df['weight_decay']
+                            drop = getattr(col, 'dropna', None)
+                            if callable(drop):
+                                try:
+                                    s = drop()
+                                    arr = np.asarray(s)
+                                    try:
+                                        arr = arr[~pd.isna(arr)]
+                                    except Exception:
+                                        pass
+                                    wds = np.unique(arr) if arr.size > 0 else np.array([])
+                                except Exception:
+                                    wds = np.array([])
+                            else:
+                                arr = np.asarray(col)
+                                try:
+                                    arr = arr[~pd.isna(arr)]
+                                except Exception:
+                                    pass
+                                wds = np.unique(arr) if arr.size > 0 else np.array([])
                             if len(wds) > 0:
                                 f.write(f"**Weight decay values tested:** {sorted(wds)}\n\n")
                 
@@ -199,8 +279,62 @@ def generate_appendix_markdown(output_path: str = 'APPENDIX.md'):
                         f.write(f"{row.get('lr', 'N/A')} | ")
                         f.write(f"{row.get('momentum', 'N/A')} | ")
                         f.write(f"{row.get('weight_decay', 'N/A')} | ")
-                        f.write(f"{row.get('final_test_accuracy', 'N/A'):.4f} | " if pd.notna(row.get('final_test_accuracy')) else "N/A | ")
-                        f.write(f"{row.get('final_test_loss', 'N/A'):.4f} |\n" if pd.notna(row.get('final_test_loss')) else "N/A |\n")
+                        # Safely format final test accuracy and loss even if values are array-like
+                        acc = row.get('final_test_accuracy', np.nan)
+                        try:
+                            arr = np.asarray(acc)
+                            # Scalar-like
+                            if arr.shape == () or arr.size == 1:
+                                val = arr.ravel()[-1]
+                                if not pd.isna(val):
+                                    try:
+                                        f.write(f"{float(val):.4f} | ")
+                                    except Exception:
+                                        f.write("N/A | ")
+                                else:
+                                    f.write("N/A | ")
+                            else:
+                                # Array-like: take last non-NA value
+                                try:
+                                    valid = arr[~pd.isna(arr)]
+                                    if valid.size > 0:
+                                        try:
+                                            f.write(f"{float(valid.ravel()[-1]):.4f} | ")
+                                        except Exception:
+                                            f.write("N/A | ")
+                                    else:
+                                        f.write("N/A | ")
+                                except Exception:
+                                    f.write("N/A | ")
+                        except Exception:
+                            f.write("N/A | ")
+
+                        loss = row.get('final_test_loss', np.nan)
+                        try:
+                            arr = np.asarray(loss)
+                            if arr.shape == () or arr.size == 1:
+                                val = arr.ravel()[-1]
+                                if not pd.isna(val):
+                                    try:
+                                        f.write(f"{float(val):.4f} |\n")
+                                    except Exception:
+                                        f.write("N/A |\n")
+                                else:
+                                    f.write("N/A |\n")
+                            else:
+                                try:
+                                    valid = arr[~pd.isna(arr)]
+                                    if valid.size > 0:
+                                        try:
+                                            f.write(f"{float(valid.ravel()[-1]):.4f} |\n")
+                                        except Exception:
+                                            f.write("N/A |\n")
+                                    else:
+                                        f.write("N/A |\n")
+                                except Exception:
+                                    f.write("N/A |\n")
+                        except Exception:
+                            f.write("N/A |\n")
                     f.write("\n")
         except Exception as e:
             f.write(f"_Error collecting hyperparameters: {e}_\n\n")
@@ -234,7 +368,7 @@ def generate_appendix_markdown(output_path: str = 'APPENDIX.md'):
             categories['Other'] = [p for p in plot_files if p not in categorized]
             
             for category, plots in categories.items():
-                if plots:
+                if len(plots) > 0:
                     f.write(f"### C.{list(categories.keys()).index(category) + 1} {category}\n\n")
                     for plot in sorted(plots):
                         f.write(f"- `plots/{plot.name}`\n")

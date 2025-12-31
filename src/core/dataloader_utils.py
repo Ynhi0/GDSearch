@@ -6,7 +6,7 @@ consistent behavior across all experiments.
 """
 import functools
 import random
-from typing import Optional, Callable, Any
+from typing import Optional, Callable, Any, Dict
 
 import numpy as np
 import torch
@@ -20,8 +20,9 @@ def _worker_init(worker_id: int, seed: int):
     random.seed(worker_seed)
     try:
         torch.manual_seed(worker_seed)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+        logging.debug("Could not set torch.manual_seed in worker %s: %s", worker_id, e, exc_info=True)
 
 
 def make_dataloader(
@@ -85,7 +86,7 @@ def make_dataloader(
             generator = None
             worker_init_fn = None
 
-    dl_kwargs = dict(
+    dl_kwargs: Dict[str, Any] = dict(
         batch_size=batch_size,
         shuffle=shuffle if sampler is None else False,
         num_workers=num_workers,
@@ -123,6 +124,11 @@ def make_dataloader(
     if not hasattr(loader, '_split_type'):
         loader._split_type = 'unknown'
     if not hasattr(loader, '_dataset_uid'):
-        loader._dataset_uid = f'dataset_{len(dataset)}'
+        # Use helper to compute length for unknown dataset types (e.g., HuggingFace datasets)
+        from src.utils.safe_len import len_sized
+        try:
+            loader._dataset_uid = f'dataset_{len_sized(dataset)}'
+        except Exception:
+            loader._dataset_uid = 'dataset_unknown'
     
     return loader

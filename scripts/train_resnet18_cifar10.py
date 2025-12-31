@@ -129,6 +129,7 @@ def main():
     print(f"Learning rate: {args.lr}")
     print()
     
+    optimizer = None
     if args.optimizer == 'sgd':
         optimizer = SGDWrapper(model.parameters(), lr=args.lr)
     elif args.optimizer == 'sgd_momentum':
@@ -137,6 +138,8 @@ def main():
         optimizer = AdamWrapper(model.parameters(), lr=args.lr)
     elif args.optimizer == 'rmsprop':
         optimizer = RMSPropWrapper(model.parameters(), lr=args.lr)
+    if optimizer is None:
+        raise ValueError(f"Unsupported optimizer: {args.optimizer}")
     
     # Loss function
     criterion = nn.CrossEntropyLoss()

@@ -17,7 +17,8 @@ import torch
 # Import compatibility helpers for cross-version torch I/O
 try:
     from src.core.io_utils import torch_load_safe, torch_save_safe
-except Exception:
+except Exception as e:
+    logging.debug("Could not import src.core.io_utils: %s", e, exc_info=True)
     # Provide local fallbacks to avoid NameError when io_utils cannot be imported
     def torch_load_safe(path_or_file, map_location=None, weights_only=None):
         try:
@@ -79,8 +80,8 @@ class RobustCheckpointManager:
     def save_checkpoint(
         self,
         checkpoint_data: Dict,
-        filename: str,
-        experiment_name: str
+        filename: Optional[str],
+        experiment_name: Optional[str]
     ) -> bool:
         """
         Save checkpoint with backup, validation, and disk space check.
@@ -93,14 +94,17 @@ class RobustCheckpointManager:
         Returns:
             True if save successful, False otherwise
         """
-        ckpt_path = self.base_dir / filename
+        if filename is None:
+            logging.error("save_checkpoint called with filename=None")
+            return False
+
+        ckpt_path = self.base_dir / str(filename)
         
         # Check disk space before saving
         if self._disk_guardian:
             if not self._disk_guardian.can_save_checkpoint(estimated_size_mb=500):
-                logging.error("Insufficient disk space to save checkpoint %s", filename)
+                logging.error("Insufficient disk space to save checkpoint")
                 return False
-        
         try:
             # Create backup if file exists
             if ckpt_path.exists():
@@ -166,13 +170,13 @@ class RobustCheckpointManager:
                 return False
 
         except (OSError, RuntimeError, ValueError) as e:
-            logging.error("Failed to save checkpoint %s: %s", filename, e)
+            logging.error("Failed to save checkpoint: %s", e)
             return False
 
     def load_checkpoint(
         self,
-        filename: str,
-        _experiment_name: str = None
+        filename: Optional[str],
+        _experiment_name: Optional[str] = None
     ) -> Optional[Dict]:
         """
         Load checkpoint with fallback to backup.
@@ -184,7 +188,11 @@ class RobustCheckpointManager:
         Returns:
             Checkpoint dictionary if successful, None otherwise
         """
-        ckpt_path = self.base_dir / filename
+        if filename is None:
+            logging.error("load_checkpoint called with filename=None")
+            return None
+
+        ckpt_path = self.base_dir / str(filename)
 
         # Try primary checkpoint first
         if ckpt_path.exists():
@@ -210,7 +218,7 @@ class RobustCheckpointManager:
 
         # Try backup checkpoints
         for i in range(self.max_backups):
-            backup_path = self.base_dir / f"{filename}.backup_{i}"
+            backup_path = self.base_dir / f"{str(filename)}.backup_{i}"
             if backup_path.exists():
                 try:
                     # Version-aware load with fallback
@@ -267,7 +275,7 @@ class RobustCheckpointManager:
         except Exception as e:
             logging.warning("Failed to restore RNG states: %s", e)
 
-    def _create_backup(self, ckpt_path: Path, _experiment_name: str):
+    def _create_backup(self, ckpt_path: Path, _experiment_name: Optional[str]):
         """Create rolling backup - only if checkpoint exists."""
         if not ckpt_path.exists():
             return

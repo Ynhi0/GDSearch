@@ -1,0 +1,94 @@
+"""Numeric helper utilities.
+
+Provide safe coercion helpers to convert potentially array-like or pandas values
+into Python floats without raising on unusual inputs (Series, Index, 0-d arrays,
+array-like containers, tuples, etc.).
+"""
+from __future__ import annotations
+from typing import Any
+
+import numpy as np
+
+
+def safe_to_float(x: Any) -> float:
+    """Safely coerce a value or array-like to a Python float.
+
+    Behavior mirrors conservative unwrapping:
+    - If x is numeric (int/float/numpy scalar) return float(x)
+    - If x is a pandas Series/Index, pick last non-NaN element
+    - If x is a container (list/tuple/ndarray), pick first (or last where appropriate)
+    - Fall back to float(x) and return NaN on failure
+    """
+    try:
+        if isinstance(x, (int, float, np.integer, np.floating)):
+            return float(x)
+    except Exception:
+        pass
+
+    try:
+        # Handle PyTorch tensors (scalars and small tensors)
+        import torch as _torch
+        if isinstance(x, _torch.Tensor):
+            try:
+                if x.numel() == 0:
+                    return float(np.nan)
+                if x.numel() == 1:
+                    return float(x.item())
+                # Non-scalar tensor: convert to numpy and recurse
+                return safe_to_float(x.detach().cpu().numpy())
+            except Exception:
+                return float(np.nan)
+    except Exception:
+        pass
+
+    try:
+        import pandas as _pd  # local import to avoid hard deps for code that doesn't use pandas
+        if isinstance(x, (_pd.Series, _pd.Index)):
+            s = x.dropna()
+            arr = np.asarray(s)
+            if arr.size == 0:
+                return float(np.nan)
+            # take last non-NA element
+            val = arr.ravel()[-1]
+            return safe_to_float(val)
+    except Exception:
+        pass
+
+    try:
+        if isinstance(x, (tuple, list)):
+            if len(x) == 0:
+                return float(np.nan)
+            return safe_to_float(x[0])
+    except Exception:
+        pass
+
+    try:
+        arr = np.asarray(x)
+        if arr.size == 0:
+            return float(np.nan)
+        if arr.shape == () or arr.size == 1:
+            val = arr.item()
+            if isinstance(val, (int, float, np.integer, np.floating, str)):
+                try:
+                    return float(val)
+                except Exception:
+                    return float(np.nan)
+            if hasattr(val, "__float__"):
+                try:
+                    return float(val)
+                except Exception:
+                    return float(np.nan)
+            return float(np.nan)
+        # Non-scalar arrays: take first element and recurse
+        try:
+            return safe_to_float(arr.ravel()[0])
+        except Exception:
+            return float(np.nan)
+    except Exception:
+        pass
+
+    try:
+        # Fall back to converting the string representation (avoids passing complex objects directly to float())
+        return float(str(x))
+    except Exception:
+        return float(np.nan)

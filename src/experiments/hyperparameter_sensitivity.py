@@ -50,7 +50,7 @@ def compute_trajectory_smoothness(trajectory: np.ndarray) -> float:
             angles.append(np.clip(cos_angle, -1.0, 1.0))
     
     # Smoothness = high cosine similarity (aligned updates)
-    smoothness = np.mean(angles) if angles else 1.0
+    smoothness = float(np.mean(angles)) if angles else 1.0
     return smoothness
 
 
@@ -76,8 +76,8 @@ def compute_oscillation_index(trajectory: np.ndarray) -> float:
             if cos_angle < 0:  # Direction reversal
                 reversals += 1
     
-    oscillation_index = reversals / max(1, len(updates) - 1)
-    return oscillation_index
+    oscillation_index = float(reversals) / max(1, len(updates) - 1)
+    return float(oscillation_index)
 
 
 def run_optimizer_trajectory(optimizer, func, grad_func, x0, max_iters=1000, tol=1e-6):

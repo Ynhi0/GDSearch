@@ -16,9 +16,18 @@ import os
 import numpy as np
 import pandas as pd
 from scipy import stats
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Any
 import matplotlib.pyplot as plt
 import warnings
+
+
+def _to_scalar(x) -> float:
+    """Safely coerce numpy/scipy scalars or arrays to a Python float.
+
+    Returns NaN when conversion is impossible.
+    """
+    from src.utils.num_utils import safe_to_float
+    return safe_to_float(x)
 
 
 def safe_shapiro(data: np.ndarray, alpha: float = 0.05) -> Dict:
@@ -104,47 +113,70 @@ def extract_final_metric(dfs: List[pd.DataFrame], metric: str = 'test_accuracy',
     values = []
     for df in dfs:
         if exclude_diverged and 'diverged' in df.columns:
+            # CRITICAL FIX: Normalize diverged column robustly to a boolean
             try:
-                # CRITICAL FIX: Expect boolean type, but handle string fallback gracefully
-                if df['diverged'].dtype == bool:
-                    is_diverged = df['diverged'].any()
+                col = df['diverged']
+                is_diverged = False
+                if hasattr(col, 'dtype'):
+                    dt = getattr(col, 'dtype', None)
+                    if dt is not None and (dt == bool or getattr(dt, 'name', '') == 'bool' or dt == np.bool_):
+                        is_diverged = bool(getattr(col, 'any', lambda: False)())
+                    else:
+                        s = col.astype(str).str.strip().str.lower()
+                        is_diverged = bool(s.isin(['true', '1', 't', 'yes', 'y']).any())
                 else:
-                    # Fallback for legacy data: normalize to string, strip whitespace, lowercase
-                    s = df['diverged'].astype(str).str.strip().str.lower()
-                    # Map known true/false strings to bool
-                    is_diverged = s.isin(['true', '1', 't', 'yes', 'y']).any()
-                
+                    s = str(col).strip().lower()
+                    is_diverged = s in ('true', '1', 't', 'yes', 'y')
+
                 if is_diverged:
                     logging.info(f"Excluding diverged run from statistical analysis")
                     continue
             except Exception as e:
-                # If parsing fails, log warning and default to False (assume not diverged)
                 logging.warning(f"Failed to parse diverged column: {e}. Assuming not diverged.")
-                pass
         
         # If requested, skip runs that are marked tainted (OOM recovery happened)
         if exclude_tainted and 'tainted' in df.columns:
             try:
-                # CRITICAL FIX: Expect boolean type, but handle string fallback gracefully
-                if df['tainted'].dtype == bool:
-                    is_tainted = df['tainted'].any()
+                col = df['tainted']
+                is_tainted = False
+                if hasattr(col, 'dtype'):
+                    dt = getattr(col, 'dtype', None)
+                    if dt is not None and (dt == bool or getattr(dt, 'name', '') == 'bool' or dt == np.bool_):
+                        is_tainted = bool(getattr(col, 'any', lambda: False)())
+                    else:
+                        s = col.astype(str).str.strip().str.lower()
+                        is_tainted = bool(s.isin(['true', '1', 't', 'yes', 'y']).any())
                 else:
-                    # Fallback for legacy data: normalize to string, strip whitespace, lowercase
-                    s = df['tainted'].astype(str).str.strip().str.lower()
-                    # Map known true/false strings to bool
-                    is_tainted = s.isin(['true', '1', 't', 'yes', 'y']).any()
-                
+                    s = str(col).strip().lower()
+                    is_tainted = s in ('true', '1', 't', 'yes', 'y')
+
                 if is_tainted:
                     logging.info(f"Excluding tainted run from statistical analysis")
                     continue
             except Exception as e:
-                # If parsing fails, log warning and default to False (assume not tainted)
                 logging.warning(f"Failed to parse tainted column: {e}. Assuming not tainted.")
                 pass
 
         eval_df = df[df['phase'] == 'eval']
         if not eval_df.empty:
-            values.append(eval_df[metric].iloc[-1])
+            series_or_arr = eval_df[metric]
+            val = None
+            # Prefer pandas Series iloc if available (use getattr to avoid static attr access on ndarray)
+            iloc_attr = getattr(series_or_arr, 'iloc', None)
+            if iloc_attr is not None:
+                try:
+                    val = iloc_attr[-1]
+                except Exception:
+                    val = None
+            if val is None:
+                try:
+                    val = series_or_arr[-1]
+                except Exception:
+                    val = series_or_arr
+            try:
+                values.append(_to_scalar(val))
+            except Exception:
+                values.append(np.nan) 
     return np.array(values)
 
 
@@ -265,10 +297,13 @@ def compare_optimizers_ttest(
         # Use Mann-Whitney U test (non-parametric alternative)
         try:
             u_stat, p_value = stats.mannwhitneyu(results_A, results_B, alternative='two-sided')
+            # Normalize numeric types
+            u_stat = _to_scalar(u_stat)
+            p_value = _to_scalar(p_value)
             
             # Effect size for Mann-Whitney: rank-biserial correlation
             # r = 1 - (2*U) / (n_A * n_B)
-            rank_biserial = 1 - (2 * u_stat) / (n_A * n_B)
+            rank_biserial = float(1 - (2 * u_stat) / (n_A * n_B))
             
             # For Mann-Whitney, we don't have parametric CIs; use bootstrap or omit
             if n_A >= 2:
@@ -330,6 +365,9 @@ def compare_optimizers_ttest(
         # Use Welch's t-test (equal_var=False) for robustness
         # Welch's test does not assume equal variances and is more robust
         t_stat, p_value = stats.ttest_ind(results_A, results_B, equal_var=False)
+        # Normalize numeric types returned by scipy
+        t_stat = _to_scalar(t_stat)
+        p_value = _to_scalar(p_value)
         
         # Effect size: Use pooled Cohen's d (standard approach)
         # Pooled std = sqrt(((n_A-1)*std_A^2 + (n_B-1)*std_B^2) / (n_A + n_B - 2))
@@ -463,7 +501,7 @@ def plot_comparison_with_errorbars(
     name_A: str = "Optimizer A",
     name_B: str = "Optimizer B",
     metric: str = "Test Accuracy",
-    save_path: str = None
+    save_path: Optional[str] = None
 ):
     """
     Plot comparison with error bars.
@@ -513,7 +551,7 @@ def plot_comparison_with_errorbars(
     plt.tight_layout()
     
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
         logging.info(f"Plot saved to: {save_path}")
     else:
         plt.show()
@@ -528,6 +566,9 @@ def wilcoxon_signed_rank_test(results_A: np.ndarray, results_B: np.ndarray) -> D
     Use when data is paired (same initial conditions) and may not be normally distributed.
     """
     statistic, p_value = stats.wilcoxon(results_A, results_B, alternative='two-sided')
+    # Normalize numeric types (scipy/stub ambiguity)
+    statistic = _to_scalar(statistic)
+    p_value = _to_scalar(p_value)
     
     return {
         'statistic': statistic,
@@ -584,7 +625,7 @@ def compute_power_analysis(
     else:  # 'less'
         power = stats.nct.cdf(critical_t, df, -ncp)
     
-    return power
+    return float(power)
 
 
 def compute_required_sample_size(
@@ -723,7 +764,7 @@ def print_power_analysis(report: Dict):
 # ============================================================================
 
 
-def friedman_test(data: np.ndarray, optimizer_names: List[str] = None) -> Dict:
+def friedman_test(data: np.ndarray, optimizer_names: Optional[List[str]] = None) -> Dict:
     """
     Friedman test for comparing multiple optimizers across multiple datasets/seeds.
     
@@ -779,7 +820,7 @@ def friedman_test(data: np.ndarray, optimizer_names: List[str] = None) -> Dict:
     }
 
 
-def nemenyi_test(data: np.ndarray, optimizer_names: List[str] = None, alpha: float = 0.05) -> Dict:
+def nemenyi_test(data: np.ndarray, optimizer_names: Optional[List[str]] = None, alpha: float = 0.05) -> Dict:
     """
     Nemenyi post-hoc test for pairwise comparisons after Friedman test.
     
@@ -900,7 +941,7 @@ def plot_critical_difference_diagram(mean_ranks: np.ndarray,
                                      optimizer_names: List[str],
                                      critical_distance: float,
                                      title: str = "Critical Difference Diagram",
-                                     save_path: str = None):
+                                     save_path: Optional[str] = None):
     """
     Plot Critical Difference (CD) diagram for visualizing Nemenyi results.
     
@@ -964,7 +1005,7 @@ def plot_critical_difference_diagram(mean_ranks: np.ndarray,
     plt.tight_layout()
     
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
         logging.info(f"Critical Difference diagram saved to {save_path}")
     
     plt.show()
@@ -1241,12 +1282,12 @@ def main():
     
     logging.info("Required sample sizes for 80% power (α=0.05, two-sided):")
     cohens_d_label = "Cohen's d"
-    logging.info(f"{'Effect Size':<15} {cohens_d_label:<12} {'Required n':<12}")
+    logging.info("%-15s %-12s %-12s", 'Effect Size', cohens_d_label, 'Required n')
     print("-" * 40)
     
     for name, d in zip(effect_names, effect_sizes):
         required_n = compute_required_sample_size(d, power=0.8, alpha=0.05)
-        logging.info(f"{name:<15} {d:<12.1f} {required_n:<12d}")
+        logging.info("%-15s %-12.1f %-12d", name, d, required_n)
     
     print("\n" + "="*80)
     logging.info("Demo complete!")
@@ -1300,8 +1341,10 @@ def test_normality(
         else:
             crit_idx = 2  # default to 5%
         
-        statistic = result.statistic
-        critical_value = result.critical_values[crit_idx]
+        # Use getattr guards for third-party return objects to satisfy static checking
+        statistic = getattr(result, 'statistic', float('nan'))
+        crit_vals = getattr(result, 'critical_values', None)
+        critical_value = float(crit_vals[crit_idx]) if crit_vals is not None and len(crit_vals) > crit_idx else float('nan')
         normal = statistic < critical_value
         p_value = None  # Anderson-Darling doesn't return p-value directly
         interpretation = f"Data {'appears' if normal else 'does not appear'} normally distributed (A²={statistic:.4f}, critical={critical_value:.4f})"
@@ -1419,9 +1462,9 @@ def compare_optimizers_wilcoxon(
         raise ValueError("Wilcoxon test requires paired samples of equal length")
     
     # Compute statistics
-    median_A = np.median(results_A)
-    median_B = np.median(results_B)
-    median_diff = np.median(results_A - results_B)
+    median_A = float(np.median(results_A))
+    median_B = float(np.median(results_B))
+    median_diff = float(np.median(results_A - results_B))
     
     # Wilcoxon signed-rank test
     statistic, p_value = stats.wilcoxon(
@@ -1429,12 +1472,30 @@ def compare_optimizers_wilcoxon(
         results_B,
         alternative=alternative
     )
+    # Normalize numeric types (some scipy/stub returns can be ambiguous)
+    def _to_float_like(x: Any) -> float:
+        """Defensively coerce various numeric-like return values to Python float."""
+        if isinstance(x, (tuple, list, np.ndarray)):
+            try:
+                return float(x[0])
+            except Exception:
+                return float('nan')
+        try:
+            return float(x)
+        except Exception:
+            try:
+                return float(getattr(x, 'item', lambda: float('nan'))())
+            except Exception:
+                return float('nan')
+
+    statistic = _to_float_like(statistic)
+    p_value = _to_float_like(p_value)
     
     # Effect size (rank-biserial correlation for paired samples)
     # r = Z / sqrt(n)
     n = len(results_A)
-    z_score = stats.norm.ppf(1 - p_value / 2) if p_value < 1 else 0
-    r = z_score / np.sqrt(n)
+    z_score = stats.norm.ppf(1 - p_value / 2) if p_value < 1 else 0.0
+    r = float(z_score) / np.sqrt(n) if n > 0 else 0.0
     
     significant = p_value < alpha
     

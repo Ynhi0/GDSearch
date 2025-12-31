@@ -64,7 +64,7 @@ def plot_eigenvalue_evolution(df: pd.DataFrame,
     plt.tight_layout()
     
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
         print(f"Saved eigenvalue evolution plot to {save_path}")
     else:
         plt.show()
@@ -128,7 +128,7 @@ def plot_eigenvalue_trajectory_overlay(df: pd.DataFrame,
     plt.tight_layout()
     
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
         print(f"Saved trajectory overlay plot to {save_path}")
     else:
         plt.show()

@@ -214,11 +214,11 @@ def create_loss_landscape_animation(test_function,
             line.set_data([], [])
             return (line,)
 
-        def update(frame):
+        def update_traj(frame):
             line.set_data(traj[:frame + 1, 0], traj[:frame + 1, 1])
             return (line,)
 
-        anim = animation.FuncAnimation(fig, update, frames=len(traj), init_func=init, blit=True)
+        anim = animation.FuncAnimation(fig, update_traj, frames=len(traj), init_func=init, blit=True)
     else:
         # Sweep mode (no trajectory) - produce a simple animated variation
         Zs = []
@@ -236,7 +236,7 @@ def create_loss_landscape_animation(test_function,
         cs = ax.contourf(X, Y, Zs[0], 50, cmap=cmap)
         fig.colorbar(cs, ax=ax)
 
-        def update(frame_idx):
+        def update_sweep(frame_idx):
             ax.clear()
             ax.contourf(X, Y, Zs[frame_idx], 50, cmap=cmap)
             ax.set_xlabel('x')
@@ -244,7 +244,7 @@ def create_loss_landscape_animation(test_function,
             ax.set_title(f'frame: {frame_idx}')
             return []
 
-        anim = animation.FuncAnimation(fig, update, frames=n_frames, interval=interval)
+        anim = animation.FuncAnimation(fig, update_sweep, frames=n_frames, interval=interval)
 
     if save_path:
         os.makedirs(os.path.dirname(save_path) or '.', exist_ok=True)

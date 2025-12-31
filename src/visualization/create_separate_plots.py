@@ -59,10 +59,11 @@ def create_separate_plots(
     detailed_df = pd.read_csv(detailed_csv)
     
     # Extract data (convert to native Python/numpy types for plotting)
+    from src.utils.plot_helpers import arr_to_numpy_float, labels_to_str_sequence
     optimizers = summary_df['Optimizer'].astype(str).tolist()  # ensure list[str] for tick labels
-    losses = summary_df['Mean Loss'].to_numpy(dtype=float)
-    stds = summary_df['Std Loss'].to_numpy(dtype=float)
-    distances = summary_df['Mean Distance'].to_numpy(dtype=float)
+    losses = arr_to_numpy_float(summary_df['Mean Loss'])
+    stds = arr_to_numpy_float(summary_df['Std Loss'])
+    distances = arr_to_numpy_float(summary_df['Mean Distance'])
     
     # Color scheme
     colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A']
@@ -132,7 +133,7 @@ def create_separate_plots(
     plt.figure(figsize=(10, 6))
     
     conv_rates = []
-    for conv in summary_df['Converged'].values:
+    for conv in summary_df['Converged'].astype(str).to_numpy():
         try:
             parts = str(conv).split('/')
             if len(parts) == 2:
@@ -171,11 +172,8 @@ def create_separate_plots(
     # ============= PLOT 4: Box Plot Distribution =============
     plt.figure(figsize=(10, 6))
     
-    box_data = [detailed_df[detailed_df['optimizer'] == opt]['final_loss'].values 
+    box_data = [arr_to_numpy_float(detailed_df[detailed_df['optimizer'] == opt]['final_loss']) 
                 for opt in optimizers]
-    
-    # Use labels=optimizers for matplotlib compatibility; convert data to numpy arrays
-    box_data = [np.asarray(d) for d in box_data]
     bp = plt.boxplot(box_data, patch_artist=True, 
                      showmeans=True, meanline=True,
                      boxprops=dict(linewidth=1.5),
@@ -213,11 +211,11 @@ def create_separate_plots(
     # Create p-value matrix - parse comparison strings
     p_matrix = np.ones((len(optimizers), len(optimizers)))
     for _, row in stats_df.iterrows():
-        comp_parts = row['Comparison'].split(' vs ')
+        comp_parts = str(row.get('Comparison', '')).split(' vs ')
         opt1 = comp_parts[0]
         opt2 = comp_parts[1]
-        opt1_idx = optimizers.tolist().index(opt1)
-        opt2_idx = optimizers.tolist().index(opt2)
+        opt1_idx = optimizers.index(opt1)
+        opt2_idx = optimizers.index(opt2)
         p_matrix[opt1_idx, opt2_idx] = row['p-value']
         p_matrix[opt2_idx, opt1_idx] = row['p-value']
     
@@ -260,9 +258,10 @@ def create_separate_plots(
     # ============= PLOT 6: Effect Sizes =============
     plt.figure(figsize=(12, 6))
     
-    comparisons = [row['Comparison'].replace(' vs ', '\nvs\n') 
-                   for _, row in stats_df.iterrows()]
-    effect_sizes = stats_df['Cohens d'].values
+    # Ensure comparison labels are strings and safe for plotting
+    comparisons = [str(row['Comparison']).replace(' vs ', '\nvs\n') for _, row in stats_df.iterrows()]
+    from src.utils.plot_helpers import arr_to_numpy_float
+    effect_sizes = arr_to_numpy_float(stats_df['Cohens d'].values)
     
     # Color based on effect size magnitude
     bar_colors = []
@@ -297,7 +296,7 @@ def create_separate_plots(
     plt.grid(axis='y', alpha=0.3)
     
     # Add value labels
-    for i, (d, effect) in enumerate(zip(effect_sizes, stats_df['Effect'].values)):
+    for i, (d, effect) in enumerate(zip(effect_sizes, stats_df['Effect'].astype(str).to_numpy())):
         y_pos = d + (0.3 if d > 0 else -0.3)
         plt.text(i, y_pos, f'd={d:.2f}\n({effect})', 
                  ha='center', va='bottom' if d > 0 else 'top', 

@@ -16,6 +16,7 @@ import torch.nn as nn
 import tempfile
 import os
 from pathlib import Path
+from typing import Any, Dict, Optional, Callable, List
 from src.core.io_utils import torch_load_safe, torch_save_safe
 
 # Import wrappers to test
@@ -34,11 +35,11 @@ class SimpleModel(nn.Module):
         return self.fc2(x)
 
 
-def train_n_steps(model, optimizer, n_steps=5, closure_fn=None):
+def train_n_steps(model: nn.Module, optimizer: torch.optim.Optimizer, n_steps: int = 5, closure_fn: Optional[Callable] = None) -> List[float]:
     """Train model for n steps and return losses."""
     model.train()
     model = model.float()
-    losses = []
+    losses: List[float] = []
     
     for _ in range(n_steps):
         x = torch.randn(4, 10, dtype=torch.float32)
@@ -53,16 +54,35 @@ def train_n_steps(model, optimizer, n_steps=5, closure_fn=None):
         
         if closure_fn or isinstance(optimizer, SAMWrapper):
             # SAM requires closure
-            loss = optimizer.step(closure)
+            loss_val = optimizer.step(closure)
         else:
             optimizer.zero_grad()
             output = model(x)
-            loss = nn.functional.cross_entropy(output, y)
-            loss.backward()
+            loss_tensor = nn.functional.cross_entropy(output, y)
+            loss_tensor.backward()
             optimizer.step()
-            loss = loss.item()
-        
-        losses.append(loss if isinstance(loss, float) else loss.item())
+            loss_val = loss_tensor
+
+        # Normalize to Python float safely
+        import numbers
+        loss_scalar: float
+        if isinstance(loss_val, torch.Tensor):
+            loss_scalar = float(loss_val.item())
+        elif isinstance(loss_val, numbers.Number):
+            from typing import Any, cast
+            loss_scalar = float(cast(Any, loss_val))
+        else:
+            try:
+                from typing import Any, cast
+                loss_scalar = float(cast(Any, loss_val))
+            except Exception:
+                # Fall back to calling .item() only when available
+                item_fn = getattr(loss_val, 'item', None)
+                if callable(item_fn):
+                    loss_scalar = float(cast(Any, item_fn()))
+                else:
+                    raise TypeError("Could not convert loss value to float")
+        losses.append(loss_scalar)
     
     return losses
 
@@ -100,7 +120,7 @@ class TestLookaheadCheckpoint:
         train_n_steps(model1, lookahead1, n_steps=10)
         
         # Save checkpoint
-        checkpoint = {
+        checkpoint: Dict[str, Any] = {
             'model': model1.state_dict(),
             'optimizer': lookahead1.state_dict(),
             'step': lookahead1.step_count
@@ -158,7 +178,7 @@ class TestLookaheadCheckpoint:
             losses_test.extend(train_n_steps(model_test, lookahead_test, n_steps=1))
         
         # Save checkpoint
-        checkpoint = {
+        checkpoint: Dict[str, Any] = {
             'model': model_test.state_dict(),
             'optimizer': lookahead_test.state_dict(),
         }
@@ -209,7 +229,7 @@ class TestSAMCheckpoint:
         train_n_steps(model1, sam1, n_steps=5)
         
         # Save checkpoint
-        checkpoint = {
+        checkpoint: Dict[str, Any] = {
             'model': model1.state_dict(),
             'optimizer': sam1.state_dict(),
         }
@@ -260,7 +280,7 @@ class TestSAMCheckpoint:
             train_n_steps(model_test, sam_test, n_steps=1, closure_fn=True)
         
         # Save & load
-        checkpoint = {
+        checkpoint: Dict[str, Any] = {
             'model': model_test.state_dict(),
             'optimizer': sam_test.state_dict(),
         }

@@ -16,7 +16,7 @@ import sys
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 import matplotlib.pyplot as plt
 import seaborn as sns
 from itertools import combinations
@@ -61,7 +61,12 @@ def load_optimizer_results(
                 df = pd.read_csv(file)
                 eval_df = df[df['phase'] == 'eval']
                 if not eval_df.empty:
-                    final_value = eval_df[metric].iloc[-1]
+                    series = eval_df[metric]
+                    iloc_attr = getattr(series, 'iloc', None)
+                    if iloc_attr is not None:
+                        final_value = iloc_attr[-1]
+                    else:
+                        final_value = series[-1]
                     metrics.append(final_value)
             except Exception as e:
                 logging.info(f"  Error reading {file.name}: {e}")
@@ -124,9 +129,9 @@ def create_comparison_matrix(
             # else: tie (remains 0)
     
     # Convert to DataFrames
-    p_value_df = pd.DataFrame(p_values, index=optimizers, columns=optimizers)
-    effect_size_df = pd.DataFrame(effect_sizes, index=optimizers, columns=optimizers)
-    win_loss_df = pd.DataFrame(win_loss, index=optimizers, columns=optimizers)
+    p_value_df = pd.DataFrame(p_values, index=pd.Index(optimizers), columns=pd.Index(optimizers))
+    effect_size_df = pd.DataFrame(effect_sizes, index=pd.Index(optimizers), columns=pd.Index(optimizers))
+    win_loss_df = pd.DataFrame(win_loss, index=pd.Index(optimizers), columns=pd.Index(optimizers))
     
     return p_value_df, effect_size_df, win_loss_df
 
@@ -135,7 +140,7 @@ def plot_comparison_heatmaps(
     p_value_df: pd.DataFrame,
     effect_size_df: pd.DataFrame,
     win_loss_df: pd.DataFrame,
-    save_path: str = None
+    save_path: Optional[str] = None
 ):
     """
     Plot comparison matrices as heatmaps.
@@ -174,8 +179,8 @@ def plot_comparison_heatmaps(
     
     plt.tight_layout()
     
-    if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    if save_path is not None:
+        plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
         logging.info(f"Comparison heatmaps saved to: {save_path}")
         plt.close()
     else:
@@ -187,7 +192,7 @@ def generate_comparison_report(
     p_value_df: pd.DataFrame,
     effect_size_df: pd.DataFrame,
     win_loss_df: pd.DataFrame,
-    save_path: str = None
+    save_path: Optional[str] = None
 ) -> str:
     """
     Generate comprehensive comparison report.
@@ -268,7 +273,7 @@ def generate_comparison_report(
     
     report_text = "\n".join(report)
     
-    if save_path:
+    if save_path is not None:
         with open(save_path, 'w', encoding='utf-8') as f:
             f.write(report_text)
         logging.info(f"Comparison report saved to: {save_path}")

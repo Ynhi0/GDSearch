@@ -18,6 +18,8 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from scipy import stats
+import logging
+from src.utils.num_utils import safe_to_float
 
 import torch
 
@@ -443,7 +445,9 @@ def run_single_experiment(optimizer_name: str, seed: int, lr: float, epochs: int
     return df, elapsed
 
 
-def run_suite(seeds, epochs, batch_size, results_dir: str, *, resume: bool = False, ckpt_dir: str | None = None, optimizer_filter: list | None = None):
+from typing import Union
+
+def run_suite(seeds, epochs, batch_size, results_dir: Union[str, Path], *, resume: bool = False, ckpt_dir: str | None = None, optimizer_filter: list | None = None):
     results_dir = Path(results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -548,7 +552,8 @@ def compute_statistics(results_dir: str):
             stat_name = 'Wilcoxon'
             W, p = stats.wilcoxon(vals_A, vals_B)
             n = len(vals_A)
-            d = 1 - (2 * W) / (n * (n + 1))  # rank-biserial correlation
+            Wf = safe_to_float(W)
+            d = 1.0 - (2.0 * Wf) / (n * (n + 1))  # rank-biserial correlation
 
         rows.append({
             'Optimizer A': A,
@@ -559,8 +564,8 @@ def compute_statistics(results_dir: str):
             'Mean B': vals_B.mean(),
             'Std B': vals_B.std(ddof=1),
             'Test': stat_name,
-            'p-value': float(p),
-            "Effect size (d or r)": float(d),
+            'p-value': safe_to_float(p),
+            "Effect size (d or r)": safe_to_float(d),
         })
 
     df = pd.DataFrame(rows)
@@ -568,14 +573,16 @@ def compute_statistics(results_dir: str):
         print("No comparisons could be computed (need >=3 common seeds per pair).")
         return None
 
-    # Holm-Bonferroni correction
+    # Holm-Bonferroni correction (coerce p-values to floats for safety)
     m = len(df)
-    order = np.argsort(df['p-value'].values)
+    pvals = np.asarray(pd.to_numeric(df['p-value'], errors='coerce')).astype(float)
+    order = np.argsort(pvals)
     holm_sig = np.zeros(m, dtype=bool)
     alpha = 0.05
     for k, idx in enumerate(order):
-        if df.loc[idx, 'p-value'] < alpha / (m - k):
-            holm_sig[idx] = True
+        pval = float(pvals[int(idx)])
+        if pval < alpha / (m - k):
+            holm_sig[int(idx)] = True
         else:
             break
     df['Significant (Holm-Bonferroni)'] = holm_sig

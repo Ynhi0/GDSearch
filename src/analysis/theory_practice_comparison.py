@@ -196,42 +196,45 @@ def fit_empirical_rate(iterations: np.ndarray, values: np.ndarray,
     try:
         if rate_type == 'linear':
             # Geometric convergence: f(k) = C * exp(-λk) or C * ρ^k
-            def func(k, C, rho):
+            def func_linear(k, C, rho):
                 return C * (rho ** k)
             
             # Initial guess
             p0 = [vals_valid[0], 0.95]
             bounds = ([0, 0], [vals_valid[0] * 10, 0.9999])
             
-            params, _ = curve_fit(func, iters_valid, vals_valid, p0=p0, bounds=bounds, maxfev=5000)
-            fitted = func(iterations, *params)
+            params, _ = curve_fit(func_linear, iters_valid, vals_valid, p0=p0, bounds=bounds, maxfev=5000)
+            fitted = func_linear(iterations, *params)
+            fitted_func = func_linear
             rate = -np.log(params[1])  # λ = -log(ρ)
             
         elif rate_type == 'sublinear':
             # Sublinear convergence: f(k) = C / k
-            def func(k, C):
+            def func_sublinear(k, C):
                 return C / k
             
             p0 = [vals_valid[0] * iters_valid[0]]
-            params, _ = curve_fit(func, iters_valid, vals_valid, p0=p0, maxfev=5000)
-            fitted = func(iterations, *params)
+            params, _ = curve_fit(func_sublinear, iters_valid, vals_valid, p0=p0, maxfev=5000)
+            fitted = func_sublinear(iterations, *params)
+            fitted_func = func_sublinear
             rate = params[0]  # C constant
             
         elif rate_type == 'sqrt':
             # Square root convergence: f(k) = C / √k
-            def func(k, C):
+            def func_sqrt(k, C):
                 return C / np.sqrt(k)
             
             p0 = [vals_valid[0] * np.sqrt(iters_valid[0])]
-            params, _ = curve_fit(func, iters_valid, vals_valid, p0=p0, maxfev=5000)
-            fitted = func(iterations, *params)
+            params, _ = curve_fit(func_sqrt, iters_valid, vals_valid, p0=p0, maxfev=5000)
+            fitted = func_sqrt(iterations, *params)
+            fitted_func = func_sqrt
             rate = params[0]
             
         else:
             raise ValueError(f"Unknown rate type: {rate_type}")
         
         # Compute R²
-        ss_res = np.sum((vals_valid - func(iters_valid, *params))**2)
+        ss_res = np.sum((vals_valid - fitted_func(iters_valid, *params))**2)
         ss_tot = np.sum((vals_valid - np.mean(vals_valid))**2)
         r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
         
@@ -270,9 +273,9 @@ def compare_theory_practice(training_csv: str, optimizer_name: str,
         logging.info(f"Warning: CSV must have 'iteration' and 'loss' columns")
         return {}
     
-    iterations = df['iteration'].values
-    losses = df['loss'].values
-    
+    iterations = np.asarray(df['iteration'].values)
+    losses = np.asarray(df['loss'].values, dtype=float)
+
     # Filter valid data
     valid = (losses > 0) & np.isfinite(losses)
     iterations = iterations[valid]
@@ -392,7 +395,8 @@ def batch_compare_optimizers(results_dir: str, output_dir: str,
     # Create comparison table
     if all_stats:
         comparison_df = pd.DataFrame(all_stats)
-        comparison_df = comparison_df.sort_values('fit_r_squared', ascending=False)
+        from typing import cast
+        comparison_df = cast(pd.DataFrame, comparison_df).sort_values(by=['fit_r_squared'], ascending=False)
         
         table_path = Path(output_dir) / 'theory_practice_comparison.csv'
         comparison_df.to_csv(table_path, index=False)

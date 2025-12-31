@@ -5,11 +5,12 @@ inputs into pd.DataFrame or pd.Series so downstream code can safely use `.iloc`,
 `.columns`, etc., without confusing static analyzers.
 """
 from typing import Iterable, Sequence, Union, Optional
+from numpy.typing import ArrayLike
 import pandas as pd
 import numpy as np
 
 
-def ensure_dataframe(obj: Union[pd.DataFrame, pd.Series, np.ndarray, Sequence[object], dict]) -> pd.DataFrame:
+def ensure_dataframe(obj: Union[pd.DataFrame, pd.Series, np.ndarray, ArrayLike, Sequence[object], dict]) -> pd.DataFrame:
     """Coerce various inputs to a DataFrame.
 
     - If already a DataFrame, return as-is.

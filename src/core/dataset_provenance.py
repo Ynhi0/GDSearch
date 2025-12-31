@@ -167,7 +167,8 @@ def get_dataset_provenance(
             try:
                 from datasets import load_dataset
                 ds = load_dataset('imdb', split=split)
-                provenance['num_samples'] = len(ds)
+                from src.utils.safe_len import len_sized
+                provenance['num_samples'] = len_sized(ds)
             except Exception:
                 provenance['num_samples'] = {'train': 25000, 'test': 25000}.get(split, 'unknown')
     

@@ -3,11 +3,14 @@ import json
 from typing import Dict, Any, Tuple, List
 
 import pandas as pd
+import numpy as np
 import logging
 logging.basicConfig(level=logging.INFO)
 
+from typing import Optional
 from src.experiments.run_nn_experiment import train_and_evaluate, result_filename
 from src.visualization.plot_results import plot_generalization_gap, plot_layer_grad_norms
+from src.utils.type_guards import ensure_dataframe, ensure_series
 
 RESULTS_DIR = 'results'
 PLOTS_DIR = 'plots'
@@ -36,7 +39,7 @@ def run_and_save(cfg: Dict[str, Any], tag: str) -> Tuple[str, pd.DataFrame]:
     return out, df
 
 
-def best_by_eval(csv_paths: List[str], prefer: str = 'accuracy') -> Tuple[str, float]:
+def best_by_eval(csv_paths: List[str], prefer: str = 'accuracy') -> Tuple[Optional[str], float]:
     """
     Return best CSV path by final validation metric.
     
@@ -58,9 +61,12 @@ def best_by_eval(csv_paths: List[str], prefer: str = 'accuracy') -> Tuple[str, f
     best_path = None
     best_score = None
     for p in csv_paths:
-        df = pd.read_csv(p)
+        df = ensure_dataframe(pd.read_csv(p))
         # Use 'val' phase instead of 'eval' to avoid test set leakage
-        val_rows = df[df.get('phase', '') == 'val']
+        if 'phase' in df.columns:
+            val_rows = ensure_dataframe(df[df['phase'] == 'val'])
+        else:
+            val_rows = ensure_dataframe(pd.DataFrame())
         if val_rows.empty:
             # Fallback to 'eval' with warning (should not happen with val_split enabled)
             import logging
@@ -69,29 +75,35 @@ def best_by_eval(csv_paths: List[str], prefer: str = 'accuracy') -> Tuple[str, f
                 "falling back to eval. This may indicate test set leakage!",
                 p
             )
-            val_rows = df[df.get('phase', '') == 'eval']
+            if 'phase' in df.columns:
+                val_rows = ensure_dataframe(df[df['phase'] == 'eval'])
+            else:
+                val_rows = ensure_dataframe(pd.DataFrame())
             if val_rows.empty:
                 continue
-        
+
+        # Determine scoring columns based on preference
+        from src.utils.num_utils import safe_to_float
+        def _extract_series_score(df_section: pd.DataFrame, candidates: list) -> float:
+            for col in candidates:
+                if col in df_section.columns:
+                    ts = ensure_series(df_section[col])
+                    if ts.empty:
+                        return float('nan')
+                    return safe_to_float(ts)
+            return float('nan')
+
         if prefer == 'accuracy':
-            # Try val_accuracy first, fallback to test_accuracy
-            if 'val_accuracy' in val_rows.columns:
-                score = val_rows['val_accuracy'].iloc[-1]
-            elif 'test_accuracy' in val_rows.columns:
-                score = val_rows['test_accuracy'].iloc[-1]
-            else:
+            score = _extract_series_score(val_rows, ['val_accuracy', 'test_accuracy', 'accuracy', 'acc'])
+            if np.isnan(score):
                 continue
             better = (best_score is None) or (score > best_score)
         else:
-            # Try val_loss first, fallback to test_loss
-            if 'val_loss' in val_rows.columns:
-                score = val_rows['val_loss'].iloc[-1]
-            elif 'test_loss' in val_rows.columns:
-                score = val_rows['test_loss'].iloc[-1]
-            else:
+            score = _extract_series_score(val_rows, ['val_loss', 'test_loss', 'loss'])
+            if np.isnan(score):
                 continue
             better = (best_score is None) or (score < best_score)
-        
+
         if better:
             best_score = float(score)
             best_path = p

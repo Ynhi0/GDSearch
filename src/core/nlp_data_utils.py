@@ -12,7 +12,7 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 from collections import Counter
 import numpy as np
-from typing import Tuple, List, Dict, Optional
+from typing import Tuple, List, Dict, Optional, Any
 import re
 
 # CRITICAL FIX: Make datasets import lazy/optional to prevent import-time errors
@@ -181,7 +181,7 @@ def get_imdb_loaders(
     test_size: Optional[int] = None,
     val_split: Optional[float] = None,
     seed: int = 42
-):
+) -> Tuple[DataLoader, Optional[DataLoader], DataLoader, Vocabulary]:
     """
     Create IMDB data loaders with optional validation split.
     
@@ -221,13 +221,14 @@ def get_imdb_loaders(
             print(f"Error: Could not load IMDB dataset: {e2}")
             raise RuntimeError("Failed to load IMDB dataset. Check HuggingFace/fsspec versions.") from e2
     
-    # Extract train data
-    train_texts = dataset['train']['text']
-    train_labels = dataset['train']['label']
-    
+    # Extract train and test data (use a runtime cast to Any to avoid typing conflicts across Dataset-like objects)
+    dataset_any = dataset  # type: Any
+    train_texts = dataset_any['train']['text']
+    train_labels = dataset_any['train']['label']
+
     # Extract test data
-    test_texts = dataset['test']['text']
-    test_labels = dataset['test']['label']
+    test_texts = dataset_any['test']['text']
+    test_labels = dataset_any['test']['label']
     
     # Subsample if requested
     if train_size is not None and train_size < len(train_texts):
@@ -305,17 +306,16 @@ def get_imdb_loaders(
     print(f"✓ Vocabulary size: {len(vocab)}")
     print("="*80)
     
-    if val_loader is not None:
-        return train_loader, val_loader, test_loader, vocab
-    else:
-        return train_loader, test_loader, vocab
+    # Always return a 4-tuple: (train_loader, val_loader or None, test_loader, vocab)
+    # This makes the return shape stable for callers that expect optional validation sets.
+    return train_loader, val_loader, test_loader, vocab
 
 
 if __name__ == '__main__':
     # Test the data loaders
     print("Testing IMDB data loaders...")
     
-    train_loader, test_loader, vocab = get_imdb_loaders(
+    train_loader, val_loader, test_loader, vocab = get_imdb_loaders(
         batch_size=32,
         max_vocab_size=5000,
         max_len=128,

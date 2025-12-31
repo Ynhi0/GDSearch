@@ -13,12 +13,13 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-from typing import Dict, List
+from typing import Dict, List, Optional
 import matplotlib.pyplot as plt
 
 from src.experiments.run_nn_experiment import train_and_evaluate, build_model_and_data
 from src.analysis.statistical_analysis import compare_optimizers_ttest, print_ttest_results
 from src.core.data_utils import get_mnist_loaders, get_cifar10_loaders
+from src.utils.type_guards import ensure_dataframe, ensure_series
 
 
 def run_pytorch_baseline(config: Dict) -> pd.DataFrame:
@@ -39,13 +40,16 @@ def run_pytorch_baseline(config: Dict) -> pd.DataFrame:
     np.random.seed(seed)
     
     # Build model and data
-    model, train_loader, test_loader = build_model_and_data(
+    ret = build_model_and_data(
         dataset=config['dataset'],
         model_name=config['model'],
         batch_size=config.get('batch_size', 128),
         device=device,
         seed=seed
     )
+    # build_model_and_data returns a consistent 4-tuple: (model, train_loader, val_loader, test_loader)
+    # If no validation split was requested, val_loader will be None.
+    model, train_loader, val_loader, test_loader = ret
     
     # Build PyTorch optimizer
     optimizer_name = config['optimizer']
@@ -217,10 +221,12 @@ def run_baseline_comparison(
             filename = f"{custom_opt}_custom_seed{seed}.csv"
             df_custom.to_csv(os.path.join(results_dir, filename), index=False)
             
-            eval_df = df_custom[df_custom['phase'] == 'eval']
+            eval_df = ensure_dataframe(df_custom[df_custom['phase'] == 'eval'])
             if not eval_df.empty:
-                final_acc = eval_df['test_accuracy'].iloc[-1]
-                logging.info(f"Acc: {final_acc:.4f}")
+                ts = ensure_series(eval_df['test_accuracy'])
+                if not ts.empty:
+                    final_acc = float(ts.iloc[-1])
+                    logging.info(f"Acc: {final_acc:.4f}")
             else:
                 logging.info("Done")
             
@@ -247,10 +253,12 @@ def run_baseline_comparison(
             filename = f"{custom_opt}_pytorch_seed{seed}.csv"
             df_pytorch.to_csv(os.path.join(results_dir, filename), index=False)
             
-            eval_df = df_pytorch[df_pytorch['phase'] == 'eval']
+            eval_df = ensure_dataframe(df_pytorch[df_pytorch['phase'] == 'eval'])
             if not eval_df.empty:
-                final_acc = eval_df['test_accuracy'].iloc[-1]
-                logging.info(f"Acc: {final_acc:.4f}")
+                ts = ensure_series(eval_df['test_accuracy'])
+                if not ts.empty:
+                    final_acc = float(ts.iloc[-1])
+                    logging.info(f"Acc: {final_acc:.4f}")
             else:
                 logging.info("Done")
     
@@ -270,9 +278,11 @@ def analyze_baseline_comparison(results: Dict) -> pd.DataFrame:
             # Extract final accuracies
             final_accs = []
             for df in dfs:
-                eval_df = df[df['phase'] == 'eval']
+                eval_df = ensure_dataframe(df[df['phase'] == 'eval'])
                 if not eval_df.empty:
-                    final_accs.append(eval_df['test_accuracy'].iloc[-1])
+                    ts = ensure_series(eval_df['test_accuracy'])
+                    if not ts.empty:
+                        final_accs.append(float(ts.iloc[-1]))
             
             if final_accs:
                 summary_data.append({
@@ -300,13 +310,18 @@ def print_baseline_summary(summary_df: pd.DataFrame):
         
         opt_df = summary_df[summary_df['Optimizer'] == opt]
         
-        custom_row = opt_df[opt_df['Implementation'] == 'Custom'].iloc[0]
-        pytorch_row = opt_df[opt_df['Implementation'] == 'Pytorch'].iloc[0]
-        
+        custom_slice = ensure_dataframe(opt_df[opt_df['Implementation'] == 'Custom'])
+        pytorch_slice = ensure_dataframe(opt_df[opt_df['Implementation'] == 'Pytorch'])
+        if custom_slice.empty or pytorch_slice.empty:
+            logging.info("  Insufficient data for comparison")
+            continue
+        custom_row = custom_slice.iloc[0]
+        pytorch_row = pytorch_slice.iloc[0]
+
         logging.info(f"  Custom:  {custom_row['Mean Accuracy']:.4f} ± {custom_row['Std Accuracy']:.4f}")
         logging.info(f"  PyTorch: {pytorch_row['Mean Accuracy']:.4f} ± {pytorch_row['Std Accuracy']:.4f}")
         
-        diff = custom_row['Mean Accuracy'] - pytorch_row['Mean Accuracy']
+        diff = float(custom_row['Mean Accuracy']) - float(pytorch_row['Mean Accuracy'])
         diff_pct = (diff / pytorch_row['Mean Accuracy']) * 100
         
         if abs(diff) < 0.001:
@@ -321,7 +336,7 @@ def print_baseline_summary(summary_df: pd.DataFrame):
     print("\n" + "="*70)
 
 
-def plot_baseline_comparison(summary_df: pd.DataFrame, save_path: str = None):
+def plot_baseline_comparison(summary_df: pd.DataFrame, save_path: Optional[str] = None):
     """Plot baseline comparison."""
     fig, ax = plt.subplots(figsize=(12, 7))
     
@@ -335,16 +350,31 @@ def plot_baseline_comparison(summary_df: pd.DataFrame, save_path: str = None):
     pytorch_stds = []
     
     for opt in optimizers:
-        opt_df = summary_df[summary_df['Optimizer'] == opt]
-        
-        custom_row = opt_df[opt_df['Implementation'] == 'Custom'].iloc[0]
-        pytorch_row = opt_df[opt_df['Implementation'] == 'Pytorch'].iloc[0]
-        
-        custom_means.append(custom_row['Mean Accuracy'])
-        custom_stds.append(custom_row['Std Accuracy'])
-        pytorch_means.append(pytorch_row['Mean Accuracy'])
-        pytorch_stds.append(pytorch_row['Std Accuracy'])
-    
+        opt_df = ensure_dataframe(summary_df[summary_df['Optimizer'] == opt])
+        if opt_df.empty:
+            # Shouldn't happen, but keep parity with robust handling
+            custom_means.append(0.0)
+            custom_stds.append(0.0)
+            pytorch_means.append(0.0)
+            pytorch_stds.append(0.0)
+            continue
+
+        custom_slice = ensure_dataframe(opt_df[opt_df['Implementation'] == 'Custom'])
+        pytorch_slice = ensure_dataframe(opt_df[opt_df['Implementation'] == 'Pytorch'])
+        if custom_slice.empty or pytorch_slice.empty:
+            custom_means.append(0.0)
+            custom_stds.append(0.0)
+            pytorch_means.append(0.0)
+            pytorch_stds.append(0.0)
+            continue
+
+        custom_row = custom_slice.iloc[0]
+        pytorch_row = pytorch_slice.iloc[0]
+
+        custom_means.append(float(custom_row['Mean Accuracy']))
+        custom_stds.append(float(custom_row['Std Accuracy']))
+        pytorch_means.append(float(pytorch_row['Mean Accuracy']))
+        pytorch_stds.append(float(pytorch_row['Std Accuracy']))
     # Bars
     bars1 = ax.bar(x - width/2, custom_means, width, yerr=custom_stds,
                    label='Custom', capsize=8, alpha=0.8, color='#3498db')
@@ -363,7 +393,7 @@ def plot_baseline_comparison(summary_df: pd.DataFrame, save_path: str = None):
     plt.tight_layout()
     
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
         logging.info(f"Baseline comparison plot saved to: {save_path}")
         plt.close()
     else:

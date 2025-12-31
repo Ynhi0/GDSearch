@@ -32,61 +32,88 @@ def test_data_leakage_protection():
     
     # Test MNIST loaders (with val_split)
     print("\n[1.1] Testing get_mnist_loaders() with val_split...")
-    train_loader, val_loader, test_loader = get_mnist_loaders(batch_size=32, val_split=0.1, seed=42)
+    loaders = get_mnist_loaders(batch_size=32, val_split=0.1, seed=42)
+    if len(loaders) == 3:
+        train_loader, val_loader, test_loader = loaders
+    else:
+        train_loader, test_loader = loaders
+        val_loader = None
     
-    assert hasattr(train_loader, 'name'), "FAIL: train_loader missing 'name' attribute"
-    assert hasattr(train_loader, '_split_type'), "FAIL: train_loader missing '_split_type' attribute"
-    assert hasattr(train_loader, '_dataset_uid'), "FAIL: train_loader missing '_dataset_uid' attribute"
-    assert train_loader.name == 'train', f"FAIL: train_loader.name = '{train_loader.name}', expected 'train'"
-    assert train_loader._split_type == 'train', f"FAIL: train_loader._split_type = '{train_loader._split_type}', expected 'train'"
-    print(f"   ✓ train_loader: name='{train_loader.name}', split='{train_loader._split_type}', uid='{train_loader._dataset_uid}'")
+    # Use getattr to access optional runtime-injected attributes (type stubs may not know about them)
+    name = getattr(train_loader, 'name', None)
+    split = getattr(train_loader, '_split_type', None)
+    uid = getattr(train_loader, '_dataset_uid', None)
+    assert name == 'train', f"FAIL: train_loader.name = '{name}', expected 'train'"
+    assert split == 'train', f"FAIL: train_loader._split_type = '{split}', expected 'train'"
+    assert uid is not None, "FAIL: train_loader missing '_dataset_uid' attribute"
+    print(f"   ✓ train_loader: name='{name}', split='{split}', uid='{uid}'")
     
-    assert hasattr(val_loader, 'name'), "FAIL: val_loader missing 'name' attribute"
-    assert hasattr(val_loader, '_split_type'), "FAIL: val_loader missing '_split_type' attribute"
-    assert hasattr(val_loader, '_dataset_uid'), "FAIL: val_loader missing '_dataset_uid' attribute"
-    assert hasattr(val_loader, '_test_dataset_ref'), "FAIL: val_loader missing '_test_dataset_ref' attribute"
-    assert val_loader.name == 'validation', f"FAIL: val_loader.name = '{val_loader.name}', expected 'validation'"
-    assert val_loader._split_type == 'validation', f"FAIL: val_loader._split_type = '{val_loader._split_type}', expected 'validation'"
-    print(f"   ✓ val_loader: name='{val_loader.name}', split='{val_loader._split_type}', uid='{val_loader._dataset_uid}'")
+    v_name = getattr(val_loader, 'name', None)
+    v_split = getattr(val_loader, '_split_type', None)
+    v_uid = getattr(val_loader, '_dataset_uid', None)
+    v_test_ref = getattr(val_loader, '_test_dataset_ref', None)
+    assert v_name == 'validation', f"FAIL: val_loader.name = '{v_name}', expected 'validation'"
+    assert v_split == 'validation', f"FAIL: val_loader._split_type = '{v_split}', expected 'validation'"
+    assert v_uid is not None, "FAIL: val_loader missing '_dataset_uid' attribute"
+    assert v_test_ref is not None, "FAIL: val_loader missing '_test_dataset_ref' attribute"
+    print(f"   ✓ val_loader: name='{v_name}', split='{v_split}', uid='{v_uid}'")
     
-    assert hasattr(test_loader, 'name'), "FAIL: test_loader missing 'name' attribute"
-    assert hasattr(test_loader, '_split_type'), "FAIL: test_loader missing '_split_type' attribute"
-    assert hasattr(test_loader, '_dataset_uid'), "FAIL: test_loader missing '_dataset_uid' attribute"
-    assert test_loader.name == 'test', f"FAIL: test_loader.name = '{test_loader.name}', expected 'test'"
-    assert test_loader._split_type == 'test', f"FAIL: test_loader._split_type = '{test_loader._split_type}', expected 'test'"
-    print(f"   ✓ test_loader: name='{test_loader.name}', split='{test_loader._split_type}', uid='{test_loader._dataset_uid}'")
+    t_name = getattr(test_loader, 'name', None)
+    t_split = getattr(test_loader, '_split_type', None)
+    t_uid = getattr(test_loader, '_dataset_uid', None)
+    assert t_name == 'test', f"FAIL: test_loader.name = '{t_name}', expected 'test'"
+    assert t_split == 'test', f"FAIL: test_loader._split_type = '{t_split}', expected 'test'"
+    assert t_uid is not None, "FAIL: test_loader missing '_dataset_uid' attribute"
+    print(f"   ✓ test_loader: name='{t_name}', split='{t_split}', uid='{t_uid}'")
     
     # Test MNIST loaders (without val_split)
     print("\n[1.2] Testing get_mnist_loaders() without val_split...")
     train_loader, test_loader = get_mnist_loaders(batch_size=32, seed=42)
-    assert train_loader.name == 'train', f"FAIL: train_loader.name = '{train_loader.name}'"
-    assert test_loader.name == 'test', f"FAIL: test_loader.name = '{test_loader.name}'"
-    print(f"   ✓ train_loader: name='{train_loader.name}', split='{train_loader._split_type}'")
-    print(f"   ✓ test_loader: name='{test_loader.name}', split='{test_loader._split_type}'")
+    name_t = getattr(train_loader, 'name', None)
+    split_t = getattr(train_loader, '_split_type', None)
+    name_te = getattr(test_loader, 'name', None)
+    split_te = getattr(test_loader, '_split_type', None)
+    assert name_t == 'train', f"FAIL: train_loader.name = '{name_t}'"
+    assert name_te == 'test', f"FAIL: test_loader.name = '{name_te}'"
+    print(f"   ✓ train_loader: name='{name_t}', split='{split_t}'")
+    print(f"   ✓ test_loader: name='{name_te}', split='{split_te}'")
     
     # Test CIFAR-10 loaders
     print("\n[1.3] Testing get_cifar10_loaders() with val_split...")
-    train_loader, val_loader, test_loader = get_cifar10_loaders(batch_size=32, val_split=0.1, seed=42)
-    assert train_loader._split_type == 'train', f"FAIL: CIFAR-10 train_loader._split_type = '{train_loader._split_type}'"
-    assert val_loader._split_type == 'validation', f"FAIL: CIFAR-10 val_loader._split_type = '{val_loader._split_type}'"
-    assert test_loader._split_type == 'test', f"FAIL: CIFAR-10 test_loader._split_type = '{test_loader._split_type}'"
+    loaders = get_cifar10_loaders(batch_size=32, val_split=0.1, seed=42)
+    if len(loaders) == 3:
+        train_loader, val_loader, test_loader = loaders
+    else:
+        train_loader, test_loader = loaders
+        val_loader = None
+    assert getattr(train_loader, '_split_type', None) == 'train', f"FAIL: CIFAR-10 train_loader._split_type = '{getattr(train_loader, '_split_type', None)}'"
+    assert getattr(val_loader, '_split_type', None) == 'validation', f"FAIL: CIFAR-10 val_loader._split_type = '{getattr(val_loader, '_split_type', None)}'"
+    assert getattr(test_loader, '_split_type', None) == 'test', f"FAIL: CIFAR-10 test_loader._split_type = '{getattr(test_loader, '_split_type', None)}'"
     print(f"   ✓ CIFAR-10 loaders have correct split_type metadata")
     
     # Test CIFAR-100 loaders
     print("\n[1.4] Testing get_cifar100_loaders() with val_split...")
-    train_loader, val_loader, test_loader = get_cifar100_loaders(batch_size=32, val_split=0.1, seed=42)
-    assert train_loader._split_type == 'train', f"FAIL: CIFAR-100 train_loader._split_type = '{train_loader._split_type}'"
-    assert val_loader._split_type == 'validation', f"FAIL: CIFAR-100 val_loader._split_type = '{val_loader._split_type}'"
+    loaders = get_cifar100_loaders(batch_size=32, val_split=0.1, seed=42)
+    if len(loaders) == 3:
+        train_loader, val_loader, test_loader = loaders
+    else:
+        train_loader, test_loader = loaders
+        val_loader = None
+    assert getattr(train_loader, '_split_type', None) == 'train', f"FAIL: CIFAR-100 train_loader._split_type = '{getattr(train_loader, '_split_type', None)}'"
+    assert getattr(val_loader, '_split_type', None) == 'validation', f"FAIL: CIFAR-100 val_loader._split_type = '{getattr(val_loader, '_split_type', None)}'"
     print(f"   ✓ CIFAR-100 loaders have correct split_type metadata")
     
     # Test make_dataloader helper
     print("\n[1.5] Testing make_dataloader() helper...")
     dataset = TensorDataset(torch.randn(100, 10), torch.randint(0, 2, (100,)))
     loader = make_dataloader(dataset, batch_size=16, seed=42)
-    assert hasattr(loader, 'name'), "FAIL: make_dataloader() missing 'name' attribute"
-    assert hasattr(loader, '_split_type'), "FAIL: make_dataloader() missing '_split_type' attribute"
-    assert hasattr(loader, '_dataset_uid'), "FAIL: make_dataloader() missing '_dataset_uid' attribute"
-    print(f"   ✓ make_dataloader: name='{loader.name}', split='{loader._split_type}', uid='{loader._dataset_uid}'")
+    l_name = getattr(loader, 'name', None)
+    l_split = getattr(loader, '_split_type', None)
+    l_uid = getattr(loader, '_dataset_uid', None)
+    assert l_name is not None, "FAIL: make_dataloader() missing 'name' attribute"
+    assert l_split is not None, "FAIL: make_dataloader() missing '_split_type' attribute"
+    assert l_uid is not None, "FAIL: make_dataloader() missing '_dataset_uid' attribute"
+    print(f"   ✓ make_dataloader: name='{l_name}', split='{l_split}', uid='{l_uid}'")
     
     print("\n✅ TEST 1 PASSED: All loaders have required metadata for test-leakage prevention")
 
@@ -234,7 +261,12 @@ def test_tuning_validation_enforcement():
     print(f"   ✓ OptunaHyperparameterTuner.optimize() calls enforce_no_test_in_tuning()")
     
     print("\n[4.3] Testing that test loader is correctly rejected...")
-    train_loader, val_loader, test_loader = get_mnist_loaders(batch_size=32, val_split=0.1, seed=42)
+    loaders = get_mnist_loaders(batch_size=32, val_split=0.1, seed=42)
+    if len(loaders) == 3:
+        train_loader, val_loader, test_loader = loaders
+    else:
+        train_loader, test_loader = loaders
+        val_loader = None
     
     # Create a simple objective function
     def dummy_objective(trial):
@@ -249,7 +281,7 @@ def test_tuning_validation_enforcement():
     # Test with validation loader (should work)
     try:
         # Don't actually run trials, just check that validation passes
-        print(f"   ✓ Validation loader passes check (split_type='{val_loader._split_type}')")
+        print(f"   ✓ Validation loader passes check (split_type='{getattr(val_loader, '_split_type', None)}')")
     except Exception as e:
         print(f"   ✗ FAIL: Validation loader rejected: {e}")
         raise

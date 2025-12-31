@@ -49,6 +49,9 @@ def configure_windows_console_encoding():
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+# Common numeric library
+import numpy as np
+
 # ASCII-safe symbols for Windows compatibility
 CHECK = 'OK' if sys.platform == 'win32' else 'OK'
 CROSS = 'X' if sys.platform == 'win32' else 'X'
@@ -104,13 +107,16 @@ def test_imports():
     print_success("Statistical analysis module")
     
     print(f"\n{GREEN}All imports successful{RESET}")
+    return True
 
 
 def test_mnist_quick():
     """Test MNIST experiment with ultra-quick mode"""
     # Use the general helper which runs an ultra-quick single experiment and validates results
     success = run_quick_experiment('mnist', expected_min_optimizers=3, min_train_acc=80.0, min_test_acc=80.0)
-    assert success, "MNIST quick test failed"
+    if not success:
+        raise AssertionError("MNIST quick test failed")
+    return success
         
         
 
@@ -148,6 +154,7 @@ def test_validation_script():
     
     print_success("Comprehensive validation PASSED")
     # Show summary
+    return True
     lines = result.stdout.split('\n')
     for line in lines:
         if 'Total Passed' in line or 'Total Failed' in line or 'Missing Files' in line:
@@ -258,7 +265,7 @@ def run_quick_experiment(experiment_name, expected_min_optimizers=3, min_train_a
                     return False
 
             cols_to_check = [c for c in ['train_loss', 'train_acc', 'test_loss', 'test_acc'] if c in df.columns]
-            if cols_to_check and df[cols_to_check].isnull().any().any():
+            if cols_to_check and np.any(df[cols_to_check].isnull().to_numpy()):
                 print_error("Found NaN values in results")
                 return False
 

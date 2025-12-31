@@ -87,7 +87,7 @@ class ConvergenceAnalyzer:
         
         # Gradient-based metrics (if available)
         grad_metrics = {}
-        if grad_norms is not None and len(grad_norms) > 0:
+        if grad_norms is not None and np.asarray(grad_norms).size > 0:
             grad_norms = np.array(grad_norms)[finite_mask]
             grad_metrics = {
                 'final_grad_norm': grad_norms[-1],
@@ -150,7 +150,8 @@ class ConvergenceAnalyzer:
         
         # Sort by convergence rate
         if 'mean_convergence_rate_value' in df.columns:
-            df = df.sort_values('mean_convergence_rate_value', ascending=False)
+            from typing import cast
+            df = cast(pd.DataFrame, df).sort_values(by=['mean_convergence_rate_value'], ascending=False)
         
         return df
     
@@ -452,7 +453,8 @@ def analyze_non_convex_convergence(
             subset = opt_data[opt_data[seed_col] == seed]
             if not isinstance(subset, pd.DataFrame):
                 subset = pd.DataFrame(subset)
-            seed_data = subset.sort_values(by='epoch')
+            from typing import cast
+            seed_data = cast(pd.DataFrame, subset).sort_values(by=['epoch'])
             losses = seed_data[loss_col].values
 
             traj = {'losses': losses}

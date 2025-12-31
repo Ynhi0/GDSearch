@@ -9,10 +9,14 @@ This script converts CSV results into:
 import pandas as pd
 import numpy as np
 from pathlib import Path
+from typing import Optional, cast
+import os
+# Safe numeric coercion helper
+from src.utils.num_utils import safe_to_float
 try:
     from openpyxl import Workbook
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
-    from openpyxl.utils.dataframe import dataframe_to_rows
+    # Import `dataframe_to_rows` lazily inside the Excel export helper to avoid static import errors
     OPENPYXL_AVAILABLE = True
 except ImportError:
     OPENPYXL_AVAILABLE = False
@@ -20,7 +24,7 @@ except ImportError:
     print("   Install with: pip install openpyxl")
 
 
-def generate_mnist_comparison_table(csv_path: str, output_path: str = None, excel_path: str = None):
+def generate_mnist_comparison_table(csv_path: str, output_path: Optional[str] = None, excel_path: Optional[str] = None):
     """
     Generate LaTeX table and Excel file for MNIST optimizer comparison.
     
@@ -32,22 +36,44 @@ def generate_mnist_comparison_table(csv_path: str, output_path: str = None, exce
     df = pd.read_csv(csv_path)
     
     # Add significance stars column for display
-    df['p-value (formatted)'] = df['p-value'].apply(lambda p: 
-        f"{p:.4f}***" if p < 0.001 else
-        f"{p:.4f}**" if p < 0.01 else
-        f"{p:.4f}*" if p < 0.05 else
-        f"{p:.4f}"
-    )
+    def _format_p(p):
+        try:
+            p_f = float(p)
+        except Exception:
+            p_f = float('nan')
+        if p_f < 0.001:
+            return f"{p_f:.4f}***"
+        if p_f < 0.01:
+            return f"{p_f:.4f}**"
+        if p_f < 0.05:
+            return f"{p_f:.4f}*"
+        return f"{p_f:.4f}"
+
+    df['p-value (formatted)'] = df['p-value'].apply(_format_p)
     
-    # Format Cohen's d
+    # Format Cohen's d (safe)
     if "Cohen's d" in df.columns:
-        df["Cohen's d (formatted)"] = df["Cohen's d"].apply(
-            lambda d: f"{d:.3f}" if not np.isnan(d) else "---"
-        )
+        def _format_effect_size(d):
+            try:
+                v = safe_to_float(d)
+                if np.isnan(v):
+                    return "---"
+                return f"{v:.3f}"
+            except Exception:
+                return "---"
+        df["Cohen's d (formatted)"] = df["Cohen's d"].apply(_format_effect_size)
     
-    # Format power
+    # Format power (safe)
     if 'Observed power' in df.columns:
-        df['Power (formatted)'] = df['Observed power'].apply(lambda p: f"{p:.3f}")
+        def _format_power(p):
+            try:
+                v = safe_to_float(p)
+                if np.isnan(v):
+                    return "---"
+                return f"{v:.3f}"
+            except Exception:
+                return "---"
+        df['Power (formatted)'] = df['Observed power'].apply(_format_power)
     
     # === LaTeX Table ===
     latex_lines = []
@@ -61,28 +87,30 @@ def generate_mnist_comparison_table(csv_path: str, output_path: str = None, exce
     latex_lines.append("\\midrule")
     
     for _, row in df.iterrows():
-        opt_a = row['Optimizer A'].replace('_', '\\_')
-        opt_b = row['Optimizer B'].replace('_', '\\_')
+        opt_a = str(row['Optimizer A']).replace('_', '\\_')
+        opt_b = str(row['Optimizer B']).replace('_', '\\_')
         n = int(row['n'])
         mean_a = f"{row['Mean A']:.4f}"
         mean_b = f"{row['Mean B']:.4f}"
         
-        # Format p-value with significance stars
-        p_val = row['p-value']
-        if p_val < 0.001:
-            p_str = f"{p_val:.4f}***"
-        elif p_val < 0.01:
-            p_str = f"{p_val:.4f}**"
-        elif p_val < 0.05:
-            p_str = f"{p_val:.4f}*"
+        # Format p-value with significance stars (coerce safely to float)
+        p_val_f = safe_to_float(row.get('p-value', np.nan))
+        if not np.isnan(p_val_f) and p_val_f < 0.001:
+            p_str = f"{p_val_f:.4f}***"
+        elif not np.isnan(p_val_f) and p_val_f < 0.01:
+            p_str = f"{p_val_f:.4f}**"
+        elif not np.isnan(p_val_f) and p_val_f < 0.05:
+            p_str = f"{p_val_f:.4f}*"
+        elif not np.isnan(p_val_f):
+            p_str = f"{p_val_f:.4f}"
         else:
-            p_str = f"{p_val:.4f}"
+            p_str = "---"
         
-        cohens_d = row.get("Cohen's d", np.nan)
+        cohens_d = safe_to_float(row.get("Cohen's d", np.nan))
         cohens_str = f"{cohens_d:.3f}" if not np.isnan(cohens_d) else "---"
-        
-        power = row['Observed power']
-        power_str = f"{power:.3f}"
+
+        power = safe_to_float(row.get('Observed power', np.nan))
+        power_str = f"{power:.3f}" if not np.isnan(power) else "---"
         
         latex_lines.append(f"{opt_a} & {opt_b} & {n} & {mean_a} & {mean_b} & {p_str} & {cohens_str} & {power_str} \\\\")
     
@@ -110,9 +138,18 @@ def generate_mnist_comparison_table(csv_path: str, output_path: str = None, exce
     return latex_content
 
 
-def _export_to_excel_mnist(df: pd.DataFrame, excel_path: str):
+from typing import Optional
+
+def _export_to_excel_mnist(df: pd.DataFrame, excel_path: Optional[str]):
+    if excel_path is None:
+        raise ValueError("excel_path must be provided")
     """Export MNIST comparison to Excel with formatting."""
-    from openpyxl.utils.dataframe import dataframe_to_rows
+    try:
+        import importlib
+        df_mod = importlib.import_module('openpyxl.utils.dataframe')
+        dataframe_to_rows = df_mod.dataframe_to_rows
+    except Exception as e:
+        raise RuntimeError('openpyxl is not available at runtime; ensure OPENPYXL_AVAILABLE is True') from e
     
     wb = Workbook()
     ws = wb.active
@@ -143,12 +180,14 @@ def _export_to_excel_mnist(df: pd.DataFrame, excel_path: str):
     headers = list(df_export.columns)
     ws.append(headers)
     
-    # Style header row
-    for cell in ws[1]:
-        cell.fill = header_fill
-        cell.font = header_font
-        cell.alignment = center_align
-        cell.border = border
+    # Style header row (only if header row exists)
+    header_row = next(ws.iter_rows(min_row=1, max_row=1), None)
+    if header_row is not None:
+        for cell in header_row:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = center_align
+            cell.border = border
     
     # Add data rows
     for row_data in dataframe_to_rows(df_export, index=False, header=False):
@@ -164,17 +203,39 @@ def _export_to_excel_mnist(df: pd.DataFrame, excel_path: str):
     sig_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")  # Light green
     p_col_idx = headers.index('p-value') + 1 if 'p-value' in headers else None
     
-    if p_col_idx:
+    if p_col_idx is not None:
         for row_idx in range(2, ws.max_row + 1):
-            p_val = ws.cell(row_idx, p_col_idx).value
+            try:
+                p_val = ws.cell(row_idx, p_col_idx).value
+            except Exception:
+                # Defensive: skip rows we can't access
+                continue
             if isinstance(p_val, (int, float)) and p_val < 0.05:
-                for cell in ws[row_idx]:
+                # Use iter_rows to fetch the row safely (avoids optional subscript warning)
+                row_cells = ()
+                for r in ws.iter_rows(min_row=row_idx, max_row=row_idx):
+                    row_cells = r
+                    break
+                for cell in row_cells:
+                    if cell is None:
+                        continue
                     cell.fill = sig_fill
-    
+
     # Auto-adjust column widths
     for column in ws.columns:
         max_length = 0
-        column_letter = column[0].column_letter
+        try:
+            first_cell = column[0]
+        except Exception:
+            continue
+        column_letter = getattr(first_cell, 'column_letter', None)
+        if column_letter is None:
+            # MergedCell stubs may not expose column_letter; fall back to numeric column index
+            try:
+                from openpyxl.utils import get_column_letter
+                column_letter = get_column_letter(getattr(first_cell, 'column', 1))
+            except Exception:
+                column_letter = 'A'
         for cell in column:
             try:
                 if len(str(cell.value)) > max_length:
@@ -184,11 +245,9 @@ def _export_to_excel_mnist(df: pd.DataFrame, excel_path: str):
                 pass
         adjusted_width = min(max_length + 2, 50)
         ws.column_dimensions[column_letter].width = adjusted_width
-    
-    # Add notes sheet
-    notes_ws = wb.create_sheet("Notes")
+
+    # Add Notes worksheet with interpretation and methodology
     notes = [
-        ["MNIST Optimizer Comparison - Statistical Analysis"],
         [""],
         ["Methodology:"],
         ["- n=10 seeds per optimizer"],
@@ -205,32 +264,17 @@ def _export_to_excel_mnist(df: pd.DataFrame, excel_path: str):
         ["Color coding:"],
         ["- Green rows: Significant differences (p < 0.05)"],
     ]
+
+    notes_ws = wb.create_sheet("Notes")
     for row in notes:
         notes_ws.append(row)
-    
-    wb.save(excel_path)
+
+    assert excel_path is not None
+    wb.save(cast(str, excel_path))
     print(f"✅ Excel file saved to: {excel_path}")
 
 
-def _export_to_excel_ablation(df: pd.DataFrame, excel_path: str):
-    """Export ablation study to Excel with formatting."""
-    from openpyxl.utils.dataframe import dataframe_to_rows
-    
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Ablation Study"
-    
-    # Styles
-    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-    header_font = Font(bold=True, color="FFFFFF", size=11)
-    center_align = Alignment(horizontal="center", vertical="center")
-    border = Border(
-        left=Side(style='thin'),
-        right=Side(style='thin'),
-        top=Side(style='thin'),
-        bottom=Side(style='thin')
-    )
-    
+
     # Export data
     df_export = df.copy()
     
@@ -238,12 +282,14 @@ def _export_to_excel_ablation(df: pd.DataFrame, excel_path: str):
     headers = list(df_export.columns)
     ws.append(headers)
     
-    # Style header
-    for cell in ws[1]:
-        cell.fill = header_fill
-        cell.font = header_font
-        cell.alignment = center_align
-        cell.border = border
+    # Style header (only if header row exists)
+    header_row = next(ws.iter_rows(min_row=1, max_row=1), None)
+    if header_row is not None:
+        for cell in header_row:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = center_align
+            cell.border = border
     
     # Add data
     for row_data in dataframe_to_rows(df_export, index=False, header=False):
@@ -258,18 +304,38 @@ def _export_to_excel_ablation(df: pd.DataFrame, excel_path: str):
     # Highlight converged optimizers
     conv_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
     conv_col_idx = headers.index('Converged (loss<1e-3)') + 1 if 'Converged (loss<1e-3)' in headers else None
-    
-    if conv_col_idx:
+
+    if conv_col_idx is not None:
         for row_idx in range(2, ws.max_row + 1):
             converged = ws.cell(row_idx, conv_col_idx).value
-            if converged:
-                for cell in ws[row_idx]:
+            try:
+                conv_bool = bool(converged)
+            except Exception:
+                conv_bool = False
+            if conv_bool:
+                # Use iter_rows to fetch the row safely (avoids optional subscript warning)
+                row_cells = ()
+                for r in ws.iter_rows(min_row=row_idx, max_row=row_idx):
+                    row_cells = r
+                    break
+                for cell in row_cells:
+                    if cell is None:
+                        continue
                     cell.fill = conv_fill
     
     # Auto-adjust columns
     for column in ws.columns:
+        if not column:
+            continue
         max_length = 0
-        column_letter = column[0].column_letter
+        first_cell = column[0]
+        column_letter = getattr(first_cell, 'column_letter', None)
+        if column_letter is None:
+            try:
+                from openpyxl.utils import get_column_letter
+                column_letter = get_column_letter(getattr(first_cell, 'column', 1))
+            except Exception:
+                column_letter = 'A'
         for cell in column:
             try:
                 if len(str(cell.value)) > max_length:
@@ -280,16 +346,27 @@ def _export_to_excel_ablation(df: pd.DataFrame, excel_path: str):
         adjusted_width = min(max_length + 2, 50)
         ws.column_dimensions[column_letter].width = adjusted_width
     
-    wb.save(excel_path)
+    assert excel_path is not None
+    wb.save(cast(str, excel_path))
     print(f"✅ Excel file saved to: {excel_path}")
 
 
-def _export_to_excel_robustness(dfs_dict: dict, excel_path: str):
+def _export_to_excel_robustness(dfs_dict: dict, excel_path: Optional[str]):
+    if excel_path is None:
+        raise ValueError("excel_path must be provided")
     """Export robustness analysis to Excel with formatting."""
-    from openpyxl.utils.dataframe import dataframe_to_rows
+    try:
+        import importlib
+        df_mod = importlib.import_module('openpyxl.utils.dataframe')
+        dataframe_to_rows = df_mod.dataframe_to_rows
+    except Exception as e:
+        raise RuntimeError('openpyxl is not available at runtime; ensure OPENPYXL_AVAILABLE is True') from e
     
     wb = Workbook()
-    wb.remove(wb.active)  # Remove default sheet
+    # Remove default sheet if present (some Workbook implementations may set active to None)
+    active_sheet = wb.active
+    if active_sheet is not None:
+        wb.remove(active_sheet)  # Remove default sheet
     
     # Styles
     header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
@@ -310,12 +387,14 @@ def _export_to_excel_robustness(dfs_dict: dict, excel_path: str):
         headers = list(df.columns)
         ws.append(headers)
         
-        # Style header
-        for cell in ws[1]:
-            cell.fill = header_fill
-            cell.font = header_font
-            cell.alignment = center_align
-            cell.border = border
+        # Style header (only if header row exists)
+        header_row = next(ws.iter_rows(min_row=1, max_row=1), None)
+        if header_row is not None:
+            for cell in header_row:
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.alignment = center_align
+                cell.border = border
         
         # Add data
         for row_data in dataframe_to_rows(df, index=False, header=False):
@@ -329,7 +408,7 @@ def _export_to_excel_robustness(dfs_dict: dict, excel_path: str):
         
         # Color code by success rate
         success_col_idx = headers.index('success_rate') + 1 if 'success_rate' in headers else None
-        if success_col_idx:
+        if success_col_idx is not None:
             for row_idx in range(2, ws.max_row + 1):
                 success_rate = ws.cell(row_idx, success_col_idx).value
                 if isinstance(success_rate, (int, float)):
@@ -342,13 +421,27 @@ def _export_to_excel_robustness(dfs_dict: dict, excel_path: str):
                     else:
                         fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")  # Red
                     
-                    for cell in ws[row_idx]:
-                        cell.fill = fill
+                    # Use iter_rows to fetch the row safely
+                    for r in ws.iter_rows(min_row=row_idx, max_row=row_idx):
+                        for cell in r:
+                            if cell is None:
+                                continue
+                            cell.fill = fill
+                        break
         
         # Auto-adjust columns
         for column in ws.columns:
+            if not column:
+                continue
             max_length = 0
-            column_letter = column[0].column_letter
+            first_cell = column[0]
+            column_letter = getattr(first_cell, 'column_letter', None)
+            if column_letter is None:
+                try:
+                    from openpyxl.utils import get_column_letter
+                    column_letter = get_column_letter(getattr(first_cell, 'column', 1))
+                except Exception:
+                    column_letter = 'A'
             for cell in column:
                 try:
                     if len(str(cell.value)) > max_length:
@@ -368,11 +461,105 @@ def _export_to_excel_robustness(dfs_dict: dict, excel_path: str):
         best_row = df.loc[df['success_rate'].idxmax()]
         summary_ws.append([func_name, best_row['optimizer'], f"{best_row['success_rate']:.2%}"])
     
-    wb.save(excel_path)
+    assert excel_path is not None
+    wb.save(cast(str, excel_path))
     print(f"✅ Excel file saved to: {excel_path}")
 
 
-def generate_ablation_table(csv_path: str, output_path: str = None, excel_path: str = None):
+def _export_to_excel_ablation(df: pd.DataFrame, excel_path: Optional[str]):
+    """Export ablation study results to Excel with simple formatting."""
+    if excel_path is None:
+        raise ValueError("excel_path must be provided")
+    try:
+        import importlib
+        df_mod = importlib.import_module('openpyxl.utils.dataframe')
+        dataframe_to_rows = df_mod.dataframe_to_rows
+    except Exception as e:
+        raise RuntimeError('openpyxl is not available at runtime; ensure OPENPYXL_AVAILABLE is True') from e
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Ablation Study"
+
+    # Basic styles (reuse names from file scope)
+    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF", size=11)
+    center_align = Alignment(horizontal="center", vertical="center")
+    border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
+
+    headers = list(df.columns)
+    ws.append(headers)
+    # Style header (only if header row exists)
+    header_row = next(ws.iter_rows(min_row=1, max_row=1), None)
+    if header_row is not None:
+        for cell in header_row:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = center_align
+            cell.border = border
+
+    for row_data in dataframe_to_rows(df, index=False, header=False):
+        ws.append(row_data)
+
+    for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
+        for cell in row:
+            cell.border = border
+            cell.alignment = center_align
+
+    # Highlight converged column if present
+    conv_idx = headers.index('Converged (loss<1e-3)') + 1 if 'Converged (loss<1e-3)' in headers else None
+    conv_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+    if conv_idx is not None:
+        for row_idx in range(2, ws.max_row + 1):
+            try:
+                val = ws.cell(row_idx, conv_idx).value
+            except Exception:
+                continue
+            try:
+                if bool(val):
+                    # Use iter_rows to fetch the row safely
+                    for r in ws.iter_rows(min_row=row_idx, max_row=row_idx):
+                        for cell in r:
+                            if cell is None:
+                                continue
+                            cell.fill = conv_fill
+                        break
+            except Exception:
+                continue
+
+    # Auto-adjust widths
+    for column in ws.columns:
+        if not column:
+            continue
+        max_length = 0
+        first_cell = column[0]
+        column_letter = getattr(first_cell, 'column_letter', None)
+        if column_letter is None:
+            try:
+                from openpyxl.utils import get_column_letter
+                column_letter = get_column_letter(getattr(first_cell, 'column', 1))
+            except Exception:
+                column_letter = 'A'
+        for cell in column:
+            try:
+                if len(str(cell.value)) > max_length:
+                    max_length = len(str(cell.value))
+            except (TypeError, AttributeError):
+                pass
+        adjusted_width = min(max_length + 2, 50)
+        ws.column_dimensions[column_letter].width = adjusted_width
+
+    assert excel_path is not None
+    wb.save(cast(str, excel_path))
+    print(f"✅ Excel file saved to: {excel_path}")
+
+
+def generate_ablation_table(csv_path: str, output_path: Optional[str] = None, excel_path: Optional[str] = None):
     """
     Generate LaTeX table and optional Excel file for optimizer ablation study.
     """
@@ -389,7 +576,7 @@ def generate_ablation_table(csv_path: str, output_path: str = None, excel_path: 
     latex_lines.append("\\midrule")
     
     for _, row in df.iterrows():
-        opt = row['Optimizer'].replace('_', '\\_')
+        opt = str(row.get('Optimizer', '')).replace('_', '\\_')
         final_loss = row['Final Loss']
         if np.isfinite(final_loss):
             final_str = f"{final_loss:.2e}"
@@ -408,7 +595,13 @@ def generate_ablation_table(csv_path: str, output_path: str = None, excel_path: 
         else:
             iter_str = ">10k"
         
-        converged = "\\checkmark" if row['Converged (loss<1e-3)'] else "---"
+        # Ensure boolean check works for scalars/ndarrays/Series
+        conv_val = row.get('Converged (loss<1e-3)', False)
+        try:
+            conv_bool = bool(np.asarray(conv_val))
+        except Exception:
+            conv_bool = bool(conv_val)
+        converged = "\\checkmark" if conv_bool else "---"
         
         latex_lines.append(f"{opt} & {final_str} & {min_str} & {iter_str} & {converged} \\\\")
     
@@ -435,7 +628,7 @@ def generate_ablation_table(csv_path: str, output_path: str = None, excel_path: 
     return latex_content
 
 
-def generate_robustness_table(csv_paths: list, output_path: str = None, excel_path: str = None):
+def generate_robustness_table(csv_paths: list, output_path: Optional[str] = None, excel_path: Optional[str] = None):
     """
     Generate LaTeX table and optional Excel file for initial condition robustness.
     """
@@ -540,7 +733,16 @@ def generate_summary_statistics(results_dir: str = 'results'):
             df = pd.read_csv(f)
             eval_df = df[df['phase'] == 'eval']
             if not eval_df.empty:
-                final_acc = eval_df['test_accuracy'].iloc[-1]
+                # Robust retrieval of final test accuracy: handle Series or ndarray and coerce to float
+                try:
+                    from src.utils.num_utils import safe_to_float
+                    final_acc = safe_to_float(eval_df['test_accuracy'])
+                    if np.isnan(final_acc):
+                        # Could not extract a reliable final test accuracy; skip
+                        continue
+                except Exception:
+                    # Could not extract final test accuracy reliably from this file; skip
+                    continue
                 # Extract optimizer name robustly (metadata JSON first, then parse)
                 opt_name = 'Unknown'
                 

@@ -19,11 +19,12 @@ import sys
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, cast
 import warnings
 warnings.filterwarnings('ignore')
 import logging
 import json
+from src.utils.type_guards import ensure_dataframe, ensure_series
 logging.basicConfig(level=logging.INFO)
 
 # Add project root to path
@@ -200,7 +201,25 @@ class FinalDeliverablesGenerator:
                                 from src.analysis.dynamics import add_dynamics_metrics
                                 df, _ = add_dynamics_metrics(df, x_col='x', y_col='y')
 
-                            plot_trajectory_and_step_size(df, title=base_name, save_path=str(out_traj))
+                            # Create a lightweight test_function from data bounds when none available
+                            class _DataTestFunction:
+                                def __init__(self, df):
+                                    self._df = ensure_dataframe(df)
+                                    x = arr_to_numpy_float(self._df['x'])
+                                    y = arr_to_numpy_float(self._df['y'])
+                                    pad = 0.5 * max(np.ptp(x) if x.size else 1.0, np.ptp(y) if y.size else 1.0)
+                                    self._bounds = ((float(np.min(x) - pad), float(np.max(x) + pad)),
+                                                    (float(np.min(y) - pad), float(np.max(y) + pad)))
+                                def get_bounds(self):
+                                    return self._bounds
+                                def compute(self, x, y):
+                                    # Simple quadratic basin centered at data mean
+                                    cx = float(np.mean(arr_to_numpy_float(self._df['x'])))
+                                    cy = float(np.mean(arr_to_numpy_float(self._df['y'])))
+                                    return (x - cx)**2 + (y - cy)**2
+
+                            test_fn = _DataTestFunction(df)
+                            plot_trajectory_and_step_size(df, test_fn, title=base_name, save_path=str(out_traj))
                             outputs.append(str(out_traj))
                         except Exception as e:
                             logging.debug("Failed to generate trajectory+step-size for %s: %s", csv_file.name, e)
@@ -329,12 +348,12 @@ class FinalDeliverablesGenerator:
             
             # Group by optimizer and seed
             results = {}
-            for opt in combined_df['optimizer'].unique():
-                opt_data = combined_df[combined_df['optimizer'] == opt]
+            for opt in ensure_series(combined_df['optimizer']).unique():
+                opt_data = ensure_dataframe(combined_df[combined_df['optimizer'] == opt])
                 trajectories = []
                 
-                for seed in opt_data['seed'].unique():
-                    seed_data = opt_data[opt_data['seed'] == seed].sort_values('epoch')
+                for seed in ensure_series(opt_data['seed']).unique():
+                    seed_data = ensure_dataframe(cast(pd.DataFrame, opt_data[opt_data['seed'] == seed]).sort_values(by=['epoch']))
                     
                     if 'test_loss' in seed_data.columns:
                         losses = seed_data['test_loss'].values

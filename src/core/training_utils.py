@@ -12,19 +12,22 @@ This module provides:
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, cast
 import contextlib
 
 # Compatibility imports for mixed precision APIs across torch versions
-# Try new public API `torch.amp` first, fallback to `torch.cuda.amp` when needed
+# Try explicit submodule imports first (pyright suggests these), then fallback to cuda submodules
 try:
-    from torch.amp import GradScaler as _GradScaler, autocast as _autocast  # type: ignore
+    from torch.amp.grad_scaler import GradScaler as _GradScaler  # type: ignore[reportPrivateImportUsage]
+    from torch.amp.autocast_mode import autocast as _autocast  # type: ignore[reportPrivateImportUsage]
 except Exception:
     try:
-        from torch.cuda.amp import GradScaler as _GradScaler, autocast as _autocast  # type: ignore
+        from torch.cuda.amp.grad_scaler import GradScaler as _GradScaler
+        from torch.cuda.amp.autocast_mode import autocast as _autocast
     except Exception:
-        _GradScaler = None  # type: ignore
-        _autocast = None  # type: ignore
+        # Last-resort: do not attempt broad top-level imports (stubs are noisy); fall back to None and handle at runtime
+        _GradScaler = None
+        _autocast = None
 import copy
 import numpy as np
 import random
@@ -315,23 +318,28 @@ class AMPWrapper:
         
         if self.enabled and torch.cuda.is_available():
             # Prefer the new public API `torch.amp.GradScaler` when available
-            # to avoid deprecation warnings for `torch.cuda.amp.GradScaler`
-            try:
-                # Prefer the detected GradScaler implementation
-                if callable(_GradScaler):
-                    import warnings as _warnings
-                    with _warnings.catch_warnings():
-                        _warnings.filterwarnings('ignore', category=FutureWarning, message='.*GradScaler.*')
-                        # Some implementations accept device_type; guard with try/except
+            # to avoid deprecation warnings for `torch.cuda.amp.GradScaler`.
+            if callable(_GradScaler):
+                import warnings as _warnings
+                import inspect
+                with _warnings.catch_warnings():
+                    _warnings.filterwarnings('ignore', category=FutureWarning, message='.*GradScaler.*')
+                    sig = None
+                    try:
+                        sig = inspect.signature(_GradScaler.__init__)
+                    except Exception:
+                        sig = None
+                    kwargs = {'device_type': 'cuda'} if sig is not None and 'device_type' in sig.parameters else {}
+                    ScalerCls = cast(Any, _GradScaler)
+                    try:
+                        self.scaler = ScalerCls(**kwargs)
+                    except Exception:
                         try:
-                            self.scaler = _GradScaler(device_type='cuda')
-                        except TypeError:
-                            self.scaler = _GradScaler()
-                else:
-                    # No scaler implementation available in this torch build
-                    self.scaler = None
-            except Exception:
-                logging.warning("Could not create AMP GradScaler; proceeding without scaler")
+                            self.scaler = ScalerCls()
+                        except Exception:
+                            self.scaler = None
+            else:
+                # No scaler implementation available in this torch build
                 self.scaler = None
         else:
             self.scaler = None
@@ -344,7 +352,16 @@ class AMPWrapper:
             Autocast context manager
         """
         if self.enabled and torch.cuda.is_available() and _autocast is not None:
-            return _autocast(self.device_type, dtype=self.dtype)
+            # Use a guarded call sequence at runtime while silencing static checks via cast to Any.
+            # Some torch.autocast implementations require device_type, others accept only dtype.
+            Sc = cast(Any, _autocast)
+            try:
+                return Sc(device_type=self.device_type, dtype=self.dtype)
+            except TypeError:
+                try:
+                    return Sc(dtype=self.dtype)
+                except TypeError:
+                    return Sc()
         else:
             # Return no-op context manager for CPU or when autocast not available
             return contextlib.nullcontext()

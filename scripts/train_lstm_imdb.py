@@ -131,7 +131,7 @@ def main():
     print("\n" + "="*80)
     print("IMDB Sentiment Analysis Training")
     print("="*80)
-    train_loader, test_loader, vocab = get_imdb_loaders(
+    train_loader, val_loader, test_loader, vocab = get_imdb_loaders(
         batch_size=args.batch_size,
         max_vocab_size=args.vocab_size,
         max_len=args.max_len,
@@ -142,24 +142,28 @@ def main():
     
     # Create model
     vocab_size = len(vocab)
+    model = None
     if args.model == 'SimpleLSTM':
         model = SimpleLSTM(vocab_size, hidden_size=args.hidden_size)
     elif args.model == 'BiLSTM':
         model = BiLSTM(vocab_size, hidden_size=args.hidden_size)
     elif args.model == 'TextCNN':
         model = TextCNN(vocab_size)
-    
+    if model is None:
+        raise ValueError(f"Unknown model '{args.model}' for IMDB training")
     model = model.to(device)
     n_params = sum(p.numel() for p in model.parameters())
     print(f"\nModel: {args.model}")
     print(f"Parameters: {n_params:,}")
     
     # Create optimizer
+    optimizer = None
     if args.optimizer == 'Adam':
         optimizer = AdamWrapper(model.parameters(), lr=args.lr)
     elif args.optimizer == 'SGDMomentum':
         optimizer = SGDMomentumWrapper(model.parameters(), lr=args.lr, momentum=0.9)
-    
+    if optimizer is None:
+        raise ValueError(f"Unknown optimizer '{args.optimizer}' for IMDB training")    
     print(f"Optimizer: {args.optimizer}")
     print(f"Learning rate: {args.lr}")
     

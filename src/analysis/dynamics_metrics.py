@@ -84,7 +84,7 @@ def compute_smoothness_index(trajectory: np.ndarray, window: int = 5) -> float:
     # Mean absolute angle change (normalized to [0, π])
     smoothness = np.mean(np.abs(angles))
     
-    return smoothness
+    return float(smoothness)
 
 
 def compute_oscillation_magnitude(values: np.ndarray, ema_alpha: float = 0.1) -> np.ndarray:
@@ -158,7 +158,7 @@ def compute_convergence_smoothness(losses: np.ndarray, window: int = 50) -> floa
         else:
             normalized_rmse = rmse
         
-        return normalized_rmse
+        return float(normalized_rmse)
         
     except Exception as e:
         # Specify exception type for better error tracking
@@ -272,7 +272,8 @@ def compare_dynamics(results_dict: Dict[str, Dict]) -> pd.DataFrame:
     
     # Sort by smoothness (lower = better)
     if 'smoothness_index' in df.columns:
-        df = df.sort_values('smoothness_index')
+        from typing import cast
+        df = cast(pd.DataFrame, df).sort_values(by=['smoothness_index'])
     
     return df
 

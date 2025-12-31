@@ -10,7 +10,7 @@ Focus: Visual comparison of dynamics differences between optimizers.
 import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
-from typing import List, Tuple, Callable
+from typing import List, Tuple, Callable, Optional
 import logging
 
 try:
@@ -34,9 +34,9 @@ except ImportError:
 
 
 def run_optimizer_2d(
-    optimizer,
-    func: Callable,
-    grad_func: Callable,
+    optimizer: object,
+    func: Callable[[float, float], float],
+    grad_func: Callable[[float, float], np.ndarray],
     x0: np.ndarray,
     max_iters: int = 500,
     tol: float = 1e-6
@@ -48,28 +48,32 @@ def run_optimizer_2d(
         trajectory: Array of shape (n_steps, 2) with (x, y) positions
         losses: Array of function values
     """
-    trajectory = [x0.copy()]
-    losses = [func(*x0)]
+    from typing import List
+    trajectory: List[np.ndarray] = [x0.copy()]
+    losses: List[float] = [float(func(*x0))]
     
     params = np.array(x0, dtype=float)
     
     for _ in range(max_iters):
-        grad = grad_func(*params)
-        grad_norm = np.linalg.norm(grad)
+        grad_raw = grad_func(float(params[0]), float(params[1]))
+        grad = np.asarray(grad_raw, dtype=float)
+        grad_norm = float(np.linalg.norm(grad))
         
         if grad_norm < tol:
             break
         
         params = optimizer.step(params, grad)
         trajectory.append(params.copy())
-        losses.append(func(*params))
+        losses.append(float(func(float(params[0]), float(params[1]))))
     
-    return np.array(trajectory), np.array(losses)
+    return np.asarray(trajectory, dtype=float), np.asarray(losses, dtype=float)
 
+
+from collections.abc import Sequence
 
 def plot_contour_with_trajectories(
-    func: Callable,
-    optimizers_config: List[Tuple[str, object]],
+    func: Callable[[float, float], float],
+    optimizers_config: Sequence[Tuple[str, object, Callable[[float, float], np.ndarray]]],
     x0: np.ndarray,
     xlim: Tuple[float, float],
     ylim: Tuple[float, float],
@@ -98,7 +102,7 @@ def plot_contour_with_trajectories(
     for i in range(X.shape[0]):
         for j in range(X.shape[1]):
             ii = int(i); jj = int(j)
-            Z[ii, jj] = func(X[ii, jj], Y[ii, jj])
+            Z[ii, jj] = float(func(float(X[ii, jj]), float(Y[ii, jj])))
     
     # Create figure
     _, ax = plt.subplots(figsize=(10, 8))
@@ -155,8 +159,8 @@ def plot_contour_with_trajectories(
 
 
 def plot_vector_field_overlay(
-    func: Callable,
-    grad_func: Callable,
+    func: Callable[[float, float], float],
+    grad_func: Callable[[float, float], np.ndarray],
     xlim: Tuple[float, float],
     ylim: Tuple[float, float],
     output_path: Path,
@@ -188,7 +192,8 @@ def plot_vector_field_overlay(
 
     for i in range(X.shape[0]):
         for j in range(X.shape[1]):
-            gx, gy = grad_func(X[i, j], Y[i, j])
+            g = np.asarray(grad_func(float(X[i, j]), float(Y[i, j])), dtype=float)
+            gx, gy = float(g[0]), float(g[1])
             U[i, j] = -gx  # plot negative gradient (descent direction)
             V[i, j] = -gy
             M[i, j] = np.sqrt(U[i, j]**2 + V[i, j]**2)
@@ -306,7 +311,7 @@ def compare_momentum_beta_trajectories(
 
 def compare_adam_beta_trajectories(
     test_function: str = 'rosenbrock',
-    beta_configs: List[Tuple[float, float]] = None,
+    beta_configs: Optional[List[Tuple[float, float]]] = None,
     save_dir: str = 'results/trajectory_visualization',
     output_dir: str | None = None
 ):

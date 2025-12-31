@@ -16,6 +16,7 @@ from typing import Dict, List, Tuple
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import logging
 
 RESULTS_DIR = Path('results')
 PLOTS_DIR = Path('plots')
@@ -54,22 +55,23 @@ def _collect_runs() -> pd.DataFrame:
                     logging.debug("Could not parse seed from %s: %s", part, e, exc_info=True)
                     seed = None
         # Final metrics
+        from src.utils.num_utils import safe_to_float
         if 'test_acc' in df.columns:
-            final_acc = float(df['test_acc'].iloc[-1])
+            final_acc = safe_to_float(df['test_acc'])
         elif 'test_accuracy' in df.columns:
-            final_acc = float(df['test_accuracy'].iloc[-1])
+            final_acc = safe_to_float(df['test_accuracy'])
         else:
             final_acc = np.nan
         if 'elapsed_seconds' in df.columns:
-            elapsed = float(df['elapsed_seconds'].iloc[-1])
+            elapsed = safe_to_float(df['elapsed_seconds'])
         elif 'time_sec' in df.columns:
-            elapsed = float(df['time_sec'].iloc[-1])
+            elapsed = safe_to_float(df['time_sec'])
         else:
             elapsed = np.nan
         if 'peak_gpu_mb' in df.columns:
-            peak_mb = float(df['peak_gpu_mb'].iloc[-1]) if pd.notna(df['peak_gpu_mb'].iloc[-1]) else np.nan
+            peak_mb = safe_to_float(df['peak_gpu_mb'])
         elif 'peak_memory_MB' in df.columns:
-            peak_mb = float(df['peak_memory_MB'].iloc[-1]) if pd.notna(df['peak_memory_MB'].iloc[-1]) else np.nan
+            peak_mb = safe_to_float(df['peak_memory_MB'])
         else:
             peak_mb = np.nan
 
@@ -90,10 +92,20 @@ def _collect_runs() -> pd.DataFrame:
 def _scatter(df: pd.DataFrame, x: str, y: str, title: str, out_png: Path):
     fig, ax = plt.subplots(figsize=(8, 6))
     # distinct markers/colors by optimizer
-    opts = sorted(df['optimizer'].dropna().unique())
-    cmap = plt.cm.get_cmap('tab10', len(opts))
+    opt_col = df.get('optimizer', np.array([]))
+    if hasattr(opt_col, 'dropna'):
+        opts = sorted(opt_col.dropna().unique())
+    else:
+        arr = np.asarray(opt_col)
+        try:
+            arr = arr[~pd.isna(arr)]
+        except Exception:
+            pass
+        opts = sorted(np.unique(arr).tolist())
+    cmap = plt.cm.get_cmap('tab10', max(1, len(opts)))
     for i, opt in enumerate(opts):
         sub = df[df['optimizer'] == opt]
+        sub = pd.DataFrame(sub)
         ax.scatter(sub[x], sub[y], label=opt, color=cmap(i), alpha=0.8)
     ax.set_xlabel(x.replace('_', ' ').title())
     ax.set_ylabel(y.replace('_', ' ').title())
@@ -117,13 +129,27 @@ def main():
     print(f"Saved: {summary_csv}")
 
     # Per-dataset plots
-    for dataset in sorted(df['dataset'].dropna().unique()):
+    ds_col = df.get('dataset', np.array([]))
+    if hasattr(ds_col, 'dropna'):
+        ds_list = sorted(ds_col.dropna().unique())
+    else:
+        arr = np.asarray(ds_col)
+        try:
+            arr = arr[~pd.isna(arr)]
+        except Exception:
+            pass
+        ds_list = sorted(np.unique(arr).tolist())
+
+    for dataset in ds_list:
         sub = df[df['dataset'] == dataset]
         if sub.empty:
             continue
+        sub = pd.DataFrame(sub)
         _scatter(sub, 'elapsed_seconds', 'final_test_acc', f"{dataset}: Accuracy vs Time", PLOTS_DIR / f"tradeoff_time_{dataset}.png")
-        if sub['peak_gpu_mb'].notna().any():
-            _scatter(sub, 'peak_gpu_mb', 'final_test_acc', f"{dataset}: Accuracy vs Peak GPU MB", PLOTS_DIR / f"tradeoff_memory_{dataset}.png")
+        col = sub.get('peak_gpu_mb', np.array([]))
+        arr = np.asarray(col)
+        if arr.size > 0 and np.any(~pd.isna(arr)):
+            _scatter(pd.DataFrame(sub), 'peak_gpu_mb', 'final_test_acc', f"{dataset}: Accuracy vs Peak GPU MB", PLOTS_DIR / f"tradeoff_memory_{dataset}.png")
     return 0
 
 

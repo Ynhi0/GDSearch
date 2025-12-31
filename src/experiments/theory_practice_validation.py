@@ -14,21 +14,25 @@ import numpy as np
 from pathlib import Path
 import glob
 import os
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+from collections.abc import Mapping
 import matplotlib.pyplot as plt
 import re
 
-# Import theory-practice comparison module
+# Import theory-practice comparison module (tolerant to missing module or missing symbols)
 try:
-    from src.analysis.theory_practice_comparison import (
-        predict_theoretical_rate,
-        fit_observed_rate,
-        compare_rates,
-        generate_comparison_report
-    )
-    HAS_THEORY_MODULE = True
-except ImportError:
+    import src.analysis.theory_practice_comparison as tp_comp
+    predict_theoretical_rate = getattr(tp_comp, 'predict_theoretical_rate', None)
+    fit_observed_rate = getattr(tp_comp, 'fit_observed_rate', None)
+    compare_rates = getattr(tp_comp, 'compare_rates', None)
+    generate_comparison_report = getattr(tp_comp, 'generate_comparison_report', None)
+    HAS_THEORY_MODULE = all(fn is not None for fn in (predict_theoretical_rate, fit_observed_rate, compare_rates, generate_comparison_report))
+except Exception:
     HAS_THEORY_MODULE = False
+    predict_theoretical_rate = None
+    fit_observed_rate = None
+    compare_rates = None
+    generate_comparison_report = None
     print("Theory-practice comparison module not available")
 
 
@@ -186,12 +190,31 @@ def run_theory_practice_validation(
                     continue
                 
                 # Compare with theory
-                comparison = compare_rates(
+                if not callable(compare_rates):
+                    raise RuntimeError("compare_rates not available; ensure theory-practice module is installed")
+                comparison_raw = compare_rates(
                     observed_losses=loss_history,
                     optimizer_name=optimizer_name,
                     problem_type=problem_type
                 )
-                
+                # Ensure we have a plain dict with string keys for downstream processing
+                comparison: Dict[str, Any]
+                try:
+                    if isinstance(comparison_raw, dict):
+                        # Coerce keys to str to satisfy static typing and downstream consumers
+                        comparison = {str(k): v for k, v in comparison_raw.items()}
+                    elif isinstance(comparison_raw, Mapping):
+                        try:
+                            comparison = {str(k): v for k, v in comparison_raw.items()}
+                        except Exception:
+                            comparison = {}
+                    else:
+                        # Not a mapping-like object; avoid calling dict() on arbitrary objects
+                        comparison = {}
+                except Exception:
+                    # Defensive fallback: ensure we have a dict to mutate
+                    comparison = {}
+
                 # Add metadata
                 comparison['experiment'] = experiment
                 comparison['dataset'] = experiment.upper()
@@ -333,7 +356,7 @@ def generate_summary_report(df_results: pd.DataFrame, output_dir: str):
             f.write(f"    Theoretical rate: {opt_df['theoretical_rate'].mean():.4f}\n")
             f.write(f"    Observed rate: {opt_df['observed_rate'].mean():.4f}\n")
             f.write(f"    R²: {opt_df['r_squared'].mean():.4f}\n")
-            f.write(f"    Experiments: {', '.join(opt_df['experiment'].unique())}\n")
+            f.write(f"    Experiments: {', '.join(map(str, pd.Series(opt_df['experiment']).unique()))}\n")
         
         f.write("\n" + "="*80 + "\n")
         f.write("INTERPRETATION:\n")

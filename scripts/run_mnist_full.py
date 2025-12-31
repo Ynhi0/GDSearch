@@ -221,6 +221,7 @@ def run_statistical_comparison(results_dir='results'):
             # Compute statistics
             import numpy as np
             from scipy import stats
+            from src.analysis.statistical_analysis import _to_scalar
             
             mean_a = np.mean(values_a)
             std_a = np.std(values_a, ddof=1)
@@ -245,14 +246,22 @@ def run_statistical_comparison(results_dir='results'):
                 stat, pval = stats.wilcoxon(values_a, values_b)
                 test_name = 'Wilcoxon'
                 
-                # Rank-biserial correlation
+                # Rank-biserial correlation - normalize stat which may be tuple-like in some SciPy versions
                 n = len(values_a)
-                cohens_d = 1 - (2 * stat) / (n * (n + 1))
-            
+                if isinstance(stat, (tuple, list, np.ndarray)):
+                    stat_val = np.asarray(stat).ravel()[0]
+                else:
+                    stat_val = stat
+                stat_val = _to_scalar(stat_val)
+                cohens_d = 1 - (2 * stat_val) / (n * (n + 1))
+
             # Power analysis
             from src.analysis.statistical_analysis import power_analysis_report
-            power_report = power_analysis_report(values_a, values_b, cohens_d)
-            
+            power_report = power_analysis_report(results_A=np.asarray(values_a), results_B=np.asarray(values_b), name_A=opt_a, name_B=opt_b)
+
+            # Normalize p-value to float for comparisons/formatting
+            pval = _to_scalar(pval)
+
             result = {
                 'Optimizer A': opt_a,
                 'Optimizer B': opt_b,
@@ -264,16 +273,15 @@ def run_statistical_comparison(results_dir='results'):
                 'Std B': std_b,
                 'Test': test_name,
                 'p-value': pval,
-                'Significant (α=0.05)': pval < 0.05,
-                "Cohen's d": cohens_d,
-                'Observed power': power_report['observed_power'],
-                'Required n (80%)': power_report['required_n_80']
+                'Significant (α=0.05)': bool(pval < 0.05),
+                "Cohen's d": float(cohens_d),
+                'Observed power': float(power_report.get('achieved_power', float('nan'))),
+                'Required n (80%)': int(power_report.get('required_n', 0)) if power_report.get('required_n') not in (None, float('inf')) else float('inf')
             }
             
             all_results.append(result)
             
-            print(f"   {test_name}: p={pval:.4f}, d={cohens_d:.3f}, power={power_report['observed_power']:.2f}")
-            
+            print(f"   {test_name}: p={pval:.4f}, d={cohens_d:.3f}, power={power_report.get('achieved_power', float('nan')):.2f}")            
         except Exception as e:
             print(f"   ❌ Error: {e}")
             continue
@@ -287,10 +295,10 @@ def run_statistical_comparison(results_dir='results'):
     
     # Apply Holm-Bonferroni correction
     from scipy.stats import false_discovery_control
-    pvalues = df['p-value'].values
+    pvalues = np.asarray(df['p-value'].to_numpy(dtype=float))
     
     # Holm-Bonferroni: sort p-values, compare to α/(m+1-k)
-    n_tests = len(pvalues)
+    n_tests = int(len(pvalues))
     sorted_indices = np.argsort(pvalues)
     corrected_sig = np.zeros(n_tests, dtype=bool)
     

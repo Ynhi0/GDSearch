@@ -34,7 +34,9 @@ except Exception:
                 return torch.load(path_or_file, map_location=map_location, weights_only=weights_only)
             else:
                 return torch.load(path_or_file, map_location=map_location)
-        except TypeError:
+        except TypeError as exc:
+            # Older PyTorch may raise TypeError for unexpected kwargs; retry without weights_only
+            logging.debug("torch_load_safe fallback due to TypeError: %s", exc)
             return torch.load(path_or_file, map_location=map_location)
 
     def torch_save_safe(obj, path_or_file, use_new_zipfile_serialization: bool = True):
@@ -43,7 +45,8 @@ except Exception:
                 torch.save(obj, path_or_file, _use_new_zipfile_serialization=True)
             else:
                 torch.save(obj, path_or_file)
-        except TypeError:
+        except TypeError as exc:
+            logging.debug("torch_save_safe fallback due to TypeError: %s", exc)
             torch.save(obj, path_or_file)
 
 
@@ -281,8 +284,9 @@ def run_single(opt_name: str, seed: int, lr: float, epochs: int, batch_size: int
         tokenized = cast(Mapping[str, Union[HasDatasetLike, Sequence[Any]]], raw.map(preprocess, batched=True))
         # Create proper train/val split from training data
         train_split = tokenized['train']
+        # Prefer HF Dataset shuffle; otherwise adapt sequence-like inputs
         try:
-            full_train = train_split.shuffle(seed=seed)
+            full_train = cast(Any, train_split).shuffle(seed=seed)  # type: ignore[attr-defined]
         except AttributeError:
             # Fallback: when using non-HF datasets, wrap sequence-like data in a thin adapter
             class ListAsDataset:
@@ -315,7 +319,18 @@ def run_single(opt_name: str, seed: int, lr: float, epochs: int, batch_size: int
                 def remove_columns(self, columns: Sequence[str]):
                     return ListAsDataset([{k: v for k, v in item.items() if k not in columns} for item in self._items])
 
-            full_train = ListAsDataset(list(train_split))
+            # Try to build a list from train_split robustly
+            if isinstance(train_split, Sequence):
+                full_train = ListAsDataset(list(cast(Sequence[Any], train_split)))
+            else:
+                try:
+                    full_train = ListAsDataset(list(cast(Any, train_split)))
+                except TypeError as exc:
+                    if hasattr(train_split, '__len__') and hasattr(train_split, '__getitem__'):
+                        _tmp = cast(Any, train_split)
+                        full_train = ListAsDataset([_tmp[i] for i in range(len(train_split))])
+                    else:
+                        raise TypeError("train_split is not iterable and cannot be adapted to ListAsDataset") from exc
         train_size_actual = min(train_size, len(full_train))
         val_size = max(int(train_size_actual * 0.15), 100)
         train_size_actual = train_size_actual - val_size
@@ -324,10 +339,20 @@ def run_single(opt_name: str, seed: int, lr: float, epochs: int, batch_size: int
         val_ds = full_train.select(range(train_size_actual, train_size_actual + val_size))
         test_split = tokenized['test']
         try:
-            test_ds = test_split.shuffle(seed=seed).select(range(min(test_size, len(tokenized['test']))))
+            test_ds = cast(Any, test_split).shuffle(seed=seed).select(range(min(test_size, len(tokenized['test']))))  # type: ignore[attr-defined]
         except AttributeError:
             # Wrap non-HF test split similarly
-            test_ds = ListAsDataset(list(test_split)).select(range(min(test_size, len(tokenized['test']))))
+            if isinstance(test_split, Sequence):
+                test_ds = ListAsDataset(list(cast(Sequence[Any], test_split))).select(range(min(test_size, len(tokenized['test']))))
+            else:
+                try:
+                    test_ds = ListAsDataset(list(cast(Any, test_split))).select(range(min(test_size, len(tokenized['test']))))
+                except TypeError as exc:
+                    if hasattr(test_split, '__len__') and hasattr(test_split, '__getitem__'):
+                        _tmp_test = cast(Any, test_split)
+                        test_ds = ListAsDataset([_tmp_test[i] for i in range(len(test_split))]).select(range(min(test_size, len(tokenized['test']))))
+                    else:
+                        raise TypeError("test_split is not iterable and cannot be adapted to ListAsDataset") from exc
 
     # keep only needed columns (only for HF datasets)
     if not use_synthetic:
@@ -436,10 +461,11 @@ def compute_statistics(results_dir: Union[str, Path]):
             seed = int(m.group(1))
             df = pd.read_csv(f)
             # Use final_test_acc if available, otherwise fall back to last epoch test_acc
+            from src.utils.num_utils import safe_to_float
             if 'final_test_acc' in df.columns:
-                vals[seed] = float(df['final_test_acc'].iloc[-1])
+                vals[seed] = safe_to_float(df['final_test_acc'])
             elif 'test_acc' in df.columns:
-                vals[seed] = float(df['test_acc'].iloc[-1])
+                vals[seed] = safe_to_float(df['test_acc'])
             else:
                 vals[seed] = float('nan')
         data[opt] = vals
@@ -460,8 +486,9 @@ def compute_statistics(results_dir: Union[str, Path]):
             test = 'Wilcoxon'
             W, p = stats.wilcoxon(a, b)
             # coerce to python floats robustly (handles arrays/tuples returned by different scipy versions)
-            W = float(np.asarray(W).item())
-            p = float(np.asarray(p).item())
+            from src.utils.num_utils import safe_to_float
+            W = safe_to_float(W)
+            p = safe_to_float(p)
             n = len(a)
             eff_name = 'Rank-biserial r'
             eff = 1 - (2.0 * W) / (n * (n + 1))

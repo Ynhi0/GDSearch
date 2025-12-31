@@ -108,7 +108,8 @@ def create_data_fraction_subset(
     n_subset = int(n_samples * fraction)
     
     indices = rng.choice(n_samples, size=n_subset, replace=False)
-    return Subset(dataset, indices)
+    # Convert to Python list to satisfy typing for Subset indices
+    return Subset(dataset, indices.tolist())
 
 
 def run_data_efficiency_ablation(
@@ -143,7 +144,7 @@ def run_data_efficiency_ablation(
     logging.info(f"Running data efficiency ablation: {optimizer_name} on {dataset_name}")
     
     results = []
-    device = torch.device(device if torch.cuda.is_available() else 'cpu')
+    device_obj = torch.device(device if torch.cuda.is_available() else 'cpu')
     
     # Get base loaders ONCE - more efficient than recreating for each fraction
     if dataset_name == 'mnist':
@@ -178,7 +179,7 @@ def run_data_efficiency_ablation(
                 num_classes=num_classes,
                 width_mult=1.0,
                 num_layers=2
-            ).to(device)
+            ).to(device_obj)
             
             # Create optimizer
             # HYPERPARAMETER FAIRNESS: Using published defaults from original papers
@@ -206,7 +207,7 @@ def run_data_efficiency_ablation(
                 model.train()
                 epoch_loss = 0.0
                 for inputs, targets in train_loader:
-                    inputs, targets = inputs.to(device), targets.to(device)
+                    inputs, targets = inputs.to(device_obj), targets.to(device_obj)
                     optimizer.zero_grad()
                     outputs = model(inputs)
                     loss = criterion(outputs, targets)
@@ -244,7 +245,7 @@ def run_data_efficiency_ablation(
             total = 0
             with torch.no_grad():
                 for inputs, targets in test_loader:
-                    inputs, targets = inputs.to(device), targets.to(device)
+                    inputs, targets = inputs.to(device_obj), targets.to(device_obj)
                     outputs = model(inputs)
                     _, predicted = outputs.max(1)
                     correct += predicted.eq(targets).sum().item()
@@ -309,7 +310,7 @@ def run_model_scaling_ablation(
     logging.info(f"Running model scaling ablation: {optimizer_name} on {dataset_name}")
     
     results = []
-    device = torch.device(device if torch.cuda.is_available() else 'cpu')
+    device_obj = torch.device(device if torch.cuda.is_available() else 'cpu')
     
     # Get loaders
     if dataset_name == 'mnist':
@@ -332,7 +333,7 @@ def run_model_scaling_ablation(
                     num_classes=num_classes,
                     width_mult=width,
                     num_layers=depth
-                ).to(device)
+                ).to(device_obj)
                 
                 # Count parameters
                 n_params = sum(p.numel() for p in model.parameters())
@@ -360,7 +361,7 @@ def run_model_scaling_ablation(
                 for epoch in range(epochs):
                     model.train()
                     for inputs, targets in train_loader:
-                        inputs, targets = inputs.to(device), targets.to(device)
+                        inputs, targets = inputs.to(device_obj), targets.to(device_obj)
                         optimizer.zero_grad()
                         outputs = model(inputs)
                         loss = criterion(outputs, targets)
@@ -395,7 +396,7 @@ def run_model_scaling_ablation(
                 total = 0
                 with torch.no_grad():
                     for inputs, targets in test_loader:
-                        inputs, targets = inputs.to(device), targets.to(device)
+                        inputs, targets = inputs.to(device_obj), targets.to(device_obj)
                         outputs = model(inputs)
                         _, predicted = outputs.max(1)
                         correct += predicted.eq(targets).sum().item()

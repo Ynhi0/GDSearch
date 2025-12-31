@@ -66,8 +66,9 @@ class DataSplitManager:
     
     def _create_splits(self, stratify_labels: Optional[np.ndarray]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Create reproducible train/val/test splits."""
-        n_total = len(self.dataset)
-        indices = np.arange(n_total)
+        from src.utils.safe_len import len_sized
+        n_total = len_sized(self.dataset)
+        indices = np.arange(int(n_total))
         
         # Set seed for reproducibility
         rng = np.random.default_rng(self.seed)
@@ -113,7 +114,7 @@ class DataSplitManager:
     
     def get_train_loader(self, batch_size: int = 32, **kwargs) -> DataLoader:
         """Get DataLoader for training set."""
-        train_subset = Subset(self.dataset, self.train_indices)
+        train_subset = Subset(self.dataset, self.train_indices.tolist())
         return DataLoader(train_subset, batch_size=batch_size, shuffle=True, **kwargs)
     
     def get_val_loader(self, batch_size: int = 32, **kwargs) -> DataLoader:
@@ -126,7 +127,7 @@ class DataSplitManager:
             logging.warning("Accessing validation set after hyperparameters are frozen. "
                           "This may indicate improper protocol!")
         
-        val_subset = Subset(self.dataset, self.val_indices)
+        val_subset = Subset(self.dataset, self.val_indices.tolist())
         return DataLoader(val_subset, batch_size=batch_size, shuffle=False, **kwargs)
     
     def get_test_loader(self, batch_size: int = 32, **kwargs) -> DataLoader:
@@ -146,7 +147,7 @@ class DataSplitManager:
             )
 
         self._test_accessed = True
-        test_subset = Subset(self.dataset, self.test_indices)
+        test_subset = Subset(self.dataset, self.test_indices.tolist())
         return DataLoader(test_subset, batch_size=batch_size, shuffle=False, **kwargs)
     
     def freeze_hyperparameters(self, best_hyperparams: Dict):
@@ -196,8 +197,9 @@ class DataSplitManager:
     
     def get_split_info(self) -> Dict:
         """Get information about the data splits."""
+        from src.utils.safe_len import len_sized
         return {
-            'total_size': len(self.dataset),
+            'total_size': len_sized(self.dataset),
             'train_size': len(self.train_indices),
             'val_size': len(self.val_indices),
             'test_size': len(self.test_indices),
@@ -235,8 +237,9 @@ def create_nested_cv_splits(dataset: Dataset,
     """
     from sklearn.model_selection import KFold
     
-    n_samples = len(dataset)
-    indices = np.arange(n_samples)
+    from src.utils.safe_len import len_sized
+    n_samples = len_sized(dataset)
+    indices = np.arange(int(n_samples))
     
     outer_cv = KFold(n_splits=n_outer_folds, shuffle=True, random_state=seed)
     nested_splits = []

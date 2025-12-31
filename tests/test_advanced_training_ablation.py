@@ -78,8 +78,8 @@ class TestAblationStudyRigor:
         output = model(x)
         
         assert output.shape == (4, 10), f"Expected output shape (4, 10), got {output.shape}"
-        assert not torch.isnan(output).any(), "Model output contains NaN"
-        assert not torch.isinf(output).any(), "Model output contains Inf"
+        assert not bool(torch.isnan(output).any()), "Model output contains NaN"
+        assert not bool(torch.isinf(output).any()), "Model output contains Inf"
     
     def test_training_epoch_basic(self):
         """Test basic training epoch functionality"""

@@ -10,7 +10,7 @@ import os
 import json
 import numpy as np
 import pandas as pd
-from typing import Dict, List
+from typing import Dict, List, Optional
 import matplotlib.pyplot as plt
 
 from src.experiments.run_nn_experiment import train_and_evaluate
@@ -163,7 +163,8 @@ def run_ablation_study(
             # Get final test accuracy
             eval_df = df[df['phase'] == 'eval']
             if not eval_df.empty:
-                final_acc = eval_df['test_accuracy'].iloc[-1]
+                from src.utils.type_guards import ensure_series
+                final_acc = ensure_series(eval_df['test_accuracy']).iloc[-1]
                 logging.info(f"Test Acc: {final_acc:.4f}")
             else:
                 logging.info("Done")
@@ -187,10 +188,11 @@ def analyze_ablation_results(results: Dict[str, List[pd.DataFrame]]) -> pd.DataF
     for config_name, dfs in results.items():
         # Extract final test accuracies
         final_accs = []
+        from src.utils.type_guards import ensure_series
         for df in dfs:
             eval_df = df[df['phase'] == 'eval']
             if not eval_df.empty:
-                final_accs.append(eval_df['test_accuracy'].iloc[-1])
+                final_accs.append(ensure_series(eval_df['test_accuracy']).iloc[-1])
         
         if final_accs:
             summary_data.append({
@@ -203,7 +205,8 @@ def analyze_ablation_results(results: Dict[str, List[pd.DataFrame]]) -> pd.DataF
             })
     
     summary_df = pd.DataFrame(summary_data)
-    summary_df = summary_df.sort_values('Mean Accuracy', ascending=False)
+    from typing import cast
+    summary_df = cast(pd.DataFrame, summary_df).sort_values(by=['Mean Accuracy'], ascending=False)
     
     return summary_df
 
@@ -226,7 +229,9 @@ def print_ablation_summary(summary_df: pd.DataFrame):
     
     
     # Compute improvements over baseline
-    baseline_acc = summary_df[summary_df['Configuration'].str.contains('SGD baseline')]['Mean Accuracy'].iloc[0]
+    series = summary_df[summary_df['Configuration'].str.contains('SGD baseline')]['Mean Accuracy']
+    iloc_attr = getattr(series, 'iloc', None)
+    baseline_acc = iloc_attr[0] if iloc_attr is not None else series[0]
     
     logging.info("IMPROVEMENT OVER BASELINE (SGD):")
     print("="*70)
@@ -244,14 +249,15 @@ def print_ablation_summary(summary_df: pd.DataFrame):
     print("="*70)
 
 
-def plot_ablation_results(summary_df: pd.DataFrame, save_path: str = None):
+def plot_ablation_results(summary_df: pd.DataFrame, save_path: Optional[str] = None):
     """Plot ablation study results as bar chart."""
     fig, ax = plt.subplots(figsize=(12, 7))
     
     # Prepare data
     configs = summary_df['Configuration'].values
-    means = summary_df['Mean Accuracy'].values
-    stds = summary_df['Std Accuracy'].values
+    from src.utils.plot_helpers import arr_to_numpy_float
+    means = arr_to_numpy_float(summary_df['Mean Accuracy'].values).astype(np.float64)
+    stds = arr_to_numpy_float(summary_df['Std Accuracy'].values).astype(np.float64)
     
     # Color coding: baseline in gray, others by performance
     colors = []
@@ -299,7 +305,7 @@ def plot_ablation_results(summary_df: pd.DataFrame, save_path: str = None):
     plt.tight_layout()
     
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
         logging.info(f"Ablation plot saved to: {save_path}")
         plt.close()
     else:
@@ -319,7 +325,9 @@ def perform_statistical_comparisons(results: Dict[str, List[pd.DataFrame]]):
         for df in dfs:
             eval_df = df[df['phase'] == 'eval']
             if not eval_df.empty:
-                accs.append(eval_df['test_accuracy'].iloc[-1])
+                series = eval_df['test_accuracy']
+                iloc_attr = getattr(series, 'iloc', None)
+                accs.append(iloc_attr[-1] if iloc_attr is not None else series[-1])
         config_accuracies[config_name] = np.array(accs)
     
     # Compare each configuration against baseline

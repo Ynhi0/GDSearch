@@ -453,9 +453,10 @@ def run_initialization_ablation(
     print("BEST INITIALIZATION FOR EACH OPTIMIZER")
     print(f"{'='*80}")
     
-    for opt in df['optimizer'].unique():
-        opt_df = df[df['optimizer'] == opt]
-        best_init = opt_df.loc[opt_df['mean_test_acc'].idxmax()]
+    from src.utils.type_guards import ensure_series, ensure_dataframe
+    for opt in ensure_series(df['optimizer']).unique():
+        opt_df = ensure_dataframe(df[df['optimizer'] == opt])
+        best_init = opt_df.loc[ensure_series(opt_df['mean_test_acc']).idxmax()]
         print(f"\n{opt}:")
         print(f"  Best init: {best_init['initialization']}")
         print(f"  Accuracy: {best_init['mean_test_acc']:.2f} ± {best_init['std_test_acc']:.2f}%")

@@ -255,8 +255,10 @@ def run_fair_optimizer_ablation_published_defaults(
         logger.info("="*80)
         
         try:
+            from typing import cast
+            converged_results_df = cast(pd.DataFrame, converged_results)
             significance_df = compute_statistical_significance(
-                converged_results,
+                converged_results_df,
                 metric='final_loss',
                 baseline_optimizer='SGD',
                 alpha=0.05
@@ -326,15 +328,23 @@ if __name__ == '__main__':
     # Example: Run fair ablation on Rosenbrock
     test_fn = Rosenbrock()
     initial_pt = (-1.5, -1.5)
-    
+
     results = run_fair_optimizer_ablation_published_defaults(
         test_function=test_fn,
         initial_point=initial_pt,
         max_iterations=10000,
         seeds=[42, 123, 456, 789, 1011],  # 5 seeds for robust evaluation
+    )
+
     logger.info("\n" + "="*80)
     logger.info("ABLATION STUDY COMPLETE")
     logger.info("="*80)
     logger.info("Results comply with HYPERPARAMETER_FAIRNESS_PROTOCOL.md")
     logger.info("All optimizers use published defaults with proper citations")
     logger.info("Statistical significance tested with Holm-Bonferroni correction")
+
+    # Save example results for reproducibility
+    out_path = Path('results/fair_ablation/example_results.csv')
+    os.makedirs(out_path.parent, exist_ok=True)
+    results.to_csv(out_path, index=False)
+    logger.info(f"Example results saved to {out_path}")

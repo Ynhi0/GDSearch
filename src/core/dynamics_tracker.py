@@ -286,8 +286,10 @@ class TrainingDynamicsTracker:
         ax2.grid(alpha=0.3)
         
         # Add statistics
-        mean_osc = np.mean(self.loss_oscillations)
-        std_osc = np.std(self.loss_oscillations)
+        assert self.loss_oscillations is not None, "loss_oscillations unexpectedly None"
+        loss_arr = np.array(self.loss_oscillations)
+        mean_osc = float(np.mean(loss_arr)) if loss_arr.size else 0.0
+        std_osc = float(np.std(loss_arr)) if loss_arr.size else 0.0
         ax2.axvline(mean_osc, color='red', linestyle='--', linewidth=2, 
                    label=f'Mean: {mean_osc:.4f}')
         ax2.legend()
@@ -350,7 +352,7 @@ def compare_multiple_dynamics(dynamics_dict: Dict[str, TrainingDynamicsTracker],
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
     fig.suptitle('Optimizer Dynamics Comparison', fontsize=14, fontweight='bold')
     
-    colors = plt.cm.tab10(np.linspace(0, 1, len(dynamics_dict)))
+    colors = plt.get_cmap('tab10')(np.linspace(0, 1, len(dynamics_dict)))
     
     for (opt_name, tracker), color in zip(dynamics_dict.items(), colors):
         iterations = np.array(tracker.iterations)

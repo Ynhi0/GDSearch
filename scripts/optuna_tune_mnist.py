@@ -22,6 +22,7 @@ from src.core.optimizer_adapter import build_optimizer_for_tuning
 import argparse
 import random
 import numpy as np
+from typing import Any, Union, cast
 
 
 def set_seed(seed: int):
@@ -35,7 +36,11 @@ def set_seed(seed: int):
     torch.backends.cudnn.benchmark = False
 
 
-def create_objective_function(optimizer_name='Adam', epochs=10, device='cpu', seed=42):
+def create_objective_function(optimizer_name: str = 'Adam', epochs: int = 10, device: Union[str, torch.device] = 'cpu', seed: int = 42):
+    """Create objective function for Optuna optimization.
+
+    Accept both string device names and torch.device instances for flexibility.
+    """
     """
     Create objective function for Optuna optimization.
     
@@ -289,7 +294,14 @@ def main():
             pred = output.argmax(dim=1, keepdim=True)
             correct += pred.eq(target.view_as(pred)).sum().item()
     
-    test_accuracy = 100. * correct / len(test_loader.dataset)
+    # Defensive dataset length retrieval: some dataset objects don't have a static stub for __len__
+    dataset_obj = getattr(test_loader, 'dataset', None)
+    try:
+        dataset_len = len(cast(Any, dataset_obj)) if dataset_obj is not None else 0
+    except Exception:
+        dataset_len = 0
+
+    test_accuracy = 100. * correct / max(1, dataset_len)
     logging.info(f"\n{'='*80}")
     logging.info(f"FINAL TEST SET ACCURACY: {test_accuracy:.2f}%")
     logging.info(f"{'='*80}")

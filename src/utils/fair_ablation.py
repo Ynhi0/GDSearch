@@ -191,7 +191,7 @@ def run_fair_lr_sweep(
     optimizers: List[str],
     train_fn: Callable,
     n_lr_points: int = 7,
-    seeds: List[int] = None,
+    seeds: Optional[List[int]] = None,
     save_dir: Optional[Path] = None
 ) -> pd.DataFrame:
     """
@@ -343,6 +343,7 @@ def compute_statistical_significance(
     
     # Extract baseline data with seed alignment
     baseline_df = results_df[results_df['optimizer'] == baseline_optimizer][['seed', metric]].copy()
+    assert isinstance(baseline_df, pd.DataFrame)
     baseline_df = baseline_df.rename(columns={metric: 'baseline_metric'})
     
     for opt_name in results_df['optimizer'].unique():
@@ -351,6 +352,7 @@ def compute_statistical_significance(
         
         # Extract optimizer data
         opt_df = results_df[results_df['optimizer'] == opt_name][['seed', metric]].copy()
+        assert isinstance(opt_df, pd.DataFrame)
         opt_df = opt_df.rename(columns={metric: 'opt_metric'})
         
         # CRITICAL FIX: Merge on seed to ensure paired samples are aligned
@@ -414,7 +416,8 @@ def compute_statistical_significance(
     comp_df = pd.DataFrame(comparisons)
     
     # Apply Holm-Bonferroni correction with step-down procedure
-    comp_df = comp_df.sort_values('p_value').reset_index(drop=True)
+    from typing import cast
+    comp_df = cast(pd.DataFrame, comp_df).sort_values(by=['p_value']).reset_index(drop=True)
     n = len(comp_df)
     
     # CRITICAL FIX: Implement proper step-down procedure

@@ -10,6 +10,8 @@ deprecation message. To run the legacy checks directly, execute:
 import runpy
 import os
 import sys
+import torch
+import numpy as np
 
 print("WARNING: 'scripts/validate_audit_fixes_quick.py' is deprecated and has been moved to 'scripts/legacy/'.")
 print("This wrapper will execute the legacy script for backwards compatibility.")

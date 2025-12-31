@@ -100,9 +100,8 @@ class TestCheckpointResumeEarlyStoppingState:
         
         # Load checkpoint (simulate resume)
         loaded_checkpoint = manager.load_checkpoint(ckpt_file, "test_run")
-        
-        # Verify metadata exists
         assert loaded_checkpoint is not None, "Checkpoint should be loaded successfully"
+        # Verify metadata exists
         assert 'metadata' in loaded_checkpoint, "Checkpoint must contain metadata key"
         
         # Verify early stopping state is preserved
@@ -167,6 +166,7 @@ class TestCheckpointResumeModelState:
         
         # Load checkpoint
         loaded_checkpoint = manager.load_checkpoint(ckpt_file, "test_run")
+        assert loaded_checkpoint is not None, "load_checkpoint returned None"
         sample_model.load_state_dict(loaded_checkpoint['model'])
         
         # Verify weights match initial state
@@ -208,6 +208,7 @@ class TestCheckpointResumeOptimizerState:
         
         # Load checkpoint
         loaded_checkpoint = manager.load_checkpoint(ckpt_file, "test_run")
+        assert loaded_checkpoint is not None, "Failed to load checkpoint"
         optimizer_new.load_state_dict(loaded_checkpoint['optimizer'])
         
         # Verify state matches
@@ -250,6 +251,7 @@ class TestCheckpointResumeSchedulerState:
         
         # Load checkpoint
         loaded_checkpoint = manager.load_checkpoint(ckpt_file, "test_run")
+        assert loaded_checkpoint is not None, "load_checkpoint returned None"
         optimizer_new.load_state_dict(loaded_checkpoint['optimizer'])
         scheduler_new.load_state_dict(loaded_checkpoint['scheduler'])
         
@@ -302,6 +304,7 @@ class TestCheckpointResumeRNGState:
         
         # Load checkpoint and restore RNG states
         loaded_checkpoint = manager.load_checkpoint(ckpt_file, "test_run")
+        assert loaded_checkpoint is not None, "load_checkpoint returned None"
         manager.restore_rng_states(loaded_checkpoint)
         
         # Generate random numbers again (should match initial)

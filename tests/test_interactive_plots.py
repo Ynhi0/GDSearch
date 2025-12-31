@@ -82,9 +82,10 @@ class TestInteractivePlots(unittest.TestCase):
         
         # Should return a Figure
         assert isinstance(fig, go.Figure)
-        
+        data = getattr(fig, 'data', ())
+        assert isinstance(data, (list, tuple)), "Figure.data is not a sequence"
         # Should have traces for each optimizer (line + start + end = 3 per optimizer)
-        assert len(fig.data) >= len(self.trajectories) * 3
+        assert len(data) >= len(self.trajectories) * 3
     
     def test_plot_trajectory_with_contour(self):
         """Test trajectory plot with contour overlay."""
@@ -96,10 +97,13 @@ class TestInteractivePlots(unittest.TestCase):
         )
         
         # Should have contour trace plus optimizer traces
-        assert len(fig.data) > len(self.trajectories) * 3
+        data = getattr(fig, 'data', ())
+        assert len(data) > len(self.trajectories) * 3
         
         # First trace should be contour
-        assert fig.data[0].type == 'contour'
+        data = getattr(fig, 'data', ())
+        assert len(data) > 0, "No traces in figure"
+        assert getattr(data[0], 'type', None) == 'contour'
     
     def test_plot_loss_landscape_3d(self):
         """Test 3D loss landscape visualization."""
@@ -115,8 +119,9 @@ class TestInteractivePlots(unittest.TestCase):
         assert isinstance(fig, go.Figure)
         
         # Should have at least one surface trace
-        assert len(fig.data) >= 1
-        assert fig.data[0].type == 'surface'
+        data = getattr(fig, 'data', ())
+        assert len(data) >= 1
+        assert getattr(data[0], 'type', None) == 'surface'
     
     def test_plot_landscape_with_trajectories(self):
         """Test 3D landscape with trajectory overlay."""
@@ -129,11 +134,13 @@ class TestInteractivePlots(unittest.TestCase):
         )
         
         # Should have surface + trajectory traces
-        assert len(fig.data) == 1 + len(self.trajectories)
+        data = getattr(fig, 'data', ())
+        assert len(data) == 1 + len(self.trajectories)
         
         # Check trajectory traces
-        for i in range(1, len(fig.data)):
-            assert fig.data[i].type == 'scatter3d'
+        data = getattr(fig, 'data', ())
+        for i in range(1, len(data)):
+            assert getattr(data[i], 'type', None) == 'scatter3d'
     
     def test_animate_convergence(self):
         """Test convergence animation creation."""
@@ -148,14 +155,47 @@ class TestInteractivePlots(unittest.TestCase):
         assert isinstance(fig, go.Figure)
         
         # Should have frames
-        assert len(fig.frames) > 0
-        
-        # Should have traces for each optimizer (trajectory + loss)
-        assert len(fig.data) == len(self.trajectories) * 2
-        
+        frames = getattr(fig, 'frames', [])
+        assert isinstance(frames, (list, tuple)) and len(frames) > 0
+        data = getattr(fig, 'data', ())
+        assert isinstance(data, (list, tuple)) and len(data) == len(self.trajectories) * 2
         # Should have play/pause buttons
-        assert 'updatemenus' in fig.layout
-        assert len(fig.layout.updatemenus) > 0
+        layout = getattr(fig, 'layout', None)
+        updatemenus = getattr(layout, 'updatemenus', None)
+        assert updatemenus is not None
+        # Be defensive: some backends expose a method-wrapper for '__iter__'; handle that gracefully
+        iter_attr = getattr(updatemenus, '__iter__', [])
+        # Resolve to a concrete sequence for len() checks without calling len() on iterators
+        if callable(iter_attr):
+            try:
+                candidate = iter_attr()
+            except Exception:
+                candidate = None
+        else:
+            candidate = iter_attr
+
+        from collections.abc import Iterable
+        if candidate is None:
+            if isinstance(updatemenus, Iterable):
+                try:
+                    candidate = list(updatemenus)
+                except Exception:
+                    candidate = []
+            else:
+                candidate = []
+
+        # Ensure candidate is a concrete sequence before checking length
+        from collections.abc import Iterable
+        if not isinstance(candidate, (list, tuple)):
+            if isinstance(candidate, Iterable):
+                try:
+                    candidate = list(candidate)
+                except Exception:
+                    candidate = []
+            else:
+                candidate = []
+
+        assert len(candidate) > 0, "updatemenus has no iterable content"
     
     def test_multi_optimizer_comparison(self):
         """Test multi-optimizer comparison plot."""
@@ -183,7 +223,8 @@ class TestInteractivePlots(unittest.TestCase):
         assert isinstance(fig, go.Figure)
         
         # Should have multiple traces (2 line plots + 2 bar plots)
-        assert len(fig.data) >= 4
+        data = getattr(fig, 'data', ())
+        assert len(data) >= 4
     
     def test_save_interactive_html(self):
         """Test saving figure to HTML."""
@@ -234,7 +275,8 @@ class TestEdgeCases(unittest.TestCase):
         """Test with empty trajectory dict."""
         fig = plot_trajectory_interactive({})
         assert isinstance(fig, go.Figure)
-        assert len(fig.data) == 0
+        data = getattr(fig, 'data', ())
+        assert len(data) == 0
     
     def test_different_trajectory_lengths(self):
         """Test with trajectories of different lengths."""

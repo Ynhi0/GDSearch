@@ -63,8 +63,7 @@ def test_medical_utils():
     if medmnist_ds is None:
         print("  ℹ MedMNIST not installed (optional)")
     else:
-        print(f"  ✓ MedMNIST loaded: {len(medmnist_ds)} samples")
-    
+        print(f"  ✓ MedMNIST loaded: {len_sized(medmnist_ds)} samples")
     # Test Kaggle loader (will gracefully fail if not available)
     print("\n4. Testing load_kaggle_medical_dataset...")
     kaggle_result = load_kaggle_medical_dataset('./data/medical')
@@ -123,7 +122,7 @@ def test_integration():
         seed=42,
         medmnist_name=os.environ.get('MEDMNIST_NAME', 'pathmnist')
     )
-    print(f"  ✓ Medical experiment can load datasets: {len(train_ds)} train, {len(test_ds)} test")
+    print(f"  ✓ Medical experiment can load datasets: {len_sized(train_ds)} train, {len_sized(test_ds)} test")
     
     print("\n✓ All integration tests passed!")
 
@@ -136,9 +135,9 @@ def main():
     
     try:
         success = True
-        success &= test_medical_utils()
-        success &= test_download_scripts()
-        success &= test_integration()
+        success = success and bool(test_medical_utils())
+        success = success and bool(test_download_scripts())
+        success = success and bool(test_integration())
         
         if success:
             print("\n" + "="*60)
@@ -153,7 +152,7 @@ def main():
             print("\nFallback to synthetic data (NOT RECOMMENDED):")
             print("  Set environment variable: MEDICAL_DATASET_TYPE=synthetic")
             print("\nOptional Kaggle datasets:")
-            print("  1. Download using download_datasets.py with Kaggle credentials")
+            print("  1. Place a pre-downloaded Kaggle medical dataset under ./data/medical")
             print("  2. Set MEDICAL_DATASET_TYPE=kaggle")
             print("  3. Set KAGGLE_MEDICAL_PATH=./data/medical")
             return 0

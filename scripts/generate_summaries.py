@@ -55,10 +55,12 @@ def summarize_quantitative(threshold_loss: float = 1e-5, max_iters: int = 10**9)
             # threshold
             if 'loss' in df.columns:
                 hit = df.index[df['loss'] < threshold_loss]
-                record['iters_to_thresh'] = int(hit[0]) if len(hit) > 0 else None
-                record['final_loss'] = float(df['loss'].iloc[-1])
+                # `hit` is a pandas Index; convert via .tolist() for robust int coercion
+                record['iters_to_thresh'] = int(hit.tolist()[0]) if len(hit) > 0 else None
+                from src.utils.num_utils import safe_to_float
+                record['final_loss'] = safe_to_float(df['loss'])
             if 'grad_norm' in df.columns:
-                record['final_grad_norm'] = float(df['grad_norm'].iloc[-1])
+                record['final_grad_norm'] = safe_to_float(df['grad_norm'])
         else:
             # NN: expect eval rows per epoch
             record['problem'] = 'MNIST/CIFAR-10'
@@ -66,16 +68,25 @@ def summarize_quantitative(threshold_loss: float = 1e-5, max_iters: int = 10**9)
             parts = os.path.basename(csv).split('_')
             if len(parts) > 3:
                 record['optimizer'] = parts[3]
-            eval_df = df[df.get('phase', '') == 'eval']
-            train_df = df[df.get('phase', '') == 'train']
-            meta_df = df[df.get('phase','') == 'meta']
+            if 'phase' in df.columns:
+                eval_df = df.loc[df['phase'] == 'eval']
+                train_df = df.loc[df['phase'] == 'train']
+                meta_df = df.loc[df['phase'] == 'meta']
+            else:
+                eval_df = pd.DataFrame()
+                train_df = pd.DataFrame()
+                meta_df = pd.DataFrame()
             if not eval_df.empty:
-                record['final_loss'] = float(eval_df['test_loss'].iloc[-1])
-                record['test_accuracy_final'] = float(eval_df['test_accuracy'].iloc[-1])
+                from src.utils.num_utils import safe_to_float
+                record['final_loss'] = safe_to_float(eval_df['test_loss'])
+                record['test_accuracy_final'] = safe_to_float(eval_df['test_accuracy'])
                 # gen gap final
                 train_epoch_loss = train_df.groupby('epoch')['train_loss'].mean()
                 ep = int(eval_df['epoch'].iloc[-1])
-                tr_loss = float(train_epoch_loss.get(ep, np.nan))
+                tr_loss_raw = train_epoch_loss.get(ep, np.nan)
+                if tr_loss_raw is None:
+                    tr_loss_raw = np.nan
+                tr_loss = float(tr_loss_raw)
                 te_loss = float(eval_df['test_loss'].iloc[-1])
                 record['generalization_gap_final'] = te_loss - tr_loss if not np.isnan(tr_loss) else None
                 # Convergence metrics for NN
@@ -101,7 +112,11 @@ def summarize_qualitative(nn_csv_paths: List[str]) -> pd.DataFrame:
         train = df[df.get('phase', '') == 'train']
         # compute stds
         osc = float(train['update_norm'].std()) if 'update_norm' in train.columns and not train.empty else np.nan
-        smth = float(train['grad_norm'].diff().abs().rolling(50).mean().mean()) if 'grad_norm' in train.columns and not train.empty else np.nan
+    if 'grad_norm' in train.columns and not train.empty:
+        grad_series = pd.Series(train['grad_norm'])
+        smth = float(grad_series.diff().abs().rolling(50).mean().mean())
+    else:
+        smth = np.nan
         def bucket(value, thr_low, thr_high, invert=False):
             if np.isnan(value):
                 return 'Unknown'

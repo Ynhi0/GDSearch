@@ -41,12 +41,12 @@ def test_data_efficiency_ablation_smoke():
         assert col in result_df.columns, f"Missing column: {col}"
     
     # Verify no divergence on short run
-    assert not result_df['diverged'].any(), "Smoke test should not diverge"
+    assert not bool(result_df['diverged'].any()), "Smoke test should not diverge"
     
     # Verify test accuracy is reasonable (> 30% for MNIST with 1 epoch - relaxed for CI)
     # Note: Exact accuracy depends on random initialization and system performance
     min_acc = 30.0  # Relaxed from 50% for environment variability
-    assert (result_df['test_accuracy'] > min_acc).all(), \
+    assert bool((result_df['test_accuracy'] > min_acc).all()), \
         f"Test accuracy too low: {result_df['test_accuracy'].tolist()} (expected > {min_acc}%)"
 
 
@@ -79,7 +79,7 @@ def test_model_scaling_ablation_smoke():
         assert col in result_df.columns, f"Missing column: {col}"
     
     # Verify no divergence on short run
-    assert not result_df['diverged'].any(), "Smoke test should not diverge"
+    assert not bool(result_df['diverged'].any()), "Smoke test should not diverge"
     
     # Verify parameter counts differ for different widths
     params = result_df['n_parameters'].tolist()

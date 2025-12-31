@@ -8,7 +8,9 @@ import torch
 import logging
 import numpy as np
 from torch.optim.optimizer import Optimizer
+import math
 from collections import OrderedDict
+from typing import Any, cast
 
 # Import custom optimizers - handle path properly
 try:
@@ -79,6 +81,8 @@ class SGDWrapper(Optimizer):
                 
                 # Compute update
                 updated_param = self.custom_opt.step(param_np.flatten(), grad.flatten())
+                if not isinstance(updated_param, np.ndarray):
+                    raise TypeError(f"SGDWrapper: custom optimizer step() must return numpy.ndarray, got {type(updated_param).__name__}")
                 
                 # CRITICAL FIX: Validate shape before reshaping
                 if updated_param.size != param_np.size:
@@ -800,16 +804,16 @@ class SAMWrapper(Optimizer):
                 f"SAMWrapper: closure() failed during first forward pass: {e}"
             ) from e
         
-        # AUDIT FIX: Validate loss is a tensor
-        if not hasattr(loss, 'item'):
-            raise TypeError(
-                f"SAMWrapper: closure must return a tensor with .item(), got {type(loss).__name__}"
-            )
-        
-        loss_at_current = loss.item() if hasattr(loss, 'item') else float(loss)
+        # AUDIT FIX: Normalize loss to Python float (accept Tensors or numeric scalars)
+        from src.utils.num_utils import safe_to_float
+        loss_at_current = safe_to_float(loss)
+        if math.isnan(loss_at_current):
+            raise RuntimeError(
+                f"SAMWrapper: closure must return a Tensor or numeric scalar, got {type(loss).__name__}"
+            ) from None
         
         # AUDIT FIX: Check for non-finite loss
-        if not np.isfinite(loss_at_current):
+        if not math.isfinite(loss_at_current):
             raise ValueError(
                 f"SAMWrapper: Non-finite loss detected at current point: {loss_at_current}\\n"
                 "This indicates numerical instability. Consider: gradient clipping, smaller LR, or AMP."
@@ -828,10 +832,21 @@ class SAMWrapper(Optimizer):
                 f"SAMWrapper: closure() failed during adversarial forward pass: {e}"
             ) from e
         
-        loss_at_adversarial = loss_adv.item() if hasattr(loss_adv, 'item') else float(loss_adv)
-        
+        # Normalize adversarial loss to Python float using safe coercion
+        loss_at_adversarial = safe_to_float(loss_adv)
+        if math.isnan(loss_at_adversarial):
+            # Restore parameters before raising
+            for group in self.param_groups:
+                for p in group["params"]:
+                    e_w = self._perturbations.pop(id(p), None)
+                    if e_w is not None:
+                        p.sub_(e_w)
+            raise RuntimeError(
+                f"SAMWrapper: closure must return a Tensor or numeric scalar at adversarial point, got {type(loss_adv).__name__}"
+            )
+
         # AUDIT FIX: Check for non-finite adversarial loss
-        if not np.isfinite(loss_at_adversarial):
+        if not math.isfinite(loss_at_adversarial):
             # Restore parameters
             for group in self.param_groups:
                 for p in group["params"]:
@@ -1042,7 +1057,16 @@ def test_sam_and_lookahead():
     
     try:
         loss = sam_opt.step(closure)
-        logging.info(f"  SAM step completed successfully, loss: {loss.item():.4f}")
+        # Normalize to float safely in case loss is a Tensor or Python number
+        if isinstance(loss, torch.Tensor):
+            loss_val = float(loss.item())
+        else:
+            try:
+                loss_val = float(cast(Any, loss))
+            except Exception:
+                logging.warning("SAM step returned non-numeric loss: %s", type(loss))
+                loss_val = float('nan')
+        logging.info(f"  SAM step completed successfully, loss: {loss_val:.4f}")
     except Exception as e:
         logging.info(f"  SAM failed: {e}")
     
@@ -1060,7 +1084,15 @@ def test_sam_and_lookahead():
             return loss
         
         loss = lookahead_opt.step(lookahead_closure)
-        logging.info(f"  Lookahead step completed successfully, loss: {loss.item():.4f}")
+        if isinstance(loss, torch.Tensor):
+            loss_val = float(loss.item())
+        else:
+            try:
+                loss_val = float(cast(Any, loss))
+            except Exception:
+                logging.warning("Lookahead step returned non-numeric loss: %s", type(loss))
+                loss_val = float('nan')
+        logging.info(f"  Lookahead step completed successfully, loss: {loss_val:.4f}")
     except Exception as e:
         logging.info(f"  Lookahead failed: {e}")
     

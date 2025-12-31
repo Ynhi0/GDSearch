@@ -39,4 +39,5 @@ scikit-learn>=1.3.0
 medmnist>=3.0.0  # REQUIRED: Lightweight medical imaging datasets
 
 # Optional: Additional medical dataset sources
-kaggle>=1.5.0  # OPTIONAL: For downloading additional medical datasets from Kaggle (requires credentials)
+# NOTE: Direct Kaggle API downloads are no longer supported by this project. If you need Kaggle datasets,
+# download them manually from the Kaggle website and place them under ./data or provide a local path to loaders.

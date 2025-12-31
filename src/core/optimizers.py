@@ -753,11 +753,14 @@ class Lookahead(Optimizer):
         """
         if isinstance(params, tuple):
             x, y = params
+            # Ensure slow params initialized
+            assert self.slow_params_x is not None and self.slow_params_y is not None, "Slow params must be initialized before update"
             # Lookahead: slow += alpha * (fast - slow)
             self.slow_params_x = (1 - self.alpha) * self.slow_params_x + self.alpha * x
             self.slow_params_y = (1 - self.alpha) * self.slow_params_y + self.alpha * y
             return self.slow_params_x, self.slow_params_y
         else:
+            assert self.slow_params is not None, "Slow params must be initialized before update"
             self.slow_params = (1 - self.alpha) * self.slow_params + self.alpha * params
             return self.slow_params
     
@@ -1085,6 +1088,8 @@ class LAMB(Optimizer):
                 self.m = np.zeros_like(params)
                 self.v = np.zeros_like(params)
             
+            # Ensure arrays initialized for safe arithmetic
+            assert self.m is not None and self.v is not None, "Internal state arrays must be initialized"
             self.m = self.beta1 * self.m + (1 - self.beta1) * gradients
             self.v = self.beta2 * self.v + (1 - self.beta2) * gradients ** 2
             
@@ -1128,8 +1133,8 @@ def create_optimizer_instance(name: str, **kwargs) -> Optimizer:
     except Exception as e:
         logging.debug("optimizer_registry import failed: %s", e, exc_info=True)
         # Minimal fallback normalization
-        def normalize_optimizer_name(x):
-            return x.replace(' ', '_').replace('-', '_')
+        def normalize_optimizer_name(name: str) -> str:
+            return name.replace(' ', '_').replace('-', '_')
 
     canon = normalize_optimizer_name(name)
 

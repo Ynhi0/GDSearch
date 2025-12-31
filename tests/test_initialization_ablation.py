@@ -215,7 +215,7 @@ class TestAblationStudy:
         assert all(result_df['n_seeds'] == 3)
 
 
-class TestReproducibility:
+class TestReproducibilityAblation:
     """Test reproducibility of the ablation study"""
     
     @pytest.mark.slow

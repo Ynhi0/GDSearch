@@ -480,7 +480,9 @@ def get_scheduler(name: str, optimizer, **kwargs) -> LRScheduler:
 
 
 # Helper function to visualize scheduler behavior
-def plot_scheduler(scheduler: LRScheduler, epochs: int, save_path: str = None):
+from typing import Optional
+
+def plot_scheduler(scheduler: LRScheduler, epochs: int, save_path: Optional[str] = None):
     """
     Plot learning rate schedule over epochs.
     
@@ -505,7 +507,7 @@ def plot_scheduler(scheduler: LRScheduler, epochs: int, save_path: str = None):
     plt.tight_layout()
     
     if save_path:
-        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.savefig(str(save_path), dpi=150, bbox_inches='tight')
         print(f"Saved scheduler plot to {save_path}")
     else:
         plt.show()

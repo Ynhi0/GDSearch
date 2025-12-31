@@ -13,6 +13,7 @@ import logging
 from tqdm import tqdm
 
 from src.experiments.run_nn_experiment import train_and_evaluate, result_filename
+from src.utils.num_utils import safe_to_float
 
 
 def run_multi_seed_experiment(base_config: Dict[str, Any], seeds: List[int], results_dir: str = 'results') -> List[str]:
@@ -90,11 +91,11 @@ def aggregate_results(result_files: List[str], metric: str = 'test_accuracy', ex
         tainted_any = bool(df['tainted'].any()) if 'tainted' in df.columns else False
         if exclude_tainted and tainted_any:
             continue
-        eval_df = df[df['phase'] == 'eval']
+        from src.utils.type_guards import ensure_dataframe, ensure_series
+        eval_df = ensure_dataframe(df[df['phase'] == 'eval'])
         if not eval_df.empty:
-            final_value = eval_df[metric].iloc[-1]
-            values.append(final_value)
-    
+                final_value = safe_to_float(ensure_series(eval_df[metric]).iloc[-1])
+                values.append(final_value)
     values = np.array(values)
     
     # CRITICAL FIX: Check for empty array before computing statistics

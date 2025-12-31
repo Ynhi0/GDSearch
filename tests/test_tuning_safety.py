@@ -73,13 +73,14 @@ class TestTuningSafety:
         train_loader = DataLoader(train_data, batch_size=10)
         val_loader = DataLoader(val_data, batch_size=10)
         
-        # Mark loaders with attributes to identify them
-        train_loader.split_type = 'train'
-        val_loader.split_type = 'validation'
+        # Mark loaders with attributes to identify them (typing-safe helpers)
+        from src.utils.loader_meta import set_loader_split_type, get_loader_split_type
+        set_loader_split_type(train_loader, 'train')
+        set_loader_split_type(val_loader, 'validation')
         
         # This test passes if we can identify loader types
-        assert train_loader.split_type == 'train'
-        assert val_loader.split_type == 'validation'
+        assert get_loader_split_type(train_loader) == 'train'
+        assert get_loader_split_type(val_loader) == 'validation'
     
     def test_optuna_objective_should_use_validation(self):
         """Integration test: Optuna objective must evaluate on validation, not test."""
@@ -152,14 +153,15 @@ class TestLoaderNaming:
         # In proper code, test_loader should NEVER be passed to tuning functions
         # This test documents the expected behavior
         
-        # Add metadata to loaders
-        train_loader.purpose = 'training'
-        val_loader.purpose = 'validation'  # Used for tuning
-        test_loader.purpose = 'final_evaluation'  # Used ONLY after tuning
+        # Add metadata to loaders (typing-safe helpers)
+        from src.utils.loader_meta import set_loader_purpose, get_loader_purpose
+        set_loader_purpose(train_loader, 'training')
+        set_loader_purpose(val_loader, 'validation')  # Used for tuning
+        set_loader_purpose(test_loader, 'final_evaluation')  # Used ONLY after tuning
         
-        assert train_loader.purpose == 'training'
-        assert val_loader.purpose == 'validation'
-        assert test_loader.purpose == 'final_evaluation'
+        assert get_loader_purpose(train_loader) == 'training'
+        assert get_loader_purpose(val_loader) == 'validation'
+        assert get_loader_purpose(test_loader) == 'final_evaluation'
     
     def test_tuning_phase_separation(self):
         """Test conceptual separation of tuning and final evaluation phases."""

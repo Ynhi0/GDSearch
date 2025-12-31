@@ -20,7 +20,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from torch.utils.data import DataLoader
-from typing import Dict, List, Tuple, Optional, Callable
+from typing import Dict, List, Tuple, Optional, Callable, Any, Sequence
 import logging
 import matplotlib.pyplot as plt
 from pathlib import Path
@@ -36,7 +36,19 @@ class HessianAnalyzer:
     - Conditioning of optimization landscape
     """
     
-    def __init__(self, model: nn.Module, criterion: nn.Module, device: torch.device = None):
+    def __init__(self, model: nn.Module, criterion: nn.Module, device: Optional[torch.device] = None):
+        """
+        Initialize Hessian analyzer.
+        
+        Args:
+            model: PyTorch model
+            criterion: Loss function
+            device: Computation device
+        """
+        self.model = model
+        self.criterion = criterion
+        self.device = device or torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.model.to(self.device)
         """
         Initialize Hessian analyzer.
         
@@ -53,17 +65,19 @@ class HessianAnalyzer:
     def compute_hessian_eigenvalues(self, 
                                     dataloader: DataLoader,
                                     num_batches: int = 10,
-                                    top_k: int = 10) -> Dict[str, float]:
+                                    top_k: int = 10) -> Dict[str, Any]:
         """
         Compute top eigenvalues of Hessian matrix.
-        
+
+        Return values are mixed: an array of eigenvalues plus scalar floats, so the value types are heterogeneous.
+
         Uses power iteration method for efficiency (full Hessian is O(n²) memory).
-        
+
         Args:
             dataloader: DataLoader for computing Hessian
             num_batches: Number of batches to use (more = more accurate)
             top_k: Number of top eigenvalues to compute
-            
+
         Returns:
             Dictionary with:
             - eigenvalues: Top k eigenvalues (sorted descending)
@@ -74,6 +88,7 @@ class HessianAnalyzer:
         
         # Get model parameters as flat vector
         params = [p for p in self.model.parameters() if p.requires_grad]
+        # Keep params as a Sequence of Parameter objects; use Sequence typing in helper
         num_params = sum(p.numel() for p in params)
         
         logging.info(f"Total parameters: {num_params:,}")
@@ -83,20 +98,26 @@ class HessianAnalyzer:
         
         # Compute Hessian eigenvalues using power iteration
         eigenvalues = self._power_iteration_eigenvalues(dataloader, params, num_batches, top_k)
-        
+        # Convert eigenvalues to numpy array of floats for stable downstream usage
+        if isinstance(eigenvalues, torch.Tensor):
+            eigs = eigenvalues.detach().cpu().numpy().astype(float)
+        else:
+            eigs = np.asarray(eigenvalues, dtype=float)
+
         return {
-            'eigenvalues': eigenvalues,
-            'max_eigenvalue': float(eigenvalues[0]) if len(eigenvalues) > 0 else 0.0,
-            'min_eigenvalue': float(eigenvalues[-1]) if len(eigenvalues) > 0 else 0.0,
-            'condition_number': float(eigenvalues[0] / eigenvalues[-1]) if len(eigenvalues) > 1 and eigenvalues[-1] != 0 else float('inf'),
-            'trace_estimate': float(eigenvalues.sum())
+            'eigenvalues': eigs,
+            'max_eigenvalue': float(eigs[0]) if eigs.size > 0 else 0.0,
+            'min_eigenvalue': float(eigs[-1]) if eigs.size > 0 else 0.0,
+            'condition_number': float(eigs[0] / eigs[-1]) if eigs.size > 1 and eigs[-1] != 0 else float('inf'),
+            'trace_estimate': float(np.sum(eigs))
         }
     
     def _power_iteration_eigenvalues(self, 
                                      dataloader: DataLoader,
-                                     params: List[torch.Tensor],
+                                     params: Sequence[torch.Tensor],
                                      num_batches: int,
                                      top_k: int) -> torch.Tensor:
+        """Use Sequence[Tensor] for covariance-friendly typing for Parameter lists."""
         """
         Compute top eigenvalues using power iteration (Lanczos method).
         
@@ -107,6 +128,7 @@ class HessianAnalyzer:
         # Hessian-vector product function
         def hvp(vector):
             """Compute Hessian-vector product H @ v"""
+            nonlocal batch_iter
             # Zero gradients
             self.model.zero_grad()
             
@@ -142,6 +164,9 @@ class HessianAnalyzer:
                 else:
                     hv = hv + hv_batch
             
+            if hv is None:
+                # No batches were processed (empty dataloader) -> return zero vector
+                return torch.zeros(num_params, device=self.device)
             return hv / num_batches
         
         # Power iteration to find top eigenvalue/eigenvector
@@ -190,7 +215,8 @@ class HessianAnalyzer:
             logging.warning("No eigenvalues computed - returning zero")
             return torch.tensor([0.0])
         
-        return torch.tensor(eigenvalues)
+        # Ensure we return a torch.Tensor of floats
+        return torch.tensor(eigenvalues, dtype=torch.float)
     
     def compute_sharpness(self, dataloader: DataLoader, rho: float = 0.05) -> float:
         """
@@ -225,11 +251,16 @@ class HessianAnalyzer:
         
         # Compute adversarial perturbation
         with torch.no_grad():
-            # Gradient norm
-            grad_norm = torch.sqrt(sum((p.grad ** 2).sum() for p in self.model.parameters() if p.grad is not None))
-            
+            # Gradient norm: accumulate in a tensor to ensure consistent Tensor typing
+            sum_sq = torch.tensor(0.0, device=self.device)
+            for p in self.model.parameters():
+                if p.grad is not None:
+                    sum_sq = sum_sq + (p.grad ** 2).sum()
+            grad_norm = torch.sqrt(sum_sq)
+
             # Perturbation: ε = ρ * grad / ||grad||
-            scale = rho / (grad_norm + 1e-12)
+            # Ensure scale is a Tensor compatible with parameter tensors
+            scale = (rho / (grad_norm + 1e-12)).to(device=self.device)
             
             # Apply perturbation
             for p in self.model.parameters():
@@ -360,7 +391,7 @@ def plot_hessian_spectrum(eigenvalues: np.ndarray,
     plt.tight_layout()
     
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
         logging.info(f"Hessian spectrum plot saved to {save_path}")
     
     plt.show()
@@ -395,8 +426,8 @@ def plot_sharpness_comparison(sharpness_values: List[float],
     
     # Annotate best
     ax.annotate('Best (Flattest)', 
-                xy=(best_idx, sharpness_values[best_idx]),
-                xytext=(best_idx, sharpness_values[best_idx] * 1.2),
+                xy=(float(best_idx), float(sharpness_values[best_idx])),
+                xytext=(float(best_idx), float(sharpness_values[best_idx]) * 1.2),
                 arrowprops=dict(arrowstyle='->', lw=2, color='green'),
                 fontsize=12, weight='bold', color='green',
                 ha='center')
@@ -404,7 +435,7 @@ def plot_sharpness_comparison(sharpness_values: List[float],
     plt.tight_layout()
     
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
         logging.info(f"Sharpness comparison plot saved to {save_path}")
     
     plt.show()

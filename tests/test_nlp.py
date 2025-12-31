@@ -209,7 +209,7 @@ class TestNLPModels:
             'embedding_dim': model_params['embedding_dim'],
             'num_classes': model_params['num_classes']
         }
-        model = TextCNN(**params, num_filters=32, filter_sizes=[3, 4, 5])
+        model = TextCNN(**params, num_filters=32, filter_sizes=(3, 4, 5))
         
         batch_size, seq_len = 4, 10
         x = torch.randint(0, model_params['vocab_size'], (batch_size, seq_len))
@@ -257,13 +257,15 @@ class TestDataLoading:
         """Test loading IMDB data (slow test, requires download)."""
         try:
             # Use very small subset for testing
-            train_loader, test_loader, vocab = get_imdb_loaders(
+            res = get_imdb_loaders(
                 batch_size=8,
                 max_len=50,
                 max_vocab_size=1000,
                 train_size=100,  # Very small for testing
                 test_size=50
             )
+            # Stable return signature: (train_loader, val_loader|None, test_loader, vocab)
+            train_loader, val_loader, test_loader, vocab = res
             
             # Check loaders
             assert len(train_loader) > 0

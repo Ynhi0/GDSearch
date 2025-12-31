@@ -2,6 +2,7 @@ import pytest
 
 from src.core.optimizer_registry import normalize_optimizer_name
 from src.core.hyperparameters import get_default_hyperparameters
+from typing import Any, cast
 
 
 def test_normalize_aliases():
@@ -22,7 +23,7 @@ def test_get_default_hyperparameters_normalized_lookup():
 def test_unknown_optimizer_in_config_raises():
     # Ensure unknown optimizer name in normalization raises
     with pytest.raises(ValueError):
-        normalize_optimizer_name(123)  # non-string
+        normalize_optimizer_name(cast(Any, 123))  # non-string (runtime error expected)
 
     with pytest.raises(ValueError):
         normalize_optimizer_name('NotAnOptimizer')

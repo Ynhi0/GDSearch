@@ -125,7 +125,9 @@ def validate_config_keys(config_path: str, strict: bool = False) -> Dict[str, Li
     return issues
 
 
-def normalize_config(config_path: str, output_path: str = None) -> Dict[str, Any]:
+from typing import Optional
+
+def normalize_config(config_path: str, output_path: Optional[str] = None) -> Dict[str, Any]:
     """
     Normalize config file to use standard keys.
     

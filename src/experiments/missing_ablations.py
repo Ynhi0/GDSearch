@@ -29,6 +29,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+from src.utils.plot_helpers import arr_to_numpy_float
 from typing import List, Dict, Optional
 import os
 from tqdm import tqdm
@@ -171,7 +172,7 @@ def evaluate(model, loader, criterion, device):
 
 
 def run_gradient_clipping_ablation(
-    clip_values: Optional[List[float]] = None,
+    clip_values: Optional[List[Optional[float]]] = None,
     epochs: int = 10,
     seeds: List[int] = [42, 123, 456],
     lr: float = 0.01,
@@ -551,7 +552,7 @@ def create_ablation_plots(df: pd.DataFrame, title: str, output_dir: str, filenam
     ax = axes[0, 0]
     for seed in df['Seed'].unique():
         seed_data = df[df['Seed'] == seed]
-        ax.plot(seed_data[x_col], seed_data['Test_Acc'], 
+        ax.plot(arr_to_numpy_float(seed_data[x_col]), arr_to_numpy_float(seed_data['Test_Acc']), 
                 marker='o', label=f'Seed {seed}', alpha=0.7)
     ax.set_xlabel(x_col.replace('_', ' '), fontsize=12)
     ax.set_ylabel('Test Accuracy (%)', fontsize=12)
@@ -563,7 +564,7 @@ def create_ablation_plots(df: pd.DataFrame, title: str, output_dir: str, filenam
     ax = axes[0, 1]
     for seed in df['Seed'].unique():
         seed_data = df[df['Seed'] == seed]
-        ax.plot(seed_data[x_col], seed_data['Train_Acc'], 
+        ax.plot(arr_to_numpy_float(seed_data[x_col]), arr_to_numpy_float(seed_data['Train_Acc']), 
                 marker='s', label=f'Seed {seed}', alpha=0.7)
     ax.set_xlabel(x_col.replace('_', ' '), fontsize=12)
     ax.set_ylabel('Train Accuracy (%)', fontsize=12)
@@ -575,7 +576,7 @@ def create_ablation_plots(df: pd.DataFrame, title: str, output_dir: str, filenam
     ax = axes[1, 0]
     for seed in df['Seed'].unique():
         seed_data = df[df['Seed'] == seed]
-        ax.plot(seed_data[x_col], seed_data['Test_Loss'], 
+        ax.plot(arr_to_numpy_float(seed_data[x_col]), arr_to_numpy_float(seed_data['Test_Loss']), 
                 marker='o', label=f'Seed {seed}', alpha=0.7)
     ax.set_xlabel(x_col.replace('_', ' '), fontsize=12)
     ax.set_ylabel('Test Loss', fontsize=12)
@@ -588,7 +589,7 @@ def create_ablation_plots(df: pd.DataFrame, title: str, output_dir: str, filenam
     if 'Overfit_Gap' in df.columns:
         for seed in df['Seed'].unique():
             seed_data = df[df['Seed'] == seed]
-            ax.plot(seed_data[x_col], seed_data['Overfit_Gap'], 
+            ax.plot(arr_to_numpy_float(seed_data[x_col]), arr_to_numpy_float(seed_data['Overfit_Gap']), 
                     marker='d', label=f'Seed {seed}', alpha=0.7)
         ax.set_xlabel(x_col.replace('_', ' '), fontsize=12)
         ax.set_ylabel('Overfitting Gap (Train - Test Acc)', fontsize=12)

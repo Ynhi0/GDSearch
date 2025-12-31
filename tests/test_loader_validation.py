@@ -22,8 +22,9 @@ def test_enforce_blocks_test_loader():
     dummy_data = TensorDataset(torch.randn(100, 10), torch.randint(0, 5, (100,)))
     test_loader = DataLoader(dummy_data, batch_size=32)
     
-    # Tag as test
-    test_loader.name = 'test'
+    # Tag as test (use helper to avoid static attribute complaints)
+    from src.utils.loader_meta import set_loader_name
+    set_loader_name(test_loader, 'test')
     
     # Should raise ValueError
     with pytest.raises(ValueError, match="TEST data"):
@@ -36,7 +37,8 @@ def test_enforce_allows_validation_loader():
     val_loader = DataLoader(dummy_data, batch_size=32)
     
     # Tag as validation
-    val_loader.name = 'validation'
+    from src.utils.loader_meta import set_loader_name
+    set_loader_name(val_loader, 'validation')
     
     # Should not raise
     enforce_no_test_in_tuning(val_loader)
@@ -49,7 +51,8 @@ def test_validate_detects_test_dataset_identity():
     
     # Create val_loader that incorrectly uses test_data
     val_loader = DataLoader(test_data, batch_size=32)
-    val_loader.name = 'validation'
+    from src.utils.loader_meta import set_loader_name
+    set_loader_name(val_loader, 'validation')
     
     # Should raise ValueError detecting dataset identity match
     with pytest.raises(ValueError, match="val_loader contains the TEST dataset"):
@@ -84,12 +87,13 @@ def test_metadata_tagging():
     loader = DataLoader(dummy_data, batch_size=32)
     
     # Tag with metadata
-    loader.name = 'validation'
-    setattr(loader, '_split_type', DatasetSplit.VALIDATION)
+    from src.utils.loader_meta import set_loader_name, set_loader_split_type, get_loader_name, get_loader_split_type
+    set_loader_name(loader, 'validation')
+    set_loader_split_type(loader, DatasetSplit.VALIDATION)
     
     # Verify metadata
-    assert loader.name == 'validation'
-    assert getattr(loader, '_split_type') == DatasetSplit.VALIDATION
+    assert get_loader_name(loader) == 'validation'
+    assert get_loader_split_type(loader) == DatasetSplit.VALIDATION
 
 
 if __name__ == '__main__':

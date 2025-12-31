@@ -41,8 +41,10 @@ RECOMMENDED_CONFIG = {
 }
 
 
+from typing import Optional
+
 class ExperimentValidator:
-    def __init__(self, root_dir: Path = None):
+    def __init__(self, root_dir: Optional[Path] = None):
         self.root_dir = root_dir or Path(__file__).parent.parent
         self.issues = []
         self.warnings = []

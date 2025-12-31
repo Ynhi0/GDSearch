@@ -14,14 +14,17 @@ import sys
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional, cast
 import matplotlib.pyplot as plt
 import seaborn as sns
+from src.utils.plot_helpers import arr_to_numpy_float
+from src.utils.type_guards import ensure_dataframe
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from src.analysis.statistical_analysis import compare_two_optimizers
+from src.utils.num_utils import safe_to_float
 
 
 def create_weight_decay_configs(
@@ -112,6 +115,9 @@ def run_weight_decay_ablation(
                 from src.experiments.run_nn_experiment import train_and_evaluate
                 df = train_and_evaluate(config_with_seed)
                 df = pd.DataFrame(df)
+                from src.utils.type_guards import ensure_dataframe
+                df = ensure_dataframe(df)
+                assert isinstance(df, pd.DataFrame)
                 
                 # Save individual result
                 filename = f"{config_name}_seed{seed}.csv"
@@ -122,9 +128,12 @@ def run_weight_decay_ablation(
                 
                 # Print final metrics
                 eval_df = df[df['phase'] == 'eval']
+                eval_df = ensure_dataframe(eval_df)
+                assert isinstance(eval_df, pd.DataFrame)
                 if not eval_df.empty:
-                    final_acc = eval_df['test_accuracy'].iloc[-1]
-                    final_loss = eval_df['test_loss'].iloc[-1]
+                    from src.utils.type_guards import ensure_series
+                    final_acc = safe_to_float(ensure_series(eval_df['test_accuracy']).iloc[-1])
+                    final_loss = safe_to_float(ensure_series(eval_df['test_loss']).iloc[-1])
                     print(f"Acc: {final_acc:.4f}, Loss: {final_loss:.4f}")
                 else:
                     print("Done")
@@ -178,23 +187,28 @@ def analyze_weight_decay_results(
             final_test_losses = []
             gen_gaps = []
             
-            for seed in eval_df['seed'].unique():
-                seed_eval = eval_df[eval_df['seed'] == seed]
-                if not seed_eval.empty:
-                    # Skip tainted seeds
-                    if 'tainted' in seed_eval.columns and seed_eval['tainted'].any():
-                        continue
-                    final_test_accs.append(seed_eval['test_accuracy'].iloc[-1])
-                    final_test_losses.append(seed_eval['test_loss'].iloc[-1])
-                    
-                    # Calculate generalization gap (test_loss - train_loss)
-                    final_epoch = int(seed_eval['epoch'].iloc[-1])
-                    train_df = df[(df['phase'] == 'train') & (df['seed'] == seed)]
-                    train_epoch = train_df[train_df['epoch'] == final_epoch]
-                    if not train_epoch.empty:
-                        train_loss = train_epoch['train_loss'].iloc[-1]
-                        test_loss = final_test_losses[-1]
-                        gen_gaps.append(test_loss - train_loss)
+            from src.utils.type_guards import ensure_series, ensure_dataframe
+            for seed in ensure_series(eval_df['seed']).unique():
+                seed_eval = ensure_dataframe(eval_df[eval_df['seed'] == seed])
+                if seed_eval.empty:
+                    continue
+                # Skip tainted seeds (explicit bool conversion for Series.any())
+                tainted_any = False
+                if 'tainted' in seed_eval.columns:
+                    tainted_any = bool(ensure_series(seed_eval['tainted']).any())
+                if tainted_any:
+                    continue
+
+                final_test_accs.append(safe_to_float(ensure_series(seed_eval['test_accuracy']).iloc[-1]))
+                final_test_losses.append(safe_to_float(ensure_series(seed_eval['test_loss']).iloc[-1]))
+
+                # Calculate generalization gap (test_loss - train_loss)
+                final_epoch = int(safe_to_float(ensure_series(seed_eval['epoch']).iloc[-1]))
+                train_df = ensure_dataframe(df[(df['phase'] == 'train') & (df['seed'] == seed)])
+                if not train_df.empty:
+                    train_loss = safe_to_float(ensure_series(train_df['train_loss']).iloc[-1])
+                    test_loss = final_test_losses[-1]
+                    gen_gaps.append(float(test_loss - train_loss))
             
             if final_test_accs:
                 summary_data.append({
@@ -214,24 +228,26 @@ def analyze_weight_decay_results(
 
 def plot_weight_decay_trends(
     summary_df: pd.DataFrame,
-    save_path: str = None
+    save_path: Optional[str] = None
 ):
     """
     Plot weight decay vs accuracy and generalization gap.
     """
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
     
+    from matplotlib import cm
     optimizers = summary_df['Optimizer'].unique()
-    colors = plt.cm.tab10(np.linspace(0, 1, len(optimizers)))
+    colors = cm.get_cmap('tab10')(np.linspace(0, 1, len(optimizers)))
     
     # Plot 1: Accuracy
     for i, optimizer in enumerate(optimizers):
-        opt_df = summary_df[summary_df['Optimizer'] == optimizer]
-        opt_df = opt_df.sort_values('Weight Decay')
+        from typing import cast
+        opt_df = cast(pd.DataFrame, summary_df[summary_df['Optimizer'] == optimizer])
+        opt_df = cast(pd.DataFrame, opt_df).sort_values(by=['Weight Decay'])
         
-        wds = opt_df['Weight Decay'].values
-        means = opt_df['Mean Accuracy'].values
-        stds = opt_df['Std Accuracy'].values
+        wds = arr_to_numpy_float(opt_df['Weight Decay'])
+        means = arr_to_numpy_float(opt_df['Mean Accuracy'])
+        stds = arr_to_numpy_float(opt_df['Std Accuracy'])
         
         ax1.errorbar(wds, means, yerr=stds, 
                     marker='o', markersize=8, linewidth=2.5,
@@ -255,10 +271,10 @@ def plot_weight_decay_trends(
     # Plot 2: Generalization Gap
     for i, optimizer in enumerate(optimizers):
         opt_df = summary_df[summary_df['Optimizer'] == optimizer]
-        opt_df = opt_df.sort_values('Weight Decay')
+        opt_df = cast(pd.DataFrame, opt_df).sort_values(by=['Weight Decay'])
         
-        wds = opt_df['Weight Decay'].values
-        gaps = opt_df['Mean Gen Gap'].values
+        wds = arr_to_numpy_float(opt_df['Weight Decay'])
+        gaps = arr_to_numpy_float(opt_df['Mean Gen Gap'])
         
         ax2.plot(wds, gaps, marker='s', markersize=8, linewidth=2.5,
                 label=optimizer, color=colors[i], alpha=0.8)
@@ -274,7 +290,7 @@ def plot_weight_decay_trends(
     plt.tight_layout()
     
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
         print(f"Weight decay trends plot saved to: {save_path}")
         plt.close()
     else:
@@ -293,7 +309,7 @@ def print_weight_decay_summary(summary_df: pd.DataFrame):
         print(f"\n{optimizer}:")
         print("-" * 80)
         opt_df = summary_df[summary_df['Optimizer'] == optimizer]
-        opt_df = opt_df.sort_values('Weight Decay')
+        opt_df = cast(pd.DataFrame, opt_df).sort_values(by=['Weight Decay'])
         
         for _, row in opt_df.iterrows():
             wd_str = f"{row['Weight Decay']:.1e}" if row['Weight Decay'] > 0 else "0.0    "

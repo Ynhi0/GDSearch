@@ -23,6 +23,7 @@ from src.analysis.statistical_analysis import (
     power_analysis_report,
 )
 from src.visualization.plot_results import plot_multiseed_comparison, plot_final_metric_comparison
+from src.utils.type_guards import ensure_dataframe, ensure_series
 
 
 def load_multiseed_results(pattern: str, results_dir: str = 'results') -> List[pd.DataFrame]:
@@ -31,12 +32,15 @@ def load_multiseed_results(pattern: str, results_dir: str = 'results') -> List[p
     return [pd.read_csv(f) for f in sorted(files)]
 
 
+from typing import Optional, Tuple
+
+
 def run_full_pipeline(
     config_path: str,
     seeds: List[int],
     results_dir: str = 'results',
     plots_dir: str = 'plots',
-    comparison_pairs: List[tuple] = None
+    comparison_pairs: Optional[List[Tuple]] = None
 ):
     """
     Run full multi-seed experiment pipeline:
@@ -163,8 +167,9 @@ def run_full_pipeline(
                         if tainted_any:
                             logging.info("Skipping tainted run for %s, seed=%s", opt_A, s)
                             continue
-                        ev = df[df['phase'] == 'eval']
+                        ev = ensure_dataframe(df[df['phase'] == 'eval'])
                         if not ev.empty:
+                            assert isinstance(ev, pd.DataFrame)
                             map_A[s] = float(ev[metric].iloc[-1])
                     except Exception as e:
                         logging.debug("Failed to read/parse result file %s: %s", f, e, exc_info=True)
@@ -180,8 +185,9 @@ def run_full_pipeline(
                         if tainted_any:
                             logging.info("Skipping tainted run for %s, seed=%s", opt_B, s)
                             continue
-                        ev = df[df['phase'] == 'eval']
+                        ev = ensure_dataframe(df[df['phase'] == 'eval'])
                         if not ev.empty:
+                            assert isinstance(ev, pd.DataFrame)
                             map_B[s] = float(ev[metric].iloc[-1])
                     except Exception as e:
                         logging.debug("Failed to read/parse result file %s: %s", f, e, exc_info=True)
@@ -213,17 +219,23 @@ def run_full_pipeline(
                     finals_A = []
                     finals_B = []
                     for df in dfs_A:
+                        df = ensure_dataframe(df)
                         # Skip any tainted runs by default
-                        if 'tainted' in df.columns and df['tainted'].any():
+                        from src.utils.type_guards import ensure_series
+                        tainted_any = bool(ensure_series(df['tainted']).any()) if 'tainted' in df.columns else False
+                        if tainted_any:
                             continue
-                        ev = df[df['phase'] == 'eval']
+                        ev = ensure_dataframe(df[df['phase'] == 'eval'])
                         if not ev.empty:
                             finals_A.append(ev[metric].iloc[-1])
                     for df in dfs_B:
+                        df = ensure_dataframe(df)
                         # Skip any tainted runs by default
-                        if 'tainted' in df.columns and df['tainted'].any():
+                        from src.utils.type_guards import ensure_series
+                        tainted_any = bool(ensure_series(df['tainted']).any()) if 'tainted' in df.columns else False
+                        if tainted_any:
                             continue
-                        ev = df[df['phase'] == 'eval']
+                        ev = ensure_dataframe(df[df['phase'] == 'eval'])
                         if not ev.empty:
                             finals_B.append(ev[metric].iloc[-1])
                     results_A = np.array(finals_A, dtype=float)
@@ -351,7 +363,7 @@ def run_full_pipeline(
                 print(f"\nSeed Consistency Summary:")
                 print(f"   {paired_count}/{len(df_summary)} comparisons used paired tests.")
                 print(f"   {unpaired_count}/{len(df_summary)} fell back to unpaired (insufficient common seeds).")
-                if df_summary['n_common_seeds'].notna().any():
+                if bool(df_summary['n_common_seeds'].notna().any()):
                     min_common = df_summary.loc[df_summary['Paired'], 'n_common_seeds'].min() if paired_count > 0 else 0
                     max_common = df_summary.loc[df_summary['Paired'], 'n_common_seeds'].max() if paired_count > 0 else 0
                     print(f"   Common seeds ranged from {int(min_common)} to {int(max_common)} for paired comparisons.")

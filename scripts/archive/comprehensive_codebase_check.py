@@ -16,7 +16,7 @@ Usage:
 import re
 import ast
 from pathlib import Path
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 import logging
 
 logging.basicConfig(level=logging.INFO, format='%(message)s')
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 class CodebaseHealthChecker:
-    def __init__(self, root_dir: Path = None):
+    def __init__(self, root_dir: Optional[Path] = None):
         self.root_dir = root_dir or Path(__file__).parent.parent
         self.errors = []
         self.warnings = []

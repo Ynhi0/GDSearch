@@ -192,8 +192,8 @@ class TestCreateNoisyDataloaders:
             num_workers=0
         )
         
-        train_size = len(train_loader.dataset)
-        val_size = len(val_loader.dataset)
+        train_size = len_sized(train_loader.dataset)
+        val_size = len_sized(val_loader.dataset)
         
         # Validation should be ~10% of original training set
         original_train_size = train_size + val_size

@@ -23,7 +23,7 @@ def test_requirements():
         content = f.read()
     
     required_packages = ['torch', 'torchvision', 'numpy', 'pandas', 'scipy', 
-                        'matplotlib', 'optuna', 'mlflow', 'datasets', 'medmnist', 'kaggle']
+                        'matplotlib', 'optuna', 'mlflow', 'datasets', 'medmnist']
     
     for pkg in required_packages:
         if pkg in content:
@@ -36,7 +36,7 @@ def test_requirements():
     with open('kaggle/requirements_kaggle.txt', 'r') as f:
         kaggle_content = f.read()
     
-    kaggle_required = ['torch', 'transformers', 'datasets', 'plotly', 'medmnist', 'kaggle']
+    kaggle_required = ['torch', 'transformers', 'datasets', 'plotly', 'medmnist']
     
     for pkg in kaggle_required:
         if pkg in kaggle_content:
@@ -192,11 +192,12 @@ def test_build_model_and_data():
     
     device = torch.device('cpu')
     
-    # Test without val_split
+    # Test without val_split - API returns a consistent 4-tuple with val_loader = None when not requested
     result = build_model_and_data('MNIST', 'SimpleMLP', 32, device, 42)
-    assert len(result) == 3, f"Expected 3 returns, got {len(result)}"
-    model, train_loader, test_loader = result
-    print("  ✓ build_model_and_data without val_split: 3 returns (model, train, test)")
+    assert len(result) == 4, f"Expected 4 returns (model, train, val, test), got {len(result)}"
+    model, train_loader, val_loader, test_loader = result
+    assert val_loader is None, "val_loader should be None when val_split is not provided"
+    print("  ✓ build_model_and_data without val_split: 4 returns (model, train, val=None, test)")
     
     # Test with val_split
     result = build_model_and_data('MNIST', 'SimpleMLP', 32, device, 42, val_split=0.1)

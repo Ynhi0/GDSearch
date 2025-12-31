@@ -13,7 +13,7 @@ import sys
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Any, cast
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -122,7 +122,8 @@ def run_learning_rate_ablation(
                 # Print final accuracy
                 eval_df = df[df['phase'] == 'eval']
                 if not eval_df.empty:
-                    final_acc = eval_df['test_accuracy'].iloc[-1]
+                    from src.utils.type_guards import ensure_series
+                    final_acc = ensure_series(eval_df['test_accuracy']).iloc[-1]
                     print(f"Test Acc: {final_acc:.4f}")
                 else:
                     print("Done")
@@ -177,9 +178,10 @@ def analyze_learning_rate_results(
                 seed_df = eval_df[eval_df['seed'] == seed]
                 if not seed_df.empty:
                     # Skip tainted seeds if present
-                    if 'tainted' in seed_df.columns and seed_df['tainted'].any():
+                    if 'tainted' in seed_df.columns and bool(seed_df['tainted'].any()):
                         continue
-                    final_accs.append(seed_df['test_accuracy'].iloc[-1])
+                    from src.utils.type_guards import ensure_series
+                    final_accs.append(ensure_series(seed_df['test_accuracy']).iloc[-1])
             
             if final_accs:
                 summary_data.append({
@@ -197,9 +199,11 @@ def analyze_learning_rate_results(
     return summary_df
 
 
+from typing import Optional
+
 def plot_learning_rate_trends(
     summary_df: pd.DataFrame,
-    save_path: str = None
+    save_path: Optional[str] = None
 ):
     """
     Plot learning rate vs accuracy trends for all optimizers.
@@ -207,12 +211,14 @@ def plot_learning_rate_trends(
     fig, ax = plt.subplots(figsize=(12, 7))
     
     optimizers = summary_df['Optimizer'].unique()
-    colors = plt.cm.tab10(np.linspace(0, 1, len(optimizers)))
+    colors = plt.get_cmap('tab10')(np.linspace(0, 1, len(optimizers)))
     
     from src.utils.plot_helpers import arr_to_numpy_float
+    from typing import cast
     for i, optimizer in enumerate(optimizers):
         opt_df = summary_df[summary_df['Optimizer'] == optimizer]
-        opt_df = opt_df.sort_values('Learning Rate')
+        opt_df = cast(pd.DataFrame, opt_df)
+        opt_df = opt_df.sort_values(by=['Learning Rate'])
         
         lrs = arr_to_numpy_float(opt_df['Learning Rate'])
         means = arr_to_numpy_float(opt_df['Mean Accuracy'])
@@ -243,7 +249,7 @@ def plot_learning_rate_trends(
     plt.tight_layout()
     
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
         print(f"Learning rate trend plot saved to: {save_path}")
         plt.close()
     else:
@@ -252,7 +258,7 @@ def plot_learning_rate_trends(
 
 def plot_learning_rate_heatmap(
     summary_df: pd.DataFrame,
-    save_path: str = None
+    save_path: Optional[str] = None
 ):
     """
     Plot heatmap of accuracy across optimizers and learning rates.
@@ -280,7 +286,7 @@ def plot_learning_rate_heatmap(
     plt.tight_layout()
     
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
         print(f"Learning rate heatmap saved to: {save_path}")
         plt.close()
     else:
@@ -299,7 +305,8 @@ def print_learning_rate_summary(summary_df: pd.DataFrame):
         print(f"\n{optimizer}:")
         print("-" * 80)
         opt_df = summary_df[summary_df['Optimizer'] == optimizer]
-        opt_df = opt_df.sort_values('Learning Rate')
+        opt_df = cast(pd.DataFrame, opt_df)
+        opt_df = opt_df.sort_values(by=['Learning Rate'])
         
         for _, row in opt_df.iterrows():
             print(f"  LR {row['Learning Rate']:.1e}: "

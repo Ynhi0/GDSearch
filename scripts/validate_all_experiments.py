@@ -22,7 +22,7 @@ from pathlib import Path
 import argparse
 import subprocess
 import tempfile
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Callable
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -149,7 +149,7 @@ def main():
     print("=" * 80)
     print()
     
-    tests: List[Tuple[str, callable]] = [
+    tests: List[Tuple[str, Callable[[], Tuple[bool, str]]]] = [
         ("Import Validation", check_imports),
         ("Configuration Validation", check_configs),
         ("Analysis Pipeline Test", run_analysis_pipeline_test),

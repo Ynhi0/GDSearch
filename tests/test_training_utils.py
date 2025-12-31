@@ -96,7 +96,7 @@ class TestLabelSmoothingCrossEntropy:
         loss.backward()
         
         assert pred.grad is not None
-        assert not torch.isnan(pred.grad).any()
+        assert not bool(torch.isnan(pred.grad).any())
 
 
 class TestModelEMA:

@@ -75,7 +75,8 @@ medmnist>=3.0.0  # REQUIRED: Lightweight medical imaging datasets (default for m
 # ============================================================================
 # OPTIONAL: ADDITIONAL MEDICAL DATASET SOURCES
 # ============================================================================
-kaggle>=1.5.0  # OPTIONAL: Kaggle API for downloading additional medical datasets (requires credentials)
+# NOTE: Direct Kaggle API downloads are no longer supported by this project. If you need Kaggle datasets,
+# download them manually from the Kaggle website and place them under ./data or provide a local path to loaders.
 
 # ============================================================================
 # SECURITY & COMPATIBILITY

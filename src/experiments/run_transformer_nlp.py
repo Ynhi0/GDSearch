@@ -54,7 +54,7 @@ def _flattened_grad_norm(model: torch.nn.Module) -> float:
         if not grads:
             return 0.0
         g = torch.cat(grads)
-        return torch.linalg.norm(g, ord=2).item()
+        return torch.norm(g, p=2).item()
 
 
 def _layer_grad_norms(model: torch.nn.Module) -> Dict[str, float]:
@@ -63,11 +63,13 @@ def _layer_grad_norms(model: torch.nn.Module) -> Dict[str, float]:
         for name, p in model.named_parameters():
             if p.grad is None:
                 continue
-            norms[name] = torch.linalg.norm(p.grad.view(-1), ord=2).item()
+            norms[name] = torch.norm(p.grad.view(-1), p=2).item()
     return norms
 
 
-def evaluate(model, loader, device) -> Tuple[float, float]:
+from typing import Any
+
+def evaluate(model: Any, loader: DataLoader, device: torch.device) -> Tuple[float, float]:
     model.eval()
     import torch.nn.functional as F
     total_loss, correct, total = 0.0, 0, 0
@@ -78,7 +80,8 @@ def evaluate(model, loader, device) -> Tuple[float, float]:
             if attention_mask is not None:
                 attention_mask = attention_mask.to(device)
             labels = batch["labels"].to(device)
-            outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
+            # model call is dynamic (third-party) - suppress arg-type strictness
+            outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)  # type: ignore[arg-type]
             loss = outputs.loss
             logits = outputs.logits
             total_loss += float(loss.item()) * input_ids.size(0)
@@ -136,36 +139,188 @@ def run_single_imdb(optimizer_name: str, seed: int, lr: float, epochs: int, batc
         return enc
 
     tokenized = raw.map(preprocess, batched=True)
-    train_dataset = tokenized['train'].shuffle(seed=seed).select(range(2000))
-    test_dataset = tokenized['test'].shuffle(seed=seed).select(range(1000))
 
-    remove_cols = [c for c in train_dataset.column_names if c not in ('input_ids', 'attention_mask', 'labels')]
-    train_dataset = train_dataset.remove_columns(remove_cols)
-    test_dataset = test_dataset.remove_columns(remove_cols)
+    # Safely handle different HF dataset-like objects (IterableDataset vs Dataset)
+    from typing import Any, Mapping, cast
+    if isinstance(tokenized, Mapping):
+        train_ds = tokenized['train']
+        test_ds = tokenized['test']
+    else:
+        # Fallback for non-mapping objects; cast to Any to access splits by index/key
+        train_ds = cast(Any, tokenized)['train']  # type: ignore[index]
+        test_ds = cast(Any, tokenized)['test']  # type: ignore[index]
 
-    def collate_fn(batch):
+    # Prefer HF Dataset API when available (explicit Dataset type check)
+    try:
+        from datasets import Dataset as _HFDataset  # type: ignore[import]
+    except Exception:
+        _HFDataset = None
+
+    if _HFDataset is not None and isinstance(train_ds, _HFDataset):
+        try:
+            train_dataset = train_ds.shuffle(seed=seed).select(range(2000))
+        except Exception:
+            train_dataset = list(train_ds)[:2000]
+    else:
+        # Materialize any iterable or list into a Python list to avoid slicing concerns
+        train_dataset = list(train_ds)[:2000]
+
+    if _HFDataset is not None and isinstance(test_ds, _HFDataset):
+        try:
+            test_dataset = test_ds.shuffle(seed=seed).select(range(1000))
+        except Exception:
+            test_dataset = list(test_ds)[:1000]
+    else:
+        test_dataset = list(test_ds)[:1000]
+
+    # Robust helper to compute columns to drop / project keys for non-HF objects
+    def _compute_remove_columns(ds) -> list:
+        names = []
+        if hasattr(ds, 'column_names'):
+            try:
+                names = list(ds.column_names)
+            except Exception:
+                names = []
+        elif isinstance(ds, list) and ds and isinstance(ds[0], dict):
+            names = list(ds[0].keys())
+        return [c for c in names if c not in ('input_ids', 'attention_mask', 'labels')]
+
+    remove_cols = _compute_remove_columns(train_dataset)
+
+    # Prefer to call Dataset.remove_columns only on HF Dataset objects when available
+    if remove_cols:
+        if _HFDataset is not None and isinstance(train_dataset, _HFDataset):
+            try:
+                train_dataset = train_dataset.remove_columns(remove_cols)
+            except Exception:
+                if isinstance(train_dataset, list):
+                    new_train = []
+                    for ex in train_dataset:
+                        try:
+                            ex_dict = dict(ex)
+                        except Exception:
+                            ex_dict = {}
+                            for k in ('input_ids', 'attention_mask', 'labels'):
+                                if hasattr(ex, k):
+                                    ex_dict[k] = getattr(ex, k)
+                        new_train.append({k: ex_dict[k] for k in ('input_ids', 'attention_mask', 'labels') if k in ex_dict})
+                    train_dataset = new_train
+        elif isinstance(train_dataset, list):
+            proj = []
+            for ex in train_dataset:
+                try:
+                    ex_dict = dict(ex)
+                except Exception:
+                    # Fallback: try attribute access for Example objects
+                    ex_dict = {}
+                    for k in ('input_ids', 'attention_mask', 'labels'):
+                        if hasattr(ex, k):
+                            ex_dict[k] = getattr(ex, k)
+                proj.append({k: ex_dict[k] for k in ('input_ids', 'attention_mask', 'labels') if k in ex_dict})
+            train_dataset = proj
+
+    # Apply same for test dataset
+    test_remove_cols = _compute_remove_columns(test_dataset)
+    if test_remove_cols:
+        if _HFDataset is not None and isinstance(test_dataset, _HFDataset):
+            try:
+                test_dataset = test_dataset.remove_columns(test_remove_cols)
+            except Exception:
+                if isinstance(test_dataset, list):
+                    new_test = []
+                    for ex in test_dataset:
+                        try:
+                            ex_dict = dict(ex)
+                        except Exception:
+                            ex_dict = {}
+                            for k in ('input_ids', 'attention_mask', 'labels'):
+                                if hasattr(ex, k):
+                                    ex_dict[k] = getattr(ex, k)
+                        new_test.append({k: ex_dict[k] for k in ('input_ids', 'attention_mask', 'labels') if k in ex_dict})
+                    test_dataset = new_test
+        elif isinstance(test_dataset, list):
+            proj = []
+            for ex in test_dataset:
+                try:
+                    ex_dict = dict(ex)
+                except Exception:
+                    ex_dict = {}
+                    for k in ('input_ids', 'attention_mask', 'labels'):
+                        if hasattr(ex, k):
+                            ex_dict[k] = getattr(ex, k)
+                proj.append({k: ex_dict[k] for k in ('input_ids', 'attention_mask', 'labels') if k in ex_dict})
+            test_dataset = proj
+    from collections.abc import Mapping
+    def collate_fn(batch: list) -> dict:
         import torch
-        keys = batch[0].keys()
-        out = {k: torch.tensor([b[k] for b in batch]) for k in keys}
+        # Support Mapping-like (dict/Mapping) examples or objects with attributes
+        first = batch[0]
+        if isinstance(first, Mapping):
+            keys = list(first.keys())
+        else:
+            keys = list(getattr(first, '__dict__', {}).keys())
+
+        out: dict = {}
+        for k in keys:
+            vals = []
+            for b in batch:
+                if isinstance(b, Mapping):
+                    v = b.get(k)
+                else:
+                    # Fall back to attribute access if present
+                    v = getattr(b, k, None)
+                vals.append(v)
+            # Attempt to convert to tensor safely; if values are None or mixed, wrap in list first
+            try:
+                out[k] = torch.tensor(vals)
+            except Exception:
+                # As a fallback, try converting each element individually
+                out[k] = torch.tensor([v if v is not None else 0 for v in vals])
         return out
 
     # Use num_workers=0 to avoid tokenizer parallelism issues
     # Use make_dataloader for consistent settings
     from src.core.dataloader_utils import make_dataloader
-    train_loader = make_dataloader(train_dataset, batch_size=batch_size, shuffle=True, seed=42, collate_fn=collate_fn, num_workers=0, pin_memory=True)
-    test_loader = make_dataloader(test_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn, num_workers=0, pin_memory=True)
+    from torch.utils.data import Dataset as TorchDataset
+    from typing import Sequence
+
+    # Single local wrapper class to avoid redeclaration warnings
+    class _SeqDataset(TorchDataset):
+        def __init__(self, seq: Sequence):
+            self._seq = seq
+        def __len__(self) -> int:  # pragma: no cover - trivial wrapper
+            return len(self._seq)
+        def __getitem__(self, idx):  # pragma: no cover - trivial wrapper
+            return self._seq[idx]
+
+    def _ensure_torch_dataset(ds) -> TorchDataset:
+        # If already a Torch Dataset, return as-is
+        if isinstance(ds, TorchDataset):
+            return ds
+        # If sequence-like (has __len__ and __getitem__), wrap it
+        if hasattr(ds, '__len__') and hasattr(ds, '__getitem__'):
+            return _SeqDataset(ds)
+        # Otherwise, consume into a list and wrap
+        seq = list(ds)
+        return _SeqDataset(seq)
+
+    train_loader = make_dataloader(_ensure_torch_dataset(train_dataset), batch_size=batch_size, shuffle=True, seed=42, collate_fn=collate_fn, num_workers=0, pin_memory=True)
+    test_loader = make_dataloader(_ensure_torch_dataset(test_dataset), batch_size=batch_size, shuffle=False, collate_fn=collate_fn, num_workers=0, pin_memory=True)
 
     # Model
-    model = BertForSequenceClassification.from_pretrained('bert-base-uncased', num_labels=2).to(device)
+    from typing import Any, cast
+    model = cast(Any, BertForSequenceClassification.from_pretrained('bert-base-uncased', num_labels=2))
+    model.to(device=device)  # type: ignore[arg-type]
 
     # Optimizer
     name = optimizer_name.upper()
     if name == 'ADAMW':
-        optim = torch.optim.AdamW(model.parameters(), lr=lr)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     elif name in ('SGD', 'SGD_MOMENTUM', 'SGD-MOMENTUM'):
-        optim = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9 if 'MOMENTUM' in name else 0.0)
+        optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9 if 'MOMENTUM' in name else 0.0)
     else:
         raise ValueError(f"Unsupported optimizer: {optimizer_name}")
+
 
     history = []
     if torch.cuda.is_available():
@@ -180,12 +335,12 @@ def run_single_imdb(optimizer_name: str, seed: int, lr: float, epochs: int, batc
             if attention_mask is not None:
                 attention_mask = attention_mask.to(device)
             labels = batch['labels'].to(device)
-            outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
+            outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)  # type: ignore[arg-type]
             loss = outputs.loss
-            optim.zero_grad()
+            optimizer.zero_grad()
             loss.backward()
             grad_norm = _flattened_grad_norm(model)
-            optim.step()
+            optimizer.step()
         # end of epoch: eval and layer grad norms (captured on last batch grads)
         test_loss, test_acc = evaluate(model, test_loader, device)
         layer_grads = _layer_grad_norms(model)

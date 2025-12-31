@@ -227,7 +227,8 @@ def run_robustness_experiment(
             'std_iterations_to_converge': std_iters
         })
     
-    df_agg = pd.DataFrame(agg_rows).sort_values('success_rate', ascending=False)
+    from typing import cast
+    df_agg = cast(pd.DataFrame, pd.DataFrame(agg_rows)).sort_values(by=['success_rate'], ascending=False)
     
     # Save aggregated results
     agg_path = os.path.join(results_dir, f'initial_condition_robustness_summary_{func_type}.csv')
@@ -247,7 +248,7 @@ def run_robustness_experiment(
     ax.set_title(f'Initial Condition Robustness: {func_type}\n'
                  f'({len(initial_points)} initial points, convergence threshold={convergence_threshold})',
                  fontsize=14, fontweight='bold')
-    ax.set_ylim([0, 1.0])
+    ax.set_ylim((0.0, 1.0))
     ax.grid(axis='y', alpha=0.3)
     
     # Annotate bars

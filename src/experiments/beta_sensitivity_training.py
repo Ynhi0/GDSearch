@@ -31,11 +31,15 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-from typing import Dict, List, Optional, Tuple
+from src.utils.plot_helpers import arr_to_numpy_float
+from typing import Dict, List, Optional, Tuple, Any
 from src.core.dataloader_utils import make_dataloader
 import os
 import json
 from tqdm import tqdm
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Import dynamics tracking
 try:
@@ -141,7 +145,7 @@ def train_with_beta(
         dynamics_tracker = None
     
     # Training history
-    history = {
+    history: Dict[str, Any] = {
         'epoch': [],
         'train_loss': [],
         'train_acc': [],
@@ -174,9 +178,13 @@ def train_with_beta(
             loss = criterion(output, target)
             loss.backward()
             
-            # Compute gradient norm
-            grad_norm = torch.sqrt(sum(p.grad.norm()**2 for p in model.parameters() if p.grad is not None))
-            grad_norms.append(grad_norm.item())
+            # Compute gradient norm (tensor-safe, avoid Python-sum mixing scalar and tensor types)
+            grad_squares = [ (p.grad.detach().norm() ** 2) for p in model.parameters() if p.grad is not None ]
+            if grad_squares:
+                grad_norm = torch.sqrt(torch.stack(grad_squares).sum())
+            else:
+                grad_norm = torch.tensor(0.0, device=device)
+            grad_norms.append(float(grad_norm.item()))
             
             # Track dynamics BEFORE optimizer step
             if dynamics_tracker is not None:
@@ -196,8 +204,12 @@ def train_with_beta(
         train_loss /= len(train_loader)
         train_acc = 100. * train_correct / train_total
         
-        # Compute param norm
-        param_norm = torch.sqrt(sum(p.norm()**2 for p in model.parameters()))
+        # Compute param norm (tensor-safe)
+        param_squares = [ (p.detach().norm() ** 2) for p in model.parameters() ]
+        if param_squares:
+            param_norm = torch.sqrt(torch.stack(param_squares).sum())
+        else:
+            param_norm = torch.tensor(0.0)
         
         # Store snapshot
         param_snapshots.append(torch.cat([p.view(-1).clone().detach() for p in model.parameters()]).cpu().numpy())
@@ -743,7 +755,7 @@ def create_beta2_sensitivity_plots(df: pd.DataFrame, output_dir: str):
     ax = axes[0, 0]
     for seed in df['Seed'].unique():
         seed_data = df[df['Seed'] == seed]
-        ax.plot(seed_data['Beta2'], seed_data['Final_Test_Acc'], 
+        ax.plot(arr_to_numpy_float(seed_data['Beta2']), arr_to_numpy_float(seed_data['Final_Test_Acc']), 
                 marker='o', label=f'Seed {seed}', alpha=0.7)
     ax.set_xlabel('β2', fontsize=12)
     ax.set_ylabel('Final Test Accuracy (%)', fontsize=12)
@@ -756,7 +768,7 @@ def create_beta2_sensitivity_plots(df: pd.DataFrame, output_dir: str):
     ax = axes[0, 1]
     for seed in df['Seed'].unique():
         seed_data = df[df['Seed'] == seed]
-        ax.plot(seed_data['Beta2'], seed_data['Final_Train_Loss'], 
+        ax.plot(arr_to_numpy_float(seed_data['Beta2']), arr_to_numpy_float(seed_data['Final_Train_Loss']), 
                 marker='o', label=f'Seed {seed}', alpha=0.7)
     ax.set_xlabel('β2', fontsize=12)
     ax.set_ylabel('Final Train Loss', fontsize=12)
@@ -770,7 +782,7 @@ def create_beta2_sensitivity_plots(df: pd.DataFrame, output_dir: str):
     if 'smoothness' in df.columns:
         for seed in df['Seed'].unique():
             seed_data = df[df['Seed'] == seed]
-            ax.plot(seed_data['Beta2'], seed_data['smoothness'], 
+            ax.plot(arr_to_numpy_float(seed_data['Beta2']), arr_to_numpy_float(seed_data['smoothness']), 
                     marker='o', label=f'Seed {seed}', alpha=0.7)
         ax.set_xlabel('β2', fontsize=12)
         ax.set_ylabel('Smoothness Index', fontsize=12)
@@ -784,7 +796,7 @@ def create_beta2_sensitivity_plots(df: pd.DataFrame, output_dir: str):
     if 'oscillation_index' in df.columns:
         for seed in df['Seed'].unique():
             seed_data = df[df['Seed'] == seed]
-            ax.plot(seed_data['Beta2'], seed_data['oscillation_index'], 
+            ax.plot(arr_to_numpy_float(seed_data['Beta2']), arr_to_numpy_float(seed_data['oscillation_index']), 
                     marker='o', label=f'Seed {seed}', alpha=0.7)
         ax.set_xlabel('β2', fontsize=12)
         ax.set_ylabel('Oscillation Index', fontsize=12)
@@ -871,7 +883,7 @@ def create_beta_sensitivity_plots(df: pd.DataFrame, output_dir: str, optimizer: 
     ax = axes[0, 0]
     for seed in df['Seed'].unique():
         seed_data = df[df['Seed'] == seed]
-        ax.plot(seed_data[beta_col], seed_data['Final_Test_Acc'], 
+        ax.plot(arr_to_numpy_float(seed_data[beta_col]), arr_to_numpy_float(seed_data['Final_Test_Acc']), 
                 marker='o', label=f'Seed {seed}', alpha=0.7)
     ax.set_xlabel(f'{beta_col}', fontsize=12)
     ax.set_ylabel('Final Test Accuracy (%)', fontsize=12)
@@ -883,7 +895,7 @@ def create_beta_sensitivity_plots(df: pd.DataFrame, output_dir: str, optimizer: 
     ax = axes[0, 1]
     for seed in df['Seed'].unique():
         seed_data = df[df['Seed'] == seed]
-        ax.plot(seed_data[beta_col], seed_data['Final_Train_Loss'], 
+        ax.plot(arr_to_numpy_float(seed_data[beta_col]), arr_to_numpy_float(seed_data['Final_Train_Loss']), 
                 marker='o', label=f'Seed {seed}', alpha=0.7)
     ax.set_xlabel(f'{beta_col}', fontsize=12)
     ax.set_ylabel('Final Train Loss', fontsize=12)
@@ -896,7 +908,7 @@ def create_beta_sensitivity_plots(df: pd.DataFrame, output_dir: str, optimizer: 
     if 'mean_speed' in df.columns:
         for seed in df['Seed'].unique():
             seed_data = df[df['Seed'] == seed]
-            ax.plot(seed_data[beta_col], seed_data['mean_speed'], 
+            ax.plot(arr_to_numpy_float(seed_data[beta_col]), arr_to_numpy_float(seed_data['mean_speed']), 
                     marker='o', label=f'Seed {seed}', alpha=0.7)
         ax.set_xlabel(f'{beta_col}', fontsize=12)
         ax.set_ylabel('Mean Update Speed', fontsize=12)
@@ -909,7 +921,7 @@ def create_beta_sensitivity_plots(df: pd.DataFrame, output_dir: str, optimizer: 
     if 'smoothness' in df.columns:
         for seed in df['Seed'].unique():
             seed_data = df[df['Seed'] == seed]
-            ax.plot(seed_data[beta_col], seed_data['smoothness'], 
+            ax.plot(arr_to_numpy_float(seed_data[beta_col]), arr_to_numpy_float(seed_data['smoothness']), 
                     marker='o', label=f'Seed {seed}', alpha=0.7)
         ax.set_xlabel(f'{beta_col}', fontsize=12)
         ax.set_ylabel('Smoothness Index', fontsize=12)
@@ -922,7 +934,7 @@ def create_beta_sensitivity_plots(df: pd.DataFrame, output_dir: str, optimizer: 
     if 'oscillation_index' in df.columns:
         for seed in df['Seed'].unique():
             seed_data = df[df['Seed'] == seed]
-            ax.plot(seed_data[beta_col], seed_data['oscillation_index'], 
+            ax.plot(arr_to_numpy_float(seed_data[beta_col]), arr_to_numpy_float(seed_data['oscillation_index']), 
                     marker='o', label=f'Seed {seed}', alpha=0.7)
         ax.set_xlabel(f'{beta_col}', fontsize=12)
         ax.set_ylabel('Oscillation Index', fontsize=12)

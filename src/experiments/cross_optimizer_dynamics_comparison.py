@@ -25,6 +25,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+from src.utils.plot_helpers import arr_to_numpy_float
 from typing import Dict, List, Optional, Tuple
 from src.core.dataloader_utils import make_dataloader
 import torch
@@ -387,7 +388,7 @@ def generate_dynamics_comparison_plots(results: List[Dict], output_dir: str, dat
     plt.subplot(1, 2, 1)
     for res in results:
         if res['seed'] == results[0]['seed']:  # Plot only first seed for clarity
-            plt.plot(res['loss_history'], label=res['optimizer'], linewidth=2)
+            plt.plot(arr_to_numpy_float(res['loss_history']), label=res['optimizer'], linewidth=2)
     plt.xlabel('Epoch', fontsize=12)
     plt.ylabel('Training Loss', fontsize=12)
     plt.title(f'Loss Convergence Comparison ({dataset})', fontsize=14, fontweight='bold')
@@ -397,7 +398,7 @@ def generate_dynamics_comparison_plots(results: List[Dict], output_dir: str, dat
     plt.subplot(1, 2, 2)
     for res in results:
         if res['seed'] == results[0]['seed']:
-            plt.plot(res['accuracy_history'], label=res['optimizer'], linewidth=2)
+            plt.plot(arr_to_numpy_float(res['accuracy_history']), label=res['optimizer'], linewidth=2)
     plt.xlabel('Epoch', fontsize=12)
     plt.ylabel('Test Accuracy (%)', fontsize=12)
     plt.title(f'Accuracy Progression ({dataset})', fontsize=14, fontweight='bold')

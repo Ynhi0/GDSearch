@@ -17,6 +17,7 @@ import json
 import numpy as np
 import pandas as pd
 from pathlib import Path
+from typing import List, Optional, Any, Dict
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
@@ -32,12 +33,12 @@ from src.experiments.run_optimizer_ablation import run_optimizer_ablation
 from src.core.test_functions import Rosenbrock, IllConditionedQuadratic, SaddlePoint
 
 
-def run_mnist_experiments(seeds: list = None, results_dir: str = 'results'):
+def run_mnist_experiments(seeds: Optional[List[int]] = None, results_dir: str = 'results'):
     """
     Run comprehensive MNIST experiments with multiple optimizers and seeds.
     
     Args:
-        seeds: List of random seeds (default: 10 seeds from 1-10)
+        seeds: Optional list of random seeds (default: 10 seeds from 1-10)
         results_dir: Output directory
     """
     if seeds is None:
@@ -197,9 +198,10 @@ def run_statistical_analysis(results_dir: str = 'results', plots_dir: str = 'plo
             m = re.search(r"seed(\d+)", os.path.basename(fname))
             seed = int(m.group(1)) if m else None
             df = pd.read_csv(fname)
-            eval_df = df[df['phase'] == 'eval']
+            eval_df = df.loc[df['phase'] == 'eval']
             if not eval_df.empty:
-                acc = float(eval_df['test_accuracy'].iloc[-1])
+                from src.utils.num_utils import safe_to_float
+                acc = safe_to_float(eval_df['test_accuracy'])
                 return seed, acc
             return None, None
         

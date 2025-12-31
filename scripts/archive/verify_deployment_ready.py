@@ -7,6 +7,7 @@ Verifies all P0 and P1 fixes are working before Kaggle deployment
 import sys
 from pathlib import Path
 import importlib.util
+import logging
 
 # Color codes for output
 GREEN = "\033[92m"
@@ -17,7 +18,9 @@ RESET = "\033[0m"
 def check_mark(passed: bool) -> str:
     return f"{GREEN}[PASS]{RESET}" if passed else f"{RED}[FAIL]{RESET}"
 
-def test_dependency_available(package: str, min_version: str = None) -> bool:
+from typing import Optional
+
+def test_dependency_available(package: str, min_version: Optional[str] = None) -> bool:
     """Test if a package is importable and meets minimum version."""
     try:
         spec = importlib.util.find_spec(package)

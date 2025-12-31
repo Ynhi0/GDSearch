@@ -27,6 +27,80 @@ PATTERNS = {
 }
 
 
+def _to_float(x: object) -> float:
+    """Safely coerce a value or array-like to a Python float.
+
+    Handles tuples/lists, numpy scalars, 0-d arrays, 1-D arrays (taking first element),
+    pandas Series/Index, and plain Python numbers/strings. Returns NaN on failure.
+    """
+    try:
+        if isinstance(x, (int, float, np.integer, np.floating)):
+            return float(x)
+    except Exception:
+        pass
+
+    try:
+        import pandas as _pd
+        if isinstance(x, (_pd.Series, _pd.Index)):
+            s = x.dropna()
+            arr = np.asarray(s)
+            if arr.size == 0:
+                return float(np.nan)
+            # take last non-NA element
+            val = arr.ravel()[-1]
+            return _to_float(val)
+    except Exception:
+        pass
+
+    try:
+        if isinstance(x, (tuple, list)):
+            if len(x) == 0:
+                return float(np.nan)
+            return _to_float(x[0])
+    except Exception:
+        pass
+
+    try:
+        arr = np.asarray(x)
+        if arr.size == 0:
+            return float(np.nan)
+        if arr.shape == () or arr.size == 1:
+            val = arr.item()
+            # Explicitly handle common scalar types to satisfy static checks
+            if isinstance(val, (int, float, np.integer, np.floating, str)):
+                try:
+                    return float(val)
+                except Exception:
+                    return float(np.nan)
+            if hasattr(val, "__float__"):
+                try:
+                    return float(val)
+                except Exception:
+                    return float(np.nan)
+            return float(np.nan)
+        # Non-scalar arrays: take first element and recurse
+        try:
+            return _to_float(arr.ravel()[0])
+        except Exception:
+            return float(np.nan)
+    except Exception:
+        pass
+
+    try:
+        from src.utils.num_utils import safe_to_float
+        if isinstance(x, (int, float, np.integer, np.floating, str)) or hasattr(x, "__float__"):
+            return safe_to_float(x)
+        arr = np.asarray(x)
+        if getattr(arr, "size", 0) == 1:
+            try:
+                return safe_to_float(arr.item())
+            except Exception:
+                return float(np.nan)
+        return float(np.nan)
+    except Exception:
+        return float(np.nan)
+
+
 def _load_final(results_dir: str, optimizer: str, metric: str) -> Dict[int, float]:
     pattern = str(Path(results_dir) / PATTERNS[optimizer])
     vals: Dict[int, float] = {}
@@ -38,10 +112,21 @@ def _load_final(results_dir: str, optimizer: str, metric: str) -> Dict[int, floa
         seed = int(m.group(1))
         try:
             df = pd.read_csv(f)
+            # Prefer requested metric column, but accept common synonyms
+            chosen = None
             if metric in df.columns:
-                vals[seed] = float(df[metric].iloc[-1])
+                chosen = metric
             elif metric == 'test_acc' and 'test_accuracy' in df.columns:
-                vals[seed] = float(df['test_accuracy'].iloc[-1])
+                chosen = 'test_accuracy'
+            if chosen is None:
+                continue
+
+            last = df[chosen].dropna()
+            if len(last) == 0:
+                vals[seed] = float(np.nan)
+                continue
+            last_val = last.iloc[-1]
+            vals[seed] = _to_float(last_val)
         except Exception as e:
             import logging
             logging.debug("Skipping unreadable or malformed CIFAR10 file %s: %s", f, e, exc_info=True)
@@ -51,21 +136,32 @@ def _load_final(results_dir: str, optimizer: str, metric: str) -> Dict[int, floa
 
 def _paired(valsA: np.ndarray, valsB: np.ndarray):
     # Normality
-    pA = stats.shapiro(valsA)[1] if len(valsA) >= 3 else np.nan
-    pB = stats.shapiro(valsB)[1] if len(valsB) >= 3 else np.nan
+    pA = _to_float(stats.shapiro(valsA)[1]) if len(valsA) >= 3 else float(np.nan)
+    pB = _to_float(stats.shapiro(valsB)[1]) if len(valsB) >= 3 else float(np.nan)
+
     if pA > 0.05 and pB > 0.05:
         stat, p = stats.ttest_rel(valsA, valsB)
+        p = _to_float(p)
         effect_name = "Cohen's d"
         d = (valsA - valsB).mean() / (valsA - valsB).std(ddof=1)
         test = 'Paired t-test'
     else:
         W, p = stats.wilcoxon(valsA, valsB)
+        # Normalize W (some SciPy versions return tuples)
+        if isinstance(W, (tuple, list, np.ndarray)):
+            W_val = np.asarray(W).ravel()[0]
+        else:
+            W_val = W
+        W_val = _to_float(W_val)
         n = len(valsA)
-        d = 1 - (2 * W) / (n * (n + 1))
-        stat = np.nan
+        d = 1 - (2 * W_val) / (n * (n + 1))
+        stat = float(np.nan)
+        p = _to_float(p)
         test = 'Wilcoxon'
         effect_name = 'Rank-biserial r'
-    return test, float(stat) if not np.isnan(stat) else np.nan, float(p), effect_name, float(d)
+
+    # Ensure numeric return types
+    return test, float(stat) if not np.isnan(stat) else np.nan, float(_to_float(p)), effect_name, float(d)
 
 
 def holm_bonferroni(pvals: List[float]) -> List[bool]:
@@ -133,9 +229,12 @@ def main():
         '| Optimizer A | Optimizer B | n | Mean A | Mean B | Test | p-value | Holm sig | Effect |',
         '|---|---:|---:|---:|---:|---|---:|:---:|---:|',
     ]
+    from src.utils.num_utils import safe_to_float
     for _, r in df.sort_values('p_value').iterrows():
+        sig_bool = bool(r.get('significant_holm', False))
+        p_val = safe_to_float(r.get('p_value', np.nan))
         lines.append(
-            f"| {r['name_A']} | {r['name_B']} | {int(r['n'])} | {r['mean_A']:.4f} | {r['mean_B']:.4f} | {r['test']} | {r['p_value']:.3g} | {'✅' if r['significant_holm'] else '—'} | {r['effect_size_name']}={r['effect_size']:.3f} |"
+            f"| {r['name_A']} | {r['name_B']} | {int(r['n'])} | {r['mean_A']:.4f} | {r['mean_B']:.4f} | {r['test']} | {p_val:.3g} | {'✅' if sig_bool else '—'} | {r['effect_size_name']}={r['effect_size']:.3f} |"
         )
     report = Path(args.results_dir) / 'cifar10_statistical_report.md'
     Path(report).write_text('\n'.join(lines), encoding='utf-8')

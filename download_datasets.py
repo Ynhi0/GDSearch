@@ -147,15 +147,117 @@ def download_imdb():
 
         # Try to download IMDB dataset (small sample first)
         print("   Attempting to load IMDB dataset from HuggingFace (small sample)...")
+        # Load a small sample; 'datasets' may return a Dataset (indexable) or an IterableDataset
         dataset = load_dataset('imdb', split='train[:100]')  # Small sample for testing
-        print(f"IMDB dataset sample: {len(dataset)} samples")
-        print(f"   Sample text: {dataset[0]['text'][:100]}...")
+        try:
+            from datasets import Dataset as HFDataset, DatasetDict as HFDatasetDict, IterableDataset as HFIterable
+        except Exception:
+            HFDataset = HFDatasetDict = HFIterable = None
+
+        # Prefer isinstance checks when available to narrow types for the static analyzer
+        if HFDataset is not None and isinstance(dataset, HFDataset):
+            try:
+                print(f"IMDB dataset sample: {len(dataset)} samples")
+            except Exception:
+                print("IMDB dataset sample: <unknown length>")
+            try:
+                first_item = next(iter(dataset))
+                if isinstance(first_item, dict):
+                    print(f"   Sample text: {first_item.get('text','')[:100]}...")
+                else:
+                    print("   Sample fetched but unexpected format")
+            except Exception:
+                print("   Could not fetch sample from dataset")
+        else:
+            # IterableDataset or unknown container
+            from collections.abc import Sized
+            if isinstance(dataset, Sized):
+                try:
+                    print(f"IMDB dataset sample: {len(dataset)} samples")
+                except Exception:
+                    print("IMDB dataset sample: <unknown length>")
+            else:
+                print("IMDB dataset sample: <unknown length, possibly IterableDataset>")
+
+            if hasattr(dataset, '__iter__'):
+                try:
+                    first_item = next(iter(dataset))
+                    if isinstance(first_item, dict):
+                        print(f"   Sample text: {first_item.get('text','')[:100]}...")
+                    else:
+                        print("   Sample fetched but unexpected format")
+                except Exception:
+                    print("   Could not fetch sample from iterable dataset")
+            else:
+                print("   No iterator available on dataset sample (unexpected)")
 
         # Try full dataset
         print("   Loading full IMDB dataset...")
         full_dataset = load_dataset('imdb')
-        print(f"IMDB train set: {len(full_dataset['train'])} samples")
-        print(f"IMDB test set: {len(full_dataset['test'])} samples")
+        if HFDatasetDict is not None and isinstance(full_dataset, HFDatasetDict):
+            from collections.abc import Sized
+            # DatasetDict is indexable by split names; guard with isinstance checks
+            if 'train' in full_dataset and isinstance(full_dataset['train'], Sized):
+                try:
+                    print(f"IMDB train set: {len(full_dataset['train'])} samples")
+                except Exception:
+                    print("IMDB train set: <unknown length>")
+            else:
+                print("IMDB train set: <unknown length>")
+
+            if 'test' in full_dataset and isinstance(full_dataset['test'], Sized):
+                try:
+                    print(f"IMDB test set: {len(full_dataset['test'])} samples")
+                except Exception:
+                    print("IMDB test set: <unknown length>")
+            else:
+                print("IMDB test set: <unknown length>")
+        elif isinstance(full_dataset, dict):
+            # Some backends may return a plain dict-like mapping
+            from collections.abc import Sized
+            if 'train' in full_dataset and isinstance(full_dataset['train'], Sized):
+                try:
+                    print(f"IMDB train set: {len(full_dataset['train'])} samples")
+                except Exception:
+                    print("IMDB train set: <unknown length>")
+            else:
+                print("IMDB train set: <unknown length>")
+
+            if 'test' in full_dataset and isinstance(full_dataset['test'], Sized):
+                try:
+                    print(f"IMDB test set: {len(full_dataset['test'])} samples")
+                except Exception:
+                    print("IMDB test set: <unknown length>")
+            else:
+                print("IMDB test set: <unknown length>")
+        else:
+            # Best-effort fallback
+            from collections.abc import Sized
+            # Only treat as mapping-like if it's actually a dict-like object
+            from collections.abc import Sized
+            if isinstance(full_dataset, dict) and 'train' in full_dataset and isinstance(full_dataset['train'], Sized):
+                try:
+                    first_item = next(iter(full_dataset['train']))
+                    if isinstance(first_item, dict):
+                        print(f"IMDB train set: sample available, first text: {first_item.get('text','')[:100]}...")
+                    else:
+                        print("IMDB train set: sample available (unexpected format)")
+                except Exception:
+                    print("IMDB train set: <unknown length or not indexable>")
+            else:
+                print("IMDB train set: <unknown length>")
+
+            if isinstance(full_dataset, dict) and 'test' in full_dataset and isinstance(full_dataset['test'], Sized):
+                try:
+                    first_item = next(iter(full_dataset['test']))
+                    if isinstance(first_item, dict):
+                        print(f"IMDB test set: sample available, first text: {first_item.get('text','')[:100]}...")
+                    else:
+                        print("IMDB test set: sample available (unexpected format)")
+                except Exception:
+                    print("IMDB test set: <unknown length or not indexable>")
+            else:
+                print("IMDB test set: <unknown length>")
 
     except Exception as e:
         print(f"Failed to download IMDB: {e}")
@@ -208,48 +310,18 @@ def download_medmnist(dataset_name: str = 'pathmnist', strict: bool = False) -> 
         print(f"{msg}")
         if strict:
             raise RuntimeError(msg) from e
-        print("   Tip: install with `pip install medmnist` and re-run this script, or provide a real medical dataset via the Kaggle option below.")
+        print("   Tip: install with `pip install medmnist` and re-run this script, or provide a local medical dataset path and set environment variables (e.g., MEDICAL_DATASET_TYPE=kaggle, KAGGLE_MEDICAL_PATH=./data/medical) if you have pre-downloaded data.")
         return False
     except Exception as e:
         msg = f"MedMNIST not available: {e}"
         print(f"{msg}")
         if strict:
             raise RuntimeError(msg) from e
-        print("   Tip: install with `pip install medmnist` and re-run this script, or provide a real medical dataset via the Kaggle option below.")
+        print("   Tip: install with `pip install medmnist` and re-run this script, or provide a local medical dataset path and set environment variables (e.g., MEDICAL_DATASET_TYPE=kaggle, KAGGLE_MEDICAL_PATH=./data/medical) if you have pre-downloaded data.")
         return False
 
 
-def download_medical_real_kaggle(dataset_slug: str = 'paultimothymooney/chest-xray-pneumonia', dest: Path | str = Path('./data/medical')) -> bool:
-    """Optionally download a real medical dataset from Kaggle if credentials are available.
 
-    This requires the `kaggle` package and the environment variables `KAGGLE_USERNAME` and
-    `KAGGLE_KEY` to be set. The download is optional because many public medical datasets
-    require registration or have usage restrictions.
-    """
-    dest = Path(dest)
-    print("Attempting to download a real medical dataset from Kaggle (optional)...")
-
-    try:
-        from kaggle.api.kaggle_api_extended import KaggleApi
-    except Exception:
-        print("   Kaggle API not available. Install it with `pip install kaggle` and set KAGGLE_USERNAME/KAGGLE_KEY to enable automated downloads.")
-        return False
-
-    if not os.environ.get('KAGGLE_USERNAME') or not os.environ.get('KAGGLE_KEY'):
-        print("   Kaggle credentials not found in environment variables. Skipping Kaggle medical download.")
-        return False
-
-    try:
-        dest.mkdir(parents=True, exist_ok=True)
-        api = KaggleApi()
-        api.authenticate()
-        print(f"   Downloading {dataset_slug} to {dest} (this may take a while)...")
-        api.dataset_download_files(dataset_slug, path=str(dest), unzip=True, quiet=False)
-        print(f"Medical dataset '{dataset_slug}' downloaded to {dest}")
-        return True
-    except Exception as e:
-        print(f"Kaggle medical download failed: {e}")
-        return False
 
 
 def main():
@@ -293,10 +365,6 @@ def main():
     print("="*40)
     results.append(("MedMNIST", download_medmnist()))
 
-    print("\n" + "="*40)
-    print("6. Medical (real, optional via Kaggle)")
-    print("="*40)
-    results.append(("Medical (Kaggle)", download_medical_real_kaggle()))
 
     # Summary
     print("\n" + "="*60)

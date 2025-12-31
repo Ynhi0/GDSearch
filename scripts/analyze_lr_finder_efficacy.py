@@ -244,7 +244,7 @@ def compare_lr_finder_vs_default(epochs=20, seeds=None, output_dir='results/lr_f
     plt.xlabel('Seed')
     plt.ylabel('Final Test Accuracy (%)')
     plt.title('LR Finder Efficacy: Default vs Auto-Tuned Learning Rate')
-    plt.xticks(x, seeds)
+    plt.xticks(x, [str(s) for s in seeds])
     plt.legend()
     plt.grid(axis='y', alpha=0.3)
     plt.tight_layout()

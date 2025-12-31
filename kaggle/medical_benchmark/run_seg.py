@@ -18,6 +18,7 @@ import numpy as np
 import pandas as pd
 from PIL import Image
 from scipy import stats
+from src.utils.num_utils import safe_to_float
 
 import torch
 
@@ -298,7 +299,7 @@ def compute_statistics(results_dir: str):
                 continue
             seed = int(m.group(1))
             df = pd.read_csv(f)
-            vals[seed] = float(df['val_dice'].iloc[-1]) if 'val_dice' in df.columns else float('nan')
+            vals[seed] = safe_to_float(df['val_dice'].iloc[-1]) if 'val_dice' in df.columns else float('nan')
         data[opt] = vals
     rows = []
     A, B = 'Adam', 'SGD_Momentum'
@@ -315,7 +316,10 @@ def compute_statistics(results_dir: str):
             eff = (a - b).mean() / (a - b).std(ddof=1)
         else:
             test = 'Wilcoxon'
-            W, p = stats.wilcoxon(a, b)
+            res = stats.wilcoxon(a, b)
+            # SciPy may return a namedtuple or tuple; extract fields defensively
+            W = safe_to_float(getattr(res, 'statistic', (res[0] if hasattr(res, '__getitem__') else res)))
+            p = safe_to_float(getattr(res, 'pvalue', (res[1] if hasattr(res, '__getitem__') and len(res) > 1 else res)))
             n = len(a)
             eff_name = 'Rank-biserial r'
             eff = 1 - (2 * W) / (n * (n + 1))

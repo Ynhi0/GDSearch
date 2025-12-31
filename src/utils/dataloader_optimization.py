@@ -199,6 +199,9 @@ def recommend_batch_size_for_fair_comparison(
             available_memory_gb = torch.cuda.get_device_properties(device).total_memory / (1024**3)
         else:
             available_memory_gb = 4.0  # Conservative default
+    # Narrow the Optional type for static analysis
+    assert available_memory_gb is not None
+    available_memory_gb = float(available_memory_gb)
     
     # Rule of thumb: batch size based on model size and memory
     # Small models (< 10M params): 128-256

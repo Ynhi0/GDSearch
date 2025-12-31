@@ -485,7 +485,8 @@ def create_visualizations(df: pd.DataFrame, results_dir: str):
     
     # Group by configuration and compute mean/std
     grouped = df.groupby('configuration')['test_accuracy'].agg(['mean', 'std', 'count'])
-    grouped = grouped.sort_values('mean', ascending=False)
+    from typing import cast
+    grouped = cast(pd.DataFrame, grouped).sort_values(by=['mean'], ascending=False)
     
     x_pos = np.arange(len(grouped))
     bars = ax.bar(x_pos, grouped['mean'], yerr=grouped['std'], 
@@ -582,11 +583,11 @@ def create_visualizations(df: pd.DataFrame, results_dir: str):
     fig, ax = plt.subplots(figsize=(14, 6))
     
     # Prepare data for box plot
-    box_data = [df[df['configuration'] == config]['test_accuracy'].values 
+    from src.utils.type_guards import ensure_series
+    box_data = [ensure_series(df[df['configuration'] == config]['test_accuracy']).to_numpy()
                 for config in grouped.index]
     
-    bp = ax.boxplot(box_data, labels=grouped.index, patch_artist=True,
-                    showmeans=True, meanline=True)
+    bp = ax.boxplot(box_data, patch_artist=True, showmeans=True, meanline=True)
     
     # Color boxes
     for patch, color in zip(bp['boxes'], colors):
@@ -597,7 +598,9 @@ def create_visualizations(df: pd.DataFrame, results_dir: str):
     ax.set_title('Accuracy Distribution Across Seeds\n(Box = IQR, Orange line = Mean)', 
                 fontsize=14, fontweight='bold')
     ax.grid(axis='y', alpha=0.3)
-    plt.xticks(rotation=45, ha='right')
+    # Ensure x-axis labels match boxplot positions
+    ax.set_xticks(np.arange(1, len(grouped.index) + 1))
+    ax.set_xticklabels(grouped.index, rotation=45, ha='right')
     plt.tight_layout()
     plt.savefig(viz_dir / 'accuracy_distribution.png', dpi=300, bbox_inches='tight')
     plt.savefig(viz_dir / 'accuracy_distribution.pdf', bbox_inches='tight')

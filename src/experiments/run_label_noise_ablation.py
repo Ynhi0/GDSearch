@@ -509,12 +509,14 @@ def analyze_robustness_to_noise(summary_df: pd.DataFrame) -> pd.DataFrame:
         opt_data = summary_df[summary_df['optimizer'] == optimizer]
         
         # Get clean performance (noise_rate=0.0)
+        from src.utils.type_guards import ensure_series
         clean_data = opt_data[opt_data['noise_rate'] == 0.0]['test_acc_mean']
         # AUDIT FIX: Protect against missing clean baseline
         if len(clean_data) == 0:
             logging.warning(f"No clean baseline (noise_rate=0.0) found for {optimizer}, skipping robustness metrics")
             continue
-        clean_acc = clean_data.values[0]
+        from src.utils.num_utils import safe_to_float
+        clean_acc = safe_to_float(ensure_series(clean_data).iloc[0])
         
         # Compute degradation at each noise level
         for _, row in opt_data.iterrows():

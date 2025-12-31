@@ -5,7 +5,7 @@ Provides tools for analyzing convergence bounds, regret analysis, and complexity
 """
 
 import numpy as np
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Any
 import logging
 
 
@@ -15,7 +15,7 @@ def sgd_convergence_bound(
     lr: float,
     T: int,
     sigma: float = 0.0
-) -> Dict[str, float]:
+) -> Dict[str, Any]:
     """
     Compute theoretical convergence bound for SGD.
     
@@ -71,7 +71,7 @@ def adam_convergence_bound(
     beta2: float = 0.999,
     alpha: float = 0.001,
     epsilon: float = 1e-8
-) -> Dict[str, float]:
+) -> Dict[str, Any]:
     """
     Compute theoretical regret bound for Adam.
     
@@ -115,7 +115,7 @@ def sam_sharpness_bound(
     rho: float,
     L: float,
     epsilon_flat: float = 0.1
-) -> Dict[str, float]:
+) -> Dict[str, Any]:
     """
     Analyze sharpness-aware minimization (SAM) properties.
     
@@ -151,7 +151,7 @@ def sam_sharpness_bound(
 def compute_regret(
     losses: np.ndarray,
     optimal_loss: Optional[float] = None
-) -> Dict[str, float]:
+) -> Dict[str, Any]:
     """
     Compute empirical regret from loss trajectory.
     
@@ -223,7 +223,7 @@ def estimate_smoothness(
                 L_estimate = grad_diff / param_diff
                 max_L = max(max_L, L_estimate)
     
-    return max_L
+    return float(max_L)
 
 
 def estimate_strong_convexity(
@@ -258,13 +258,13 @@ def estimate_strong_convexity(
                 if mu_estimate > 0:  # Only positive values indicate strong convexity
                     min_mu = min(min_mu, mu_estimate)
     
-    return 0.0 if min_mu == float('inf') else min_mu
+    return 0.0 if min_mu == float('inf') else float(min_mu)
 
 
 def analyze_convergence_trajectory(
     losses: np.ndarray,
     optimizer_name: str = "Unknown"
-) -> Dict[str, any]:
+) -> Dict[str, Any]:
     """
     Comprehensive convergence analysis from loss trajectory.
     
@@ -298,13 +298,13 @@ def analyze_convergence_trajectory(
     
     return {
         'optimizer': optimizer_name,
-        'total_iterations': T,
-        'initial_loss': losses[0],
-        'final_loss': losses[-1],
-        'best_loss': best_loss,
-        'empirical_rate': empirical_rate,
-        'has_converged': has_converged,
-        'iterations_to_90_percent': iterations_to_90,
+        'total_iterations': int(T),
+        'initial_loss': float(losses[0]),
+        'final_loss': float(losses[-1]),
+        'best_loss': float(best_loss),
+        'empirical_rate': float(empirical_rate),
+        'has_converged': bool(has_converged),
+        'iterations_to_90_percent': int(iterations_to_90),
         'regret': regret_stats,
-        'final_variance': recent_std
+        'final_variance': float(recent_std)
     }

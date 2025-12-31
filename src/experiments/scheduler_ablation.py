@@ -22,6 +22,7 @@ import seaborn as sns
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from src.analysis.statistical_analysis import compare_two_optimizers
+from src.utils.num_utils import safe_to_float
 
 
 def create_scheduler_configs(
@@ -131,8 +132,10 @@ def run_scheduler_ablation(
                 
                 # Print final accuracy
                 eval_df = df[df['phase'] == 'eval']
+                from src.utils.type_guards import ensure_dataframe, ensure_series
+                eval_df = ensure_dataframe(eval_df)
                 if not eval_df.empty:
-                    final_acc = eval_df['test_accuracy'].iloc[-1]
+                    final_acc = safe_to_float(ensure_series(eval_df['test_accuracy']).iloc[-1])
                     print(f"Acc: {final_acc:.4f}")
                 else:
                     print("Done")
@@ -185,22 +188,28 @@ def analyze_scheduler_results(
             final_accs = []
             convergence_epochs = []
             
-            for seed in eval_df['seed'].unique():
-                seed_df = eval_df[eval_df['seed'] == seed]
-                if not seed_df.empty:
-                    # Skip tainted seeds
-                    if 'tainted' in seed_df.columns and seed_df['tainted'].any():
+            from src.utils.type_guards import ensure_series, ensure_dataframe
+            from src.utils.plot_helpers import arr_to_numpy_float
+            for seed in ensure_series(eval_df['seed']).unique():
+                seed_df = ensure_dataframe(eval_df[eval_df['seed'] == seed])
+                if seed_df.empty:
+                    continue
+                # Skip tainted seeds
+                if 'tainted' in seed_df.columns:
+                    tainted_series = ensure_series(seed_df['tainted'])
+                    if bool(tainted_series.any()):
                         continue
-                    final_accs.append(seed_df['test_accuracy'].iloc[-1])
-                    
-                    # Estimate convergence epoch (when accuracy stabilizes)
-                    accs = seed_df['test_accuracy'].values
-                    if len(accs) > 5:
-                        diffs = np.abs(np.diff(accs))
-                        # Find when changes become small
-                        converged_idx = np.where(diffs < 0.001)[0]
-                        if len(converged_idx) > 0:
-                            convergence_epochs.append(converged_idx[0])
+
+                test_acc_series = ensure_series(seed_df['test_accuracy'])
+                final_accs.append(safe_to_float(test_acc_series.iloc[-1]))
+
+                # Estimate convergence epoch (when accuracy stabilizes)
+                accs = arr_to_numpy_float(test_acc_series)
+                if accs.size > 5:
+                    diffs = np.abs(np.diff(accs))
+                    converged_idx = np.where(diffs < 0.001)[0]
+                    if converged_idx.size > 0:
+                        convergence_epochs.append(int(converged_idx[0]))
             
             if final_accs:
                 summary_data.append({
@@ -221,7 +230,7 @@ def analyze_scheduler_results(
 
 def plot_scheduler_comparison(
     summary_df: pd.DataFrame,
-    save_path: str = None
+    save_path: Optional[str] = None
 ):
     """
     Plot scheduler comparison across optimizers.
@@ -235,7 +244,9 @@ def plot_scheduler_comparison(
     x = np.arange(len(schedulers))
     width = 0.8 / len(optimizers)
     
-    colors = plt.cm.tab10(np.linspace(0, 1, len(optimizers)))
+    from matplotlib import cm
+    cmap = cm.get_cmap('tab10')
+    colors = cmap(np.linspace(0, 1, len(optimizers)))
     
     for i, optimizer in enumerate(optimizers):
         opt_df = summary_df[summary_df['Optimizer'] == optimizer]
@@ -257,11 +268,14 @@ def plot_scheduler_comparison(
     ax1.grid(True, alpha=0.3, axis='y')
     
     # Plot 2: Convergence speed
+    from typing import cast
+    from src.utils.plot_helpers import arr_to_numpy_float
     for i, optimizer in enumerate(optimizers):
-        opt_df = summary_df[summary_df['Optimizer'] == optimizer]
+        opt_df = cast(pd.DataFrame, summary_df[summary_df['Optimizer'] == optimizer])
         opt_df = opt_df.set_index('Scheduler').reindex(schedulers)
+        assert isinstance(opt_df, pd.DataFrame)
         
-        conv_epochs = opt_df['Mean Convergence Epoch'].values
+        conv_epochs = arr_to_numpy_float(opt_df['Mean Convergence Epoch'])
         
         ax2.plot(schedulers, conv_epochs, marker='o', markersize=10,
                 linewidth=2.5, label=optimizer, color=colors[i], alpha=0.8)
@@ -276,7 +290,7 @@ def plot_scheduler_comparison(
     plt.tight_layout()
     
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
         print(f"Scheduler comparison plot saved to: {save_path}")
         plt.close()
     else:
@@ -285,6 +299,8 @@ def plot_scheduler_comparison(
 
 def print_scheduler_summary(summary_df: pd.DataFrame):
     """Print formatted scheduler ablation summary."""
+    from src.utils.type_guards import ensure_series, ensure_dataframe
+
     print("\n" + "="*80)
     print("LEARNING RATE SCHEDULER ABLATION RESULTS")
     print("="*80)
@@ -294,21 +310,24 @@ def print_scheduler_summary(summary_df: pd.DataFrame):
     for optimizer in optimizers:
         print(f"\n{optimizer}:")
         print("-" * 80)
-        opt_df = summary_df[summary_df['Optimizer'] == optimizer]
+        opt_df = ensure_dataframe(summary_df[summary_df['Optimizer'] == optimizer])
         
         for _, row in opt_df.iterrows():
-            conv_str = f"{row['Mean Convergence Epoch']:.1f}" if not pd.isna(row['Mean Convergence Epoch']) else "N/A"
+            conv_val = row.get('Mean Convergence Epoch', np.nan)
+            is_na = pd.isna(conv_val)
+            if isinstance(is_na, (np.ndarray, pd.Series, pd.DataFrame)):
+                is_na_bool = bool(is_na.any())
+            else:
+                is_na_bool = bool(is_na)
+            conv_str = f"{conv_val:.1f}" if not is_na_bool else "N/A"
             print(f"  {row['Scheduler']:<20}: "
                   f"Acc={row['Mean Accuracy']:.4f}±{row['Std Accuracy']:.4f}, "
                   f"ConvEpoch={conv_str}")
         
         # Find best scheduler
-        best_idx = opt_df['Mean Accuracy'].idxmax()
+        best_idx = ensure_series(opt_df['Mean Accuracy']).idxmax()
         best_scheduler = opt_df.loc[best_idx, 'Scheduler']
-        best_acc = opt_df.loc[best_idx, 'Mean Accuracy']
-        print(f"  → Best: {best_scheduler} (Acc={best_acc:.4f})")
-    
-    print("\n" + "="*80)
+        best_acc = float(opt_df.loc[best_idx, 'Mean Accuracy'])
 
 
 def main():
