@@ -63,6 +63,10 @@ def run_optimizer_2d(
             break
         
         params = optimizer.step(params, grad)
+        # Safety guard: if params diverge to non-finite or extremely large values, stop early
+        if not np.all(np.isfinite(params)) or np.any(np.abs(params) > 1e6):
+            logging.warning("Optimizer params diverged (non-finite or large). Stopping trajectory early.")
+            break
         trajectory.append(params.copy())
         losses.append(float(func(float(params[0]), float(params[1]))))
     

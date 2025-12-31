@@ -66,6 +66,7 @@ def validate_loader_for_tuning(
         # Handle Subset wrapper on test_dataset too
         test_base = test_dataset.dataset if isinstance(test_dataset, Subset) else test_dataset
         
+        # Fast identity check
         if base_dataset is test_base:
             raise ValueError(
                 "CRITICAL: val_loader contains the TEST dataset! "
@@ -73,6 +74,41 @@ def validate_loader_for_tuning(
                 "This invalidates all generalization claims. "
                 "Use a separate validation split from training data."
             )
+        # Additional robust checks: dataset UID or small-sample fingerprint
+        try:
+            uid_a = getattr(base_dataset, '_dataset_uid', None)
+            uid_b = getattr(test_base, '_dataset_uid', None)
+            if uid_a is not None and uid_b is not None and uid_a == uid_b:
+                raise ValueError(
+                    "CRITICAL: val_loader dataset appears identical to test dataset (matched _dataset_uid). "
+                    "This constitutes test set leakage."
+                )
+
+            # Fall back to length + small-sample equality checks (best-effort, cheap)
+            if hasattr(base_dataset, '__len__') and hasattr(test_base, '__len__'):
+                if len(base_dataset) == len(test_base) and len(base_dataset) > 0:
+                    # Try comparing first few items if possible
+                    try:
+                        ncheck = min(3, len(base_dataset))
+                        same_count = 0
+                        for i in range(ncheck):
+                            a_item = base_dataset[i]
+                            b_item = test_base[i]
+                            if a_item == b_item:
+                                same_count += 1
+                        if same_count == ncheck:
+                            raise ValueError(
+                                "CRITICAL: val_loader dataset contents match test dataset (sample check). "
+                                "This indicates potential dataset leakage."
+                            )
+                    except Exception:
+                        # If we can't index or equality isn't defined, skip sample equality test
+                        pass
+        except ValueError:
+            raise
+        except Exception:
+            # Non-fatal: if fingerprinting fails, continue with other checks
+            pass
     
     # Check 3: Dataset length heuristic (weak, but catches obvious errors)
     if hasattr(loader, 'dataset'):

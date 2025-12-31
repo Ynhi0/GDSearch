@@ -1068,7 +1068,7 @@ def test_sam_and_lookahead():
                 loss_val = float('nan')
         logging.info(f"  SAM step completed successfully, loss: {loss_val:.4f}")
     except Exception as e:
-        logging.info(f"  SAM failed: {e}")
+        logging.error(f"  SAM failed: {e}", exc_info=True)
     
     # Test Lookahead
     logging.info("  Testing Lookahead...")
@@ -1094,7 +1094,7 @@ def test_sam_and_lookahead():
                 loss_val = float('nan')
         logging.info(f"  Lookahead step completed successfully, loss: {loss_val:.4f}")
     except Exception as e:
-        logging.info(f"  Lookahead failed: {e}")
+        logging.error(f"  Lookahead failed: {e}", exc_info=True)
     
     logging.info("\nSAM and Lookahead optimizer wrappers tested!")
 

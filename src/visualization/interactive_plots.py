@@ -377,8 +377,9 @@ def animate_convergence(
         props = getattr(fig.layout, '_props', None)
         if isinstance(props, dict):
             props['updatemenus'] = updatemenus_dict
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+        logging.debug("interactive_plots: failed to set layout props._props updatemenus: %s", e, exc_info=True)
     
     # Update axes
     fig.update_xaxes(title_text="x", row=1, col=1)
@@ -399,10 +400,12 @@ def animate_convergence(
                     props = getattr(fig.layout, '_props', None)
                     if isinstance(props, dict):
                         props['updatemenus'] = updatemenus_dict
-                except Exception:
-                    pass
-    except Exception:
-        pass
+                except Exception as e_fallback:
+                    import logging
+                    logging.debug("interactive_plots: fallback props set failed: %s", e_fallback, exc_info=True)
+    except Exception as e_outer:
+        import logging
+        logging.debug("interactive_plots: final updatemenus verification failed: %s", e_outer, exc_info=True)
 
     return fig
 

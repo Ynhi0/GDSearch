@@ -39,6 +39,11 @@ def _call_optimizer_step(optimizer: Any, closure: Optional[Callable] = None):
     This helper introspects the optimizer.step signature and decides whether to
     call with a closure argument. It accepts Any to avoid static check issues at
     call sites that can't assume the exact optimizer signature.
+
+    Contract enforcement: If a closure is provided, the optimizer.step(closure)
+    SHOULD return a loss (Tensor or numeric). If it returns None, we raise a
+    RuntimeError to enforce a clearer contract rather than silently propagate
+    a NoneType loss that will later cause confusing errors.
     """
     try:
         sig = inspect.signature(optimizer.step)
@@ -47,17 +52,32 @@ def _call_optimizer_step(optimizer: Any, closure: Optional[Callable] = None):
             # A required 'closure' parameter is present
             if closure is None:
                 raise TypeError("Optimizer.step requires a 'closure' argument but none was provided")
-            return optimizer.step(closure)
+            ret = optimizer.step(closure)
+            if ret is None:
+                raise RuntimeError(
+                    "Optimizer.step(closure) returned None. Closure-based optimizers must return the loss when a closure is provided."
+                )
+            return ret
         else:
             # Optional closure or no closure param
             if closure is not None:
-                return optimizer.step(closure)
+                ret = optimizer.step(closure)
+                if ret is None:
+                    raise RuntimeError(
+                        "Optimizer.step(closure) returned None. Closure-based optimizers must return the loss when a closure is provided."
+                    )
+                return ret
             return optimizer.step()
     except (TypeError, ValueError):
         # If signature inspection fails (e.g., C-implemented optimizers), fall back
         # to calling with closure when provided, otherwise call without args.
         if closure is not None:
-            return optimizer.step(closure)
+            ret = optimizer.step(closure)
+            if ret is None:
+                raise RuntimeError(
+                    "Optimizer.step(closure) returned None. Closure-based optimizers must return the loss when a closure is provided."
+                )
+            return ret
         return optimizer.step()
 
 
@@ -150,45 +170,19 @@ def oom_safe_train_step(
                     logging.debug("Could not set requires_closure attribute: %s", e3, exc_info=True)
                 logging.warning("Optimizer appears to be closure-based (LBFGS); setting 'requires_closure=True' for safety.")
 
-    if is_closure_based:
-        logging.warning(
-            "CRITICAL: Closure-based optimizer detected (requires_closure=True). OOM retry disabled to prevent state corruption. "
-            "If OOM occurs, the run will fail immediately. Reduce batch size manually."
-        )
-        # Bypass retry logic - execute closure-based step directly
-        inputs_device = inputs.to(device)
-        targets_device = targets.to(device)
-        
-        def closure_run():
-            optimizer.zero_grad()
-            outputs = model(inputs_device)
-            loss = criterion(outputs, targets_device)
-            loss.backward()
-            return loss
-        
-        loss = optimizer.step(closure_run)
-        
-        if loss is None:
-            raise RuntimeError(
-                f"SAM optimizer step returned None. Expected loss tensor. "
-                f"Check SAM implementation: {type(optimizer).__name__}"
-            )
-        
-        with torch.no_grad():
-            outputs = model(inputs_device)
-        
-        if isinstance(loss, torch.Tensor):
-            loss_value = float(loss.item())
-        elif isinstance(loss, (int, float)):
-            loss_value = float(loss)
-        else:
-            raise TypeError(
-                f"SAM step returned unexpected type: {type(loss)}. "
-                f"Expected torch.Tensor or numeric scalar."
-            )
-        
-        return loss_value, inputs.size(0), outputs, False
-    
+            # Extra heuristic: Some SAM wrappers may not advertise closure semantics but include 'SAM' in class name
+            try:
+                name_upper = optimizer.__class__.__name__.upper()
+                if 'SAM' in name_upper and not is_closure_based:
+                    is_closure_based = True
+                    try:
+                        setattr(optimizer, 'requires_closure', True)
+                    except Exception as e4:
+                        logging.debug("Could not set requires_closure attribute for SAM-like optimizer: %s", e4, exc_info=True)
+                    logging.warning("Detected SAM-like optimizer (%s): treating as closure-based and disabling OOM retry for safety.", optimizer.__class__.__name__)
+            except Exception:
+                # Non-fatal; continue
+                pass
     current_inputs = inputs
     current_targets = targets
     retries = 0

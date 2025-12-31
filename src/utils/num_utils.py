@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+import logging
 
 
 def safe_to_float(x: Any) -> float:
@@ -22,8 +23,8 @@ def safe_to_float(x: Any) -> float:
     try:
         if isinstance(x, (int, float, np.integer, np.floating)):
             return float(x)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug("safe_to_float: numeric isinstance check failed: %s", e, exc_info=True)
 
     try:
         # Handle PyTorch tensors (scalars and small tensors)
@@ -36,10 +37,11 @@ def safe_to_float(x: Any) -> float:
                     return float(x.item())
                 # Non-scalar tensor: convert to numpy and recurse
                 return safe_to_float(x.detach().cpu().numpy())
-            except Exception:
+            except Exception as e_inner:
+                logging.debug("safe_to_float: error while handling torch tensor content: %s", e_inner, exc_info=True)
                 return float(np.nan)
-    except Exception:
-        pass
+    except Exception as e_outer:
+        logging.debug("safe_to_float: torch import/handling check failed: %s", e_outer, exc_info=True)
 
     try:
         import pandas as _pd  # local import to avoid hard deps for code that doesn't use pandas
@@ -51,16 +53,16 @@ def safe_to_float(x: Any) -> float:
             # take last non-NA element
             val = arr.ravel()[-1]
             return safe_to_float(val)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug("safe_to_float: pandas handling failed (pandas may be unavailable or value unusual): %s", e, exc_info=True)
 
     try:
         if isinstance(x, (tuple, list)):
             if len(x) == 0:
                 return float(np.nan)
             return safe_to_float(x[0])
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug("safe_to_float: container (tuple/list) handling failed: %s", e, exc_info=True)
 
     try:
         arr = np.asarray(x)
@@ -84,8 +86,8 @@ def safe_to_float(x: Any) -> float:
             return safe_to_float(arr.ravel()[0])
         except Exception:
             return float(np.nan)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug("safe_to_float: array handling failed: %s", e, exc_info=True)
 
     try:
         # Fall back to converting the string representation (avoids passing complex objects directly to float())

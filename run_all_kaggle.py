@@ -29,7 +29,9 @@ def import_optional_nlp_dependencies():
         _optional_modules['AutoModelForSequenceClassification'] = AutoModelForSequenceClassification
         _optional_modules['load_dataset'] = load_dataset
     except Exception as e:
-        logging.debug("Optional NLP dependencies unavailable: %s", e, exc_info=True)
+        # Local import to avoid NameError if logging isn't configured yet
+        import logging as _logging
+        _logging.debug("Optional NLP dependencies unavailable: %s", e, exc_info=True)
         # Mark as unavailable; callers should handle None gracefully
         _optional_modules['transformers'] = None
     return _optional_modules
@@ -2411,6 +2413,23 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader
     Returns:
         Dict with best hyperparameters
     """
+    # Fail-fast: val_loader MUST be provided and non-empty - prevents accidental test leakage
+    if val_loader is None:
+        raise ValueError(
+            "CRITICAL: quick_tune_optimizer requires a 'val_loader' argument containing VALIDATION data (not test data). "
+            "Provide a validation DataLoader (e.g., from create_validated_loaders or get_*_loaders(val_split=...))"
+        )
+
+    # Sanity-check validation loader content
+    try:
+        n_val = len(getattr(val_loader, 'dataset', []))
+    except Exception:
+        n_val = 0
+    if n_val == 0:
+        raise ValueError(
+            "CRITICAL: val_loader appears empty (0 samples). Ensure your validation split has at least one sample before tuning."
+        )
+
     try:
         import optuna
         from optuna.samplers import TPESampler
@@ -2444,7 +2463,7 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader
                     "This constitutes test set leakage and invalidates research."
                 ) from exc
 
-        logging.debug(f"Loader validation: name='{loader_name}', split='{split_type}', len={len(val_loader.dataset)}")
+        logging.debug(f"Loader validation: name='{loader_name}', split='{split_type}', len={len(getattr(val_loader, 'dataset', []))}")
     
     logging.info(f"  Tuning {optimizer_name} ({n_trials} trials, {epochs} epochs each)")
     
@@ -2745,17 +2764,28 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                 # Create validation split from TRAINING data (not test set)
                 # This prevents adaptive overfitting / test-set leakage during tuning
                 # Reference: Agarwal et al. (2021) on overtuning in hyperparameter selection
-                tune_size = min(5000, len(train_dataset))
-                val_size = min(1000, len(train_dataset) - tune_size)
-                
+                total_train = len(train_dataset)
+                # Ensure a non-zero validation set: at least 10 samples or 5% up to 1000
+                min_val = min(1000, max(10, int(total_train * 0.05)))
+
+                # Reserve min_val for validation, tune up to 5000 or remaining training samples
+                tune_size = min(5000, max(0, total_train - min_val))
+                val_size = total_train - tune_size
+
+                if val_size < 1:
+                    raise ValueError(
+                        f"CRITICAL: Not enough training data for tuning split: total_train={total_train}. "
+                        "Adjust val_split or skip_tuning for very small datasets."
+                    )
+
                 # Randomize indices instead of using contiguous ranges
                 # Prevents selection bias if dataset is ordered by class or other characteristics
                 # AUDIT FIX: Use explicit seed for reproducible tuning splits
                 tune_generator = torch.Generator().manual_seed(seeds[0])  # Use first seed for deterministic tuning
-                all_indices = torch.randperm(len(train_dataset), generator=tune_generator).tolist()
+                all_indices = torch.randperm(total_train, generator=tune_generator).tolist()
                 tune_indices = all_indices[:tune_size]
                 val_indices = all_indices[tune_size:tune_size + val_size]
-                
+
                 tune_subset = torch.utils.data.Subset(train_dataset, tune_indices)
                 val_subset = torch.utils.data.Subset(train_dataset, val_indices)
                 
@@ -3244,7 +3274,13 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                                             'completed': epoch >= epochs
                                         }
                                     }
-                                    checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"MNIST_{opt_name}_seed{seed}")
+                                    try:
+                                        checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"MNIST_{opt_name}_seed{seed}")
+                                    except Exception as e:
+                                        logging.error("Checkpoint save failed for %s seed %s: %s", opt_name, seed, e, exc_info=True)
+                                        # Mark run as tainted due to checkpoint I/O failure
+                                        run_tainted = True
+                                        logging.warning("INTEGRITY: Marking run as TAINTED due to checkpoint save failure; results may be incomplete or non-reproducible.")
                         
                         except RuntimeError as e:
                             if "out of memory" in str(e).lower():
@@ -3689,29 +3725,31 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
 
                     # Save checkpoint with complete training state (BLOCKER-2 fix)
                     if checkpoint_manager:
-                        try:
-                            checkpoint_data = {
-                                'model': model.state_dict(),
-                                'optimizer': optimizer.state_dict(),
-                                'scheduler': scheduler.state_dict() if scheduler is not None else None,
-                                'scaler': None,  # AMP scaler (not used in CIFAR10 baseline)
-                                'ema': None,  # EMA weights (not used in CIFAR10 baseline)
-                                'epoch': epoch,
-                                'history': history,
-                                'opt_name': opt_name,
-                                'seed': seed,
-                                'metadata': {
-                                    'current_lr': optimizer.param_groups[0]['lr'],
-                                    'best_val_acc': best_val_acc if 'best_val_acc' in locals() else 0.0,
-                                    'patience_counter': patience_counter if 'patience_counter' in locals() else 0,
-                                    'training_time_sec': time.time() - training_start_time if 'training_start_time' in locals() else 0.0,
-                                    'total_epochs_trained': epoch + 1,
-                                    'completed': epoch >= epochs
-                                }
+                        checkpoint_data = {
+                            'model': model.state_dict(),
+                            'optimizer': optimizer.state_dict(),
+                            'scheduler': scheduler.state_dict() if scheduler is not None else None,
+                            'scaler': None,  # AMP scaler (not used in CIFAR10 baseline)
+                            'ema': None,  # EMA weights (not used in CIFAR10 baseline)
+                            'epoch': epoch,
+                            'history': history,
+                            'opt_name': opt_name,
+                            'seed': seed,
+                            'metadata': {
+                                'current_lr': optimizer.param_groups[0]['lr'],
+                                'best_val_acc': best_val_acc if 'best_val_acc' in locals() else 0.0,
+                                'patience_counter': patience_counter if 'patience_counter' in locals() else 0,
+                                'training_time_sec': time.time() - training_start_time if 'training_start_time' in locals() else 0.0,
+                                'total_epochs_trained': epoch + 1,
+                                'completed': epoch >= epochs
                             }
+                        }
+                        try:
                             checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"CIFAR10_{opt_name}_seed{seed}")
                         except Exception as e:
-                            logging.warning(f"Failed to save checkpoint: {e}")
+                            logging.error("Checkpoint save failed for %s seed %s: %s", opt_name, seed, e, exc_info=True)
+                            run_tainted = True
+                            logging.warning("INTEGRITY: Marking run as TAINTED due to checkpoint save failure; results may be incomplete or non-reproducible." )
             
                 # CRITICAL: Restore best model before final evaluation
                 # If training completed without early stopping, model may not be at best checkpoint
@@ -4254,31 +4292,33 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
 
                     # Save checkpoint with complete training state (BLOCKER-2 fix)
                     if checkpoint_manager:
-                        try:
-                            checkpoint_data = {
-                                'model': model.state_dict(),
-                                'optimizer': optimizer.state_dict(),
-                                'scheduler': scheduler.state_dict() if scheduler is not None else None,
-                                'scaler': None,  # AMP scaler (not used in IMDB baseline)
-                                'ema': None,  # EMA weights (not used in IMDB baseline)
-                                'epoch': epoch,
-                                'history': history,
-                                'opt_name': opt_name,
-                                'seed': seed,
-                                'lr': lr,
-                                'model_name': model_name,
-                                'metadata': {
-                                    'current_lr': optimizer.param_groups[0]['lr'],
-                                    'best_val_acc': best_val_acc if 'best_val_acc' in locals() else 0.0,
-                                    'patience_counter': patience_counter if 'patience_counter' in locals() else 0,
-                                    'training_time_sec': time.time() - training_start_time if 'training_start_time' in locals() else 0.0,
-                                    'total_epochs_trained': epoch + 1,
-                                    'completed': epoch >= epochs
-                                }
+                        checkpoint_data = {
+                            'model': model.state_dict(),
+                            'optimizer': optimizer.state_dict(),
+                            'scheduler': scheduler.state_dict() if scheduler is not None else None,
+                            'scaler': None,  # AMP scaler (not used in IMDB baseline)
+                            'ema': None,  # EMA weights (not used in IMDB baseline)
+                            'epoch': epoch,
+                            'history': history,
+                            'opt_name': opt_name,
+                            'seed': seed,
+                            'lr': lr,
+                            'model_name': model_name,
+                            'metadata': {
+                                'current_lr': optimizer.param_groups[0]['lr'],
+                                'best_val_acc': best_val_acc if 'best_val_acc' in locals() else 0.0,
+                                'patience_counter': patience_counter if 'patience_counter' in locals() else 0,
+                                'training_time_sec': time.time() - training_start_time if 'training_start_time' in locals() else 0.0,
+                                'total_epochs_trained': epoch + 1,
+                                'completed': epoch >= epochs
                             }
+                        }
+                        try:
                             checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"IMDB_{model_name.replace('/', '_')}_{opt_name}_lr{lr}_seed{seed}")
                         except Exception as e:
-                            logging.warning(f"Failed to save checkpoint: {e}")
+                            logging.error("Checkpoint save failed for %s seed %s: %s", opt_name, seed, e, exc_info=True)
+                            run_tainted = True
+                            logging.warning("INTEGRITY: Marking run as TAINTED due to checkpoint save failure; results may be incomplete or non-reproducible.")
             
                 # CRITICAL: Restore best model before final evaluation
                 # If training completed without early stopping, model may not be at best checkpoint
@@ -5058,30 +5098,32 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
 
                 # Save checkpoint with complete training state (BLOCKER-2 fix)
                 if checkpoint_manager:
-                    try:
-                        checkpoint_data = {
-                            'model': model.state_dict(),
-                            'optimizer': optimizer.state_dict(),
-                            'scheduler': scheduler.state_dict() if scheduler is not None else None,
-                            'scaler': None,  # AMP scaler (not used in Medical baseline)
-                            'ema': None,  # EMA weights (not used in Medical baseline)
-                            'epoch': epoch,
-                            'history': history,
-                            'opt_name': opt_name,
-                            'seed': seed,
-                            'lr': lr,
-                            'metadata': {
-                                'current_lr': optimizer.param_groups[0]['lr'],
-                                'best_dice': best_dice if 'best_dice' in locals() else 0.0,
-                                'patience_counter': patience_counter if 'patience_counter' in locals() else 0,
-                                'training_time_sec': time.time() - training_start_time if 'training_start_time' in locals() else 0.0,
-                                'total_epochs_trained': epoch + 1,
-                                'completed': epoch >= epochs
-                            }
+                    checkpoint_data = {
+                        'model': model.state_dict(),
+                        'optimizer': optimizer.state_dict(),
+                        'scheduler': scheduler.state_dict() if scheduler is not None else None,
+                        'scaler': None,  # AMP scaler (not used in Medical baseline)
+                        'ema': None,  # EMA weights (not used in Medical baseline)
+                        'epoch': epoch,
+                        'history': history,
+                        'opt_name': opt_name,
+                        'seed': seed,
+                        'lr': lr,
+                        'metadata': {
+                            'current_lr': optimizer.param_groups[0]['lr'],
+                            'best_dice': best_dice if 'best_dice' in locals() else 0.0,
+                            'patience_counter': patience_counter if 'patience_counter' in locals() else 0,
+                            'training_time_sec': time.time() - training_start_time if 'training_start_time' in locals() else 0.0,
+                            'total_epochs_trained': epoch + 1,
+                            'completed': epoch >= epochs
                         }
+                    }
+                    try:
                         checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"Medical_UNet_{opt_name}_lr{lr}_seed{seed}")
                     except Exception as e:
-                        logging.warning(f"Failed to save checkpoint: {e}")
+                        logging.error("Checkpoint save failed for %s seed %s: %s", opt_name, seed, e, exc_info=True)
+                        run_tainted = True
+                        logging.warning("INTEGRITY: Marking run as TAINTED due to checkpoint save failure; results may be incomplete or non-reproducible.")
             
             # CRITICAL: Restore best model before final evaluation
             # If training completed without early stopping, model may not be at best checkpoint

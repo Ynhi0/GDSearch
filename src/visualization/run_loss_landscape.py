@@ -74,7 +74,10 @@ def train_quick(config):
             loss = criterion(logits, y)
             loss.backward()
             optimizer.step()
-    return model, test_loader, criterion, device
+    # Return full set of data loaders and devices to keep the function's
+    # contract explicit and consistent.
+    # (model, train_loader, val_loader, test_loader, criterion, device)
+    return model, train_loader, val_loader, test_loader, criterion, device
 
 
 def load_checkpoint_model(checkpoint_path, config):
@@ -117,7 +120,8 @@ def load_checkpoint_model(checkpoint_path, config):
     print(f"Loaded FINAL CHECKPOINT (epoch {checkpoint.get('epoch', 'unknown')})")
     
     criterion = nn.CrossEntropyLoss()
-    return model, test_loader, criterion, device
+    # Mirror the signature of train_quick: return all loaders + criterion + device
+    return model, _train_loader, _val_loader, test_loader, criterion, device
 
 
 def main():
@@ -151,20 +155,23 @@ def main():
 
     # Load model: either from checkpoint or train quick snapshot
     if args.load_checkpoint:
-        model, loader, criterion, device = load_checkpoint_model(args.load_checkpoint, config)
+        model, _train_loader, _val_loader, test_loader, criterion, device = load_checkpoint_model(args.load_checkpoint, config)
         mode_label = "Final Checkpoint"
         filename_suffix = "_final"
     else:
         print("WARNING: Using quick training snapshot (2 epochs).")
         print("For high-quality plots, use --load-checkpoint with a fully trained model.")
-        model, loader, criterion, device = train_quick(config)
+        model, _train_loader, _val_loader, test_loader, criterion, device = train_quick(config)
         mode_label = "Quick Snapshot (2 epochs)"
         filename_suffix = "_snapshot"
+
+    # We evaluate the loss landscape using the test loader by design
+    run_loader = test_loader
 
     # 1D probe
     dir1 = _random_direction_like(model, seed=0).to(device)
     alphas = np.linspace(-1.0, 1.0, 41)
-    a, losses_1d = probe_loss_1d(model, loader, criterion, device, dir1, alphas, max_batches=50)
+    a, losses_1d = probe_loss_1d(model, run_loader, criterion, device, dir1, alphas, max_batches=50)
 
     plt.figure(figsize=(6,4))
     plt.plot(a, losses_1d, 'k-')
@@ -179,7 +186,7 @@ def main():
     dir2 = _random_direction_like(model, seed=1).to(device)
     alphas2 = np.linspace(-0.5, 0.5, 41)
     betas2 = np.linspace(-0.5, 0.5, 41)
-    A, B, Z = probe_loss_2d(model, loader, criterion, device, dir1, dir2, alphas2, betas2, max_batches=30)
+    A, B, Z = probe_loss_2d(model, run_loader, criterion, device, dir1, dir2, alphas2, betas2, max_batches=30)
 
     from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
     fig = plt.figure(figsize=(7,5))

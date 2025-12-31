@@ -45,7 +45,7 @@ A comprehensive Python framework for comparing gradient descent algorithms on 2D
 - **Lookahead Optimizer:** Meta-optimizer with slow/fast weights for stability (NeurIPS 2019)
 - **Flatness Analysis:** Quantitative metrics for minimum quality assessment
 - **Computational Cost Analysis:** Wall-clock time metrics (SAM requires 2x forward/backward passes)
-- **Unit Tests:** 208+ tests verifying gradients, optimizers, schedulers, NLP, ResNet, checkpoints, tuning safety, and more (pytest)
+- **Unit Tests:** ~80 tests verifying gradients, optimizers, schedulers, NLP, ResNet, checkpoints, tuning safety, and more (pytest)
 - **Input Validation:** Comprehensive error checking and input sanitization
 - **Ablation Studies:** Component-wise isolation to quantify contributions
 - **Baseline Comparisons:** Compare custom implementations with PyTorch built-ins
@@ -278,7 +278,7 @@ cd /workspaces/GDSearch
 pip install -r requirements.txt
 ```
 
-> **Kaggle users:** Kaggle kernels use modern NumPy 2.x (optimized and performant). Our codebase is NumPy 2.x compatible. If you encounter binary incompatibility errors:
+> **Kaggle users:** Kaggle kernels use modern NumPy 2.x (optimized and performant). The project is actively tested with NumPy 1.26.x (pinned in `requirements.txt`) and aims to maintain compatibility with NumPy 2.x where possible; if you encounter binary incompatibility errors:
 >
 > 1. **Best practice (automatic in notebook):** Let the compatibility check cell reinstall Pandas to match NumPy 2.x
 > 2. **Manual fix if needed:**

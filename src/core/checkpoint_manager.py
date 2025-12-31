@@ -17,9 +17,10 @@ import torch
 # Import compatibility helpers for cross-version torch I/O
 try:
     from src.core.io_utils import torch_load_safe, torch_save_safe
-except Exception as e:
-    logging.debug("Could not import src.core.io_utils: %s", e, exc_info=True)
-    # Provide local fallbacks to avoid NameError when io_utils cannot be imported
+except (ImportError, AttributeError) as e:
+    # If centralized I/O helpers are not available, keep local fallbacks, but warn explicitly.
+    logging.warning("Could not import src.core.io_utils; using local I/O helpers: %s", e)
+
     def torch_load_safe(path_or_file, map_location=None, weights_only=None):
         try:
             if weights_only is not None:
@@ -51,7 +52,7 @@ class RobustCheckpointManager:
     - Disk space monitoring
     """
 
-    def __init__(self, base_dir: str, max_backups: int = 3, min_free_gb: float = 1.0):
+    def __init__(self, base_dir: str, max_backups: int = 3, min_free_gb: float = 1.0, strict: bool = True):
         """
         Initialize checkpoint manager.
         
@@ -59,10 +60,12 @@ class RobustCheckpointManager:
             base_dir: Base directory for checkpoints
             max_backups: Maximum number of backup files to keep
             min_free_gb: Minimum free disk space in GB
+            strict: If True, raise on critical save/load/validation failures. If False, return False and log warnings (backward compatibility).
         """
         self.base_dir = Path(base_dir)
         self.max_backups = max_backups
         self.min_free_gb = min_free_gb
+        self.strict = bool(strict)
         self.base_dir.mkdir(parents=True, exist_ok=True)
         
         # Initialize disk space guardian if available
@@ -144,33 +147,61 @@ class RobustCheckpointManager:
             # Atomic save: write to temp file in same directory then replace
             tmp_path = ckpt_path.with_suffix('.tmp')
             try:
-                # Use binary write file handle to ensure fsync works
-                with open(tmp_path, 'wb') as f:
-                    # Use version-safe save helper to handle serialization flag across torch versions
-                    torch_save_safe(checkpoint_data, f, use_new_zipfile_serialization=True)
-                    f.flush()
-                    os.fsync(f.fileno())
+                # Attempt to use centralized version-safe saver writing to a path (more robust across torch versions)
+                try:
+                    # Save to temp file path (string) to allow torch to manage file handling
+                    torch_save_safe(checkpoint_data, str(tmp_path), use_new_zipfile_serialization=True)
+                except TypeError:
+                    # Fallback: call without serialization flag
+                    try:
+                        torch_save_safe(checkpoint_data, str(tmp_path), use_new_zipfile_serialization=False)
+                    except Exception:
+                        # Final fallback: use direct torch.save to path
+                        torch.save(checkpoint_data, str(tmp_path))
+
+                # Ensure file is flushed to disk before atomic replace
+                try:
+                    with open(tmp_path, 'rb') as _f:
+                        _f.flush()
+                        os.fsync(_f.fileno())
+                except Exception:
+                    # Non-fatal: if fsync not possible, continue (atomic replace will still occur)
+                    pass
 
                 # Atomically replace
                 os.replace(str(tmp_path), str(ckpt_path))
 
-            finally:
                 if tmp_path.exists():
                     try:
                         tmp_path.unlink()
                     except (OSError, PermissionError):
                         pass
 
+            except Exception as e:
+                logging.error("Atomic save failed: %s", e, exc_info=True)
+                try:
+                    if tmp_path.exists():
+                        tmp_path.unlink()
+                except Exception:
+                    pass
+                # Re-raise to be handled by outer except
+                raise
+
             # Validate checkpoint
             if self._validate_checkpoint(ckpt_path, checkpoint_data):
                 logging.info("Checkpoint saved: %s", ckpt_path)
                 return True
             else:
-                logging.debug("Checkpoint validation failed: %s", ckpt_path)
+                msg = f"Checkpoint validation failed: {ckpt_path}"
+                logging.error(msg)
+                if self.strict:
+                    raise RuntimeError(msg)
                 return False
 
         except (OSError, RuntimeError, ValueError) as e:
             logging.error("Failed to save checkpoint: %s", e)
+            if self.strict:
+                raise RuntimeError(f"Failed to save checkpoint: {e}") from e
             return False
 
     def load_checkpoint(
@@ -197,18 +228,13 @@ class RobustCheckpointManager:
         # Try primary checkpoint first
         if ckpt_path.exists():
             try:
-                # CRITICAL FIX: Version-aware load with fallback
+                # Use centralized loader to handle versions that lack `weights_only` gracefully
                 try:
-                    checkpoint = torch.load(
-                        ckpt_path,
-                        map_location='cpu',
-                        weights_only=False
-                    )
-                except TypeError:
-                    # Fallback for PyTorch versions without weights_only parameter
+                    checkpoint = torch_load_safe(ckpt_path, map_location='cpu', weights_only=False)
+                except Exception:
+                    # Fallback to direct torch.load without weights_only
                     logging.warning(
-                        "weights_only parameter not supported, "
-                        "using default torch.load behavior"
+                        "torch_load_safe failed or 'weights_only' unsupported; falling back to torch.load without weights_only"
                     )
                     checkpoint = torch.load(ckpt_path, map_location='cpu')
                 logging.info("Loaded checkpoint: %s", ckpt_path)
@@ -223,15 +249,15 @@ class RobustCheckpointManager:
                 try:
                     # Version-aware load with fallback
                     try:
-                        checkpoint = torch.load(
-                            backup_path,
-                            map_location='cpu',
-                            weights_only=False
-                        )
-                    except TypeError:
-                        checkpoint = torch.load(backup_path, map_location='cpu')
-                    logging.info("Loaded backup checkpoint: %s", backup_path)
-                    return checkpoint
+                        try:
+                            checkpoint = torch_load_safe(backup_path, map_location='cpu', weights_only=False)
+                        except Exception:
+                            logging.warning("torch_load_safe failed for backup; falling back to torch.load without weights_only")
+                            checkpoint = torch.load(backup_path, map_location='cpu')
+                        logging.info("Loaded backup checkpoint: %s", backup_path)
+                        return checkpoint
+                    except Exception as e:
+                        logging.debug("Failed to load backup %s using torch_load_safe: %s", backup_path, e, exc_info=True)
                 except (FileNotFoundError, OSError, RuntimeError) as e:
                     logging.debug("Failed to load backup %d: %s", i, e)
 

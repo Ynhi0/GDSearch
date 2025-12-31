@@ -135,6 +135,24 @@ class TestTuningSafety:
             pass
             pass
 
+    def test_quick_tune_requires_val_loader(self):
+        """Ensure quick_tune_optimizer fails fast if val_loader is None"""
+        from run_all_kaggle import quick_tune_optimizer
+        import pytest
+
+        # Minimal model_fn and dummy train loader
+        def model_fn():
+            class M:
+                def to(self, device):
+                    return self
+            return M()
+
+        train_loader = object()  # placeholder - function will check val_loader early
+
+        with pytest.raises(ValueError, match="requires a 'val_loader' argument"):
+            quick_tune_optimizer('SGD', model_fn, train_loader, None, device='cpu', epochs=1, n_trials=1, seed=42)
+
+
 
 class TestLoaderNaming:
     """Test proper naming conventions for data loaders."""
