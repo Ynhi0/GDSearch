@@ -53,28 +53,44 @@ class Optimizer:
 
 class SGD(Optimizer):
     """
-    Basic Stochastic Gradient Descent (SGD).
+    Basic Stochastic Gradient Descent (SGD) with optional weight decay (L2 regularization).
     
-    Update formula: θ_new = θ_old - lr * gradient
+    Update formula: θ_new = θ_old - lr * gradient - lr * weight_decay * θ_old
+    
+    **CRITICAL SCIENTIFIC FIX (Issue #18: Unregularized SGD):**
+    Added weight_decay parameter to make fair comparisons with AdamW.
+    Without this, SGD is unfairly handicapped in generalization comparisons.
     """
     
-    def __init__(self, lr: float = 0.01) -> None:
+    def __init__(self, lr: float = 0.01, weight_decay: float = 0.0) -> None:
         """
         Initialize SGD optimizer.
         
         Args:
             lr: Learning rate (default: 0.01)
+            weight_decay: L2 regularization coefficient (default: 0.0)
+                         Set to match AdamW's weight_decay for fair comparison
         """
         super().__init__()
         self.lr = lr
-        self.name = f"SGD(lr={lr})"
+        self.weight_decay = weight_decay
+        if weight_decay > 0:
+            self.name = f"SGD(lr={lr}, wd={weight_decay})"
+        else:
+            self.name = f"SGD(lr={lr})"
     
     def step(self, params: Union[Tuple[float, float], Any], gradients: Union[Tuple[float, float], Any]) -> Union[Tuple[float, float], Any]:
-        """Perform one SGD step."""
+        """Perform one SGD step with optional weight decay."""
         # Supports both tuple (x,y) and numpy array
         if isinstance(params, tuple):
             x, y = params
             grad_x, grad_y = gradients
+            
+            # Apply weight decay (L2 regularization)
+            if self.weight_decay > 0:
+                grad_x += self.weight_decay * x
+                grad_y += self.weight_decay * y
+            
             new_x = x - self.lr * grad_x
             new_y = y - self.lr * grad_y
             # Track history
@@ -82,7 +98,13 @@ class SGD(Optimizer):
             return new_x, new_y
         else:
             # Handle array (for neural networks)
-            updated = params - self.lr * gradients
+            effective_grad = gradients.copy()
+            
+            # Apply weight decay (L2 regularization)
+            if self.weight_decay > 0:
+                effective_grad += self.weight_decay * params
+            
+            updated = params - self.lr * effective_grad
             self._append_history(updated)
             return updated
     
@@ -643,7 +665,8 @@ class SAM(Optimizer):
             grad_x, grad_y = gradients
             
             # Compute gradient norm
-            grad_norm = np.sqrt(grad_x**2 + grad_y**2)
+            # NUMERICAL STABILITY FIX: Use np.hypot to avoid overflow
+            grad_norm = np.hypot(grad_x, grad_y)
             if grad_norm < 1e-12:
                 return params
                 
@@ -662,7 +685,18 @@ class SAM(Optimizer):
             return adv_x, adv_y
         else:
             # Array case (neural networks)
-            grad_norm = np.linalg.norm(gradients)
+            # NUMERICAL STABILITY FIX: Use safe norm computation to prevent overflow
+            # For large arrays, np.linalg.norm can overflow before taking sqrt
+            # Use np.sqrt(np.sum(gradients**2)) with overflow check, or scale first
+            max_abs = np.max(np.abs(gradients))
+            if max_abs < 1e-12:
+                return params
+            
+            # Scale gradients to prevent overflow in norm computation
+            scaled_grad = gradients / max_abs
+            scaled_norm = np.linalg.norm(scaled_grad)
+            grad_norm = scaled_norm * max_abs  # Actual norm
+            
             if grad_norm < 1e-12:
                 return params
                 

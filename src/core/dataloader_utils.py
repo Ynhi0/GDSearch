@@ -35,19 +35,26 @@ def make_dataloader(
     collate_fn: Optional[Callable] = None,
     sampler: Optional[Sampler] = None,
     drop_last: bool = False,
-    persistent_workers: bool = False
+    persistent_workers: bool = False,
+    full_batch: bool = False
 ) -> DataLoader:
     """
     Create a DataLoader with deterministic worker seeding when `seed` is provided.
+    
+    CRITICAL FIX: Added `full_batch` parameter for TRUE Gradient Descent (not mini-batch SGD).
+    When full_batch=True, batch_size is set to len(dataset) and shuffle=False to ensure
+    deterministic, full-batch gradient computation (required for theoretical GD analysis).
     
     - If `seed` is not None, a `torch.Generator` is created and `worker_init_fn` 
       seeds python, numpy and torch RNGs for each worker deterministically.
     - If `sampler` is provided, it will be used and `shuffle` will be ignored.
     - `persistent_workers` requires PyTorch >= 1.7.0 and num_workers > 0
+    - If `full_batch` is True, overrides batch_size to len(dataset) and disables shuffle
     
     Args:
         dataset: PyTorch Dataset
-        batch_size: Batch size for DataLoader
+        batch_size: Batch size for DataLoader (ignored if full_batch=True)
+        full_batch: If True, use entire dataset as single batch (True GD, not SGD)
         shuffle: Whether to shuffle data (ignored if sampler provided)
         seed: Random seed for reproducibility
         num_workers: Number of worker processes
@@ -56,6 +63,7 @@ def make_dataloader(
         sampler: Custom sampler (overrides shuffle)
         drop_last: Drop last incomplete batch
         persistent_workers: Keep workers alive between epochs
+        full_batch: If True, use full dataset as single batch (True GD)
         
     Returns:
         DataLoader with configured settings
@@ -64,6 +72,22 @@ def make_dataloader(
     multiprocessing issues. This ensures testing works on Windows while still
     allowing full multiprocessing on Kaggle/Linux.
     """
+    # CRITICAL FIX: Full-Batch GD mode for true Gradient Descent (not mini-batch SGD)
+    if full_batch:
+        # Get dataset size - handle different dataset types
+        try:
+            dataset_size = len(dataset)
+        except TypeError:
+            # Some datasets don't support len(), estimate from iteration
+            import logging
+            logging.warning("Dataset does not support len(), cannot use full_batch mode. Falling back to provided batch_size.")
+        else:
+            batch_size = dataset_size
+            shuffle = False  # Full batch must be deterministic
+            drop_last = False  # Must use entire dataset
+            import logging
+            logging.info(f"Full-Batch GD mode enabled: batch_size={batch_size} (entire dataset), shuffle=False")
+    
     # AUDIT FIX: Force num_workers=0 on Windows to prevent hanging/crashes
     import platform
     import logging
@@ -117,10 +141,11 @@ def make_dataloader(
 
     loader = DataLoader(dataset, **dl_kwargs)
     
-    # CRITICAL: Add basic metadata for test-leakage prevention
+    # CRITICAL: Add metadata for tracking and test-leakage prevention
+    loader.name = 'full_batch_gd' if full_batch else getattr(loader, 'name', 'unknown')
+    loader.is_full_batch = full_batch
+    
     # Callers should override with more specific values if available
-    if not hasattr(loader, 'name'):
-        loader.name = 'unknown'
     if not hasattr(loader, '_split_type'):
         loader._split_type = 'unknown'
     if not hasattr(loader, '_dataset_uid'):

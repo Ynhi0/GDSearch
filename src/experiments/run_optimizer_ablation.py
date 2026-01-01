@@ -56,7 +56,7 @@ from typing import Optional, List, Dict, Any, Callable
 import logging
 
 from src.core.test_functions import Rosenbrock, TestFunction
-from src.core.optimizers import SGD, SGDMomentum, RMSProp, Adam, AdamW, AMSGrad
+from src.core.optimizers import SGD, SGDMomentum, RMSProp, Adam, AdamW, AMSGrad, SAM
 
 
 # AUDIT FIX: Add guard to prevent unfair benchmark usage
@@ -180,6 +180,8 @@ def run_optimizer_ablation(
         ('Adam', Adam(lr=lr_map.get('Adam', lr_map.get('default', 0.01)), beta1=0.9, beta2=0.999)),
         ('AdamW', AdamW(lr=lr_map.get('AdamW', lr_map.get('default', 0.01)), beta1=0.9, beta2=0.999, weight_decay=0.01)),
         ('AMSGrad', AMSGrad(lr=lr_map.get('AMSGrad', lr_map.get('default', 0.01)), beta1=0.9, beta2=0.999)),
+        # CRITICAL FIX: Add SAM with proper 2D support
+        ('SAM', SAM(lr=lr_map.get('SAM', lr_map.get('default', 0.01)), rho=0.05, base_optimizer='SGD')),
     ]
     
     # Storage for trajectories
@@ -197,7 +199,8 @@ def run_optimizer_ablation(
         estimate_smoothness,
         estimate_strong_convexity,
         sgd_convergence_bound,
-        adam_convergence_bound
+        adam_convergence_bound,
+        momentum_convergence_bound  # CRITICAL FIX: Add momentum bounds
     )
     import torch
 
@@ -212,13 +215,13 @@ def run_optimizer_ablation(
         opt_lr = optimizer.lr if hasattr(optimizer, 'lr') else 0.01
 
         # Local lists for vector-based estimates
-        grads_list: List[np.ndarray] = []
-        params_list: List[np.ndarray] = []
+        grads_list: List[np.ndarray[Any, np.dtype[np.float64]]] = []
+        params_list: List[np.ndarray[Any, np.dtype[np.float64]]] = []
 
         # Create numeric model and optimizer wrapper for tracker compatibility
         class NumericModel(torch.nn.Module):
             def __init__(self, x0: float, y0: float) -> None:
-                super().__init__()
+                super().__init__()  # type: ignore[misc]
                 self.param = torch.nn.Parameter(torch.tensor([x0, y0], dtype=torch.float32))
 
             def forward(self, _x: torch.Tensor) -> torch.Tensor:
@@ -234,7 +237,7 @@ def run_optimizer_ablation(
                 defaults: Dict[str, Any] = {'lr': lr}
                 super().__init__(params, defaults)
             
-            @torch.no_grad()
+            @torch.no_grad()  # type: ignore[misc]
             def step(self, closure: Optional[Callable[[], float]] = None) -> float:  # type: ignore[override]
                 """
                 Dummy step method (not used, but required for Optimizer).
@@ -264,6 +267,16 @@ def run_optimizer_ablation(
         try:
             for i in range(max_iterations):
                 try:
+                    # CRITICAL FIX (Issue #19): LR Scheduler for SGD
+                    # Apply learning rate decay to counter "Constant LR Strawman" criticism
+                    if i > 0 and i % 100 == 0:  # Decay every 100 iterations
+                        if hasattr(optimizer, 'lr') and 'SGD' in opt_name and 'Momentum' not in opt_name and 'Adam' not in opt_name:
+                            # Apply 0.99 decay to base SGD only (prevents oscillation at convergence)
+                            old_lr = optimizer.lr
+                            optimizer.lr *= 0.99
+                            if i % 1000 == 0:  # Log every 1000 iters
+                                logging.info(f"{opt_name} LR decayed from {old_lr:.6f} to {optimizer.lr:.6f} at iteration {i}")
+                    
                     loss = test_function.compute(x, y)
                     grad_x, grad_y = test_function.gradient(x, y)
 
@@ -271,7 +284,25 @@ def run_optimizer_ablation(
                     if not np.isfinite(loss) or not np.isfinite(grad_x) or not np.isfinite(grad_y):
                         raise OverflowError("Non-finite gradient or loss")
 
-                    grad_norm = np.sqrt(grad_x ** 2 + grad_y ** 2)
+                    # CRITICAL FIX (Issue #21): Gradient Clipping
+                    # Prevents "Gradient Explosion Vulnerability" on steep landscapes (Rosenbrock, etc.)
+                    # This is a standard safeguard used in all production codebases
+                    max_grad_norm = 10.0  # Clip threshold (prevents catastrophic divergence)
+                    
+                    # NUMERICAL STABILITY FIX: Use np.hypot to avoid overflow in x**2 + y**2
+                    # np.hypot computes sqrt(x^2 + y^2) without intermediate overflow
+                    grad_norm_raw = np.hypot(grad_x, grad_y)
+                    
+                    # Apply gradient clipping if needed
+                    if grad_norm_raw > max_grad_norm:
+                        clip_factor = max_grad_norm / grad_norm_raw
+                        grad_x *= clip_factor
+                        grad_y *= clip_factor
+                        grad_norm = max_grad_norm
+                        if i < 10 or (i < 1000 and i % 100 == 0):  # Log early and periodic clipping
+                            logging.debug(f"{opt_name} gradient clipped from {grad_norm_raw:.2f} to {max_grad_norm}")
+                    else:
+                        grad_norm = grad_norm_raw
 
                     if not np.isfinite(grad_norm):
                         raise OverflowError("Non-finite grad_norm")
@@ -288,9 +319,38 @@ def run_optimizer_ablation(
                     # Track dynamics (before step)
                     tracker.track_step(i, float(loss), numeric_model, numeric_optim_mock)
 
-                    step_result = optimizer.step((x, y), (grad_x, grad_y))
-                    if isinstance(step_result, tuple):
-                        x, y = step_result
+                    # CRITICAL FIX: SAM requires closure/oracle for 2D functions
+                    if isinstance(optimizer, SAM):
+                        # SAM two-step process:
+                        # 1. Compute adversarial point using the test function gradient
+                        # Note: We compute adversarial parameters manually rather than using
+                        # the protected _compute_adversarial_step to avoid Pyright warnings
+                        grad_norm = np.hypot(grad_x, grad_y)
+                        if grad_norm >= 1e-12:
+                            # Normalize gradient direction
+                            grad_dir_x = grad_x / grad_norm
+                            grad_dir_y = grad_y / grad_norm
+                            # Adversarial step: θ + ρ * (g / ||g||)
+                            adv_x = x + optimizer.rho * grad_dir_x
+                            adv_y = y + optimizer.rho * grad_dir_y
+                        else:
+                            adv_x, adv_y = x, y
+                        
+                        # 2. Compute gradient at adversarial point
+                        adv_grad_x, adv_grad_y = test_function.gradient(adv_x, adv_y)
+                        adversarial_gradients = (adv_grad_x, adv_grad_y)
+                        
+                        # 3. Take step using adversarial gradient
+                        step_result = optimizer.step((x, y), (grad_x, grad_y), 
+                                                    adversarial_gradients=adversarial_gradients)
+                    else:
+                        # Standard optimizer step
+                        step_result = optimizer.step((x, y), (grad_x, grad_y))
+                    
+                    if isinstance(step_result, tuple) and len(step_result) == 2:
+                        x_new, y_new = step_result
+                        x = float(x_new)
+                        y = float(y_new)
                     else:
                         raise TypeError(f"Expected tuple from optimizer.step, got {type(step_result)}")
 
@@ -299,7 +359,7 @@ def run_optimizer_ablation(
                         raise OverflowError("Non-finite parameters after step")
                     
                     # CRITICAL FIX: Update numeric model to new position for accurate distance tracking
-                    numeric_model.update_position(float(x), float(y))
+                    numeric_model.update_position(x, y)
 
                 except (OverflowError, FloatingPointError) as e:
                     # Log exception details for debugging
@@ -371,7 +431,9 @@ def run_optimizer_ablation(
                     raise ValueError("No losses tracked")
                     
                 init_loss = tracker.losses[0] if np.isfinite(tracker.losses[0]) else 1.0
-                if 'Adam' in opt_name:
+                
+                # CRITICAL FIX: Use appropriate theoretical bounds per optimizer type
+                if 'Adam' in opt_name or 'AdamW' in opt_name or 'AMSGrad' in opt_name:
                     # Compute bounds for validation (not used in curve, but good for logging)
                     _ = adam_convergence_bound(
                         L=est_L if est_L > 0 else 1.0,
@@ -380,7 +442,31 @@ def run_optimizer_ablation(
                     )
                     # Adam theoretical decay ~ O(1/sqrt(t)). Scale by initial loss for visualization.
                     theory_curve = init_loss / np.sqrt(np.maximum(1, theory_iters + 1))
+                
+                elif 'Momentum' in opt_name:
+                    # CRITICAL FIX: Use momentum-specific bounds with acceleration
+                    momentum_beta = 0.9  # Default momentum coefficient
+                    momentum_stats = momentum_convergence_bound(
+                        L=est_L if est_L > 0 else 1.0,
+                        mu=est_mu if est_mu > 0 else 1e-6,
+                        lr=current_lr,
+                        momentum=momentum_beta,
+                        T=max(1, len(theory_iters)),
+                        method='heavy_ball'
+                    )
+                    conv_rate = momentum_stats.get('convergence_rate', 1.0)
+                    final_bound = momentum_stats.get('final_bound', 0.0)
+                    
+                    # Accelerated decay: ρ = 1 - sqrt(μ/L) vs vanilla SGD's 1 - μ/L
+                    if 0 < conv_rate < 1:
+                        log_decay = theory_iters * np.log(conv_rate)
+                        log_decay = np.clip(log_decay, -700, 0)
+                        theory_curve = init_loss * np.exp(log_decay) + final_bound
+                    else:
+                        theory_curve = np.full_like(theory_iters, init_loss, dtype=float)
+                
                 else:
+                    # Vanilla SGD, RMSProp, SAM (use SGD bounds)
                     sgd_stats = sgd_convergence_bound(
                         L=est_L if est_L > 0 else 1.0,
                         mu=est_mu if est_mu > 0 else 1e-6,
@@ -441,10 +527,10 @@ def run_optimizer_ablation(
         logging.debug(f"Failed to create comparative dynamics plots: {e}")
     
     # Create figure with subplots
-    _fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    _fig, axes = plt.subplots(2, 2, figsize=(14, 10))  # type: ignore[misc]
     
     # Define color map for consistent coloring
-    colors = plt.get_cmap('viridis')(np.linspace(0, 0.9, len(optimizers)))
+    colors = plt.get_cmap('viridis')(np.linspace(0, 0.9, len(optimizers)))  # type: ignore[misc]
     
     # Plot 1: Loss curves (log scale)
     ax = axes[0, 0]

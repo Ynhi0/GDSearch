@@ -41,13 +41,17 @@ class TrainingDynamicsTracker:
         >>> tracker.plot_dynamics('plots/')
     """
     
-    def __init__(self, track_params: bool = False, param_sample_freq: int = 10):
+    def __init__(self, track_params: bool = False, param_sample_freq: int = 10, param_snapshot_dir: Optional[str] = None):
         """
         Initialize dynamics tracker.
         
         Args:
-            track_params: If True, store full parameter snapshots (memory intensive)
+            track_params: If True, log parameter snapshots to DISK (not RAM) to avoid OOM
             param_sample_freq: Only track params every N iterations (to save memory)
+            param_snapshot_dir: Directory to save parameter snapshots (default: None = disabled)
+        
+        CRITICAL FIX (Issue #30): Removed in-memory param_snapshots list (343GB RAM risk).
+        Now writes snapshots to disk incrementally using np.save() to prevent OOM.
         """
         self.iterations: List[int] = []
         self.losses: List[float] = []
@@ -56,13 +60,20 @@ class TrainingDynamicsTracker:
         self.param_distances: List[float] = []  # Distance from initialization
         self.learning_rates: List[float] = []
         
-        # Optional: track parameter snapshots (memory intensive)
+        # CRITICAL FIX (Issue #29): Add normalized speed metric
+        self.normalized_speeds: List[float] = []  # Speed normalized by LR (removes scheduler confounding)
+        
+        # CRITICAL FIX (Issue #30): Disk-based parameter tracking
         self.track_params = track_params
         self.param_sample_freq = param_sample_freq
-        self.param_snapshots = [] if track_params else None
+        self.param_snapshot_dir = Path(param_snapshot_dir) if param_snapshot_dir else None
+        if self.param_snapshot_dir:
+            self.param_snapshot_dir.mkdir(parents=True, exist_ok=True)
+        self.snapshot_counter = 0
         
         # Store initial parameters for distance calculation
         self.initial_params = None
+        self.prev_params = None  # For speed calculation
         
         # Computed metrics (filled during analysis)
         self.instantaneous_speeds = None
@@ -122,15 +133,29 @@ class TrainingDynamicsTracker:
             
             distance = torch.norm(current_params - self.initial_params).item()
             self.param_distances.append(distance)
+            
+            # CRITICAL FIX (Issue #29): Compute normalized speed (removes LR scheduler confounding)
+            if self.prev_params is not None and lr > 0:
+                step_distance = torch.norm(current_params - self.prev_params).item()
+                normalized_speed = step_distance / lr  # Distance per unit LR
+                self.normalized_speeds.append(normalized_speed)
+            else:
+                self.normalized_speeds.append(0.0)
+            
+            self.prev_params = current_params.clone()
         else:
             self.param_distances.append(0.0)
+            self.normalized_speeds.append(0.0)
         
-        # Optionally store parameter snapshot
-        if self.track_params and iteration % self.param_sample_freq == 0:
+        # CRITICAL FIX (Issue #30): Write parameter snapshots to DISK (not RAM)
+        if self.track_params and self.param_snapshot_dir and iteration % self.param_sample_freq == 0:
             param_snapshot = torch.nn.utils.parameters_to_vector(
                 [p for p in model.parameters() if p.requires_grad]
             ).detach().cpu().numpy()
-            self.param_snapshots.append(param_snapshot)
+            
+            snapshot_path = self.param_snapshot_dir / f"snapshot_iter_{iteration:06d}.npy"
+            np.save(snapshot_path, param_snapshot)
+            self.snapshot_counter += 1
     
     def compute_derived_metrics(self):
         """Compute derived dynamics metrics from tracked data."""
@@ -148,20 +173,24 @@ class TrainingDynamicsTracker:
                 compute_smoothness_index
             )
         
-        # Instantaneous speeds (if param snapshots available)
-        if self.param_snapshots is not None and len(self.param_snapshots) > 1:
-            trajectory = np.array(self.param_snapshots)
-            self.instantaneous_speeds = compute_instantaneous_speed(trajectory)
+        # CRITICAL FIX (Issue #30): Load snapshots from disk only when needed (avoid OOM)
+        if self.param_snapshot_dir and self.param_snapshot_dir.exists():
+            snapshot_files = sorted(self.param_snapshot_dir.glob("snapshot_iter_*.npy"))
+            if len(snapshot_files) > 1:
+                # Load snapshots in batches to avoid OOM
+                trajectory_samples = []
+                for f in snapshot_files[:min(100, len(snapshot_files))]:  # Limit to 100 snapshots
+                    trajectory_samples.append(np.load(f))
+                if len(trajectory_samples) > 1:
+                    trajectory = np.array(trajectory_samples)
+                    self.instantaneous_speeds = compute_instantaneous_speed(trajectory)
+                if len(trajectory_samples) > 2:
+                    self.smoothness_index = compute_smoothness_index(trajectory)
         
         # Loss oscillations
         if len(self.losses) > 1:
             losses_arr = np.array(self.losses)
             self.loss_oscillations = compute_oscillation_magnitude(losses_arr, ema_alpha=0.1)
-        
-        # Trajectory smoothness (if param snapshots available)
-        if self.param_snapshots is not None and len(self.param_snapshots) > 2:
-            trajectory = np.array(self.param_snapshots)
-            self.smoothness_index = compute_smoothness_index(trajectory)
     
     def save_dynamics(self, output_path: str):
         """
@@ -178,6 +207,10 @@ class TrainingDynamicsTracker:
             'param_distance': self.param_distances,
             'learning_rate': self.learning_rates
         })
+        
+        # CRITICAL FIX (Issue #29): Add normalized speed metric (removes LR scheduler confounding)
+        if len(self.normalized_speeds) == len(self.iterations):
+            df['normalized_speed'] = self.normalized_speeds
         
         # Add oscillations if computed
         if self.loss_oscillations is not None:

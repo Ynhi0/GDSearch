@@ -82,7 +82,8 @@ def run_single_optimizer_trial(
                     logger.warning(f"{optimizer_name}: {divergence_reason}")
                     break
                 
-                grad_norm = np.sqrt(grad_x**2 + grad_y**2)
+                # NUMERICAL STABILITY FIX: Use np.hypot to avoid overflow
+                grad_norm = np.hypot(grad_x, grad_y)
                 
                 if not np.isfinite(grad_norm):
                     diverged = True

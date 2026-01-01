@@ -1672,14 +1672,17 @@ def get_adaptive_batch_size(model, sample_input, device, base_batch_size=128):
     Falls back to base_batch_size if detection fails.
     
     Args:
-        model: PyTorch model
+        model: PyTorch model (unused, reserved for future memory profiling)
         sample_input: Sample input tensor for size estimation
-        device: torch.device
+        device: torch.device (unused, reserved for future device-specific logic)
         base_batch_size: Fallback batch size
         
     Returns:
         int: Optimal batch size
     """
+    _ = model  # Reserved for future memory profiling
+    _ = device  # Reserved for future device-specific logic
+    
     if not torch.cuda.is_available():
         return base_batch_size
         
@@ -2650,13 +2653,14 @@ def normalize_adam_params(params: Dict, optimizer_name: str = 'Adam') -> Dict:
     
     Args:
         params: Hyperparameter dictionary (may contain beta1/beta2 or betas)
-        optimizer_name: Name of optimizer (for logging)
+        optimizer_name: Name of optimizer (for logging/debugging)
         
     Returns:
         Normalized parameter dictionary with betas tuple if needed
     """
     params = params.copy()
     if 'beta1' in params and 'beta2' in params:
+        logging.debug(f"Normalizing {optimizer_name} params: converting beta1/beta2 to betas tuple")
         params['betas'] = (params.pop('beta1'), params.pop('beta2'))
     return params
 
@@ -3185,6 +3189,25 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                                     if param.grad is not None:
                                         grad_norm += param.grad.data.norm(2).item() ** 2
                                 grad_norm = grad_norm ** 0.5
+                                
+                                # QA INTEGRATION (Issue #2): Estimate gradient noise variance every 10 epochs
+                                # CRITICAL for validating theoretical SGD bounds vs empirical results
+                                grad_noise_var = None
+                                if epoch % 10 == 0:
+                                    try:
+                                        from src.analysis.gradient_noise_analysis import estimate_gradient_noise_variance
+                                        noise_stats = estimate_gradient_noise_variance(
+                                            model=model,
+                                            data_loader=train_loader,
+                                            criterion=criterion,
+                                            device=device,
+                                            num_samples=20,  # Limited samples to avoid slowdown
+                                            method='empirical_variance'
+                                        )
+                                        grad_noise_var = noise_stats['sigma_squared']
+                                        logging.info(f"Epoch {epoch}: Gradient noise σ² = {grad_noise_var:.4e}")
+                                    except Exception as e:
+                                        logging.warning(f"Failed to estimate gradient noise variance: {e}")
 
                                 # Sanity check: MNIST train accuracy should be > 10% (basic validation)
                                 if epoch > 1 and train_acc < 10.0:
@@ -3231,7 +3254,8 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                                 # Add tainted and effective_batch_size to per-epoch history
                                 # AUDIT FIX: Include test metrics for schema consistency with integration tests
                                 # PROPOSAL REQUIREMENT: Include gradient_norm for convergence rate analysis
-                                history.append({
+                                # QA INTEGRATION (Issue #2): Include grad_noise_var for theoretical bounds validation
+                                epoch_data = {
                                     'epoch': epoch,
                                     'train_loss': train_loss,
                                     'train_acc': train_acc,
@@ -3242,7 +3266,10 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                                     'grad_norm': grad_norm,  # CRITICAL for convergence analysis per proposal
                                     'effective_batch_size': effective_batch_size,
                                     'original_batch_size': original_batch_size
-                                })
+                                }
+                                if grad_noise_var is not None:
+                                    epoch_data['grad_noise_var'] = grad_noise_var
+                                history.append(epoch_data)
 
                                 # Log metrics to tracker
                                 if tracker:
@@ -7925,6 +7952,12 @@ def get_kaggle_t4_config():
 
 def main():
     """Main execution orchestrator with CLI argument parsing"""
+    # INTEGRATION FIX (Issue #9): Add reproducibility setup BEFORE any experiments
+    # This ensures GPU determinism across all experiment runs
+    from src.utils.reproducibility import setup_experiment_reproducibility, warn_if_nondeterministic
+    setup_experiment_reproducibility(seed=42, deterministic=False)  # Will be overridden by --seeds
+    warn_if_nondeterministic()
+    
     # Configure environment & console encoding early for script execution
     configure_environment()
     configure_windows_console_encoding()

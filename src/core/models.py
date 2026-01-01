@@ -2,7 +2,8 @@
 Neural network models for MNIST and CIFAR-10 using PyTorch.
 """
 
-from typing import Tuple, Optional
+from typing import Optional
+import logging
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -11,22 +12,56 @@ import torch.nn.functional as F
 class SimpleMLP(nn.Module):
     """
     A simple 2-layer MLP for MNIST classification.
-    Architecture: Flatten -> Linear(hidden) -> ReLU -> Linear(num_classes)
+    Architecture: Flatten -> Linear(hidden) -> [BN] -> ReLU -> [Dropout] -> Linear(num_classes)
+    
+    EXTENDED: Now supports configurable hidden size, dropout, and batch normalization.
+    
+    CRITICAL FIX (Issue #26): Added use_bn parameter to control Batch Normalization.
+    This prevents confounding variables when comparing optimizers:
+    - SGD benefits greatly from BN (stabilizes gradients)
+    - Adam works well without BN (adaptive scaling handles it)
+    Without this flag, SGD vs Adam comparisons confound optimizer with normalization.
     """
 
-    def __init__(self, input_size: int = 28 * 28, hidden_size: int = 256, num_classes: int = 10):
+    def __init__(
+        self,
+        input_size: int = 28 * 28,
+        hidden_size: int = 256,
+        num_classes: int = 10,
+        dropout: float = 0.0,
+        use_bn: bool = False
+    ):
         super().__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.num_classes = num_classes
+        self.dropout_rate = dropout
+        self.use_bn = use_bn
 
         self.fc1 = nn.Linear(input_size, hidden_size)
+        
+        # CRITICAL FIX (Issue #26): Optional Batch Normalization
+        # When use_bn=True, adds BN after first linear layer
+        # This allows fair optimizer comparisons with/without normalization
+        if use_bn:
+            self.bn1 = nn.BatchNorm1d(hidden_size)
+        else:
+            self.bn1 = None
+        
+        self.dropout = nn.Dropout(dropout) if dropout > 0.0 else nn.Identity()
         self.fc2 = nn.Linear(hidden_size, num_classes)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: (N, 1, 28, 28)
+        # x: (N, 1, 28, 28) or (N, input_size)
         x = torch.flatten(x, 1)
-        x = F.relu(self.fc1(x))
+        x = self.fc1(x)
+        
+        # Apply BN if enabled
+        if self.bn1 is not None:
+            x = self.bn1(x)
+        
+        x = F.relu(x)
+        x = self.dropout(x)
         x = self.fc2(x)
         return x
 
@@ -66,7 +101,10 @@ class ConvNet(nn.Module):
     Architecture:
         Conv(64)->BN->ReLU->Conv(64)->BN->ReLU->MaxPool->Dropout
         Conv(128)->BN->ReLU->Conv(128)->BN->ReLU->MaxPool->Dropout
-        FC(256)->BN->ReLU->Dropout->FC(10)
+        AdaptiveAvgPool(1x1)->FC(256)->BN->ReLU->Dropout->FC(10)
+    
+    FIXED (Issue #23): Now uses AdaptiveAvgPool2d instead of hardcoded Linear(128*8*8, 256).
+    This prevents crashes when using different input resolutions (e.g., MNIST 28x28).
     """
 
     def __init__(self, num_classes: int = 10, dropout: float = 0.3):
@@ -80,7 +118,7 @@ class ConvNet(nn.Module):
             nn.Conv2d(64, 64, kernel_size=3, padding=1),
             nn.BatchNorm2d(64),
             nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=2, stride=2),  # 64x16x16
+            nn.MaxPool2d(kernel_size=2, stride=2),  # 64x16x16 for CIFAR, 64x14x14 for MNIST
             nn.Dropout2d(p=dropout)
         )
         
@@ -92,14 +130,18 @@ class ConvNet(nn.Module):
             nn.Conv2d(128, 128, kernel_size=3, padding=1),
             nn.BatchNorm2d(128),
             nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=2, stride=2),  # 128x8x8
+            nn.MaxPool2d(kernel_size=2, stride=2),  # 128x8x8 for CIFAR, 128x7x7 for MNIST
             nn.Dropout2d(p=dropout)
         )
         
-        # Classifier
+        # CRITICAL FIX (Issue #23): Use AdaptiveAvgPool2d instead of hardcoded shape
+        # This allows the model to work with ANY input resolution (CIFAR 32x32, MNIST 28x28, etc.)
+        self.adaptive_pool = nn.AdaptiveAvgPool2d((1, 1))  # Always outputs 128x1x1
+        
+        # Classifier (now resolution-agnostic)
         self.classifier = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(128 * 8 * 8, 256),
+            nn.Linear(128, 256),  # Input is now always 128 (from adaptive pooling)
             nn.BatchNorm1d(256),
             nn.ReLU(inplace=True),
             nn.Dropout(p=dropout),
@@ -109,6 +151,7 @@ class ConvNet(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.block1(x)
         x = self.block2(x)
+        x = self.adaptive_pool(x)  # Resolution-agnostic pooling
         x = self.classifier(x)
         return x
 
@@ -174,13 +217,16 @@ class ResNet18(nn.Module):
     
     Total: 18 layers (1 conv + 8*2 conv in blocks + 1 fc)
     Parameters: ~11M for CIFAR-10
+    
+    EXTENDED (Issue #25): Now supports zero_init_residual for modern initialization.
     """
     
-    def __init__(self, num_classes: int = 10, dropout: float = 0.0):
+    def __init__(self, num_classes: int = 10, dropout: float = 0.0, zero_init_residual: bool = False):
         super().__init__()
         
         self.in_channels = 64
         self.dropout = dropout
+        self.zero_init_residual = zero_init_residual
         
         # Initial convolution (no pooling for small CIFAR-10 images)
         self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
@@ -235,7 +281,16 @@ class ResNet18(nn.Module):
         return nn.Sequential(*layers)
     
     def _initialize_weights(self):
-        """Initialize weights using Kaiming initialization."""
+        """
+        Initialize weights using Kaiming initialization.
+        
+        EXTENDED (Issue #25): Implements Zero-Gamma Initialization when zero_init_residual=True.
+        This initializes the last BatchNorm in each residual block to zero, making the block
+        an identity function at initialization. This allows gradients to flow through the
+        shortcut path unimpeded, improving trainability with SGD (not just Adam).
+        
+        Reference: "Bag of Tricks for Image Classification with CNNs" (He et al., 2018)
+        """
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
@@ -245,6 +300,16 @@ class ResNet18(nn.Module):
             elif isinstance(m, nn.Linear):
                 nn.init.normal_(m.weight, 0, 0.01)
                 nn.init.constant_(m.bias, 0)
+        
+        # CRITICAL FIX (Issue #25): Zero-Gamma Initialization for residual blocks
+        # Initialize the last BN in each residual block to zero (γ=0)
+        # This makes each block initially act as identity: out = x + 0 = x
+        if self.zero_init_residual:
+            for m in self.modules():
+                if isinstance(m, BasicBlock):
+                    # Zero-initialize the last BN in the residual block
+                    nn.init.constant_(m.bn2.weight, 0)
+                    logging.debug(f"Zero-initialized residual block: {m}")
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Initial conv

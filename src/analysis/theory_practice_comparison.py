@@ -300,11 +300,42 @@ def compare_theory_practice(training_csv: str, optimizer_name: str,
         else:
             theoretical = theoretical_sgd_strongly_convex(iterations, mu, L, initial_loss)
         theory_label = f"Theory: O((1-μ/L)^k), μ/L={mu/L:.4f}"
+        
+        # Compute theoretical convergence rate: ρ = 1 - μ/L
+        theoretical_rate = 1 - mu / L
     else:
         # General non-convex case
         R = kwargs.get('R', 1.0)
         theoretical = theoretical_sgd_convex(iterations, L, R)
         theory_label = f"Theory: O(1/√k), L={L}"
+        
+        # Theoretical rate is sublinear (no exponential rate)
+        theoretical_rate = None
+    
+    # CRITICAL FIX (Issue #24): Compute Optimality Gap
+    # This is the TRUE theory-practice comparison: difference between fitted and predicted rate
+    # Without this, curve fitting is just decoration, not science
+    optimality_gap = None
+    optimality_gap_pct = None
+    
+    if mu is not None and empirical_rate > 0 and theoretical_rate is not None:
+        # For geometric convergence: compare -log(ρ) values
+        # Empirical rate from fit is already -log(ρ_empirical)
+        theoretical_rate_log = -np.log(theoretical_rate)
+        
+        # Optimality gap: how far is empirical rate from theoretical rate?
+        optimality_gap = abs(empirical_rate - theoretical_rate_log)
+        optimality_gap_pct = (optimality_gap / theoretical_rate_log) * 100
+        
+        logging.info(f"  Theoretical convergence rate (ρ): {theoretical_rate:.6f}")
+        logging.info(f"  Theoretical rate (-log ρ): {theoretical_rate_log:.6f}")
+        logging.info(f"  Empirical rate (-log ρ_fit): {empirical_rate:.6f}")
+        logging.info(f"  ⚠️  OPTIMALITY GAP: {optimality_gap:.6f} ({optimality_gap_pct:.2f}%)")
+        
+        if optimality_gap_pct > 10:
+            logging.info(f"  WARNING: Large optimality gap (>10%) indicates theory-practice mismatch")
+        elif optimality_gap_pct < 5:
+            logging.info(f"  ✓ Good agreement: optimality gap <5%")
     
     # Create comparison plot
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
@@ -345,6 +376,9 @@ def compare_theory_practice(training_csv: str, optimizer_name: str,
     stats = {
         'optimizer': optimizer_name,
         'empirical_rate': float(empirical_rate),
+        'theoretical_rate': float(theoretical_rate) if theoretical_rate is not None else None,
+        'optimality_gap': float(optimality_gap) if optimality_gap is not None else None,
+        'optimality_gap_pct': float(optimality_gap_pct) if optimality_gap_pct is not None else None,
         'fit_r_squared': float(r_squared),
         'mean_relative_error': float(np.mean(relative_errors)),
         'median_relative_error': float(np.median(relative_errors)),

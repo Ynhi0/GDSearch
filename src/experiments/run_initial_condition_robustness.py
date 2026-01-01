@@ -39,7 +39,8 @@ def run_single_trial(
     for iteration in range(max_iterations):
         loss = test_function.compute(x, y)
         grad_x, grad_y = test_function.gradient(x, y)
-        grad_norm = np.sqrt(grad_x**2 + grad_y**2)
+        # NUMERICAL STABILITY FIX: Use np.hypot to avoid overflow
+        grad_norm = np.hypot(grad_x, grad_y)
         
         # Convergence check
         if grad_norm < convergence_threshold:
@@ -57,7 +58,8 @@ def run_single_trial(
     # Did not converge within max_iterations
     final_loss = test_function.compute(x, y)
     final_grad_x, final_grad_y = test_function.gradient(x, y)
-    final_grad_norm = np.sqrt(final_grad_x**2 + final_grad_y**2)
+    # NUMERICAL STABILITY FIX: Use np.hypot to avoid overflow
+    final_grad_norm = np.hypot(final_grad_x, final_grad_y)
     
     return {
         'final_loss': final_loss,

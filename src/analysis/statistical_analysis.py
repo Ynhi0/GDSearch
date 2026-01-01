@@ -97,26 +97,50 @@ def load_multiseed_results(pattern: str, results_dir: str = 'results') -> List[p
     return [pd.read_csv(f) for f in sorted(files)]
 
 
-def extract_final_metric(dfs: List[pd.DataFrame], metric: str = 'test_accuracy', exclude_tainted: bool = True, exclude_diverged: bool = True) -> np.ndarray:
+def extract_final_metric(
+    dfs: List[pd.DataFrame],
+    metric: str = 'test_accuracy',
+    exclude_tainted: bool = True,
+    exclude_diverged: bool = False,  # CRITICAL FIX: Changed default to False
+    divergence_penalty: Optional[float] = None,  # NEW: Penalty value for diverged runs
+    use_best: bool = False,  # NEW: Use best value instead of last
+    average_last_n: Optional[int] = None  # NEW: Average last N epochs for stability
+) -> np.ndarray:
     """Extract final metric value from each run.
+
+    **CRITICAL SCIENTIFIC FIX (Issue #17: Survivor Bias):**
+    By default, this function NO LONGER excludes diverged runs to avoid Survivor Bias.
+    Instead, assign them a failure penalty or report success rate separately.
+    
+    **CRITICAL SCIENTIFIC FIX (Issue #20: Last Epoch Variance):**
+    Added options to use best value or average of last N epochs for robust statistics.
 
     Args:
         dfs: List of DataFrames produced by runs
         metric: Name of the metric to extract from `eval` phase rows
         exclude_tainted: If True, skip runs (DataFrames) where any `tainted` flag is True.
-        exclude_diverged: If True, skip runs (DataFrames) where `diverged` column is True.
+        exclude_diverged: If True, skip runs where `diverged` is True (NOT RECOMMENDED due to Survivor Bias)
+        divergence_penalty: If set, assign this value to diverged runs instead of excluding them
+                           (e.g., 0.0 for accuracy, np.inf for loss). Fixes Survivor Bias.
+        use_best: If True, use best (max for accuracy, min for loss) instead of last value
+        average_last_n: If set, average last N epochs for stability (reduces variance)
         
     Note:
+        **Survivor Bias Warning**: Setting exclude_diverged=True will BIAS your results.
+        An optimizer that diverges 90% of the time but gets lucky once will appear
+        better than a stable optimizer. Use divergence_penalty instead.
+        
         Expects tainted/diverged columns to be boolean type. If they are strings,
         will attempt to convert them, but proper boolean types are recommended.
     """
     values = []
     for df in dfs:
-        if exclude_diverged and 'diverged' in df.columns:
-            # CRITICAL FIX: Normalize diverged column robustly to a boolean
+        is_diverged = False
+        
+        # Check for divergence
+        if 'diverged' in df.columns:
             try:
                 col = df['diverged']
-                is_diverged = False
                 if hasattr(col, 'dtype'):
                     dt = getattr(col, 'dtype', None)
                     if dt is not None and (dt == bool or getattr(dt, 'name', '') == 'bool' or dt == np.bool_):
@@ -127,12 +151,19 @@ def extract_final_metric(dfs: List[pd.DataFrame], metric: str = 'test_accuracy',
                 else:
                     s = str(col).strip().lower()
                     is_diverged = s in ('true', '1', 't', 'yes', 'y')
-
-                if is_diverged:
-                    logging.info(f"Excluding diverged run from statistical analysis")
-                    continue
             except Exception as e:
                 logging.warning(f"Failed to parse diverged column: {e}. Assuming not diverged.")
+        
+        # Handle diverged runs
+        if is_diverged:
+            if exclude_diverged:
+                logging.warning(f"SURVIVOR BIAS: Excluding diverged run. This biases statistics!")
+                continue
+            elif divergence_penalty is not None:
+                logging.info(f"Assigning divergence penalty: {divergence_penalty}")
+                values.append(divergence_penalty)
+                continue
+            # Otherwise, extract actual value (may be NaN/Inf)
         
         # If requested, skip runs that are marked tainted (OOM recovery happened)
         if exclude_tainted and 'tainted' in df.columns:
@@ -160,19 +191,34 @@ def extract_final_metric(dfs: List[pd.DataFrame], metric: str = 'test_accuracy',
         eval_df = df[df['phase'] == 'eval']
         if not eval_df.empty:
             series_or_arr = eval_df[metric]
+            
+            # Extract value based on strategy
             val = None
-            # Prefer pandas Series iloc if available (use getattr to avoid static attr access on ndarray)
-            iloc_attr = getattr(series_or_arr, 'iloc', None)
-            if iloc_attr is not None:
-                try:
-                    val = iloc_attr[-1]
-                except Exception:
-                    val = None
-            if val is None:
-                try:
-                    val = series_or_arr[-1]
-                except Exception:
-                    val = series_or_arr
+            if use_best:
+                # Use best value (max for accuracy-like, min for loss-like)
+                # Heuristic: metrics with 'loss' or 'error' in name should use min
+                if 'loss' in metric.lower() or 'error' in metric.lower():
+                    val = series_or_arr.min() if hasattr(series_or_arr, 'min') else np.min(series_or_arr)
+                else:
+                    val = series_or_arr.max() if hasattr(series_or_arr, 'max') else np.max(series_or_arr)
+            elif average_last_n is not None:
+                # Average last N epochs for stability
+                last_n = series_or_arr[-average_last_n:] if len(series_or_arr) >= average_last_n else series_or_arr
+                val = last_n.mean() if hasattr(last_n, 'mean') else np.mean(last_n)
+            else:
+                # Default: last epoch (original behavior, but with variance warning)
+                iloc_attr = getattr(series_or_arr, 'iloc', None)
+                if iloc_attr is not None:
+                    try:
+                        val = iloc_attr[-1]
+                    except Exception:
+                        val = None
+                if val is None:
+                    try:
+                        val = series_or_arr[-1]
+                    except Exception:
+                        val = series_or_arr
+            
             try:
                 values.append(_to_scalar(val))
             except Exception:
@@ -246,6 +292,20 @@ def compare_optimizers_ttest(
     Returns:
         Dictionary with test results (includes 'test_used' field)
     """
+    # NUMERICAL STABILITY: Clip extreme values before computing std to prevent overflow
+    # If results contain very large values (> 1e100), std computation will overflow
+    MAX_SAFE_VALUE = 1e100
+    results_A = np.asarray(results_A)
+    results_B = np.asarray(results_B)
+    
+    # Clip extreme values to prevent overflow in variance computation
+    if np.any(np.abs(results_A) > MAX_SAFE_VALUE):
+        logging.warning(f"Clipping extreme values in results_A (max={np.max(np.abs(results_A)):.2e}) to prevent overflow")
+        results_A = np.clip(results_A, -MAX_SAFE_VALUE, MAX_SAFE_VALUE)
+    if np.any(np.abs(results_B) > MAX_SAFE_VALUE):
+        logging.warning(f"Clipping extreme values in results_B (max={np.max(np.abs(results_B)):.2e}) to prevent overflow")
+        results_B = np.clip(results_B, -MAX_SAFE_VALUE, MAX_SAFE_VALUE)
+    
     # Compute statistics
     mean_A = results_A.mean()
     std_A = results_A.std()
@@ -374,7 +434,21 @@ def compare_optimizers_ttest(
         # This is the standard Cohen's d formula for independent groups
         if std_A > 0 and std_B > 0:
             # Pooled standard deviation (standard Cohen's d approach)
-            pooled_std = np.sqrt(((n_A - 1) * std_A**2 + (n_B - 1) * std_B**2) / (n_A + n_B - 2))
+            # NUMERICAL STABILITY: Check for overflow before computing std**2
+            try:
+                var_A = std_A ** 2
+                var_B = std_B ** 2
+                if not (np.isfinite(var_A) and np.isfinite(var_B)):
+                    # Overflow in variance, use approximation
+                    pooled_std = max(std_A, std_B)
+                else:
+                    pooled_variance = ((n_A - 1) * var_A + (n_B - 1) * var_B) / (n_A + n_B - 2)
+                    if np.isfinite(pooled_variance) and pooled_variance >= 0:
+                        pooled_std = np.sqrt(pooled_variance)
+                    else:
+                        pooled_std = max(std_A, std_B)
+            except (OverflowError, FloatingPointError):
+                pooled_std = max(std_A, std_B)
             cohens_d = (mean_A - mean_B) / pooled_std
         elif std_A > 0:
             # Only A has variance, use Glass's delta (mean_diff / std_control)
@@ -681,12 +755,39 @@ def power_analysis_report(
     Returns:
         Dictionary with power analysis results
     """
+    # NUMERICAL STABILITY: Clip extreme values before computing std to prevent overflow
+    MAX_SAFE_VALUE = 1e100
+    results_A = np.asarray(results_A)
+    results_B = np.asarray(results_B)
+    
+    # Clip extreme values to prevent overflow in variance computation
+    if np.any(np.abs(results_A) > MAX_SAFE_VALUE):
+        logging.warning(f"Clipping extreme values in results_A (max={np.max(np.abs(results_A)):.2e}) to prevent overflow")
+        results_A = np.clip(results_A, -MAX_SAFE_VALUE, MAX_SAFE_VALUE)
+    if np.any(np.abs(results_B) > MAX_SAFE_VALUE):
+        logging.warning(f"Clipping extreme values in results_B (max={np.max(np.abs(results_B)):.2e}) to prevent overflow")
+        results_B = np.clip(results_B, -MAX_SAFE_VALUE, MAX_SAFE_VALUE)
+    
     # Compute observed effect size
     n_A, n_B = len(results_A), len(results_B)
     mean_A, mean_B = results_A.mean(), results_B.mean()
     std_A, std_B = results_A.std(), results_B.std()
     
-    pooled_std = np.sqrt(((n_A - 1) * std_A**2 + (n_B - 1) * std_B**2) / (n_A + n_B - 2))
+    # NUMERICAL STABILITY: Prevent overflow in variance computation
+    try:
+        var_A = std_A ** 2
+        var_B = std_B ** 2
+        if np.isfinite(var_A) and np.isfinite(var_B):
+            pooled_variance = ((n_A - 1) * var_A + (n_B - 1) * var_B) / (n_A + n_B - 2)
+            if np.isfinite(pooled_variance) and pooled_variance >= 0:
+                pooled_std = np.sqrt(pooled_variance)
+            else:
+                pooled_std = max(std_A, std_B)
+        else:
+            pooled_std = max(std_A, std_B)
+    except (OverflowError, FloatingPointError):
+        pooled_std = max(std_A, std_B)
+    
     observed_effect_size = abs(mean_A - mean_B) / pooled_std if pooled_std > 0 else 0.0
     
     # Compute achieved power

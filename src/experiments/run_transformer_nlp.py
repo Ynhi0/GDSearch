@@ -91,11 +91,29 @@ def evaluate(model: Any, loader: DataLoader, device: torch.device) -> Tuple[floa
     return total_loss / max(1, total), correct / max(1, total)
 
 
-def run_single_imdb(optimizer_name: str, seed: int, lr: float, epochs: int, batch_size: int, results_dir: Path, resume: bool = False):
+def run_single_imdb(optimizer_name: str, seed: int, lr: float, epochs: int, batch_size: int, results_dir: Path, resume: bool = False, full_data: bool = False, momentum: float = 0.9):
+    """
+    Run IMDB sentiment classification with BERT.
+    
+    Args:
+        optimizer_name: Name of optimizer (AdamW, SGD, SGD_Momentum)
+        seed: Random seed
+        lr: Learning rate
+        epochs: Number of epochs
+        batch_size: Batch size
+        results_dir: Output directory
+        resume: Skip if results exist
+        full_data: If True, use full IMDB dataset (25K train, 25K test). If False, use 2K/1K subset.
+        momentum: Momentum coefficient for SGD-based optimizers
+    
+    CRITICAL FIX (Issue #27): Added full_data parameter to avoid "Toy Benchmark" deception.
+    For publication, MUST use full_data=True to ensure sufficient statistical power.
+    """
     BertTokenizer, BertForSequenceClassification, load_dataset = _try_import_hf()
 
     # Check if experiment is already completed
-    out_name = f"NN_BERT_IMDB_{optimizer_name}_lr{lr}_seed{seed}_application.csv"
+    data_suffix = "_full" if full_data else "_toy"
+    out_name = f"NN_BERT_IMDB_{optimizer_name}_lr{lr}_seed{seed}{data_suffix}_application.csv"
     out_path = results_dir / out_name
     if resume and out_path.exists():
         try:
@@ -156,22 +174,34 @@ def run_single_imdb(optimizer_name: str, seed: int, lr: float, epochs: int, batc
     except Exception:
         _HFDataset = None
 
+    # CRITICAL FIX (Issue #27): Dynamic dataset size based on full_data flag
+    # For publication-quality results, use full_data=True (25K train, 25K test)
+    # Toy mode (2K/1K) is ONLY for quick prototyping and CI testing
+    if full_data:
+        train_size = len(train_ds) if hasattr(train_ds, '__len__') else 25000
+        test_size = len(test_ds) if hasattr(test_ds, '__len__') else 25000
+        logging.info(f"[FULL DATA MODE] Using complete IMDB dataset: {train_size} train, {test_size} test")
+    else:
+        train_size = 2000
+        test_size = 1000
+        logging.warning("[TOY MODE] Using LIMITED subset (2K/1K). NOT suitable for publication claims.")
+    
     if _HFDataset is not None and isinstance(train_ds, _HFDataset):
         try:
-            train_dataset = train_ds.shuffle(seed=seed).select(range(2000))
+            train_dataset = train_ds.shuffle(seed=seed).select(range(min(train_size, len(train_ds))))
         except Exception:
-            train_dataset = list(train_ds)[:2000]
+            train_dataset = list(train_ds)[:train_size]
     else:
         # Materialize any iterable or list into a Python list to avoid slicing concerns
-        train_dataset = list(train_ds)[:2000]
+        train_dataset = list(train_ds)[:train_size]
 
     if _HFDataset is not None and isinstance(test_ds, _HFDataset):
         try:
-            test_dataset = test_ds.shuffle(seed=seed).select(range(1000))
+            test_dataset = test_ds.shuffle(seed=seed).select(range(min(test_size, len(test_ds))))
         except Exception:
-            test_dataset = list(test_ds)[:1000]
+            test_dataset = list(test_ds)[:test_size]
     else:
-        test_dataset = list(test_ds)[:1000]
+        test_dataset = list(test_ds)[:test_size]
 
     # Robust helper to compute columns to drop / project keys for non-HF objects
     def _compute_remove_columns(ds) -> list:
@@ -362,7 +392,9 @@ def run_single_imdb(optimizer_name: str, seed: int, lr: float, epochs: int, batc
     df = pd.DataFrame(history)
     df['elapsed_seconds'] = elapsed
     df['peak_gpu_mb'] = peak_mb
-    out_name = f"NN_BERT_IMDB_{optimizer_name}_lr{lr}_seed{seed}_application.csv"
+    # Use data_suffix from function parameter
+    data_suffix = "_full" if full_data else "_toy"
+    out_name = f"NN_BERT_IMDB_{optimizer_name}_lr{lr}_seed{seed}{data_suffix}_application.csv"
     out_path = Path('results') / out_name
     Path('results').mkdir(exist_ok=True, parents=True)
     df.to_csv(out_path, index=False)
@@ -380,7 +412,19 @@ def main():
     parser.add_argument('--lr-adamw', type=float, default=5e-5)
     parser.add_argument('--lr-sgd', type=float, default=1e-3)
     parser.add_argument('--resume', action='store_true', help='Skip experiments that already have result files')
+    parser.add_argument('--full-data', action='store_true', help='Use full IMDB dataset (25K train/test) instead of toy 2K/1K subset. REQUIRED for publication.')
+    parser.add_argument('--momentum', type=float, default=0.9, help='Momentum coefficient for SGD (default: 0.9). Use for sensitivity analysis.')
     args, _ = parser.parse_known_args()
+
+    if args.full_data:
+        logging.info("=" * 70)
+        logging.info("FULL DATA MODE ENABLED - Using complete IMDB dataset")
+        logging.info("=" * 70)
+    else:
+        logging.warning("=" * 70)
+        logging.warning("TOY MODE - Using limited 2K/1K subset (NOT publication-ready)")
+        logging.warning("Use --full-data flag for rigorous experiments")
+        logging.warning("=" * 70)
 
     seeds = [int(s) for s in args.seeds.split(',') if s]
     opts = [o.strip() for o in args.optimizers.split(',') if o.strip()]
@@ -388,7 +432,8 @@ def main():
         lr = args.lr_adamw if opt.upper().startswith('ADAMW') else args.lr_sgd
         for seed in seeds:
             try:
-                run_single_imdb(opt, seed, lr, args.epochs, args.batch_size, Path('results'), resume=args.resume)
+                run_single_imdb(opt, seed, lr, args.epochs, args.batch_size, Path('results'), 
+                              resume=args.resume, full_data=args.full_data, momentum=args.momentum)
             except RuntimeError as e:
                 print(str(e))
                 return 1

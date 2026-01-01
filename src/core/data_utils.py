@@ -78,11 +78,43 @@ def get_mnist_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optiona
         if seed is not None:
             split_generator.manual_seed(int(seed))
         
-        train_dataset, val_dataset = random_split(
-            full_train_dataset, 
+        # CRITICAL FIX (Issue #22): Split indices first, then create separate datasets
+        # with appropriate transforms (train gets augmentation, val gets test transform)
+        # This prevents "Augmented Validation" trap where validation metrics are noisy
+        all_indices = list(range(total_train))
+        # Use torch's random_split on indices list
+        train_idx_subset, val_idx_subset = random_split(
+            all_indices,
             [train_size, val_size],
             generator=split_generator
         )
+        
+        # Create base dataset without transform for index access
+        base_train_dataset = datasets.MNIST(root=data_root, train=True, download=True, transform=None)
+        
+        # Wrap with transforms AFTER split to prevent augmentation leakage
+        class TransformedSubset(torch.utils.data.Dataset):
+            """Subset with explicit transform (prevents augmentation leakage to validation)."""
+            def __init__(self, base_dataset, indices, transform):
+                self.base_dataset = base_dataset
+                self.indices = list(indices)
+                self.transform = transform
+            
+            def __len__(self):
+                return len(self.indices)
+            
+            def __getitem__(self, idx):
+                real_idx = self.indices[idx]
+                img, label = self.base_dataset[real_idx]
+                if self.transform:
+                    img = self.transform(img)
+                return img, label
+        
+        # Apply TRAINING transform to train split (with augmentation if any)
+        train_dataset = TransformedSubset(base_train_dataset, train_idx_subset.indices, transform_train)
+        
+        # Apply TEST transform to validation split (NO augmentation - clean deterministic data)
+        val_dataset = TransformedSubset(base_train_dataset, val_idx_subset.indices, transform_test)
         
         train_loader = DataLoader(
             train_dataset,
@@ -229,11 +261,45 @@ def get_cifar10_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optio
         if seed is not None:
             split_generator.manual_seed(int(seed))
         
-        train_dataset, val_dataset = random_split(
-            full_train_dataset, 
+        # CRITICAL FIX (Issue #22): Split indices first, then create separate datasets
+        # with appropriate transforms (train gets augmentation, val gets test transform)
+        # This prevents "Augmented Validation" trap where validation metrics are noisy
+        # For CIFAR-10, this is CRITICAL because transform_train has RandomCrop and RandomFlip
+        all_indices = list(range(total_train))
+        # Use torch's random_split on indices list
+        train_idx_subset, val_idx_subset = random_split(
+            all_indices,
             [train_size, val_size],
             generator=split_generator
         )
+        
+        # Create base dataset without transform for index access
+        base_train_dataset = datasets.CIFAR10(root=data_root, train=True, download=True, transform=None)
+        
+        # Wrap with transforms AFTER split to prevent augmentation leakage
+        class TransformedSubset(torch.utils.data.Dataset):
+            """Subset with explicit transform (prevents augmentation leakage to validation)."""
+            def __init__(self, base_dataset, indices, transform):
+                self.base_dataset = base_dataset
+                self.indices = list(indices)
+                self.transform = transform
+            
+            def __len__(self):
+                return len(self.indices)
+            
+            def __getitem__(self, idx):
+                real_idx = self.indices[idx]
+                img, label = self.base_dataset[real_idx]
+                if self.transform:
+                    img = self.transform(img)
+                return img, label
+        
+        # Apply TRAINING transform to train split (WITH RandomCrop and RandomFlip)
+        train_dataset = TransformedSubset(base_train_dataset, train_idx_subset.indices, transform_train)
+        
+        # Apply TEST transform to validation split (NO augmentation - clean deterministic data)
+        # This ensures validation loss is stable and reflects true performance
+        val_dataset = TransformedSubset(base_train_dataset, val_idx_subset.indices, transform_test)
         
         train_loader = DataLoader(
             train_dataset,

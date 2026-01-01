@@ -116,13 +116,25 @@ def momentum_beta_sweep(
     lr=0.01,
     x0=np.array([-1.5, 2.0]),
     max_iters=1000,
-    output_dir='results/hyperparameter_sensitivity'
+    output_dir='results/hyperparameter_sensitivity',
+    use_coupled_lr=False
 ):
     """
     Systematic sweep of momentum β parameter.
     
     Addresses research proposal requirement: "khảo sát hệ thống ảnh hưởng của 
     các siêu tham số đặc trưng (β cho Momentum)"
+    
+    SCIENTIFIC NOTE - Beta vs. Learning Rate Coupling:
+    The effective step size in momentum is approximately lr/(1-β).
+    When use_coupled_lr=False (default), uses FIXED lr for all β values.
+    This confounds magnitude effects with dynamical effects.
+    
+    When use_coupled_lr=True, scales lr by (1-β) to maintain constant effective
+    step size, isolating the momentum dynamics from magnitude scaling.
+    
+    Args:
+        use_coupled_lr: If True, scale lr by (1-beta) to decouple magnitude from dynamics
     """
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     
@@ -138,7 +150,9 @@ def momentum_beta_sweep(
     results = []
     
     for beta in beta_values:
-        optimizer = SGDMomentum(lr=lr, beta=beta)
+        # Apply coupled learning rate to isolate momentum dynamics
+        effective_lr = lr * (1.0 - beta) if use_coupled_lr else lr
+        optimizer = SGDMomentum(lr=effective_lr, beta=beta)
         
         trajectory, losses, grad_norms = run_optimizer_trajectory(
             optimizer, func, grad_func, x0, max_iters
@@ -159,6 +173,7 @@ def momentum_beta_sweep(
         
         results.append({
             'beta': beta,
+            'effective_lr': effective_lr,
             'final_loss': final_loss,
             'convergence_iters': convergence_iters,
             'smoothness': smoothness,
@@ -167,7 +182,7 @@ def momentum_beta_sweep(
             'final_grad_norm': grad_norms[-1] if len(grad_norms) > 0 else np.nan
         })
         
-        logging.info(f"β={beta:.2f}: loss={final_loss:.6f}, iters={convergence_iters}, "
+        logging.info(f"β={beta:.2f}, effective_lr={effective_lr:.6f}: loss={final_loss:.6f}, iters={convergence_iters}, "
                     f"smoothness={smoothness:.3f}, oscillation={oscillation:.3f}")
     
     # Save results

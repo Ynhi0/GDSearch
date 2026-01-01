@@ -11,6 +11,8 @@ that are commonly used but not yet systematically analyzed:
 4. Model Architecture - hidden layer size sensitivity
 5. Dropout - regularization vs performance tradeoff
 
+REFACTORED: Now imports all components from src.core to eliminate code duplication.
+
 Author: Research Team
 Date: December 7, 2025
 """
@@ -29,48 +31,37 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-from src.utils.plot_helpers import arr_to_numpy_float
 from typing import List, Dict, Optional
 import os
 from tqdm import tqdm
 
+# Import from core library (eliminates code duplication)
+from src.core.models import SimpleMLP
+from src.core.training_utils import LabelSmoothingCrossEntropy
+from src.core.data_utils import get_mnist_loaders
+from src.utils.plot_helpers import arr_to_numpy_float
 
-class SimpleMLP(nn.Module):
-    """Configurable MLP for ablation studies"""
-    def __init__(self, input_size=784, hidden_size=128, num_classes=10, dropout=0.0):
-        super(SimpleMLP, self).__init__()
-        self.fc1 = nn.Linear(input_size, hidden_size)
-        self.relu = nn.ReLU()
-        self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-        self.fc2 = nn.Linear(hidden_size, num_classes)
+
+def load_mnist_with_augmentation(
+    augmentation: bool = False,
+    batch_size: int = 128,
+    quick: bool = False,
+    seed: int = 42
+) -> tuple:
+    """
+    Load MNIST with optional data augmentation.
     
-    def forward(self, x):
-        x = x.view(x.size(0), -1)
-        x = self.fc1(x)
-        x = self.relu(x)
-        x = self.dropout(x)
-        x = self.fc2(x)
-        return x
-
-
-class LabelSmoothingCrossEntropy(nn.Module):
-    """Cross entropy loss with label smoothing"""
-    def __init__(self, smoothing=0.1):
-        super().__init__()
-        self.smoothing = smoothing
-        self.confidence = 1.0 - smoothing
+    REFACTORED: Now uses get_mnist_loaders from core with custom transforms.
     
-    def forward(self, pred, target):
-        pred = pred.log_softmax(dim=-1)
-        with torch.no_grad():
-            true_dist = torch.zeros_like(pred)
-            true_dist.fill_(self.smoothing / (pred.size(-1) - 1))
-            true_dist.scatter_(1, target.data.unsqueeze(1), self.confidence)
-        return torch.mean(torch.sum(-true_dist * pred, dim=-1))
-
-
-def load_mnist_with_augmentation(augmentation=False, batch_size=128, quick=False):
-    """Load MNIST with optional data augmentation"""
+    Args:
+        augmentation: Whether to apply data augmentation
+        batch_size: Batch size for DataLoader
+        quick: If True, use subset for fast testing
+        seed: Random seed for reproducibility
+        
+    Returns:
+        Tuple of (train_loader, test_loader)
+    """
     if augmentation:
         transform_train = transforms.Compose([
             transforms.RandomRotation(10),
@@ -89,21 +80,29 @@ def load_mnist_with_augmentation(augmentation=False, batch_size=128, quick=False
         transforms.Normalize((0.1307,), (0.3081,))
     ])
     
+    # Use core data_utils function for consistent loading
+    data_root = './data'
     train_dataset = torchvision.datasets.MNIST(
-        root='./data', train=True, download=True, transform=transform_train
+        root=data_root, train=True, download=True, transform=transform_train
     )
     test_dataset = torchvision.datasets.MNIST(
-        root='./data', train=False, download=True, transform=transform_test
+        root=data_root, train=False, download=True, transform=transform_test
     )
     
     if quick:
         train_dataset = torch.utils.data.Subset(train_dataset, range(10000))
         test_dataset = torch.utils.data.Subset(test_dataset, range(2000))
     
-    # Use make_dataloader for consistent settings
+    # Use core dataloader utilities
     from src.core.dataloader_utils import make_dataloader
-    train_loader = make_dataloader(train_dataset, batch_size=batch_size, shuffle=True, seed=42, num_workers=2, pin_memory=True)
-    test_loader = make_dataloader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=True)
+    train_loader = make_dataloader(
+        train_dataset, batch_size=batch_size, shuffle=True,
+        seed=seed, num_workers=2, pin_memory=True
+    )
+    test_loader = make_dataloader(
+        test_dataset, batch_size=batch_size, shuffle=False,
+        num_workers=2, pin_memory=True
+    )
     
     return train_loader, test_loader
 
