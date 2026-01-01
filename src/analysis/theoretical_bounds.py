@@ -5,7 +5,7 @@ Provides tools for analyzing convergence bounds, regret analysis, and complexity
 """
 
 import numpy as np
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Dict, List, Optional, Any
 import logging
 
 
@@ -37,7 +37,7 @@ def sgd_convergence_bound(
           - final_bound: Expected error bound at iteration T
     """
     # Optimal learning rate for strongly convex functions
-    optimal_lr = 2.0 / (L + mu)
+    optimal_lr = 2.0 / (L + mu) if (L + mu) > 0 else 0.0
     
     # Convergence rate
     convergence_rate = 1.0 - mu * lr
@@ -45,22 +45,39 @@ def sgd_convergence_bound(
     # Iterations to reach ε-accuracy (assuming deterministic case)
     # (1 - μη)^T ≤ ε  =>  T ≥ log(ε) / log(1 - μη)
     epsilon = 1e-6
-    if convergence_rate < 1:
-        iterations_to_eps = np.log(epsilon) / np.log(convergence_rate)
-    else:
+    if convergence_rate <= 0:
+        # Negative convergence_rate: log will be complex, optimizer oscillates/diverges
         iterations_to_eps = float('inf')
+        logging.warning(f"sgd_convergence_bound: convergence_rate={convergence_rate:.4f} <= 0. "
+                       f"Learning rate lr={lr:.6f} is too large for mu={mu:.6f}. Optimizer diverges.")
+    elif convergence_rate >= 1:
+        # No convergence: rate >= 1 means error does not decrease
+        iterations_to_eps = float('inf')
+        logging.warning(f"sgd_convergence_bound: convergence_rate={convergence_rate:.4f} >= 1. "
+                       f"Learning rate lr={lr:.6f} is too small for mu={mu:.6f}. No convergence.")
+    else:
+        # Valid convergence case: 0 < rate < 1
+        iterations_to_eps = np.log(epsilon) / np.log(convergence_rate)
     
     # Final error bound (simplified, assuming ||x_0 - x*||^2 = 1)
-    geometric_term = convergence_rate ** T
-    variance_term = lr * sigma ** 2 / (2 * mu) if mu > 0 else float('inf')
-    final_bound = geometric_term / 2.0 + variance_term
+    if convergence_rate >= 1:
+        geometric_term = float('inf')  # No geometric decay
+    else:
+        geometric_term = convergence_rate ** T
+    
+    variance_term = lr * sigma ** 2 / (2 * mu) if mu > 1e-12 else float('inf')
+    
+    if geometric_term == float('inf') or variance_term == float('inf'):
+        final_bound = float('inf')
+    else:
+        final_bound = geometric_term / 2.0 + variance_term
     
     return {
         'optimal_lr': optimal_lr,
         'convergence_rate': convergence_rate,
         'iterations_to_eps': iterations_to_eps,
         'final_bound': final_bound,
-        'is_lr_optimal': abs(lr - optimal_lr) / optimal_lr < 0.1
+        'is_lr_optimal': abs(lr - optimal_lr) / max(optimal_lr, 1e-10) < 0.1 if optimal_lr > 0 else False
     }
 
 
@@ -69,8 +86,7 @@ def adam_convergence_bound(
     T: int,
     beta1: float = 0.9,
     beta2: float = 0.999,
-    alpha: float = 0.001,
-    epsilon: float = 1e-8
+    alpha: float = 0.001
 ) -> Dict[str, Any]:
     """
     Compute theoretical regret bound for Adam.

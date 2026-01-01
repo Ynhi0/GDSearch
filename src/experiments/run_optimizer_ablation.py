@@ -26,88 +26,124 @@ import argparse
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-# typing imports removed - not used
+from typing import Optional, List, Dict, Any, Callable
 import logging
 
-from src.core.test_functions import Rosenbrock
+from src.core.test_functions import Rosenbrock, TestFunction
 from src.core.optimizers import SGD, SGDMomentum, RMSProp, Adam, AdamW, AMSGrad
 
 
 # AUDIT FIX: Add guard to prevent unfair benchmark usage
-def check_ablation_guard():
-    """Check if --allow-unfair-ablations flag is present in sys.argv."""
-    if '--allow-unfair-ablations' not in sys.argv:
+def check_ablation_guard(allow_unfair: Optional[bool] = None):
+    """Legacy guard for unfair ablations.
+
+    Backwards-compatible behavior:
+      - If `allow_unfair` is None (default), preserve legacy behavior: require the
+        '--allow-unfair-ablations' or '--use-legacy-unfair' flag in sys.argv and
+        exit with SystemExit(1) when absent (this is relied on by tests).
+      - If `allow_unfair` is True/False, behave non-fatally and return True/False
+        while printing a helpful warning when appropriate.
+    """
+    if allow_unfair is None:
+        # Legacy strict behavior (preserve test expectations)
+        if '--allow-unfair-ablations' in sys.argv or '--use-legacy-unfair' in sys.argv:
+            print("\n" + "="*80)
+            print("WARNING: Running in LEGACY UNFAIR mode (fixed lr=0.01 for all optimizers)")
+            print("Consider running with the default per-optimizer fair learning rates.")
+            print("="*80)
+            return True
+
+        # Preserve original strict behavior expected by tests
         print("\n" + "="*80)
         print("ERROR: Ablation Guard - Preventing Unfair Benchmark Usage")
         print("="*80)
         print(
-            "HYPERPARAMETER FAIRNESS WARNING: This script uses fixed lr=0.01 for all optimizers.\n"
-            "This is for EXPLORATORY ABLATION ANALYSIS ONLY and should NOT be used\n"
-            "for canonical benchmark comparisons.\n\n"
-            "Reason: Fixed learning rates create unfair comparisons between adaptive\n"
-            "(Adam, RMSProp) and non-adaptive (SGD) optimizers.\n\n"
-            "To run this script, add --allow-unfair-ablations flag to acknowledge this limitation.\n"
-            "For fair comparisons, use: src/experiments/run_fair_optimizer_ablation.py\n"
+            "HYPERPARAMETER FAIRNESS WARNING: This script uses a fixed lr for all optimizers.\n"
+            "This script is for exploratory analysis only and should NOT be used for canonical benchmarks.\n\n"
+            "To run the legacy unfair version, pass --allow-unfair-ablations. For fair comparisons,"
+            " run the default mode which uses per-optimizer defaults or run_fair_optimizer_ablation.py"
         )
-        print("="*80)
         sys.exit(1)
+
+    # Non-fatal programmatic behavior
+    if allow_unfair:
+        print("\n" + "="*80)
+        print("WARNING: Running in LEGACY UNFAIR mode (fixed lr=0.01 for all optimizers)")
+        print("Consider running with the default per-optimizer fair learning rates.")
+        print("="*80)
+        return True
+    return False
 
 
 def run_optimizer_ablation(
-    test_function,
-    initial_point: tuple,
+    test_function: TestFunction,
+    initial_point: tuple[float, float],
     max_iterations: int = 10000,
     results_dir: str = 'results',
-    plots_dir: str = 'plots'
+    plots_dir: str = 'plots',
+    use_legacy_unfair: bool = False,
+    track_params: bool = False,
+    lr_map_override: dict[str, float] | None = None
 ) -> pd.DataFrame:
     """
     Run ablation study comparing optimizer variants.
-    
-    HYPERPARAMETER FAIRNESS WARNING:
-    This function uses lr=0.01 for ALL optimizers, which is methodologically unfair:
-    - SGD typically performs better with higher LR (0.1)
-    - Adam/AdamW typically perform better with lower LR (0.001)
-    
-    AUDIT FIX: This script requires --allow-unfair-ablations flag in sys.argv
-    to prevent accidental use in fair benchmarks.
-    
-    For higher-quality results, use run_fair_optimizer_ablation.py or
-    implement proper per-optimizer tuning per HYPERPARAMETER_FAIRNESS_PROTOCOL.md
-    
+
+    By default this function enforces per-optimizer fair learning rates. To run the legacy
+    unfair mode (fixed lr=0.01 for every optimizer) set `use_legacy_unfair=True`.
+
     Args:
         test_function: Test function instance
         initial_point: Starting (x, y)
         max_iterations: Number of iterations
         results_dir: Directory for CSV output
         plots_dir: Directory for plots
-        
+        use_legacy_unfair: If True, run legacy mode with lr=0.01 for all optimizers
+        track_params: If True, track full parameter snapshots in the tracker
+        lr_map_override: Optional dict to override default per-optimizer LRs
+
     Returns:
         DataFrame with summary metrics
     """
-    # AUDIT FIX: Enforce guard check
-    check_ablation_guard()
-    
-    logging.warning(
-        "⚠️ HYPERPARAMETER FAIRNESS WARNING: Using fixed lr=0.01 for all optimizers. "
-        "This may produce biased results. Consider using run_fair_optimizer_ablation.py instead."
-    )
-    
+    # Decide hyperparameter protocol: by default use FAIR per-optimizer defaults.
+    if use_legacy_unfair:
+        check_ablation_guard(allow_unfair=True)
+        logging.warning(
+            "⚠️ HYPERPARAMETER FAIRNESS WARNING: Running in LEGACY UNFAIR mode with fixed lr=0.01 for all optimizers. "
+            "This mode is discouraged for canonical benchmarks."
+        )
+        lr_map = { 'default': 0.01 }
+    else:
+        logging.info("✅ Enforcing HYPERPARAMETER FAIRNESS: using per-optimizer default learning rates.")
+        # Per-optimizer fair defaults (approx. published defaults)
+        lr_map = {
+            'SGD': 0.1,
+            'SGD+Momentum': 0.1,
+            'RMSProp': 0.001,
+            'Adam': 0.001,
+            'AdamW': 0.001,
+            'AMSGrad': 0.001,
+        }
+
+    # Allow programmatic overrides for specific optimizers
+    if lr_map_override is not None:
+        lr_map.update(lr_map_override)
+
     os.makedirs(results_dir, exist_ok=True)
     os.makedirs(plots_dir, exist_ok=True)
     
     # Define optimizer sequence (progressive improvements)
     optimizers = [
-        ('SGD', SGD(lr=0.01)),
-        ('SGD+Momentum', SGDMomentum(lr=0.01, beta=0.9)),
-        ('RMSProp', RMSProp(lr=0.01, decay_rate=0.9)),
-        ('Adam', Adam(lr=0.01, beta1=0.9, beta2=0.999)),
-        ('AdamW', AdamW(lr=0.01, beta1=0.9, beta2=0.999, weight_decay=0.01)),
-        ('AMSGrad', AMSGrad(lr=0.01, beta1=0.9, beta2=0.999)),
+        ('SGD', SGD(lr=lr_map.get('SGD', lr_map.get('default', 0.01)))),
+        ('SGD+Momentum', SGDMomentum(lr=lr_map.get('SGD+Momentum', lr_map.get('default', 0.01)), beta=0.9)),
+        ('RMSProp', RMSProp(lr=lr_map.get('RMSProp', lr_map.get('default', 0.01)), decay_rate=0.9)),
+        ('Adam', Adam(lr=lr_map.get('Adam', lr_map.get('default', 0.01)), beta1=0.9, beta2=0.999)),
+        ('AdamW', AdamW(lr=lr_map.get('AdamW', lr_map.get('default', 0.01)), beta1=0.9, beta2=0.999, weight_decay=0.01)),
+        ('AMSGrad', AMSGrad(lr=lr_map.get('AMSGrad', lr_map.get('default', 0.01)), beta1=0.9, beta2=0.999)),
     ]
     
     # Storage for trajectories
-    trajectories = {}
-    summary_metrics = []
+    trajectories: Dict[str, Any] = {}
+    summary_metrics: List[Dict[str, Any]] = []
     
     print(f"\n{'='*70}")
     print(f"Optimizer Ablation Study: {test_function.__class__.__name__}")
@@ -115,110 +151,216 @@ def run_optimizer_ablation(
     print(f"Max iterations: {max_iterations}")
     print(f"{'='*70}\n")
     
+    from src.core.dynamics_tracker import TrainingDynamicsTracker
+    from src.analysis.theoretical_bounds import (
+        estimate_smoothness,
+        estimate_strong_convexity,
+        sgd_convergence_bound,
+        adam_convergence_bound
+    )
+    import torch
+
     for opt_name, optimizer in optimizers:
+        # Reset optimizer state completely before each run
         optimizer.reset()
+        x: float
+        y: float
         x, y = initial_point
         
-        history = {
-            'iteration': [],
-            'loss': [],
-            'grad_norm': [],
-            'x': [],
-            'y': []
-        }
+        # Extract learning rate once for consistent reference throughout loop
+        opt_lr = optimizer.lr if hasattr(optimizer, 'lr') else 0.01
+
+        # Local lists for vector-based estimates
+        grads_list: List[np.ndarray] = []
+        params_list: List[np.ndarray] = []
+
+        # Create numeric model and optimizer wrapper for tracker compatibility
+        class NumericModel(torch.nn.Module):
+            def __init__(self, x0: float, y0: float) -> None:
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.tensor([x0, y0], dtype=torch.float32))
+
+            def forward(self, _x: torch.Tensor) -> torch.Tensor:
+                """Dummy forward pass (not used, but required for nn.Module)."""
+                return self.param
+            
+            def update_position(self, new_x: float, new_y: float) -> None:
+                """Update parameter tensor to new position (for tracking accuracy)."""
+                self.param.data = torch.tensor([new_x, new_y], dtype=torch.float32)
+
+        class NumericOptimizerMock(torch.optim.Optimizer):
+            def __init__(self, params: Any, lr: float) -> None:
+                defaults: Dict[str, Any] = {'lr': lr}
+                super().__init__(params, defaults)
+            
+            @torch.no_grad()
+            def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
+                """Dummy step method (not used, but required for Optimizer)."""
+                loss = None
+                if closure is not None:
+                    with torch.enable_grad():
+                        loss = closure()
+                return loss
+
+        numeric_model = NumericModel(x, y)
+        numeric_optim_mock = NumericOptimizerMock(numeric_model.parameters(), opt_lr)
+
+        tracker = TrainingDynamicsTracker(track_params=track_params)
+        # Initialize tracker with current params
+        tracker.set_initial_params(numeric_model)
+
+        diverged = False
+        divergence_reason = None
         
         # Set numpy to raise on warnings for proper exception handling
         old_settings = np.seterr(all='raise')
-        
+
         try:
             for i in range(max_iterations):
                 try:
                     loss = test_function.compute(x, y)
                     grad_x, grad_y = test_function.gradient(x, y)
-                    
+
                     # Overflow protection
                     if not np.isfinite(loss) or not np.isfinite(grad_x) or not np.isfinite(grad_y):
                         raise OverflowError("Non-finite gradient or loss")
-                    
-                    grad_norm = np.sqrt(grad_x**2 + grad_y**2)
-                    
+
+                    grad_norm = np.sqrt(grad_x ** 2 + grad_y ** 2)
+
                     if not np.isfinite(grad_norm):
                         raise OverflowError("Non-finite grad_norm")
-                    
-                    history['iteration'].append(i)
-                    history['loss'].append(loss)
-                    history['grad_norm'].append(grad_norm)
-                    history['x'].append(x)
-                    history['y'].append(y)
-                    
-                    x, y = optimizer.step((x, y), (grad_x, grad_y))
-                    
+
+                    # Record vectors for L and mu estimation
+                    grads_list.append(np.array([grad_x, grad_y]))
+                    params_list.append(np.array([x, y]))
+
+                    # Populate numeric model grad tensors for tracker
+                    grad_tensor = torch.tensor([grad_x, grad_y], dtype=torch.float32)
+                    # Assign gradient to parameter (accessing internal state for mock compatibility)
+                    numeric_model.param.grad = grad_tensor
+
+                    # Track dynamics (before step)
+                    tracker.track_step(i, float(loss), numeric_model, numeric_optim_mock)
+
+                    step_result = optimizer.step((x, y), (grad_x, grad_y))
+                    if isinstance(step_result, tuple):
+                        x, y = step_result
+                    else:
+                        raise TypeError(f"Expected tuple from optimizer.step, got {type(step_result)}")
+
                     # Check if step produced non-finite values
                     if not np.isfinite(x) or not np.isfinite(y):
                         raise OverflowError("Non-finite parameters after step")
-                
+                    
+                    # CRITICAL FIX: Update numeric model to new position for accurate distance tracking
+                    numeric_model.update_position(float(x), float(y))
+
                 except (OverflowError, FloatingPointError) as e:
                     # Log exception details for debugging
                     logging.warning(f"{opt_name} diverged at iteration {i}: {e}")
-                    # Divergence detected; fill remaining with NaN
-                    for j in range(i, max_iterations):
-                        history['iteration'].append(j)
-                        history['loss'].append(np.nan)
-                        history['grad_norm'].append(np.nan)
-                        history['x'].append(np.nan)
-                        history['y'].append(np.nan)
+                    diverged = True
+                    divergence_reason = str(e)
                     break
         finally:
             # Restore numpy error settings
             np.seterr(**old_settings)
+
+        # Store tracker for later comparative plots
+        trajectories.setdefault('trackers', {})[opt_name] = tracker
         
-        trajectories[opt_name] = history
+
         
-        if len(history['loss']) == 0 or len(history['grad_norm']) == 0:
-            logging.error(f"{opt_name}: Optimization failed - no history recorded")
-            continue
-        
-        # Summary statistics
-        final_loss = history['loss'][-1]
-        final_grad = history['grad_norm'][-1]
-        
-        # Check for divergence
-        diverged = not np.isfinite(final_loss)
-        divergence_reason = None
-        
-        # Handle NaN (divergence)
-        if diverged:
+
+
+        # Save dynamics and plots
+        try:
+            dyn_dir = os.path.join(plots_dir, 'dynamics', opt_name.replace(' ', '_'))
+            dyn_csv_path = os.path.join(dyn_dir, f'{opt_name}_dynamics.csv')
+            os.makedirs(dyn_dir, exist_ok=True)
+            _ = tracker.save_dynamics(dyn_csv_path)  # Returns df but not used here
+            tracker.plot_dynamics(dyn_dir, optimizer_name=opt_name)
+        except Exception as e:
+            logging.debug(f"Failed to save/plot dynamics for {opt_name}: {e}")
+
+        # Prepare summary statistics using tracker
+        try:
+            final_loss = tracker.losses[-1] if len(tracker.losses) > 0 else np.inf
+            final_grad = tracker.grad_norms[-1] if len(tracker.grad_norms) > 0 else np.inf
+        except (IndexError, Exception):
             final_loss = np.inf
             final_grad = np.inf
+
+        # Define theory indices and default estimates (always defined, even if empty)
+        theory_iters = np.arange(0, max(1, len(tracker.iterations)))  # Ensure at least length 1
+        est_L = 0.0
+        est_mu = 0.0
+        theory_curve = None
+        
+        # Extract learning rate once for consistent use
+        current_lr = optimizer.lr if hasattr(optimizer, 'lr') else 0.01
+
+        if diverged:
             min_loss = np.inf
             converged_iter = None
             precise_converged_iter = None
-            # Find divergence reason from history
-            for i, loss_val in enumerate(history['loss']):
-                if not np.isfinite(loss_val):
-                    divergence_reason = f"Non-finite loss at iteration {i}"
-                    break
-            if divergence_reason is None:
-                divergence_reason = "Overflow/NaN in parameters"
         else:
-            min_loss = min([l for l in history['loss'] if np.isfinite(l)], default=np.inf)
-            
-            # Find iteration where loss < 1e-3 (practical convergence)
-            converged_iter = None
-            for i, loss_val in enumerate(history['loss']):
-                if np.isfinite(loss_val) and loss_val < 1e-3:
-                    converged_iter = i
-                    break
-            
-            # Find iteration where grad_norm < 1e-6 (precise convergence)
-            precise_converged_iter = None
-            for i, gn in enumerate(history['grad_norm']):
-                if np.isfinite(gn) and gn < 1e-6:
-                    precise_converged_iter = i
-                    break
-        
+            # Safely handle case where all losses are non-finite
+            finite_losses = [l for l in tracker.losses if np.isfinite(l)]
+            min_loss = min(finite_losses) if finite_losses else np.inf
+            converged_iter = next((i for i, l in enumerate(tracker.losses) if np.isfinite(l) and l < 1e-3), None)
+            precise_converged_iter = next((i for i, g in enumerate(tracker.grad_norms) if np.isfinite(g) and g < 1e-6), None)
+            # Estimate smoothness (L) and strong convexity (mu) from vector samples
+            try:
+                est_L = estimate_smoothness(grads_list, params_list) if len(grads_list) > 1 else 0.0
+                est_mu = estimate_strong_convexity(grads_list, params_list) if len(grads_list) > 1 else 0.0
+            except Exception as e:
+                logging.debug(f"Estimate smoothness failed for {opt_name}: {e}")
+                est_L = 0.0
+                est_mu = 0.0
+
+            # Compute theoretical overlay curve (using already-defined theory_iters)
+            try:
+                # Ensure we have valid losses to work with
+                if len(tracker.losses) == 0:
+                    raise ValueError("No losses tracked")
+                    
+                init_loss = tracker.losses[0] if np.isfinite(tracker.losses[0]) else 1.0
+                if 'Adam' in opt_name:
+                    # Compute bounds for validation (not used in curve, but good for logging)
+                    _ = adam_convergence_bound(
+                        L=est_L if est_L > 0 else 1.0,
+                        T=max(1, len(theory_iters)),
+                        alpha=current_lr
+                    )
+                    # Adam theoretical decay ~ O(1/sqrt(t)). Scale by initial loss for visualization.
+                    theory_curve = init_loss / np.sqrt(np.maximum(1, theory_iters + 1))
+                else:
+                    sgd_stats = sgd_convergence_bound(
+                        L=est_L if est_L > 0 else 1.0,
+                        mu=est_mu if est_mu > 0 else 1e-6,
+                        lr=current_lr,
+                        T=max(1, len(theory_iters))
+                    )
+                    conv_rate = sgd_stats.get('convergence_rate', 1.0)
+                    final_bound = sgd_stats.get('final_bound', 0.0)
+                    # Exponential decay plus asymptotic variance term
+                    # Clip to prevent overflow: conv_rate^T can overflow for large T
+                    if 0 < conv_rate < 1:
+                        # Safe computation: use log space for large exponents
+                        log_decay = theory_iters * np.log(conv_rate)
+                        # Clip extreme values to prevent overflow
+                        log_decay = np.clip(log_decay, -700, 0)  # exp(-700) ≈ 1e-304
+                        theory_curve = init_loss * np.exp(log_decay) + final_bound
+                    else:
+                        # Divergent or non-convergent case
+                        theory_curve = np.full_like(theory_iters, init_loss, dtype=float)
+            except Exception as e:
+                logging.debug(f"Failed to compute theoretical curve for {opt_name}: {e}")
+                theory_curve = None
+        # Append LR and estimates to summary
         summary_metrics.append({
             'Optimizer': opt_name,
+            'LR': current_lr,
             'Final Loss': final_loss,
             'Final Grad Norm': final_grad,
             'Min Loss': min_loss,
@@ -227,9 +369,15 @@ def run_optimizer_ablation(
             'Converged (loss<1e-3)': converged_iter is not None,
             'Converged (grad<1e-6)': precise_converged_iter is not None,
             'Diverged': diverged,
-            'Divergence Reason': divergence_reason if divergence_reason else 'None'
+            'Divergence Reason': divergence_reason if divergence_reason else 'None',
+            'Estimated_L': est_L,
+            'Estimated_mu': est_mu,
+            'Has_Theoretical_Curve': theory_curve is not None
         })
-        
+
+        # Store theory curve for plotting overlay
+        trajectories.setdefault('__theory__', {})[opt_name] = (theory_iters, theory_curve)
+
         print(f"{opt_name:20s} | Final Loss: {final_loss:12.6e} | "
               f"Converged (loss<1e-3): {'YES' if converged_iter is not None else 'NO':3s} at iter {converged_iter if converged_iter is not None else ('DIV' if np.isinf(final_loss) else '>10k')}")
     
@@ -238,6 +386,13 @@ def run_optimizer_ablation(
     summary_path = os.path.join(results_dir, 'optimizer_ablation_summary.csv')
     df_summary.to_csv(summary_path, index=False)
     print(f"\nSummary saved to: {summary_path}")
+
+    # Comparative dynamics plot across optimizers using the trackers
+    try:
+        from src.core.dynamics_tracker import compare_multiple_dynamics
+        compare_multiple_dynamics(trajectories.get('trackers', {}), os.path.join(plots_dir, 'dynamics_compare'))
+    except Exception as e:
+        logging.debug(f"Failed to create comparative dynamics plots: {e}")
     
     # Create figure with subplots
     _fig, axes = plt.subplots(2, 2, figsize=(14, 10))
@@ -248,16 +403,27 @@ def run_optimizer_ablation(
     # Plot 1: Loss curves (log scale)
     ax = axes[0, 0]
     for (opt_name, _), color in zip(optimizers, colors):
-        hist = trajectories[opt_name]
+        tracker = trajectories['trackers'][opt_name]
+        iters = tracker.iterations
+        losses = tracker.losses
         # Sample every 10 iterations for clarity; filter out non-finite
         sample_iters = []
         sample_loss = []
-        for i in range(0, len(hist['loss']), 10):
-            if np.isfinite(hist['loss'][i]) and hist['loss'][i] > 0:
-                sample_iters.append(hist['iteration'][i])
-                sample_loss.append(hist['loss'][i])
+        for idx in range(0, len(losses), 10):
+            if np.isfinite(losses[idx]) and losses[idx] > 0:
+                sample_iters.append(iters[idx])
+                sample_loss.append(losses[idx])
         if sample_loss:
             ax.plot(sample_iters, sample_loss, label=opt_name, linewidth=2, color=color, alpha=0.8)
+
+        # Plot theoretical overlay if available
+        try:
+            theory_iters, theory_curve = trajectories.get('__theory__', {}).get(opt_name, (None, None))
+            if theory_curve is not None and theory_iters is not None and len(theory_curve) > 0 and sample_iters:
+                theory_vals = np.interp(sample_iters, theory_iters, theory_curve)
+                ax.plot(sample_iters, theory_vals, linestyle='--', color=color, alpha=0.6, linewidth=1.5, label=f'{opt_name} (theory)')
+        except Exception:
+            pass
     
     ax.set_xlabel('Iteration', fontsize=11)
     ax.set_ylabel('Loss (log scale)', fontsize=11)
@@ -269,13 +435,15 @@ def run_optimizer_ablation(
     # Plot 2: Gradient norm (log scale)
     ax = axes[0, 1]
     for (opt_name, _), color in zip(optimizers, colors):
-        hist = trajectories[opt_name]
+        tracker = trajectories['trackers'][opt_name]
+        iters = tracker.iterations
+        grads = tracker.grad_norms
         sample_iters = []
         sample_grad = []
-        for i in range(0, len(hist['grad_norm']), 10):
-            if np.isfinite(hist['grad_norm'][i]) and hist['grad_norm'][i] > 0:
-                sample_iters.append(hist['iteration'][i])
-                sample_grad.append(hist['grad_norm'][i])
+        for idx in range(0, len(grads), 10):
+            if np.isfinite(grads[idx]) and grads[idx] > 0:
+                sample_iters.append(iters[idx])
+                sample_grad.append(grads[idx])
         if sample_grad:
             ax.plot(sample_iters, sample_grad, label=opt_name, linewidth=2, color=color, alpha=0.8)
     
@@ -342,27 +510,48 @@ def run_optimizer_ablation(
 
 
 def main():
-    """Run ablation study on Rosenbrock function."""
+    """CLI for running ablation study."""
+    parser = argparse.ArgumentParser(description="Run optimizer ablation study (fair defaults by default).")
+    parser.add_argument('--allow-unfair-ablations', '--use-legacy-unfair', dest='allow_unfair', action='store_true',
+                        help='Run legacy unfair ablation (fixed lr=0.01 for all optimizers). Use for quick sanity checks only.')
+    parser.add_argument('--track-params', dest='track_params', action='store_true',
+                        help='Track full parameter snapshots in TrainingDynamicsTracker (memory intensive).')
+    parser.add_argument('--max-iterations', type=int, default=10000, help='Max iterations per optimizer.')
+    parser.add_argument('--results-dir', type=str, default='results', help='Directory to save CSV results.')
+    parser.add_argument('--plots-dir', type=str, default='plots', help='Directory to save plots.')
+    parser.add_argument('--initial-point', nargs=2, type=float, default=[-1.5, 2.0], help='Initial point x y for test function.')
+    parser.add_argument('--lr-sgd', type=float, help='Override LR for SGD.')
+    parser.add_argument('--lr-adam', type=float, help='Override LR for Adam.')
+    args = parser.parse_args()
+
     print("="*70)
     print("Optimizer Ablation Study")
     print("="*70)
-    
-    # Use standard challenging initial point for Rosenbrock
-    initial_point = (-1.5, 2.0)
-    
-    # Initialize Rosenbrock function
+
+    initial_point = tuple(args.initial_point)
+
+    # Initialize Rosenbrock
     rosenbrock = Rosenbrock(a=1, b=100)
-    
-    # Run ablation
-    _df_summary = run_optimizer_ablation(
+
+    # collect lr overrides
+    lr_overrides = {}
+    if args.lr_sgd is not None:
+        lr_overrides['SGD'] = args.lr_sgd
+    if args.lr_adam is not None:
+        lr_overrides['Adam'] = args.lr_adam
+
+    df_summary = run_optimizer_ablation(
         test_function=rosenbrock,
         initial_point=initial_point,
-        max_iterations=10000,
-        results_dir='results',
-        plots_dir='plots'
+        max_iterations=args.max_iterations,
+        results_dir=args.results_dir,
+        plots_dir=args.plots_dir,
+        use_legacy_unfair=args.allow_unfair,
+        track_params=args.track_params,
+        lr_map_override=lr_overrides
     )
-    
     print("Ablation study complete!")
+    return df_summary
 
 
 if __name__ == '__main__':

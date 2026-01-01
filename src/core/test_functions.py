@@ -3,28 +3,29 @@ Module defining test functions for evaluating optimization algorithms.
 """
 
 import numpy as np
+from typing import Tuple
 
 
 class TestFunction:
     """Base class for 2D test functions."""
     __test__ = False
 
-    def __init__(self):
+    def __init__(self) -> None:
         pass
 
-    def compute(self, x, y):
+    def compute(self, x: float, y: float) -> float:
         """Compute function value at point (x, y)."""
         raise NotImplementedError("The compute method must be implemented in subclass")
 
-    def gradient(self, x, y):
+    def gradient(self, x: float, y: float) -> Tuple[float, float]:
         """Compute gradient of function at point (x, y). Returns (grad_x, grad_y)."""
         raise NotImplementedError("The gradient method must be implemented in subclass")
 
-    def hessian(self, x, y):
+    def hessian(self, x: float, y: float) -> np.ndarray:
         """Compute 2x2 Hessian matrix at point (x, y)."""
         raise NotImplementedError("The hessian method must be implemented in subclass")
 
-    def get_bounds(self):
+    def get_bounds(self) -> Tuple[Tuple[float, float], Tuple[float, float]]:
         """Return plotting bounds as ((x_min, x_max), (y_min, y_max))."""
         raise NotImplementedError("The get_bounds method must be implemented in subclass")
 
@@ -37,7 +38,7 @@ class Rosenbrock(TestFunction):
     Global minimum at (a, a^2) with value 0.
     """
     
-    def __init__(self, a=1, b=100):
+    def __init__(self, a: float = 1, b: float = 100) -> None:
         """
         Initialize Rosenbrock function.
         
@@ -50,22 +51,22 @@ class Rosenbrock(TestFunction):
         self.b = b
         self.name = f"Rosenbrock(a={a}, b={b})"
     
-    def compute(self, x, y):
+    def compute(self, x: float, y: float) -> float:
         """Compute value of Rosenbrock function."""
-        return (self.a - x)**2 + self.b * (y - x**2)**2
+        return float((self.a - x)**2 + self.b * (y - x**2)**2)
     
-    def gradient(self, x, y):
+    def gradient(self, x: float, y: float) -> Tuple[float, float]:
         """
         Compute analytical gradient of Rosenbrock function.
         
         df/dx = -2(a - x) - 4bx(y - x^2)
         df/dy = 2b(y - x^2)
         """
-        grad_x = -2 * (self.a - x) - 4 * self.b * x * (y - x**2)
-        grad_y = 2 * self.b * (y - x**2)
+        grad_x = float(-2 * (self.a - x) - 4 * self.b * x * (y - x**2))
+        grad_y = float(2 * self.b * (y - x**2))
         return grad_x, grad_y
     
-    def hessian(self, x, y):
+    def hessian(self, x: float, y: float) -> np.ndarray:
         """
         Compute Hessian matrix of Rosenbrock function.
         
@@ -78,7 +79,7 @@ class Rosenbrock(TestFunction):
         h_yy = 2 * self.b
         return np.array([[h_xx, h_xy], [h_xy, h_yy]])
     
-    def get_bounds(self):
+    def get_bounds(self) -> Tuple[Tuple[float, float], Tuple[float, float]]:
         """Return plotting bounds for Rosenbrock function."""
         return (-2, 2), (-1, 3)
 

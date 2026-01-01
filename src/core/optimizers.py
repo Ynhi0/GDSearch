@@ -5,17 +5,18 @@ Module defining optimization algorithms (optimizers).
 
 import numpy as np
 import logging
+from typing import Tuple, Union, Any
 
 
 class Optimizer:
     """Base class for optimization algorithms."""
     
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize optimizer."""
         # History of parameters (for 2D / tuple case store list of (x,y), for arrays store copies)
-        self.history_params = []
+        self.history_params: list = []
     
-    def _append_history(self, params):
+    def _append_history(self, params: Any) -> None:
         """Append parameters to history in a safe, copy-on-write manner."""
         try:
             if isinstance(params, tuple):
@@ -31,7 +32,7 @@ class Optimizer:
             except Exception:
                 pass
     
-    def step(self, params, gradients):
+    def step(self, params: Union[Tuple[float, float], Any], gradients: Union[Tuple[float, float], Any]) -> Union[Tuple[float, float], Any]:
         """
         Perform one parameter update step.
         
@@ -44,7 +45,7 @@ class Optimizer:
         """
         raise NotImplementedError("The step method must be implemented in subclass")
     
-    def reset(self):
+    def reset(self) -> None:
         """Reset internal optimizer state."""
         # Default: no state to reset
         self.history_params = []
@@ -57,7 +58,7 @@ class SGD(Optimizer):
     Update formula: θ_new = θ_old - lr * gradient
     """
     
-    def __init__(self, lr=0.01):
+    def __init__(self, lr: float = 0.01) -> None:
         """
         Initialize SGD optimizer.
         
@@ -68,7 +69,7 @@ class SGD(Optimizer):
         self.lr = lr
         self.name = f"SGD(lr={lr})"
     
-    def step(self, params, gradients):
+    def step(self, params: Union[Tuple[float, float], Any], gradients: Union[Tuple[float, float], Any]) -> Union[Tuple[float, float], Any]:
         """Perform one SGD step."""
         # Supports both tuple (x,y) and numpy array
         if isinstance(params, tuple):
@@ -81,9 +82,11 @@ class SGD(Optimizer):
             return new_x, new_y
         else:
             # Handle array (for neural networks)
-            return params - self.lr * gradients
+            updated = params - self.lr * gradients
+            self._append_history(updated)
+            return updated
     
-    def reset(self):
+    def reset(self) -> None:
         """SGD has no internal state."""
         # Stateless optimizer
         super().reset()
@@ -199,6 +202,9 @@ class SGDNesterov(Optimizer):
         else:
             if self.v is None:
                 self.v = np.zeros_like(params)
+            elif self.v.shape != params.shape:
+                logging.warning(f"SGDNesterov: Parameter shape changed from {self.v.shape} to {params.shape}. Resizing state.")
+                self.v = np.zeros_like(params)
             self.v = self.beta * self.v + gradients
             d = gradients + self.beta * self.v
             updated = params - self.lr * d
@@ -259,6 +265,9 @@ class RMSProp(Optimizer):
         else:
             # Handle array (for neural networks)
             if self.s is None:
+                self.s = np.zeros_like(params)
+            elif self.s.shape != params.shape:
+                logging.warning(f"RMSProp: Parameter shape changed from {self.s.shape} to {params.shape}. Resizing state.")
                 self.s = np.zeros_like(params)
             
             # Update squared gradient accumulator
@@ -347,7 +356,11 @@ class Adam(Optimizer):
             return new_x, new_y
         else:
             # Handle array (for neural networks)
-            if self.m is None or self.m.shape != params.shape:
+            if self.m is None:
+                self.m = np.zeros_like(params)
+                self.v = np.zeros_like(params)
+            elif self.m.shape != params.shape:
+                logging.warning(f"Adam: Parameter shape changed from {self.m.shape} to {params.shape}. Resizing state.")
                 self.m = np.zeros_like(params)
                 self.v = np.zeros_like(params)
             
@@ -427,20 +440,21 @@ class AdamW(Optimizer):
             v_x_hat = self.v_x / max(1 - self.beta2 ** self.t, 1e-8)
             v_y_hat = self.v_y / max(1 - self.beta2 ** self.t, 1e-8)
 
-            # Adam step
+            # Adam step (computed from original params)
             step_x = self.lr * m_x_hat / (np.sqrt(v_x_hat) + self.epsilon)
             step_y = self.lr * m_y_hat / (np.sqrt(v_y_hat) + self.epsilon)
 
-            # Decoupled weight decay
-            x = x - self.lr * self.weight_decay * x
-            y = y - self.lr * self.weight_decay * y
-
-            new_x = x - step_x
-            new_y = y - step_y
+            # Decoupled weight decay: apply to original params
+            new_x = x - step_x - self.lr * self.weight_decay * x
+            new_y = y - step_y - self.lr * self.weight_decay * y
             self._append_history((new_x, new_y))
             return new_x, new_y
         else:
-            if self.m is None or self.m.shape != params.shape:
+            if self.m is None:
+                self.m = np.zeros_like(params)
+                self.v = np.zeros_like(params)
+            elif self.m.shape != params.shape:
+                logging.warning(f"AdamW: Parameter shape changed from {self.m.shape} to {params.shape}. Resizing state.")
                 self.m = np.zeros_like(params)
                 self.v = np.zeros_like(params)
             
@@ -456,9 +470,8 @@ class AdamW(Optimizer):
             m_hat = self.m / max(1 - self.beta1 ** self.t, 1e-8)
             v_hat = self.v / max(1 - self.beta2 ** self.t, 1e-8)
             step = self.lr * m_hat / (np.sqrt(v_hat) + self.epsilon)
-            # Decoupled weight decay
-            params = params - self.lr * self.weight_decay * params
-            return params - step
+            # Decoupled weight decay: apply to original params
+            return params - step - self.lr * self.weight_decay * params
 
     def reset(self):
         self.m_x = 0.0
@@ -523,7 +536,12 @@ class AMSGrad(Optimizer):
             self._append_history((new_x, new_y))
             return new_x, new_y
         else:
-            if self.m is None or self.m.shape != params.shape:
+            if self.m is None:
+                self.m = np.zeros_like(params)
+                self.v = np.zeros_like(params)
+                self.vhat_max = np.zeros_like(params)
+            elif self.m.shape != params.shape:
+                logging.warning(f"AMSGrad: Parameter shape changed from {self.m.shape} to {params.shape}. Resizing state.")
                 self.m = np.zeros_like(params)
                 self.v = np.zeros_like(params)
                 self.vhat_max = np.zeros_like(params)

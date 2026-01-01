@@ -48,6 +48,8 @@ A comprehensive Python framework for comparing gradient descent algorithms on 2D
 - **Unit Tests:** ~80 tests verifying gradients, optimizers, schedulers, NLP, ResNet, checkpoints, tuning safety, and more (pytest)
 - **Input Validation:** Comprehensive error checking and input sanitization
 - **Ablation Studies:** Component-wise isolation to quantify contributions
+  - NOTE: Optimizer ablation scripts now **use per-optimizer fair default learning rates** by default (e.g., SGD=0.1, Adam=0.001). Legacy fixed-lr mode is available via `--allow-unfair-ablations` but is discouraged.
+  - Each optimizer run also saves **per-optimizer dynamics CSVs** and plots (via `TrainingDynamicsTracker`), and includes optional **theoretical overlay** curves for visual comparison.
 - **Baseline Comparisons:** Compare custom implementations with PyTorch built-ins
 - **GPU Validation:** Kaggle experiments for large-scale training (ResNet-18: 85.51% on CIFAR-10)
 - **CI/CD:** Automated config validation, budget parity checks, tuning safety lint

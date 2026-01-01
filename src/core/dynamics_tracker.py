@@ -49,12 +49,12 @@ class TrainingDynamicsTracker:
             track_params: If True, store full parameter snapshots (memory intensive)
             param_sample_freq: Only track params every N iterations (to save memory)
         """
-        self.iterations = []
-        self.losses = []
-        self.grad_norms = []
-        self.update_magnitudes = []
-        self.param_distances = []  # Distance from initialization
-        self.learning_rates = []
+        self.iterations: List[int] = []
+        self.losses: List[float] = []
+        self.grad_norms: List[float] = []
+        self.update_magnitudes: List[float] = []
+        self.param_distances: List[float] = []  # Distance from initialization
+        self.learning_rates: List[float] = []
         
         # Optional: track parameter snapshots (memory intensive)
         self.track_params = track_params
