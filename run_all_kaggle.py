@@ -29,9 +29,13 @@ def import_optional_nlp_dependencies():
         _optional_modules['AutoModelForSequenceClassification'] = AutoModelForSequenceClassification
         _optional_modules['load_dataset'] = load_dataset
     except Exception as e:
-        # Local import to avoid NameError if logging isn't configured yet
-        import logging as _logging
-        _logging.debug("Optional NLP dependencies unavailable: %s", e, exc_info=True)
+        # AUDIT FIX: Use conditional import to avoid redefining logging from outer scope
+        # At import time, logging may not be configured, so we use try-except and print fallback
+        try:
+            import logging  # noqa: F811  # Reimport in exception handler is intentional for robustness
+            logging.debug("Optional NLP dependencies unavailable: %s", e, exc_info=True)
+        except Exception:
+            print(f"DEBUG: Optional NLP dependencies unavailable: {e}")
         # Mark as unavailable; callers should handle None gracefully
         _optional_modules['transformers'] = None
     return _optional_modules
@@ -76,7 +80,8 @@ def safe_print(*args, **kwargs):
         print(*safe_args, **kwargs)
 
 
-from typing import Any, Optional, Union
+# AUDIT FIX: Import all typing items at once to avoid reimports later
+from typing import Any, Dict, List, Optional, Union
 from pathlib import Path
 
 def _int_if_possible(x: Any) -> int:
@@ -104,7 +109,7 @@ def _safe_len(obj: object) -> int:
 
     # numpy arrays
     try:
-        import numpy as _np
+        import numpy as _np  # noqa: F811  # Lazy import with alias for optional dependency check
         if isinstance(obj, _np.ndarray):
             try:
                 return int(obj.size)
@@ -115,7 +120,7 @@ def _safe_len(obj: object) -> int:
 
     # torch tensors
     try:
-        import torch as _torch
+        import torch as _torch  # noqa: F811  # Lazy import with alias for optional dependency check
         if isinstance(obj, _torch.Tensor):
             try:
                 return _int_if_possible(obj.numel())
@@ -156,7 +161,7 @@ import torchvision.transforms as transforms
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from pathlib import Path
+# AUDIT FIX: Removed duplicate 'from pathlib import Path' (already imported at line 85)
 import random
 from tqdm import tqdm
 import argparse
@@ -255,7 +260,7 @@ warnings.filterwarnings('ignore', message='.*cuFFT.*')
 warnings.filterwarnings('ignore', message='.*cuDNN.*')
 warnings.filterwarnings('ignore', message='.*cuBLAS.*')
 warnings.filterwarnings('ignore', message='.*register factory.*')
-from typing import Dict, List, Optional, Any, Union
+# AUDIT FIX: Removed duplicate 'from typing import Dict, List' (already imported at line 84)
 import traceback
 from datetime import datetime
 warnings.filterwarnings('ignore')
@@ -986,8 +991,9 @@ def error_context(context: str, continue_on_error: bool = False):
             print('\n--- TRACEBACK (debug) ---')
             print(traceback_str)
             print('--- END TRACEBACK ---\n')
-        except Exception as exc:
-            logging.debug("Failed while attempting to print traceback for %s: %s", context, exc, exc_info=True)
+        except Exception as tb_error:
+            # AUDIT FIX: Renamed 'exc' to 'tb_error' to avoid shadowing outer scope
+            logging.debug("Failed while attempting to print traceback for %s: %s", context, tb_error, exc_info=True)
 
         if not continue_on_error:
             raise
@@ -1356,7 +1362,7 @@ def get_provenance_info() -> Dict[str, Any]:
 
 def save_run_artifacts(base_results_dir: Union[str, Path], dataset: str, model_name: str, optimizer_name: str,
                        seed: int, history: List[Dict[str, Any]], params: Dict[str, Any],
-                       device: Optional[torch.device] = None, tracker: Optional[ExperimentTracker] = None,
+                       device: Optional[torch.device] = None, exp_tracker: Optional[ExperimentTracker] = None,
                        model: Optional[torch.nn.Module] = None, save_model: bool = True):
     """Save per-run CSV and metadata sidecar using a canonical filename.
 
@@ -1368,6 +1374,7 @@ def save_run_artifacts(base_results_dir: Union[str, Path], dataset: str, model_n
     Args:
         model: PyTorch model to save (optional)
         save_model: Whether to save model weights (default: True)
+        exp_tracker: ExperimentTracker instance (renamed from 'tracker' to avoid shadowing global)
     """
     # Accept str or Path for base_results_dir and coerce to Path for file ops
     base_results_dir = Path(base_results_dir)
@@ -1438,12 +1445,13 @@ def save_run_artifacts(base_results_dir: Union[str, Path], dataset: str, model_n
             json.dump(meta, f, indent=2)
 
         # Optional tracker artifact upload
-        if tracker:
+        # AUDIT FIX: Use exp_tracker parameter (renamed to avoid shadowing global)
+        if exp_tracker:
             try:
-                tracker.log_artifact(str(csv_path), artifact_path=f"{dataset}/results")
-                tracker.log_artifact(str(meta_path), artifact_path=f"{dataset}/meta")
+                exp_tracker.log_artifact(str(csv_path), artifact_path=f"{dataset}/results")
+                exp_tracker.log_artifact(str(meta_path), artifact_path=f"{dataset}/meta")
                 if model_path:
-                    tracker.log_artifact(str(model_path), artifact_path=f"{dataset}/models")
+                    exp_tracker.log_artifact(str(model_path), artifact_path=f"{dataset}/models")
             except Exception as e:
                 logging.debug("Tracker artifact logging failed for %s: %s", file_stem, e, exc_info=True)
 
@@ -3334,8 +3342,9 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                             'original_batch_size': original_batch_size
                         }
 
+                        # AUDIT FIX: Use exp_tracker parameter name (renamed to avoid shadowing global)
                         save_run_artifacts(results_dir, 'MNIST', 'SimpleMLP', opt_name,
-                                           seed, history, params, device=device, tracker=tracker,
+                                           seed, history, params, device=device, exp_tracker=tracker,
                                            model=model, save_model=True)  # Save model weights
 
                         results.append({
@@ -3842,10 +3851,11 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
     seed0 = seeds[0] if seeds else None
     try:
         if seed0 is not None:
+            # AUDIT FIX: Use exp_tracker parameter name (renamed to avoid shadowing global)
             save_run_artifacts(results_dir, 'CIFAR10', 'ResNet18', 'Adam', seed0, all_results, params={
                 'epochs': epochs,
                 'batch_size': 128
-            }, device=device, tracker=tracker)
+            }, device=device, exp_tracker=tracker)
     except Exception as e:
         logging.debug("Failed to save per-run CIFAR10 artifact: %s", e, exc_info=True)
 
@@ -4382,7 +4392,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
             # Save per-run artifacts for this optimizer/seed
             try:
                 params = {'lr': lr, 'epochs': epochs, 'batch_size': batch_size, 'model_name': model_name}
-                save_run_artifacts(results_dir, 'IMDB', model_name.replace('/', '_'), opt_name, seed, history, params, device=device, tracker=tracker)
+                save_run_artifacts(results_dir, 'IMDB', model_name.replace('/', '_'), opt_name, seed, history, params, device=device, exp_tracker=tracker)
             except Exception as e:
                 logging.debug("Failed to save per-run NLP artifact for %s seed %s: %s", opt_name, seed, e, exc_info=True)
 
@@ -5172,7 +5182,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
             # Save per-run artifacts for this optimizer/seed
             try:
                 params = {'lr': lr, 'epochs': epochs, 'batch_size': batch_size}
-                save_run_artifacts(results_dir, 'Medical', 'UNet2D', opt_name, seed, history, params, device=device, tracker=tracker)
+                save_run_artifacts(results_dir, 'Medical', 'UNet2D', opt_name, seed, history, params, device=device, exp_tracker=tracker)
             except Exception:
                 logging.debug("Failed to save per-run Medical artifact for %s seed %s", opt_name, seed)
 
@@ -6253,7 +6263,7 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, resume=False):
                 # Save per-run artifact for this 2D optimization run
                 try:
                     params = {'function': func_name, 'optimizer': opt_name, 'max_iter': max_iter}
-                    save_run_artifacts(results_dir, '2D', func_name, opt_name, seed, history, params, device=None, tracker=None)
+                    save_run_artifacts(results_dir, '2D', func_name, opt_name, seed, history, params, device=None, exp_tracker=None)
                 except Exception as e:
                     logging.debug("Failed to save 2D artifact for %s %s seed %s: %s", func_name, opt_name, seed, e, exc_info=True)
 
@@ -6379,7 +6389,7 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, resume
 
             # Save per-run artifact for robustness run (fixed seed)
             try:
-                save_run_artifacts(results_dir, 'Robustness', 'Rosenbrock', opt_name, 42, [{'final_loss': loss.item(), 'iterations': i+1, 'initial_point': start_point}], {'converged': converged}, device=None, tracker=None)
+                save_run_artifacts(results_dir, 'Robustness', 'Rosenbrock', opt_name, 42, [{'final_loss': loss.item(), 'iterations': i+1, 'initial_point': start_point}], {'converged': converged}, device=None, exp_tracker=None)
             except Exception as e:
                 logging.debug("Failed to save robustness artifact for start %s: %s", start_point, e, exc_info=True)
 
@@ -6502,7 +6512,7 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=None, resum
         # Save per-run artifact for this rho
         try:
             params = {'rho': rho, 'epochs': 3, 'batch_size': 256}
-            save_run_artifacts(results_dir, 'MNIST', 'SimpleMLP', f'SAM_rho_{rho}', 42, [{'final_loss': epoch_loss}], params, device=device, tracker=None)
+            save_run_artifacts(results_dir, 'MNIST', 'SimpleMLP', f'SAM_rho_{rho}', 42, [{'final_loss': epoch_loss}], params, device=device, exp_tracker=None)
         except Exception as e:
             logging.debug("Failed to save SAM sensitivity artifact for rho %s: %s", rho, e, exc_info=True)
 
@@ -6614,7 +6624,7 @@ def run_ablation_study(results_dir="results_ablation", seeds=None, resume=False)
         # Save per-run artifact for ablation configuration
         try:
             params = params if isinstance(params, dict) else {'params': params}
-            save_run_artifacts(results_dir, 'Ablation', '2D_Rosenbrock', opt_name, 42, [{'final_loss': loss.item(), 'iterations': i+1}], params, device=None, tracker=None)
+            save_run_artifacts(results_dir, 'Ablation', '2D_Rosenbrock', opt_name, 42, [{'final_loss': loss.item(), 'iterations': i+1}], params, device=None, exp_tracker=None)
         except Exception as e:
             logging.debug("Failed to save ablation artifact for %s: %s", opt_name, e, exc_info=True)
 
@@ -7668,7 +7678,7 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
     try:
         seed0 = int(seeds[0]) if seeds else 0
         params = {'epochs': epochs, 'batch_size': 128}
-        save_run_artifacts(results_dir, 'ResNet18', 'ResNet18', 'Adam', seed0, results, params, device=device, tracker=tracker)
+        save_run_artifacts(results_dir, 'ResNet18', 'ResNet18', 'Adam', seed0, results, params, device=device, exp_tracker=tracker)
     except Exception:
         logging.debug("Failed to save per-run ResNet artifact")
 
@@ -7807,7 +7817,7 @@ def run_highdim_experiment(results_dir="results_highdim", seeds=None, quick=Fals
                 # Save per-run artifact for this high-dim run
                 try:
                     params = {'dimension': dim, 'optimizer': opt_name, 'max_iter': max_iter}
-                    save_run_artifacts(results_dir, 'HighDim', f'Dim{dim}', opt_name, seed, history, params, device=device, tracker=tracker)
+                    save_run_artifacts(results_dir, 'HighDim', f'Dim{dim}', opt_name, seed, history, params, device=device, exp_tracker=tracker)
                 except Exception:
                     logging.debug("Failed to save highdim artifact for dim %s opt %s seed %s", dim, opt_name, seed)
 

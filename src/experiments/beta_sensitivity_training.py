@@ -13,8 +13,30 @@ runs β sweeps on REAL MNIST/CIFAR training to analyze:
 - Impact on training dynamics (smoothness, oscillations)
 - Impact on loss landscape navigation
 
+**IMPORTANT - Implementation Consistency Note:**
+This module uses PyTorch's NATIVE optimizers (torch.optim.SGD, torch.optim.Adam)
+for neural network training. This differs from 2D ablation studies which use
+CUSTOM implementations from src.core.optimizers (SGD, Adam, etc.).
+
+Rationale:
+1. PyTorch native optimizers are industry-standard, battle-tested implementations
+2. They include optimizations (fused kernels, numerically stable operations)
+3. Direct comparison to published baselines requires using standard implementations
+
+Scientific Implication:
+Conclusions drawn from 2D plots (which use clean, pedagogical implementations)
+may not strictly apply to NN results (which use production-grade implementations).
+Both are valid but serve different purposes:
+- 2D plots: Understanding algorithmic behavior in controlled settings
+- NN experiments: Real-world performance with standard tooling
+
+Any discrepancies between 2D and NN results should be investigated for:
+- Implementation differences (epsilon handling, bias correction timing)
+- Numerical precision differences
+- Optimization-specific edge cases
+
 Author: Research Team
-Date: December 7, 2025
+Date: December 7, 2025 (Updated: January 2, 2026)
 """
 
 import sys
@@ -100,20 +122,35 @@ def train_with_beta(
     device: str = 'cpu',
     track_dynamics: bool = True,
     quick: bool = False,
-    seed: int = 42
+    seed: int = 42,
+    use_beta_scaled_lr: bool = False
 ) -> Dict:
     """
     Train MNIST with specific β value and track comprehensive metrics
+    
+    SCIENTIFIC NOTE - Beta vs. Learning Rate Coupling:
+    By default (use_beta_scaled_lr=False), this function uses a FIXED learning rate
+    for all β values. This is scientifically suboptimal because the "effective learning rate"
+    in momentum-based optimizers scales approximately as lr/(1-β). As β→1, the effective
+    step size increases dramatically.
+    
+    When use_beta_scaled_lr=True, the learning rate is adjusted as: lr_effective = lr * (1 - beta)
+    This compensates for the momentum accumulation and provides a fairer comparison across
+    different β values.
+    
+    LIMITATION: Even with beta-scaled LR, the "optimal" LR for each β may differ. A fully
+    rigorous study would tune LR independently for each β value via grid search.
     
     Args:
         beta: Momentum parameter (β for Momentum, β1 for Adam)
         optimizer_name: 'momentum' or 'adam'
         epochs: Number of training epochs
-        lr: Learning rate
+        lr: Base learning rate (will be scaled if use_beta_scaled_lr=True)
         device: 'cpu' or 'cuda'
         track_dynamics: Whether to track dynamics metrics
         quick: Use subset of data for quick testing
         seed: Random seed
+        use_beta_scaled_lr: If True, scale LR by (1-beta) to compensate for momentum accumulation
     
     Returns:
         Dictionary with training history and dynamics metrics
@@ -129,13 +166,20 @@ def train_with_beta(
     model = SimpleMLP().to(device)
     criterion = nn.CrossEntropyLoss()
     
+    # Apply beta-scaled learning rate if requested (addresses beta-LR coupling issue)
+    effective_lr = lr * (1.0 - beta) if use_beta_scaled_lr else lr
+    
     # Create optimizer with specific beta
     if optimizer_name.lower() == 'momentum':
-        optimizer = optim.SGD(model.parameters(), lr=lr, momentum=beta)
+        optimizer = optim.SGD(model.parameters(), lr=effective_lr, momentum=beta)
     elif optimizer_name.lower() == 'adam':
-        optimizer = optim.Adam(model.parameters(), lr=lr, betas=(beta, 0.999))
+        optimizer = optim.Adam(model.parameters(), lr=effective_lr, betas=(beta, 0.999))
     else:
         raise ValueError(f"Unknown optimizer: {optimizer_name}")
+    
+    # Log the effective learning rate for transparency
+    if use_beta_scaled_lr:
+        logging.info(f"Beta-scaled LR: base={lr:.6f}, beta={beta:.4f}, effective={effective_lr:.6f}")
     
     # Initialize dynamics tracker
     if track_dynamics and HAS_DYNAMICS:
@@ -307,12 +351,36 @@ def run_momentum_beta_sensitivity(
     lr: float = 0.01,
     device: str = 'cpu',
     quick: bool = False,
-    output_dir: str = 'results/beta_sensitivity'
+    output_dir: str = 'results/beta_sensitivity',
+    use_beta_scaled_lr: bool = False
 ) -> pd.DataFrame:
     """
     Run β sensitivity analysis for Momentum optimizer on MNIST
     
     This addresses the proposal requirement for β sensitivity on REAL training
+    
+    **SCIENTIFIC LIMITATION - Beta vs. Learning Rate Coupling:**
+    By default (use_beta_scaled_lr=False), this function uses a FIXED learning rate
+    across all β values. This can lead to misleading results because:
+    - Effective LR ≈ lr/(1-β), so high β values have much larger effective steps
+    - Poor performance at β=0.99 may be due to LR being too high, not β being bad
+    - A rigorous study would tune LR independently for each β
+    
+    When use_beta_scaled_lr=True, LR is adjusted as lr*(1-β) to partially compensate.
+    This is an approximation; full rigor requires per-β LR tuning via grid search.
+    
+    Args:
+        beta_values: List of β values to sweep (default: [0.0, 0.5, 0.7, 0.9, 0.95, 0.99])
+        epochs: Training epochs
+        seeds: Random seeds for multiple runs
+        lr: Base learning rate (fixed if use_beta_scaled_lr=False)
+        device: 'cpu' or 'cuda'
+        quick: Use data subset for faster testing
+        output_dir: Directory for results
+        use_beta_scaled_lr: If True, scale LR by (1-β) to address coupling issue
+    
+    Returns:
+        DataFrame with results across all β values and seeds
     """
     if beta_values is None:
         beta_values = [0.0, 0.5, 0.7, 0.9, 0.95, 0.99]
@@ -325,6 +393,12 @@ def run_momentum_beta_sensitivity(
     print(f"β values: {beta_values}")
     print(f"Seeds: {seeds}")
     print(f"Epochs: {epochs}")
+    print(f"Base LR: {lr}")
+    print(f"Beta-scaled LR: {use_beta_scaled_lr}")
+    if not use_beta_scaled_lr:
+        print("⚠️  WARNING: Using FIXED LR across all β values (beta-LR coupling issue)")
+        print("   High β values will have larger effective step sizes (≈lr/(1-β))")
+        print("   Consider setting use_beta_scaled_lr=True for fairer comparison")
     print(f"Device: {device}")
     print("=" * 80)
     
@@ -341,7 +415,8 @@ def run_momentum_beta_sensitivity(
                 device=device,
                 track_dynamics=True,
                 quick=quick,
-                seed=seed
+                seed=seed,
+                use_beta_scaled_lr=use_beta_scaled_lr  # Pass through the beta-scaled LR flag
             )
             result['seed'] = seed
             results.append(result)

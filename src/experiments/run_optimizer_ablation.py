@@ -4,6 +4,32 @@ Ablation study comparing optimizer progression: SGD → SGD+Momentum → RMSProp
 WARNING: This script uses FIXED learning rates (lr=0.01) for all optimizers.
 This violates hyperparameter fairness principles and may produce biased results.
 
+**SCIENTIFIC LIMITATION - "Fair" Defaults for 2D Functions:**
+The "fair" default learning rates (SGD=0.1, Adam=0.001) used in this script are
+derived from NEURAL NETWORK training conventions, NOT optimized for 2D mathematical
+functions like Rosenbrock or Ackley.
+
+Consequence: An optimizer may appear to "win" simply because its default LR
+happens to be closer to optimal for the specific 2D landscape being tested, while
+another optimizer's default may be catastrophically bad.
+
+Example:
+- On Rosenbrock with a=1, b=100, the optimal LR for Adam might be 0.01, not 0.001
+- For SGD, 0.1 might cause divergence while 0.01 converges slowly
+- These are ARTIFACTS of arbitrary NN-derived defaults, not inherent optimizer quality
+
+Proper 2D Evaluation Protocol (not implemented here):
+1. For each optimizer, sweep LR over [1e-4, 1e-3, 1e-2, 1e-1, 1.0]
+2. Report the BEST result for each optimizer from its sweep
+3. OR report full heatmaps (optimizer x LR) to show sensitivity
+
+This script uses fixed defaults for QUICK exploratory analysis only.
+For rigorous 2D function benchmarks, implement per-function LR tuning.
+
+Note: Neural network experiments (run_nn_experiment.py) are less affected by this
+issue because NN defaults (0.1 for SGD, 0.001 for Adam) are based on extensive
+empirical research across thousands of NN training runs.
+
 AUDIT FIX: This script now requires --allow-unfair-ablations flag to prevent
 accidental use in canonical benchmarks.
 
@@ -86,13 +112,22 @@ def run_optimizer_ablation(
     lr_map_override: dict[str, float] | None = None
 ) -> pd.DataFrame:
     """
-    Run ablation study comparing optimizer variants.
+    Run ablation study comparing optimizer variants on 2D test functions.
 
     By default this function enforces per-optimizer fair learning rates. To run the legacy
     unfair mode (fixed lr=0.01 for every optimizer) set `use_legacy_unfair=True`.
+    
+    **SCIENTIFIC CAVEAT - Learning Rate Selection for 2D Functions:**
+    The \"fair\" default LRs (SGD=0.1, Adam=0.001) are derived from NEURAL NETWORK
+    training conventions. They may NOT be optimal for 2D mathematical functions.
+    Results should be interpreted as \"how well do NN-tuned defaults transfer to 2D\"
+    rather than \"which optimizer is fundamentally better on this landscape.\"
+    
+    For rigorous 2D benchmarks, consider implementing per-function LR tuning or
+    reporting full (optimizer \u00d7 LR) heatmaps.
 
     Args:
-        test_function: Test function instance
+        test_function: Test function instance (e.g., Rosenbrock, Ackley)
         initial_point: Starting (x, y)
         max_iterations: Number of iterations
         results_dir: Directory for CSV output
@@ -100,6 +135,7 @@ def run_optimizer_ablation(
         use_legacy_unfair: If True, run legacy mode with lr=0.01 for all optimizers
         track_params: If True, track full parameter snapshots in the tracker
         lr_map_override: Optional dict to override default per-optimizer LRs
+                        (useful for function-specific tuning)
 
     Returns:
         DataFrame with summary metrics
@@ -114,6 +150,11 @@ def run_optimizer_ablation(
         lr_map = { 'default': 0.01 }
     else:
         logging.info("✅ Enforcing HYPERPARAMETER FAIRNESS: using per-optimizer default learning rates.")
+        logging.warning(
+            "⚠️ 2D FUNCTION CAVEAT: Using NN-derived default LRs (SGD=0.1, Adam=0.001) on 2D functions. "
+            "These may not be optimal for mathematical test functions. Results show 'transferability' not 'absolute optimality'. "
+            "For function-specific tuning, use lr_map_override parameter."
+        )
         # Per-optimizer fair defaults (approx. published defaults)
         lr_map = {
             'SGD': 0.1,
@@ -194,13 +235,18 @@ def run_optimizer_ablation(
                 super().__init__(params, defaults)
             
             @torch.no_grad()
-            def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
-                """Dummy step method (not used, but required for Optimizer)."""
-                loss = None
+            def step(self, closure: Optional[Callable[[], float]] = None) -> float:  # type: ignore[override]
+                """
+                Dummy step method (not used, but required for Optimizer).
+                
+                AUDIT FIX: Return type varies across PyTorch versions and type stubs.
+                Using type: ignore[override] to handle inconsistency while preserving
+                runtime compatibility. Returns 0.0 as dummy loss value.
+                """
                 if closure is not None:
                     with torch.enable_grad():
-                        loss = closure()
-                return loss
+                        _ = closure()  # Compute but discard loss
+                return 0.0  # Dummy loss return for type checker compatibility
 
         numeric_model = NumericModel(x, y)
         numeric_optim_mock = NumericOptimizerMock(numeric_model.parameters(), opt_lr)
