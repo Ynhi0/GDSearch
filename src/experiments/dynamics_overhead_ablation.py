@@ -38,21 +38,8 @@ except ImportError:
     HAS_DYNAMICS_TRACKER = False
     print("TrainingDynamicsTracker not available - ablation study limited")
 
-
-class SimpleMLP(nn.Module):
-    """Simple MLP for MNIST - same as used in main experiments"""
-    def __init__(self, input_dim=784, hidden_dim=256, num_classes=10):
-        super().__init__()
-        self.fc1 = nn.Linear(input_dim, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        self.fc3 = nn.Linear(hidden_dim, num_classes)
-        self.relu = nn.ReLU()
-        
-    def forward(self, x):
-        x = x.view(x.size(0), -1)
-        x = self.relu(self.fc1(x))
-        x = self.relu(self.fc2(x))
-        return self.fc3(x)
+# Import centralized model (FIX #4: Remove duplicate SimpleMLP)
+from src.core.models import SimpleMLP
 
 
 def get_gpu_memory_usage() -> float:

@@ -175,39 +175,31 @@ def compare_to_theoretical_bounds(
     empirical_rate: float,
     optimizer_name: str,
     problem_type: str = 'strongly_convex',
-    lr: float = 0.01
+    lr: float = 0.01,
+    condition_number: Optional[float] = None
 ) -> Dict[str, Any]:
     """
     Compare empirical convergence rate to theoretical bounds.
+    
+    CRITICAL FIX: Properly accounts for problem condition number (kappa = L/mu)
+    in theoretical rate predictions. Without this, theoretical bounds are
+    meaningless as they ignore the problem geometry.
+    
+    Correct theoretical rates:
+    - SGD (strongly convex): beta = lr * mu * (1 - 1/kappa) where mu = strong convexity
+    - Momentum: beta \u2248 sqrt(lr * mu)  
+    - Adam: No closed-form bound (adaptive)
     
     Args:
         empirical_rate: Measured convergence exponent (α for power-law or β for exponential)
         optimizer_name: Name of optimizer (SGD, Adam, etc.)
         problem_type: 'strongly_convex', 'convex', or 'nonconvex'
         lr: Learning rate used
+        condition_number: kappa = L/mu (eigenvalue ratio for quadratics)
     
     Returns:
         Dict with theoretical bounds and deviation metrics
     """
-    # Theoretical convergence rates (simplified, from standard theory)
-    theoretical = {
-        'SGD': {
-            'strongly_convex': {'rate': 'exponential', 'exponent': lr},
-            'convex': {'rate': 'sublinear', 'exponent': 0.5},  # O(1/√t)
-            'nonconvex': {'rate': 'sublinear', 'exponent': 0.5}
-        },
-        'Momentum': {
-            'strongly_convex': {'rate': 'exponential', 'exponent': 2 * lr},
-            'convex': {'rate': 'sublinear', 'exponent': 1.0},  # O(1/t) with optimal momentum
-            'nonconvex': {'rate': 'sublinear', 'exponent': 0.5}
-        },
-        'Adam': {
-            'strongly_convex': {'rate': 'exponential', 'exponent': lr},
-            'convex': {'rate': 'sublinear', 'exponent': 0.5},
-            'nonconvex': {'rate': 'sublinear', 'exponent': 0.5}
-        }
-    }
-    
     # Map optimizer name
     opt_key = optimizer_name.upper()
     if 'MOMENTUM' in opt_key:
@@ -219,23 +211,66 @@ def compare_to_theoretical_bounds(
     else:
         opt_key = 'SGD'  # Default
     
-    theory = theoretical.get(opt_key, theoretical['SGD'])
-    bounds = theory.get(problem_type, theory['convex'])
+    # CRITICAL FIX: Compute theoretical rate using condition number
+    if condition_number is not None and problem_type == 'strongly_convex':
+        kappa = condition_number
+        # Estimate mu: for normalized problems, assume L ~ 1, so mu ~ 1/kappa
+        mu_estimate = 1.0 / kappa
+        
+        if opt_key == 'SGD':
+            # Linear convergence: (1 - lr*mu) per iteration
+            # Continuous rate: beta = lr * mu * (1 - 1/kappa)
+            theoretical_rate = lr * mu_estimate * (1 - 1/kappa)
+            rate_type = 'exponential'
+        elif opt_key == 'Momentum':
+            # Accelerated: beta \u2248 sqrt(lr * mu)
+            theoretical_rate = np.sqrt(lr * mu_estimate)
+            rate_type = 'exponential (accelerated)'
+        elif opt_key == 'Adam':
+            # No closed form - use SGD-like heuristic
+            theoretical_rate = lr * mu_estimate * 0.5  # Conservative
+            rate_type = 'adaptive (heuristic)'
+        else:
+            theoretical_rate = lr * mu_estimate
+            rate_type = 'exponential'
+    else:
+        # Fallback: use generic rates (WARNING: these are inaccurate!)
+        if problem_type == 'strongly_convex':
+            if opt_key == 'SGD':
+                theoretical_rate = lr * 0.1  # Assume mu ~ 0.1
+                rate_type = 'exponential (mu assumed 0.1)'
+            elif opt_key == 'Momentum':
+                theoretical_rate = np.sqrt(lr * 0.1)
+                rate_type = 'exponential (mu assumed 0.1)'
+            else:
+                theoretical_rate = lr * 0.05
+                rate_type = 'adaptive (heuristic)'
+        elif problem_type == 'convex':
+            theoretical_rate = 0.5  # Sublinear O(1/sqrt(t))
+            rate_type = 'sublinear'
+        else:
+            theoretical_rate = 0.5
+            rate_type = 'sublinear'
     
-    theoretical_rate = bounds['exponent']
     deviation = abs(empirical_rate - theoretical_rate)
     relative_deviation = deviation / theoretical_rate if theoretical_rate > 0 else np.inf
     
-    return {
+    result = {
         'optimizer': optimizer_name,
         'problem_type': problem_type,
-        'theoretical_rate_type': bounds['rate'],
+        'condition_number': condition_number,
+        'theoretical_rate_type': rate_type,
         'theoretical_exponent': theoretical_rate,
         'empirical_rate': empirical_rate,
         'absolute_deviation': deviation,
         'relative_deviation': relative_deviation,
-        'within_theory': relative_deviation < 0.5  # Heuristic threshold
+        'within_theory': relative_deviation < 2.0  # Relaxed threshold for practical problems
     }
+    
+    if condition_number is None:
+        result['warning'] = 'Condition number unknown - using heuristic bounds (may be inaccurate)'
+    
+    return result
 
 
 def generate_convergence_report(

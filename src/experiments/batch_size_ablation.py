@@ -30,27 +30,51 @@ from src.analysis.statistical_analysis import compare_two_optimizers, print_ttes
 def create_batch_size_configs(
     base_config: Dict,
     batch_sizes: List[int],
-    optimizers: List[str]
+    optimizers: List[str],
+    apply_lr_scaling: bool = True
 ) -> List[Dict]:
     """
     Create experiment configurations for batch size ablation.
+    
+    CRITICAL FIX: Implements Learning Rate Scaling (Linear Scaling Rule)
+    to ensure fair comparison across batch sizes.
     
     Args:
         base_config: Base configuration with model, dataset, etc.
         batch_sizes: List of batch sizes to test
         optimizers: List of optimizer names
+        apply_lr_scaling: Whether to scale LR with batch size (default: True)
         
     Returns:
         List of configuration dictionaries
     """
     configs = []
     
+    # Reference batch size and LR for scaling
+    base_batch_size = base_config.get('batch_size', 128)
+    base_lr = base_config.get('lr', 0.001)
+    
     for optimizer in optimizers:
         for batch_size in batch_sizes:
             config = base_config.copy()
+            
+            # CRITICAL: Apply Linear Scaling Rule for SGD variants
+            # For Adam/AdamW, use square root scaling (more conservative)
+            if apply_lr_scaling:
+                scaling_factor = batch_size / base_batch_size
+                if 'Adam' in optimizer or 'RMSprop' in optimizer:
+                    # Square root scaling for adaptive optimizers
+                    scaled_lr = base_lr * np.sqrt(scaling_factor)
+                else:
+                    # Linear scaling for SGD variants (Goyal et al., 2017)
+                    scaled_lr = base_lr * scaling_factor
+            else:
+                scaled_lr = base_lr
+            
             config.update({
                 'optimizer': optimizer,
                 'batch_size': batch_size,
+                'lr': scaled_lr,
                 'name': f"{optimizer}_batch{batch_size}"
             })
             configs.append(config)

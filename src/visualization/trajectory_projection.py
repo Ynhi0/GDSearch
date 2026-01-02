@@ -39,16 +39,32 @@ class TrajectoryProjector:
         self,
         method: str = 'pca',
         n_components: int = 2,
-        subsample_params: Optional[int] = None
+        subsample_params: Optional[int] = 10000
     ):
         """
         Initialize trajectory projector.
         
+        CRITICAL FIX: Default subsample_params set to 10,000 to prevent OOM crashes.
+        
+        MEMORY SAFETY ANALYSIS:
+        - ResNet-18: ~11M parameters × 4 bytes (float32) = 44 MB per snapshot
+        - Training for 100 epochs with snapshot_every=1 → 100 snapshots → 4.4 GB
+        - t-SNE requires O(n²) pairwise distances → memory explosion for large models
+        
+        With subsample_params=10000 (default):
+        - 10K params × 4 bytes × 100 snapshots = 4 MB (safe for all systems)
+        - Sufficient dimensionality for meaningful trajectory visualization
+        - Preserves trajectory structure via random sampling
+        
+        CRITICAL: Users must EXPLICITLY set subsample_params=None to use full
+        parameter space, acknowledging the memory risk.
+        
         Args:
             method: Projection method ('pca', 'tsne', 'random')
             n_components: Number of dimensions to project to (typically 2)
-            subsample_params: If not None, randomly sample this many parameters
-                            to reduce memory (useful for very large models)
+            subsample_params: Number of parameters to randomly sample (DEFAULT: 10000).
+                            Set to None ONLY for small models (<100K params) with
+                            sufficient RAM (32GB+). Prevents accidental OOM crashes.
         """
         self.method = method
         self.n_components = n_components
@@ -146,17 +162,45 @@ class TrajectoryProjector:
         """
         Fit projection on collected trajectories from multiple optimizers.
         
+        CRITICAL FIX: To avoid bias toward optimizers with more snapshots,
+        we balance the dataset by sampling EQUAL number of snapshots from each
+        optimizer trajectory before fitting PCA.
+        
+        Scientific Justification:
+        - If Optimizer A takes 100 steps and Optimizer B takes 500 steps,
+          naive concatenation gives B 5x more influence on PCA axes
+        - This makes PCA components represent "where B goes" rather than
+          "directions of maximum variance across all optimizers equally"
+        - Balanced sampling ensures fair comparison
+        
         Args:
             trajectories: Dict mapping optimizer names to parameter snapshot lists
         """
-        # Concatenate all snapshots for fitting
+        # Find minimum trajectory length to ensure balanced sampling
+        min_length = min(len(snapshots) for snapshots in trajectories.values())
+        
+        if min_length < 2:
+            logging.warning(f"Shortest trajectory has only {min_length} snapshots. "
+                          "Consider collecting more snapshots for better projection.")
+        
+        # Balanced sampling: take same number of snapshots from each optimizer
         all_snapshots = []
         for opt_name, snapshots in trajectories.items():
-            all_snapshots.extend(snapshots)
+            # Uniformly sample min_length snapshots from this trajectory
+            if len(snapshots) > min_length:
+                indices = np.linspace(0, len(snapshots) - 1, min_length, dtype=int)
+                sampled_snapshots = [snapshots[i] for i in indices]
+            else:
+                sampled_snapshots = snapshots
+            
+            all_snapshots.extend(sampled_snapshots)
+            logging.debug(f"Sampled {len(sampled_snapshots)} snapshots from {opt_name} "
+                        f"(original: {len(snapshots)})")
         
         X = np.array(all_snapshots)
         
-        logging.info(f"Fitting {self.method} projection on {X.shape[0]} snapshots "
+        logging.info(f"Fitting {self.method} projection on {X.shape[0]} BALANCED snapshots "
+                    f"({min_length} per optimizer × {len(trajectories)} optimizers) "
                     f"with {X.shape[1]} parameters each")
         
         if self.method == 'pca':
@@ -190,6 +234,14 @@ class TrajectoryProjector:
         """
         Project parameter trajectory to low-dimensional space.
         
+        CRITICAL FIX FOR t-SNE: t-SNE cannot project new data points because it
+        is a manifold learning method that computes embeddings globally. Each
+        call to fit_transform creates a completely different embedding space.
+        
+        For trajectory projection, we MUST use methods that support out-of-sample
+        projection (PCA, random projection). t-SNE is disabled for individual
+        trajectory projection.
+        
         Args:
             snapshots: List of parameter vectors
             
@@ -204,8 +256,15 @@ class TrajectoryProjector:
         if self.method == 'pca':
             return self.projector.transform(X)
         elif self.method == 'tsne':
-            # t-SNE must be re-fit for new data (limitation of the algorithm)
-            return self.projector.fit_transform(X)
+            # CRITICAL: t-SNE cannot project new points consistently
+            # Each fit_transform creates a DIFFERENT embedding space
+            # Solution: Only allow t-SNE for visualize_trajectories where all
+            # data is projected together in one consistent space
+            raise RuntimeError(
+                "t-SNE cannot project individual trajectories consistently. "
+                "Use method='pca' or 'random' for individual trajectory projection, "
+                "or use visualize_trajectories() to project all trajectories together."
+            )
         elif self.method == 'random':
             return X @ self.projector
         else:
@@ -220,20 +279,45 @@ class TrajectoryProjector:
         """
         Create publication-quality trajectory visualization.
         
+        CRITICAL FIX FOR t-SNE: To use t-SNE, ALL trajectories must be projected
+        together in a single fit_transform call. This ensures all points exist
+        in the same embedding space, making comparisons meaningful.
+        
         Args:
             trajectories: Dict mapping optimizer names to snapshot lists
             output_path: Path to save figure
             title: Plot title
         """
-        # Fit projection if not already done
-        if self.projector is None:
-            self.fit_projection(trajectories)
-        
-        # Project each trajectory
-        projected_trajectories = {}
-        for opt_name, snapshots in trajectories.items():
-            projected = self.project_trajectory(snapshots)
-            projected_trajectories[opt_name] = projected
+        # For t-SNE, we must project all data together
+        if self.method == 'tsne':
+            # Concatenate all snapshots from all trajectories
+            all_snapshots = []
+            trajectory_lengths = {}
+            
+            for opt_name, snapshots in trajectories.items():
+                trajectory_lengths[opt_name] = len(snapshots)
+                all_snapshots.extend(snapshots)
+            
+            # Project everything together in ONE consistent space
+            X_all = np.array(all_snapshots)
+            projected_all = self.projector.fit_transform(X_all)
+            
+            # Split back into individual trajectories
+            projected_trajectories = {}
+            offset = 0
+            for opt_name, length in trajectory_lengths.items():
+                projected_trajectories[opt_name] = projected_all[offset:offset+length]
+                offset += length
+        else:
+            # For PCA and random projection, fit once then transform each trajectory
+            if self.projector is None:
+                self.fit_projection(trajectories)
+            
+            # Project each trajectory separately (they share the same projection)
+            projected_trajectories = {}
+            for opt_name, snapshots in trajectories.items():
+                projected = self.project_trajectory(snapshots)
+                projected_trajectories[opt_name] = projected
         
         # Create plot
         plt.figure(figsize=(12, 8))

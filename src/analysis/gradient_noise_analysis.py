@@ -106,11 +106,28 @@ def estimate_gradient_noise_variance(
     
     # Compute variance across samples
     if method == 'empirical_variance':
-        # Var[g] = E[||g - E[g]||²]
+        # CORRECT FORMULA: σ² = E[||g||²] - ||E[g]||²
+        # This is the variance of the gradient norm, which measures stochasticity
+        # 
+        # Mathematical derivation:
+        # σ² = E[(g - E[g])ᵀ(g - E[g])]  [definition of variance]
+        #    = E[gᵀg - 2gᵀE[g] + E[g]ᵀE[g]]  [expand]
+        #    = E[gᵀg] - 2E[g]ᵀE[g] + E[g]ᵀE[g]  [linearity of expectation]
+        #    = E[||g||²] - ||E[g]||²  [simplify]
         mean_gradient = np.mean(gradient_array, axis=0)
-        deviations = gradient_array - mean_gradient[np.newaxis, :]
-        variances = np.sum(deviations ** 2, axis=1)
-        sigma_squared = np.mean(variances)
+        
+        # E[||g||²]: mean of squared norms
+        squared_norms = np.sum(gradient_array ** 2, axis=1)
+        mean_squared_norm = np.mean(squared_norms)
+        
+        # ||E[g]||²: squared norm of mean
+        mean_norm_squared = np.sum(mean_gradient ** 2)
+        
+        # σ² = E[||g||²] - ||E[g]||²
+        sigma_squared = mean_squared_norm - mean_norm_squared
+        
+        # Ensure non-negative (numerical errors can make this slightly negative)
+        sigma_squared = max(0.0, sigma_squared)
         
     elif method == 'full_batch_comparison':
         # Compute full-batch gradient (expensive but accurate)
@@ -122,9 +139,12 @@ def estimate_gradient_noise_variance(
             # Fall back to empirical variance
             logging.warning("Could not compute full-batch gradient, falling back to empirical variance")
             mean_gradient = np.mean(gradient_array, axis=0)
-            deviations = gradient_array - mean_gradient[np.newaxis, :]
-            variances = np.sum(deviations ** 2, axis=1)
-            sigma_squared = np.mean(variances)
+            
+            # CONSISTENT: Use same formula as empirical_variance method
+            squared_norms = np.sum(gradient_array ** 2, axis=1)
+            mean_squared_norm = np.mean(squared_norms)
+            mean_norm_squared = np.sum(mean_gradient ** 2)
+            sigma_squared = max(0.0, mean_squared_norm - mean_norm_squared)
         else:
             # E[||g_batch - g_full||²]
             deviations = gradient_array - full_batch_grad[np.newaxis, :]

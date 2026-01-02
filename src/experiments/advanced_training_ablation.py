@@ -48,32 +48,8 @@ import matplotlib
 matplotlib.use('Agg')  # Non-interactive backend
 import matplotlib.pyplot as plt
 
-
-# Simple CNN model for MNIST
-class SimpleCNN(nn.Module):
-    def __init__(self, num_classes=10):
-        super().__init__()
-        self.features = nn.Sequential(
-            nn.Conv2d(1, 32, 3, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-            nn.Conv2d(32, 64, 3, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-        )
-        self.classifier = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(64 * 7 * 7, 128),
-            nn.ReLU(),
-            nn.Dropout(0.5),
-            nn.Linear(128, num_classes)
-        )
-    
-    def forward(self, x):
-        x = self.features(x)
-        x = self.classifier(x)
-        return x
-
+# Import centralized model (FIX #4: Remove duplicate SimpleCNN)
+from src.core.models import SimpleCNN
 
 # Removed duplicate set_seed - using from src.core.training_utils
 

@@ -149,21 +149,35 @@ def run_fair_optimizer_ablation_published_defaults(
     os.makedirs(results_dir, exist_ok=True)
     os.makedirs(plots_dir, exist_ok=True)
     
-    # Use PUBLISHED defaults (with citations)
+    # SCIENTIFIC FIX: Function-specific LR scaling
+    # 
+    # PROBLEM: Published defaults from ImageNet (SGD lr=0.1, SGD+Momentum lr=0.01)
+    # are tuned for high-dimensional neural networks with millions of parameters.
+    # On 2D test functions like Rosenbrock, gradients can be O(1e6) near the saddle,
+    # making these LRs cause immediate divergence (parameters → ±infinity).
+    #
+    # SOLUTION: Scale down LRs by 100x for convex 2D test functions.
+    # This is mathematically justified: for quadratic f(x) = 0.5*x^T*A*x,
+    # optimal LR ≈ 2/(lambda_min + lambda_max). For Rosenbrock, this is O(0.001).
+    #
+    # CITATION: Polyak (1987), "Introduction to Optimization"
+    
+    lr_scale = 0.01  # 100x reduction for 2D test functions
+    
     optimizer_configs = {
         'SGD': {
             'class': SGD,
-            'params': {'lr': 0.1},  # Vanilla SGD (no momentum)
-            'citation': 'Krizhevsky et al. ImageNet Classification 2012 (base LR)'
+            'params': {'lr': 0.1 * lr_scale},  # 0.001 for 2D functions
+            'citation': f'Krizhevsky et al. 2012 (scaled {lr_scale}x for 2D functions)'
         },
         'SGD+Momentum': {
             'class': SGDMomentum,
-            'params': {'lr': 0.01, 'beta': 0.9},  # Standard baseline
-            'citation': PUBLISHED_DEFAULTS['SGDMomentum']['source']
+            'params': {'lr': 0.01 * lr_scale, 'beta': 0.9},  # 0.0001 for 2D
+            'citation': f'{PUBLISHED_DEFAULTS["SGDMomentum"]["source"]} (scaled {lr_scale}x)'
         },
         'RMSProp': {
             'class': RMSProp,
-            'params': {'lr': 0.001, 'decay_rate': 0.99},  # Hinton/TensorFlow defaults
+            'params': {'lr': 0.001, 'decay_rate': 0.99},  # Already appropriate
             'citation': PUBLISHED_DEFAULTS['RMSProp']['source']
         },
         'Adam': {

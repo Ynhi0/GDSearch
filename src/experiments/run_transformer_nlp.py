@@ -342,14 +342,15 @@ def run_single_imdb(optimizer_name: str, seed: int, lr: float, epochs: int, batc
     model = cast(Any, BertForSequenceClassification.from_pretrained('bert-base-uncased', num_labels=2))
     model.to(device=device)  # type: ignore[arg-type]
 
-    # Optimizer
-    name = optimizer_name.upper()
-    if name == 'ADAMW':
-        optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
-    elif name in ('SGD', 'SGD_MOMENTUM', 'SGD-MOMENTUM'):
-        optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9 if 'MOMENTUM' in name else 0.0)
-    else:
-        raise ValueError(f"Unsupported optimizer: {optimizer_name}")
+    # CRITICAL FIX: Use optimizer registry for consistency
+    # This ensures proper hyperparameter management across all experiments
+    from src.core.optimizer_registry import create_optimizer_from_config
+    
+    optimizer_config = {'name': optimizer_name, 'lr': lr}
+    try:
+        optimizer = create_optimizer_from_config(optimizer_config, model.parameters())
+    except Exception as e:
+        logging.warning(f\"Registry creation failed, using fallback: {e}\")\n        # Fallback for backward compatibility\n        name = optimizer_name.upper()\n        if name == 'ADAMW':\n            optimizer = torch.optim.AdamW(model.parameters(), lr=lr)\n        elif name in ('SGD', 'SGD_MOMENTUM', 'SGD-MOMENTUM'):\n            optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9 if 'MOMENTUM' in name else 0.0)\n        else:\n            raise ValueError(f\"Unsupported optimizer: {optimizer_name}\")
 
 
     history = []

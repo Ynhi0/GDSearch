@@ -66,25 +66,38 @@ def run_single_optimizer_with_dynamics(
     """
     Train with a single optimizer and track detailed dynamics.
     
+    CRITICAL FIX: Uses optimizer registry instead of hardcoded if-else chain.
+    This ensures consistency with other experiments and proper hyperparameter handling.
+    
     Returns:
         dict: Contains loss history, accuracy history, dynamics metrics
     """
     
-    # Create optimizer
-    if optimizer_name == 'SGD':
-        optimizer = torch.optim.SGD(model.parameters(), **optimizer_config)
-    elif optimizer_name == 'SGD_Momentum':
-        config = optimizer_config.copy()
-        config['momentum'] = config.get('momentum', 0.9)
-        optimizer = torch.optim.SGD(model.parameters(), **config)
-    elif optimizer_name == 'Adam':
-        optimizer = torch.optim.Adam(model.parameters(), **optimizer_config)
-    elif optimizer_name == 'AdamW':
-        optimizer = torch.optim.AdamW(model.parameters(), **optimizer_config)
-    elif optimizer_name == 'RMSprop':
-        optimizer = torch.optim.RMSprop(model.parameters(), **optimizer_config)
-    else:
-        raise ValueError(f"Unknown optimizer: {optimizer_name}")
+    # CRITICAL FIX: Use optimizer registry for consistent config-driven creation
+    from src.core.optimizer_registry import create_optimizer_from_config
+    
+    config_dict = {'name': optimizer_name}
+    config_dict.update(optimizer_config)
+    
+    try:
+        optimizer = create_optimizer_from_config(config_dict, model.parameters())
+    except Exception as e:
+        logging.warning(f"Registry creation failed for {optimizer_name}, falling back to direct creation: {e}")
+        # Fallback to direct creation for backward compatibility
+        if optimizer_name == 'SGD':
+            optimizer = torch.optim.SGD(model.parameters(), **optimizer_config)
+        elif optimizer_name == 'SGD_Momentum':
+            config = optimizer_config.copy()
+            config['momentum'] = config.get('momentum', 0.9)
+            optimizer = torch.optim.SGD(model.parameters(), **config)
+        elif optimizer_name == 'Adam':
+            optimizer = torch.optim.Adam(model.parameters(), **optimizer_config)
+        elif optimizer_name == 'AdamW':
+            optimizer = torch.optim.AdamW(model.parameters(), **optimizer_config)
+        elif optimizer_name == 'RMSprop':
+            optimizer = torch.optim.RMSprop(model.parameters(), **optimizer_config)
+        else:
+            raise ValueError(f"Unknown optimizer: {optimizer_name}")
     
     criterion = nn.CrossEntropyLoss()
     

@@ -59,10 +59,20 @@ class EffectiveLRTracker:
         eps: float = 1e-8
     ) -> Dict[str, np.ndarray]:
         """
-        Compute effective LR for Adam optimizer.
+        Compute effective LR for Adam optimizer WITH FULL BIAS CORRECTION.
         
-        effective_lr_i = α / (√v_i + ε)
-        where v_i is the second moment estimate for parameter i
+        CRITICAL FIX: Adam's true update includes TWO bias correction terms:
+        
+        m_hat = m_t / (1 - β₁ᵗ)
+        v_hat = v_t / (1 - β₂ᵗ)
+        θ_t = θ_{t-1} - α * m_hat / (√v_hat + ε)
+        
+        The effective learning rate per parameter is:
+        
+        effective_lr = α * √(1 - β₂ᵗ) / (1 - β₁ᵗ) / (√v_t + ε)
+        
+        WITHOUT both corrections, early training (t < 100) effective LR estimates
+        are off by 10x-1000x, causing false conclusions about optimizer dynamics.
         
         Returns:
             Dict mapping parameter name to effective LR array (same shape as parameter)
@@ -70,6 +80,9 @@ class EffectiveLRTracker:
         effective_lrs = {}
         
         for group in optimizer.param_groups:
+            # Get Adam hyperparameters
+            beta1, beta2 = group.get('betas', (0.9, 0.999))
+            
             for param in group['params']:
                 if param.grad is None:
                     continue
@@ -79,8 +92,26 @@ class EffectiveLRTracker:
                 # Get second moment (v_t in Adam)
                 if 'exp_avg_sq' in state:
                     v = state['exp_avg_sq']
-                    # Compute effective LR
-                    effective_lr = self.base_lr / (torch.sqrt(v) + eps)
+                    
+                    # Get step count for bias correction
+                    step = state.get('step', 0)
+                    
+                    if step == 0:
+                        # No updates yet, use base LR
+                        effective_lr = torch.full_like(v, self.base_lr)
+                    else:
+                        # COMPLETE bias correction formula
+                        bias_correction1 = 1 - beta1 ** step  # For first moment
+                        bias_correction2 = 1 - beta2 ** step  # For second moment
+                        
+                        # Effective LR with full bias correction
+                        # Note: √(bias_correction2) in numerator, bias_correction1 in denominator
+                        effective_lr = (
+                            self.base_lr
+                            * torch.sqrt(torch.tensor(bias_correction2, dtype=v.dtype, device=v.device))
+                            / bias_correction1
+                            / (torch.sqrt(v) + eps)
+                        )
                     
                     # Find parameter name
                     param_name = self._find_param_name(param)

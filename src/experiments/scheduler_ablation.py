@@ -43,12 +43,16 @@ def create_scheduler_configs(
     """
     configs = []
     
+    # CRITICAL FIX: Dynamic T_max to match epochs - prevents unwanted LR restart
+    # If T_max < epochs, CosineAnnealing will restart and increase LR at the end
+    epochs = base_config.get('epochs', 15)
+    
     scheduler_params = {
         'None': {},
-        'StepLR': {'step_size': 5, 'gamma': 0.5},
+        'StepLR': {'step_size': max(1, epochs // 3), 'gamma': 0.5},
         'ExponentialLR': {'gamma': 0.95},
-        'CosineAnnealingLR': {'T_max': 10, 'eta_min': 1e-6},
-        'ReduceLROnPlateau': {'mode': 'min', 'factor': 0.5, 'patience': 2}
+        'CosineAnnealingLR': {'T_max': epochs, 'eta_min': 1e-6},  # Match training length
+        'ReduceLROnPlateau': {'mode': 'min', 'factor': 0.5, 'patience': max(1, epochs // 10)}
     }
     
     for optimizer in optimizers:

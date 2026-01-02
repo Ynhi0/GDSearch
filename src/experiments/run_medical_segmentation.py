@@ -45,7 +45,12 @@ def _try_import_monai():
         raise RuntimeError("MONAI is required for this script. Install via `pip install monai[all]`." ) from e
 
 
-def medical_image_segmentation(data_dicts: List[Dict[str, str]] | None = None, epochs: int = 5, batch_size: int = 2):
+def medical_image_segmentation(
+    data_dicts: List[Dict[str, str]] | None = None,
+    epochs: int = 5,
+    batch_size: int = 2,
+    optimizer_config: Dict | None = None
+):
     UNet, Compose, LoadImaged, EnsureChannelFirstd, ScaleIntensityd, ToTensord, CacheDataset, DataLoader, DiceLoss, DiceMetric = _try_import_monai()
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -80,7 +85,15 @@ def medical_image_segmentation(data_dicts: List[Dict[str, str]] | None = None, e
     # Model & loss/metrics
     model = UNet(spatial_dims=3, in_channels=1, out_channels=1, channels=(16, 32, 64, 128, 256),
                  strides=(2, 2, 2, 2), num_res_units=2).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+    
+    # CRITICAL FIX: Use config-driven optimizer creation instead of hardcoded Adam
+    # This allows proper comparison across SGD, Adam, AdamW, etc.
+    if optimizer_config is None:
+        optimizer_config = {'name': 'Adam', 'lr': 1e-4}
+    
+    from src.core.optimizer_registry import create_optimizer_from_config
+    optimizer = create_optimizer_from_config(optimizer_config, model.parameters())
+    
     loss_function = DiceLoss(sigmoid=True)
     dice_metric = DiceMetric(include_background=False, reduction="mean")
 

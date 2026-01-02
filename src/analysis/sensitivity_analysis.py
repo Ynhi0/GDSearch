@@ -318,7 +318,211 @@ def _interpret_robustness(classification: str) -> str:
     return interpretations.get(classification, "Unknown classification")
 
 
-def main():
+def run_pairwise_sensitivity_experiment(
+    base_config: Dict,
+    param_pair: Tuple[str, str],
+    param1_values: List[float],
+    param2_values: List[float],
+    output_dir: str = 'results/sensitivity_pairwise'
+) -> pd.DataFrame:
+    """
+    Run 2D sensitivity analysis for parameter interaction.
+    
+    CRITICAL FIX: Tests parameter pairs jointly to capture interactions.
+    Example: High LR may be unstable alone, but stable with large batch size
+    due to the Linear Scaling Rule. One-at-a-time analysis misses this.
+    
+    Args:
+        base_config: Base experiment configuration
+        param_pair: Tuple of parameter names ('lr', 'batch_size')
+        param1_values: Values for first parameter
+        param2_values: Values for second parameter
+        output_dir: Directory to save results
+    
+    Returns:
+        DataFrame with grid results (param1, param2, test_accuracy, ...)
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    
+    param1_name, param2_name = param_pair
+    results = []
+    
+    total_experiments = len(param1_values) * len(param2_values)
+    logging.info(f"\n{'='*60}")
+    logging.info(f"Pairwise Sensitivity: {param1_name} x {param2_name}")
+    logging.info(f"Total experiments: {total_experiments}")
+    logging.info(f"{'='*60}")
+    
+    for i, val1 in enumerate(param1_values):
+        for j, val2 in enumerate(param2_values):
+            exp_num = i * len(param2_values) + j + 1
+            logging.info(f"\n[{exp_num}/{total_experiments}] {param1_name}={val1:.6f}, {param2_name}={val2}")
+            
+            # Create config for this run
+            config = base_config.copy()
+            config[param1_name] = val1
+            config[param2_name] = val2
+            
+            # Run experiment
+            try:
+                df = train_and_evaluate(config)
+                
+                # Extract final metrics
+                eval_df = df[df['phase'] == 'eval']
+                if not eval_df.empty:
+                    series_acc = eval_df['test_accuracy']
+                    series_loss = eval_df['test_loss']
+                    iloc_acc = getattr(series_acc, 'iloc', None)
+                    iloc_loss = getattr(series_loss, 'iloc', None)
+                    if iloc_acc is not None:
+                        final_test_acc = iloc_acc[-1]
+                    else:
+                        final_test_acc = series_acc[-1]
+                    if iloc_loss is not None:
+                        final_test_loss = iloc_loss[-1]
+                    else:
+                        final_test_loss = series_loss[-1]
+                    
+                    results.append({
+                        param1_name: val1,
+                        param2_name: val2,
+                        'test_accuracy': final_test_acc,
+                        'test_loss': final_test_loss,
+                        'status': 'success'
+                    })
+                    
+                    # Save individual run
+                    fname = result_filename(config).replace('.csv', f'_pairwise_{param1_name}_{i}_{param2_name}_{j}.csv')
+                    out_path = os.path.join(output_dir, fname)
+                    df.to_csv(out_path, index=False)
+                    logging.info(f"  Test acc: {final_test_acc:.4f}")
+                    
+            except Exception as e:
+                logging.error(f"  Error: {e}")
+                results.append({
+                    param1_name: val1,
+                    param2_name: val2,
+                    'test_accuracy': float('nan'),
+                    'test_loss': float('nan'),
+                    'status': 'failed',
+                    'error': str(e)
+                })
+    
+    results_df = pd.DataFrame(results)
+    
+    # Save aggregated results
+    summary_path = os.path.join(output_dir, f'pairwise_{param1_name}_{param2_name}_summary.csv')
+    results_df.to_csv(summary_path, index=False)
+    logging.info(f"\nSaved pairwise summary: {summary_path}")
+    
+    return results_df
+
+
+def plot_pairwise_sensitivity(
+    results_df: pd.DataFrame,
+    param_pair: Tuple[str, str],
+    save_path: Optional[str] = None
+):
+    """
+    Create heatmap for pairwise sensitivity analysis.
+    
+    Args:
+        results_df: DataFrame from run_pairwise_sensitivity_experiment
+        param_pair: Tuple of parameter names
+        save_path: Optional path to save plot
+    """
+    param1_name, param2_name = param_pair
+    success_df = results_df[results_df['status'] == 'success'].copy()
+    
+    if success_df.empty:
+        logging.warning("No successful runs to plot")
+        return
+    
+    # Pivot for heatmap
+    pivot_acc = success_df.pivot(index=param2_name, columns=param1_name, values='test_accuracy')
+    
+    fig, ax = plt.subplots(figsize=(10, 8))
+    
+    # Create heatmap
+    import seaborn as sns
+    sns.heatmap(pivot_acc, annot=True, fmt='.4f', cmap='viridis', 
+                ax=ax, cbar_kws={'label': 'Test Accuracy'})
+    
+    ax.set_title(f'Pairwise Sensitivity: {param1_name} x {param2_name}', 
+                 fontsize=14, fontweight='bold')
+    ax.set_xlabel(param1_name, fontsize=12)
+    ax.set_ylabel(param2_name, fontsize=12)
+    
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
+        logging.info(f"Saved pairwise plot: {save_path}")
+    else:
+        plt.show()
+    
+    plt.close()
+
+
+def analyze_parameter_interaction(results_df: pd.DataFrame, param_pair: Tuple[str, str]) -> Dict:
+    """
+    Quantify interaction strength between two parameters.
+    
+    Uses 2-way ANOVA to detect if parameters interact (non-additive effects).
+    
+    Args:
+        results_df: DataFrame from pairwise sensitivity
+        param_pair: Tuple of parameter names
+        
+    Returns:
+        Dict with interaction metrics
+    """
+    param1_name, param2_name = param_pair
+    success_df = results_df[results_df['status'] == 'success'].copy()
+    
+    if len(success_df) < 4:
+        return {'status': 'insufficient_data'}
+    
+    # Compute main effects and interaction effect (simplified)
+    # For rigorous analysis, use statsmodels ANOVA, but this is a heuristic
+    
+    # Range of performance variation along each axis
+    grouped1 = success_df.groupby(param1_name)['test_accuracy'].agg(['mean', 'std'])
+    grouped2 = success_df.groupby(param2_name)['test_accuracy'].agg(['mean', 'std'])
+    
+    main_effect1 = grouped1['mean'].max() - grouped1['mean'].min()
+    main_effect2 = grouped2['mean'].max() - grouped2['mean'].min()
+    
+    # Total variance
+    total_variance = success_df['test_accuracy'].std()
+    
+    # Heuristic: Strong interaction if total variance >> individual effects
+    interaction_strength = total_variance / (main_effect1 + main_effect2 + 1e-8)
+    
+    if interaction_strength > 1.5:
+        classification = "STRONG INTERACTION"
+        interpretation = f"{param1_name} and {param2_name} must be tuned jointly. They interact non-additively."
+    elif interaction_strength > 1.0:
+        classification = "MODERATE INTERACTION"
+        interpretation = f"Some interaction between {param1_name} and {param2_name}. Consider joint tuning."
+    else:
+        classification = "WEAK INTERACTION"
+        interpretation = f"{param1_name} and {param2_name} can be tuned independently."
+    
+    return {
+        'status': 'success',
+        'param1': param1_name,
+        'param2': param2_name,
+        'main_effect_param1': main_effect1,
+        'main_effect_param2': main_effect2,
+        'total_variance': total_variance,
+        'interaction_strength': interaction_strength,
+        'classification': classification,
+        'interpretation': interpretation
+    }
+
+
+def _interpret_robustness(classification: str) -> str:
     """
     Example: Run sensitivity analysis for AdamW learning rate.
     """

@@ -652,14 +652,39 @@ class SelfHealingTrainer:
                         logging.error(f"OOM recovery failed: batch size {new_size} < minimum {self.min_batch_size}")
                         raise
                     
-                    logging.warning(f"OOM detected! Reducing batch size: {old_size} → {new_size} (retry {retries}/{self.max_retries})")
+                    logging.warning(f"OOM detected! Switching to gradient accumulation: {old_size} → {new_size} per step (retry {retries}/{self.max_retries})")
                     
-                    # Slice batch
-                    current_inputs = inputs[:new_size]
-                    current_targets = targets[:new_size]
+                    # DATA INTEGRITY FIX:
+                    # Instead of dropping data (inputs[:new_size]), we process ALL data
+                    # in smaller chunks via gradient accumulation.
+                    # This ensures the model sees all samples, preserving metric validity.
                     
-                    # Clear gradients
+                    num_chunks = (old_size + new_size - 1) // new_size
+                    accumulated_loss = 0.0
+                    
                     self.optimizer.zero_grad(set_to_none=True)
+                    
+                    for chunk_idx in range(num_chunks):
+                        start_idx = chunk_idx * new_size
+                        end_idx = min(start_idx + new_size, old_size)
+                        
+                        chunk_inputs = inputs[start_idx:end_idx].to(self.device)
+                        chunk_targets = targets[start_idx:end_idx].to(self.device)
+                        
+                        outputs = self.model(chunk_inputs)
+                        loss = self.criterion(outputs, chunk_targets)
+                        (loss / num_chunks).backward()  # Scale loss for accumulation
+                        
+                        accumulated_loss += loss.item()
+                        
+                        del chunk_inputs, chunk_targets, outputs, loss
+                    
+                    # Update after processing all chunks
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                    self.optimizer.step()
+                    
+                    self.current_batch_size = old_size  # Full batch processed
+                    return accumulated_loss / num_chunks, True
                 else:
                     raise
         
@@ -1055,18 +1080,28 @@ class HessianAnalyzer:
             trace_estimate += (z @ Hz).item()
         trace_estimate /= n_samples
         
-        # Rough estimate: assume eigenvalues are roughly uniformly distributed
-        # lambda_min ≈ (2 * trace - lambda_max * n) / (n - 1) for well-conditioned
-        # This is a simplification for efficiency
-        lambda_min = max(1e-6, trace_estimate / n_params - abs(lambda_max) * 0.1)
+        # SCIENTIFIC INTEGRITY WARNING:
+        # Computing lambda_min (minimum eigenvalue) requires inverse iteration or
+        # Lanczos algorithm (scipy.sparse.linalg.eigsh). The previous approximation
+        # formula was INVALID - it fabricated values assuming uniform eigenvalue
+        # distribution, which is NEVER true for neural networks.
+        #
+        # CORRECT APPROACH:
+        # 1. Use Lanczos iteration: scipy.sparse.linalg.eigsh(A, k=1, which='SM')
+        # 2. OR report only lambda_max ("Top-1 Curvature") which is actually measured
+        #
+        # For now, we report lambda_max only and set lambda_min/condition_number to None
+        # to prevent propagation of fabricated data.
         
-        condition_number = abs(lambda_max) / max(abs(lambda_min), 1e-8)
+        lambda_min = None  # Requires Lanczos iteration - not implemented
+        condition_number = None  # Cannot compute without valid lambda_min
         
         return {
             'lambda_max': lambda_max,
-            'lambda_min': lambda_min,
-            'condition_number': condition_number,
-            'trace_estimate': trace_estimate
+            'lambda_min': lambda_min,  # None - requires proper eigenvalue solver
+            'condition_number': condition_number,  # None - invalid without lambda_min
+            'trace_estimate': trace_estimate,
+            'warning': 'lambda_min and condition_number require Lanczos iteration (not implemented). Use lambda_max (Top-1 Curvature) only.'
         }
     
     def compute_sharpness(

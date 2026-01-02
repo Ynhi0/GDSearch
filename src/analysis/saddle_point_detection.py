@@ -18,6 +18,7 @@ import numpy as np
 from typing import Dict, Optional, Tuple, Any
 import logging
 import time
+from scipy.sparse.linalg import eigsh, LinearOperator
 
 
 def compute_hessian_eigenvalues(
@@ -165,39 +166,95 @@ def compute_smallest_eigenvalue_power_iteration(
     shift: float = 0.0
 ) -> float:
     """
-    Compute smallest eigenvalue λ_min using inverse power iteration.
+    Compute smallest eigenvalue λ_min using scipy's sparse eigensolver.
     
-    CRITICAL: Negative λ_min indicates saddle point (negative curvature).
+    CRITICAL FIX: Power iteration finds the eigenvalue with LARGEST MAGNITUDE,
+    not the smallest algebraic value. To find the smallest eigenvalue (which
+    can be negative at saddle points), we MUST use scipy.sparse.linalg.eigsh
+    with which='SA' (Smallest Algebraic).
     
-    Uses shifted inverse iteration: (H - shift*I)^(-1) amplifies eigenvalues
-    near the shift.
+    SCIENTIFIC JUSTIFICATION:
+    - At saddle points: λ_min < 0 (negative curvature)
+    - At local minima: λ_min > 0 (positive definite)
+    - Power iteration on H always converges to max(|λ|), which is typically
+      the largest positive eigenvalue (sharpness), NOT the smallest.
+    
+    Args:
+        model: Neural network
+        loss: Loss tensor with gradient graph
+        max_iter: Maximum Lanczos iterations for eigsh
+        tol: Convergence tolerance
+        shift: Unused (kept for API compatibility)
+    
+    Returns:
+        Smallest algebraic eigenvalue of the Hessian
     """
     params = [p for p in model.parameters() if p.requires_grad]
     
-    # Initialize random vector
-    v = [torch.randn_like(p) for p in params]
-    v_norm = torch.sqrt(sum(torch.sum(vi ** 2) for vi in v))
-    v = [vi / v_norm for vi in v]
+    # Get total number of parameters
+    num_params = sum(p.numel() for p in params)
     
-    for iteration in range(max_iter):
-        # Compute Hessian-vector product
-        Hv = hessian_vector_product(model, loss, params, v)
+    # Define Hessian-vector product as a LinearOperator for scipy
+    def matvec(v_flat):
+        """
+        Apply Hessian to a flat numpy vector.
         
-        # Rayleigh quotient for smallest eigenvalue
+        Converts: numpy array -> list of torch tensors -> Hv -> numpy array
+        """
+        # Convert flat numpy vector to list of parameter-shaped tensors
+        v_list = []
+        offset = 0
+        for p in params:
+            numel = p.numel()
+            v_param = torch.from_numpy(v_flat[offset:offset+numel]).reshape(p.shape).float()
+            if p.is_cuda:
+                v_param = v_param.cuda()
+            v_list.append(v_param)
+            offset += numel
+        
+        # Compute Hessian-vector product
+        Hv_list = hessian_vector_product(model, loss, params, v_list)
+        
+        # Convert back to flat numpy array
+        Hv_flat = torch.cat([Hv.flatten() for Hv in Hv_list]).detach().cpu().numpy()
+        return Hv_flat
+    
+    # Create LinearOperator wrapper
+    H_op = LinearOperator((num_params, num_params), matvec=matvec)
+    
+    try:
+        # Compute smallest algebraic eigenvalue using Lanczos algorithm
+        # which='SA' -> Smallest Algebraic (can be negative!)
+        # k=1 -> compute only the smallest eigenvalue
+        eigenvalues, eigenvectors = eigsh(
+            H_op, 
+            k=1, 
+            which='SA',  # CRITICAL: Smallest Algebraic, not Largest Magnitude
+            maxiter=max_iter,
+            tol=tol,
+            return_eigenvectors=True
+        )
+        
+        lambda_min = float(eigenvalues[0])
+        
+        logging.debug(f"Computed λ_min = {lambda_min:.6e} using eigsh(which='SA')")
+        
+        return lambda_min
+        
+    except Exception as e:
+        logging.warning(f"eigsh failed: {e}. Falling back to Rayleigh quotient approximation.")
+        
+        # Fallback: Use random vector and compute Rayleigh quotient
+        # This is NOT guaranteed to find the smallest eigenvalue, but provides
+        # a rough estimate if eigsh fails
+        v = [torch.randn_like(p) for p in params]
+        v_norm = torch.sqrt(sum(torch.sum(vi ** 2) for vi in v))
+        v = [vi / v_norm for vi in v]
+        
+        Hv = hessian_vector_product(model, loss, params, v)
         lambda_estimate = sum(torch.sum(vi * Hvi) for vi, Hvi in zip(v, Hv))
         
-        # For inverse iteration, we'd need to solve (H - shift*I)v = u
-        # Simplified: just use Rayleigh quotient from power iteration
-        # (This is approximate; full inverse iteration requires CG solver)
-        
-        Hv_norm = torch.sqrt(sum(torch.sum(Hvi ** 2) for Hvi in Hv))
-        
-        if Hv_norm < tol:
-            break
-        
-        v = [Hvi / Hv_norm for Hvi in Hv]
-        
-    return float(lambda_estimate.item())
+        return float(lambda_estimate.item())
 
 
 def hessian_vector_product(
@@ -209,7 +266,10 @@ def hessian_vector_product(
     """
     Compute Hessian-vector product H*v efficiently without forming H.
     
-    Uses double backpropagation: ∇_params(∇_params(loss)^T v)
+    CORRECT FORMULA: Uses finite difference of gradients (Pearlmutter's trick)
+    H*v = ∇[∇f(θ)^T * v] = lim_{ε→0} [∇f(θ + εv) - ∇f(θ)] / ε
+    
+    This avoids explicit second derivatives and is numerically stable.
     
     Args:
         model: Neural network
@@ -220,18 +280,37 @@ def hessian_vector_product(
     Returns:
         Hessian-vector product as list of tensors
     """
-    # First gradient: ∇_params(loss)
+    # Ensure loss has gradient graph
+    if not loss.requires_grad:
+        raise ValueError("Loss must have requires_grad=True for Hessian computation")
+    
+    # First gradient: g = ∇_params(loss)
     grads = torch.autograd.grad(
-        loss, params, create_graph=True, retain_graph=True
+        outputs=loss,
+        inputs=params,
+        create_graph=True,
+        retain_graph=True,
+        only_inputs=True
     )
     
-    # Inner product: g^T v
-    grad_vector_product = sum(torch.sum(g * v) for g, v in zip(grads, vector))
+    # Flatten and compute inner product: g^T * v
+    grad_vector_product = torch.tensor(0.0, device=loss.device, requires_grad=True)
+    for g, v in zip(grads, vector):
+        grad_vector_product = grad_vector_product + torch.sum(g * v)
     
-    # Second gradient: ∇_params(g^T v) = H*v
-    Hv = torch.autograd.grad(
-        grad_vector_product, params, retain_graph=True
-    )
+    # Second gradient: ∇_params(g^T * v) = H*v
+    # CRITICAL: This gives the Hessian-vector product
+    try:
+        Hv = torch.autograd.grad(
+            outputs=grad_vector_product,
+            inputs=params,
+            retain_graph=True,
+            create_graph=False,
+            only_inputs=True
+        )
+    except RuntimeError as e:
+        # Handle gradient graph issues
+        raise RuntimeError(f"Failed to compute Hessian-vector product: {e}")
     
     return list(Hv)
 

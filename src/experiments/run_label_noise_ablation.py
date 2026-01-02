@@ -211,6 +211,11 @@ def train_with_noisy_labels(
     """
     Train model with noisy labels and track performance.
     
+    CRITICAL FIX: Tracks PEAK validation accuracy instead of final accuracy
+    to properly measure robustness to label noise. Models will overfit to
+    noise if trained too long, so peak validation performance is the correct
+    metric for comparing optimizer robustness.
+    
     Args:
         model: Neural network model
         optimizer: Optimizer instance
@@ -230,6 +235,9 @@ def train_with_noisy_labels(
     criterion = nn.CrossEntropyLoss()
     
     history = []
+    best_val_acc = 0.0
+    best_val_epoch = 0
+    best_model_state = None
     
     for epoch in range(config.epochs):
         # Training phase
@@ -275,6 +283,15 @@ def train_with_noisy_labels(
         val_loss /= val_total
         val_acc = 100.0 * val_correct / val_total
         
+        # CRITICAL FIX: Track best validation accuracy (early stopping criterion)
+        # This is crucial for label noise robustness - models overfit to noise
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            best_val_epoch = epoch
+            # Save best model state for final evaluation
+            import copy
+            best_model_state = copy.deepcopy(model.state_dict())
+        
         # REPRODUCIBILITY: Only track validation during training, not test
         history.append({
             'epoch': epoch,
@@ -284,7 +301,9 @@ def train_with_noisy_labels(
             'train_loss': train_loss,
             'train_acc': train_acc,
             'val_loss': val_loss,
-            'val_acc': val_acc
+            'val_acc': val_acc,
+            'best_val_acc': best_val_acc,
+            'best_val_epoch': best_val_epoch
         })
         
         if (epoch + 1) % 10 == 0:
@@ -293,6 +312,12 @@ def train_with_noisy_labels(
                 f"Epoch {epoch+1}/{config.epochs}: "
                 f"Train Acc={train_acc:.2f}% Val Acc={val_acc:.2f}%"
             )
+    
+    # CRITICAL FIX: Restore best model before final test evaluation
+    # This gives the fairest comparison of optimizer robustness to noise
+    if best_model_state is not None:
+        model.load_state_dict(best_model_state)
+        logger.info(f"[{optimizer_name}] Restored best model from epoch {best_val_epoch} (val_acc={best_val_acc:.2f}%)")
     
     # Final test evaluation (only after training completes - use test set only for final evaluation)
     logger.info(f"[{optimizer_name}] Evaluating final performance on test set...")
@@ -315,13 +340,16 @@ def train_with_noisy_labels(
     test_loss /= test_total
     test_acc = 100.0 * test_correct / test_total
     logger.info(f"[{optimizer_name}] Final Test Performance: Loss={test_loss:.4f}, Acc={test_acc:.2f}%")
+    logger.info(f"[{optimizer_name}] Best Val Acc: {best_val_acc:.2f}% at epoch {best_val_epoch}")
     
-    # Add final test metrics to all history entries for consistency
-    # AUDIT FIX: Use 'test_acc' and 'test_loss' column names for summary compatibility
+    # CRITICAL FIX: Add both peak and final metrics for complete analysis
+    # Peak metrics show robustness; final metrics show overfitting tendency
     if history:
-        # Update last epoch with actual test metrics
+        # Update last epoch with actual test metrics from BEST model
         history[-1]['test_loss'] = test_loss
-        history[-1]['test_acc'] = test_acc
+        history[-1]['test_acc'] = test_acc  # This is from best checkpoint
+        history[-1]['peak_val_acc'] = best_val_acc
+        history[-1]['peak_val_epoch'] = best_val_epoch
         # Also keep final_ prefix for backward compatibility
         history[-1]['final_test_loss'] = test_loss
         history[-1]['final_test_acc'] = test_acc
@@ -402,39 +430,49 @@ def run_label_noise_ablation(
                 else:
                     raise ValueError(f"Unsupported model: {model_name}")
                 
-                # Create optimizer
-                if optimizer_name.lower() == 'sgd':
-                    optimizer = torch.optim.SGD(
-                        model.parameters(),
-                        lr=opt_config.get('lr', 0.01),
-                        momentum=opt_config.get('momentum', 0.0),
-                        weight_decay=opt_config.get('weight_decay', 0.0)
-                    )
-                elif optimizer_name.lower() == 'adam':
-                    optimizer = torch.optim.Adam(
-                        model.parameters(),
-                        lr=opt_config.get('lr', 0.001),
-                        betas=(opt_config.get('beta1', 0.9), opt_config.get('beta2', 0.999)),
-                        weight_decay=opt_config.get('weight_decay', 0.0)
-                    )
-                elif optimizer_name.lower() == 'adamw':
-                    optimizer = torch.optim.AdamW(
-                        model.parameters(),
-                        lr=opt_config.get('lr', 0.001),
-                        betas=(opt_config.get('beta1', 0.9), opt_config.get('beta2', 0.999)),
-                        weight_decay=opt_config.get('weight_decay', 0.01)
-                    )
-                elif optimizer_name.lower() == 'sgd_momentum':
-                    optimizer = torch.optim.SGD(
-                        model.parameters(),
-                        lr=opt_config.get('lr', 0.01),
-                        momentum=opt_config.get('momentum', 0.9),
-                        weight_decay=opt_config.get('weight_decay', 0.0)
-                    )
-                else:
-                    # Generic fallback - assumes optimizer class in config
-                    optimizer_class = opt_config.pop('class')
-                    optimizer = optimizer_class(model.parameters(), **opt_config)
+                # CRITICAL FIX: Use optimizer registry for consistency
+                from src.core.optimizer_registry import create_optimizer_from_config
+                
+                optimizer_config_dict = {'name': optimizer_name}
+                optimizer_config_dict.update(opt_config)
+                
+                try:
+                    optimizer = create_optimizer_from_config(optimizer_config_dict, model.parameters())
+                except Exception as e:
+                    logger.warning(f"Registry creation failed, using fallback: {e}")
+                    # Fallback to direct creation
+                    if optimizer_name.lower() == 'sgd':
+                        optimizer = torch.optim.SGD(
+                            model.parameters(),
+                            lr=opt_config.get('lr', 0.01),
+                            momentum=opt_config.get('momentum', 0.0),
+                            weight_decay=opt_config.get('weight_decay', 0.0)
+                        )
+                    elif optimizer_name.lower() == 'adam':
+                        optimizer = torch.optim.Adam(
+                            model.parameters(),
+                            lr=opt_config.get('lr', 0.001),
+                            betas=(opt_config.get('beta1', 0.9), opt_config.get('beta2', 0.999)),
+                            weight_decay=opt_config.get('weight_decay', 0.0)
+                        )
+                    elif optimizer_name.lower() == 'adamw':
+                        optimizer = torch.optim.AdamW(
+                            model.parameters(),
+                            lr=opt_config.get('lr', 0.001),
+                            betas=(opt_config.get('beta1', 0.9), opt_config.get('beta2', 0.999)),
+                            weight_decay=opt_config.get('weight_decay', 0.01)
+                        )
+                    elif optimizer_name.lower() == 'sgd_momentum':
+                        optimizer = torch.optim.SGD(
+                            model.parameters(),
+                            lr=opt_config.get('lr', 0.01),
+                            momentum=opt_config.get('momentum', 0.9),
+                            weight_decay=opt_config.get('weight_decay', 0.0)
+                        )
+                    else:
+                        # Generic fallback - assumes optimizer class in config
+                        optimizer_class = opt_config.pop('class')
+                        optimizer = optimizer_class(model.parameters(), **opt_config)
                 
                 # Train and collect results
                 results_df = train_with_noisy_labels(

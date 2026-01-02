@@ -71,83 +71,64 @@ except ImportError:
     from src.visualization.ablation_plots import generate_all_ablation_plots
 
 from src.core.training_utils import set_seed
+from src.core.models import SimpleCNN  # Import from central models.py
 
 
 # Removed duplicate set_seed - using from src.core.training_utils
+# Removed duplicate SimpleCNN - using from src.core.models
 
 
-class SimpleCNN(nn.Module):
-    """Simple CNN for testing initialization strategies"""
-    def __init__(self, num_classes=10, activation='relu'):
-        super().__init__()
-        self.activation_name = activation
-        
-        # Select activation function
-        if activation == 'relu':
-            self.act = nn.ReLU()
-        elif activation == 'tanh':
-            self.act = nn.Tanh()
-        elif activation == 'sigmoid':
-            self.act = nn.Sigmoid()
-        elif activation == 'gelu':
-            self.act = nn.GELU()
-        else:
-            raise ValueError(f"Unknown activation: {activation}")
-        
-        self.conv1 = nn.Conv2d(1, 32, 3, padding=1)
-        self.bn1 = nn.BatchNorm2d(32)
-        self.conv2 = nn.Conv2d(32, 64, 3, padding=1)
-        self.bn2 = nn.BatchNorm2d(64)
-        self.pool = nn.MaxPool2d(2)
-        self.fc1 = nn.Linear(64 * 7 * 7, 128)
-        self.fc2 = nn.Linear(128, num_classes)
-        
-        # Store layers that will be initialized
-        self.init_layers = [self.conv1, self.conv2, self.fc1, self.fc2]
+# SCIENTIFIC FIX: Centralized model definitions
+# Previously, this file defined its own SimpleCNN class, creating two problems:
+# 1. CONSISTENCY: If we fix initialization bugs in src.core.models.py,
+#    this ablation script wouldn't see the fix (running on a different model).
+# 2. VALIDITY: "Ablation" means removing ONE variable from the MAIN experiment.
+#    Using a different model class invalidates the ablation claim.
+#
+# SOLUTION: Import SimpleCNN from src.core.models.py to ensure all experiments
+# use the same model architecture.
+
+
+def apply_custom_initialization(model: nn.Module, init_method: str):
+    """Apply specified initialization to model layers.
     
-    def forward(self, x):
-        x = self.pool(self.act(self.bn1(self.conv1(x))))
-        x = self.pool(self.act(self.bn2(self.conv2(x))))
-        x = x.view(x.size(0), -1)
-        x = self.act(self.fc1(x))
-        x = self.fc2(x)
-        return x
-    
-    def apply_initialization(self, init_method: str):
-        """Apply specified initialization to all layers"""
-        for layer in self.init_layers:
+    This function replaces the previous SimpleCNN.apply_initialization() method.
+    It works with any model by targeting Conv2d, Linear layers.
+    """
+    for module in model.modules():
+        if isinstance(module, (nn.Conv2d, nn.Linear)):
             if init_method == 'zero':
                 # Pathological case - all zeros
-                if hasattr(layer, 'weight'):
-                    nn.init.constant_(layer.weight, 0.0)
-                if hasattr(layer, 'bias') and layer.bias is not None:
-                    nn.init.constant_(layer.bias, 0.0)
+                if hasattr(module, 'weight'):
+                    nn.init.constant_(module.weight, 0.0)
+                if hasattr(module, 'bias') and module.bias is not None:
+                    nn.init.constant_(module.bias, 0.0)
             
             elif init_method == 'uniform_small':
                 # Uniform in [-0.1, 0.1]
-                if hasattr(layer, 'weight'):
-                    nn.init.uniform_(layer.weight, -0.1, 0.1)
-                if hasattr(layer, 'bias') and layer.bias is not None:
-                    nn.init.uniform_(layer.bias, -0.1, 0.1)
+                if hasattr(module, 'weight'):
+                    nn.init.uniform_(module.weight, -0.1, 0.1)
+                if hasattr(module, 'bias') and module.bias is not None:
+                    nn.init.uniform_(module.bias, -0.1, 0.1)
             
             elif init_method == 'normal_small':
                 # Normal with std=0.01
-                if hasattr(layer, 'weight'):
-                    nn.init.normal_(layer.weight, mean=0.0, std=0.01)
-                if hasattr(layer, 'bias') and layer.bias is not None:
-                    nn.init.normal_(layer.bias, mean=0.0, std=0.01)
+                if hasattr(module, 'weight'):
+                    nn.init.normal_(module.weight, mean=0.0, std=0.01)
+                if hasattr(module, 'bias') and module.bias is not None:
+                    nn.init.normal_(module.bias, mean=0.0, std=0.01)
             
             elif init_method == 'xavier_uniform':
                 # Xavier/Glorot uniform
-                if hasattr(layer, 'weight'):
-                    nn.init.xavier_uniform_(layer.weight)
-                if hasattr(layer, 'bias') and layer.bias is not None:
-                    nn.init.constant_(layer.bias, 0.0)
+                if hasattr(module, 'weight'):
+                    nn.init.xavier_uniform_(module.weight)
+                if hasattr(module, 'bias') and module.bias is not None:
+                    nn.init.constant_(module.bias, 0.0)
             
             elif init_method == 'xavier_normal':
                 # Xavier/Glorot normal
-                if hasattr(layer, 'weight'):
-                    nn.init.xavier_normal_(layer.weight)
+                if hasattr(module, 'weight'):
+                    nn.init.xavier_normal_(module.weight)
                 if hasattr(layer, 'bias') and layer.bias is not None:
                     nn.init.constant_(layer.bias, 0.0)
             
@@ -229,18 +210,30 @@ def run_single_experiment(
     set_seed(seed)
     
     # Create model and apply initialization
-    model = SimpleCNN(num_classes=10, activation=activation).to(device)
-    model.apply_initialization(init_method)
+    model = SimpleCNN(num_classes=10).to(device)
+    apply_custom_initialization(model, init_method)
     
-    # Create optimizer
+    # FAIRNESS FIX: Optimizer-specific learning rates
+    # 
+    # PROBLEM: Using lr=0.001 for all optimizers is UNFAIR to SGD.
+    # On MNIST/ConvNets, SGD needs lr=0.01-0.1 to converge well,
+    # while Adam works great at lr=0.001 due to adaptive scaling.
+    #
+    # Using the same lr=0.001 for both makes SGD appear "sensitive to initialization"
+    # when it's actually just starved of learning rate.
+    #
+    # SOLUTION: Use optimizer-preferred base LRs from published defaults.
+    # This isolates the effect of INITIALIZATION from learning rate mismatch.
+    
+    # Create optimizer with fair LR per optimizer type
     if optimizer_name == 'SGD':
-        optimizer = optim.SGD(model.parameters(), lr=lr)
+        optimizer = optim.SGD(model.parameters(), lr=0.01)  # SGD needs 10x more
     elif optimizer_name == 'SGD_Momentum':
-        optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9)
+        optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
     elif optimizer_name == 'Adam':
-        optimizer = optim.Adam(model.parameters(), lr=lr)
+        optimizer = optim.Adam(model.parameters(), lr=0.001)  # Adam default
     elif optimizer_name == 'AdamW':
-        optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
+        optimizer = optim.AdamW(model.parameters(), lr=0.001, weight_decay=1e-4)
     else:
         raise ValueError(f"Unknown optimizer: {optimizer_name}")
     

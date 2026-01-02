@@ -25,10 +25,15 @@ def run_single_trial(
     test_function,
     initial_point: Tuple[float, float],
     max_iterations: int,
-    convergence_threshold: float = 1e-6
+    convergence_threshold: float = 1e-6,
+    grad_clip_value: float = 10.0
 ) -> Dict:
     """
     Run one trial with a given initial point.
+    
+    CRITICAL FIX: Added gradient clipping to prevent NaN explosion on
+    Rosenbrock and other ill-conditioned functions where gradients can
+    reach 1e9+ magnitude.
     
     Returns:
         Dictionary with final_loss, converged (bool), iterations_to_converge, grad_norm
@@ -53,7 +58,36 @@ def run_single_trial(
                 'final_y': y
             }
         
-        x, y = optimizer.step((x, y), (grad_x, grad_y))
+        # CRITICAL FIX: Gradient clipping to prevent exploding gradients
+        # Rosenbrock gradients can reach O(1e9) at x,y >> 1
+        if grad_norm > grad_clip_value:
+            clip_scale = grad_clip_value / grad_norm
+            grad_x = grad_x * clip_scale
+            grad_y = grad_y * clip_scale
+        
+        # Wrap in try-except to catch NaN/Inf gracefully
+        try:
+            x, y = optimizer.step((x, y), (grad_x, grad_y))
+            # Check for NaN/Inf
+            if not (np.isfinite(x) and np.isfinite(y)):
+                return {
+                    'final_loss': float('inf'),
+                    'converged': False,
+                    'iterations': iteration,
+                    'grad_norm': float('inf'),
+                    'final_x': float('nan'),
+                    'final_y': float('nan')
+                }
+        except (ValueError, OverflowError) as e:
+            return {
+                'final_loss': float('inf'),
+                'converged': False,
+                'iterations': iteration,
+                'grad_norm': grad_norm,
+                'final_x': float('nan'),
+                'final_y': float('nan'),
+                'error': str(e)
+            }
     
     # Did not converge within max_iterations
     final_loss = test_function.compute(x, y)
