@@ -14,7 +14,6 @@ where κ = L/μ is the condition number. To prove this, we must sweep κ.
 """
 
 import numpy as np
-import torch
 from typing import Callable, Tuple, Dict, Any, Optional
 import logging
 
@@ -72,7 +71,7 @@ def quadratic_with_condition_number(
     
     def f(x: np.ndarray) -> float:
         """Evaluate f(x) = 0.5 * x^T Q x"""
-        return 0.5 * x @ Q @ x
+        return float(0.5 * x @ Q @ x)
     
     def grad_f(x: np.ndarray) -> np.ndarray:
         """Evaluate gradient: ∇f(x) = Q x"""
@@ -145,7 +144,7 @@ def logistic_regression_with_condition_number(
         loss[pos_mask] = np.log(1 + np.exp(-logits[pos_mask]))
         loss[neg_mask] = -logits[neg_mask] + np.log(1 + np.exp(logits[neg_mask]))
         
-        return np.mean(y * loss + (1 - y) * loss)
+        return float(np.mean(y * loss + (1 - y) * loss))
     
     def grad_fn(w: np.ndarray) -> np.ndarray:
         """Gradient of loss"""
@@ -278,7 +277,7 @@ def run_optimizer_on_function(
     
     optimal_x = metadata.get('optimal_x', np.zeros_like(x))
     
-    for iteration in range(n_iterations):
+    for _ in range(n_iterations):
         # Compute loss and gradient
         loss = f(x)
         grad = grad_f(x)
@@ -348,7 +347,6 @@ def visualize_condition_number_sweep(
     This plot is CRITICAL for validating Momentum's theoretical advantage.
     """
     import matplotlib.pyplot as plt
-    import seaborn as sns
     
     plt.figure(figsize=(10, 6))
     

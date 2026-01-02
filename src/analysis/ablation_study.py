@@ -7,7 +7,6 @@ their individual contributions to performance.
 
 import logging
 import os
-import json
 import numpy as np
 import pandas as pd
 from typing import Dict, List, Optional
@@ -218,7 +217,7 @@ def print_ablation_summary(summary_df: pd.DataFrame):
     print("="*70)
     
     
-    for idx, row in summary_df.iterrows():
+    for _, row in summary_df.iterrows():
         logging.info(f"{row['Configuration']}")
         logging.info(f"  Mean: {row['Mean Accuracy']:.4f} ± {row['Std Accuracy']:.4f}")
         logging.info(f"  Range: [{row['Min Accuracy']:.4f}, {row['Max Accuracy']:.4f}]")
@@ -236,7 +235,7 @@ def print_ablation_summary(summary_df: pd.DataFrame):
     logging.info("IMPROVEMENT OVER BASELINE (SGD):")
     print("="*70)
     
-    for idx, row in summary_df.iterrows():
+    for _, row in summary_df.iterrows():
         if 'baseline' in row['Configuration']:
             continue
         
@@ -251,7 +250,7 @@ def print_ablation_summary(summary_df: pd.DataFrame):
 
 def plot_ablation_results(summary_df: pd.DataFrame, save_path: Optional[str] = None):
     """Plot ablation study results as bar chart."""
-    fig, ax = plt.subplots(figsize=(12, 7))
+    _fig, ax = plt.subplots(figsize=(12, 7))
     
     # Prepare data
     configs = summary_df['Configuration'].values
@@ -291,7 +290,7 @@ def plot_ablation_results(summary_df: pd.DataFrame, save_path: Optional[str] = N
     ax.set_axisbelow(True)
     
     # Annotate bars
-    for i, (bar, mean, std) in enumerate(zip(bars, means, stds)):
+    for _, (bar, mean, std) in enumerate(zip(bars, means, stds)):
         height = bar.get_height()
         ax.text(bar.get_x() + bar.get_width() / 2., height + std + 0.005,
                 f'{mean:.4f}\n±{std:.4f}',

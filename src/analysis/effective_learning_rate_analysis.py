@@ -321,11 +321,12 @@ class EffectiveLRTracker:
         # Create heatmap
         fig, ax = plt.subplots(figsize=figsize)
         
+        from matplotlib.colors import LogNorm
         im = ax.imshow(
             lr_matrix,
             aspect='auto',
             cmap='viridis',
-            norm=plt.matplotlib.colors.LogNorm(vmin=lr_matrix.min(), vmax=lr_matrix.max())
+            norm=LogNorm(vmin=lr_matrix.min(), vmax=lr_matrix.max())
         )
         
         ax.set_xlabel('Training Iteration (sampled)', fontsize=12)

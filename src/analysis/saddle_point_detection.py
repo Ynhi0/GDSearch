@@ -10,6 +10,13 @@ Key Insight: At a saddle point, grad_norm ≈ 0 BUT λ_min(∇²f) < 0.
 
 This is REQUIRED to validate claims about "escaping saddle points" and
 "converging to Second-Order Stationary Points (SOSP)".
+
+PERFORMANCE NOTE:
+scipy.sparse.linalg.eigsh (Lanczos algorithm) runs on CPU. If the model is on GPU,
+each matrix-vector product in the Lanczos iteration triggers a GPU→CPU transfer.
+This is mathematically correct but computationally expensive for large models (ResNet-18+).
+For research purposes, eigenvalue tracking should be performed periodically (e.g., every
+N epochs) rather than at every iteration. Consider this when interpreting runtime results.
 """
 
 import torch
@@ -130,7 +137,8 @@ def compute_largest_eigenvalue_power_iteration(
     
     # Initialize random vector
     v = [torch.randn_like(p) for p in params]
-    v_norm = torch.sqrt(sum(torch.sum(vi ** 2) for vi in v))
+    v_norm_sq = torch.tensor(sum(torch.sum(vi ** 2) for vi in v))
+    v_norm = torch.sqrt(v_norm_sq)
     v = [vi / v_norm for vi in v]
     
     for iteration in range(max_iter):
@@ -138,10 +146,11 @@ def compute_largest_eigenvalue_power_iteration(
         Hv = hessian_vector_product(model, loss, params, v)
         
         # Rayleigh quotient: λ ≈ v^T H v
-        lambda_estimate = sum(torch.sum(vi * Hvi) for vi, Hvi in zip(v, Hv))
+        lambda_estimate = torch.tensor(sum(torch.sum(vi * Hvi) for vi, Hvi in zip(v, Hv)))
         
         # Normalize for next iteration
-        Hv_norm = torch.sqrt(sum(torch.sum(Hvi ** 2) for Hvi in Hv))
+        Hv_norm_sq = torch.tensor(sum(torch.sum(Hvi ** 2) for Hvi in Hv))
+        Hv_norm = torch.sqrt(Hv_norm_sq)
         
         if Hv_norm < tol:
             break
@@ -149,7 +158,8 @@ def compute_largest_eigenvalue_power_iteration(
         v_new = [Hvi / Hv_norm for Hvi in Hv]
         
         # Check convergence
-        v_diff = torch.sqrt(sum(torch.sum((vi_new - vi) ** 2) for vi_new, vi in zip(v_new, v)))
+        v_diff_sq = torch.tensor(sum(torch.sum((vi_new - vi) ** 2) for vi_new, vi in zip(v_new, v)))
+        v_diff = torch.sqrt(v_diff_sq)
         v = v_new
         
         if v_diff < tol:
@@ -220,7 +230,7 @@ def compute_smallest_eigenvalue_power_iteration(
         return Hv_flat
     
     # Create LinearOperator wrapper
-    H_op = LinearOperator((num_params, num_params), matvec=matvec)
+    H_op = LinearOperator((num_params, num_params), matvec=matvec, dtype=np.float64)  # type: ignore[call-arg]
     
     try:
         # Compute smallest algebraic eigenvalue using Lanczos algorithm
@@ -231,7 +241,7 @@ def compute_smallest_eigenvalue_power_iteration(
             k=1, 
             which='SA',  # CRITICAL: Smallest Algebraic, not Largest Magnitude
             maxiter=max_iter,
-            tol=tol,
+            tol=1e-6 if tol is None else float(tol),  # type: ignore[arg-type]
             return_eigenvectors=True
         )
         
@@ -248,11 +258,12 @@ def compute_smallest_eigenvalue_power_iteration(
         # This is NOT guaranteed to find the smallest eigenvalue, but provides
         # a rough estimate if eigsh fails
         v = [torch.randn_like(p) for p in params]
-        v_norm = torch.sqrt(sum(torch.sum(vi ** 2) for vi in v))
+        v_norm_sq = torch.tensor(sum(torch.sum(vi ** 2) for vi in v))
+        v_norm = torch.sqrt(v_norm_sq)
         v = [vi / v_norm for vi in v]
         
         Hv = hessian_vector_product(model, loss, params, v)
-        lambda_estimate = sum(torch.sum(vi * Hvi) for vi, Hvi in zip(v, Hv))
+        lambda_estimate = torch.tensor(sum(torch.sum(vi * Hvi) for vi, Hvi in zip(v, Hv)))
         
         return float(lambda_estimate.item())
 

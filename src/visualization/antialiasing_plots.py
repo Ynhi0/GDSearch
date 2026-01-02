@@ -10,6 +10,7 @@ Addresses QA Issue #14: "Visualization Aliasing"
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.axes import Axes
 from typing import Optional, Tuple, List, Union
 from scipy.ndimage import uniform_filter1d
 
@@ -110,7 +111,7 @@ def downsample_with_envelope(
 def plot_with_envelope(
     x: np.ndarray,
     y: np.ndarray,
-    ax: Optional[plt.Axes] = None,
+    ax: Optional[Axes] = None,
     label: str = '',
     color: Optional[str] = None,
     downsample_factor: Optional[int] = None,
@@ -118,7 +119,7 @@ def plot_with_envelope(
     show_bounds: bool = True,
     alpha_line: float = 0.8,
     alpha_fill: float = 0.2
-) -> plt.Axes:
+) -> Axes:
     """
     Plot line with envelope (min/max bounds) to avoid aliasing artifacts.
     
@@ -194,12 +195,12 @@ def plot_multiple_runs_with_statistics(
     x_col: str,
     y_col: str,
     group_col: str,
-    ax: Optional[plt.Axes] = None,
+    ax: Optional[Axes] = None,
     downsample_factor: Optional[int] = None,
     rolling_window: Optional[int] = None,
     show_individual_runs: bool = False,
     alpha_individual: float = 0.15
-) -> plt.Axes:
+) -> Axes:
     """
     Plot multiple runs with mean ± std envelope.
     
@@ -231,27 +232,27 @@ def plot_multiple_runs_with_statistics(
         # Compute statistics across seeds at each x value
         stats = group_data.groupby(x_col)[y_col].agg(['mean', 'std']).reset_index()
         
-        x_vals = stats[x_col].values
-        y_mean = stats['mean'].values
-        y_std = stats['std'].values
+        x_vals = stats[x_col].values  # type: ignore[assignment]
+        y_mean = stats['mean'].values  # type: ignore[assignment]
+        y_std = stats['std'].values  # type: ignore[assignment]
         
         # Apply transformations
         if downsample_factor is not None and downsample_factor > 1:
-            x_vals, y_mean, _, _ = downsample_with_envelope(x_vals, y_mean, downsample_factor)
-            _, y_std, _, _ = downsample_with_envelope(stats[x_col].values, y_std, downsample_factor)
+            x_vals, y_mean, _, _ = downsample_with_envelope(x_vals, y_mean, downsample_factor)  # type: ignore[arg-type]
+            _, y_std, _, _ = downsample_with_envelope(stats[x_col].values, y_std, downsample_factor)  # type: ignore[arg-type]
         
         if rolling_window is not None and rolling_window > 1:
-            y_mean, _, _ = rolling_mean_with_bounds(y_mean, rolling_window, compute_bounds=False)
-            y_std, _, _ = rolling_mean_with_bounds(y_std, rolling_window, compute_bounds=False)
+            y_mean, _, _ = rolling_mean_with_bounds(y_mean, rolling_window, compute_bounds=False)  # type: ignore[arg-type]
+            y_std, _, _ = rolling_mean_with_bounds(y_std, rolling_window, compute_bounds=False)  # type: ignore[arg-type]
         
         # Plot mean line
-        ax.plot(x_vals, y_mean, label=str(group_name), linewidth=2)
+        ax.plot(x_vals, y_mean, label=str(group_name), linewidth=2)  # type: ignore[arg-type]
         
         # Plot std envelope
-        ax.fill_between(
-            x_vals,
-            y_mean - y_std,
-            y_mean + y_std,
+        ax.fill_between(  # type: ignore[arg-type]
+            np.asarray(x_vals),
+            y_mean - y_std,  # type: ignore[operator]
+            y_mean + y_std,  # type: ignore[operator]
             alpha=0.25,
             linewidth=0
         )
@@ -259,13 +260,13 @@ def plot_multiple_runs_with_statistics(
         # Optionally plot individual runs
         if show_individual_runs and 'seed' in group_data.columns:
             for seed, seed_data in group_data.groupby('seed'):
-                x_seed = seed_data[x_col].values
-                y_seed = seed_data[y_col].values
+                x_seed = seed_data[x_col].values  # type: ignore[assignment]
+                y_seed = seed_data[y_col].values  # type: ignore[assignment]
                 
                 if downsample_factor is not None:
-                    x_seed, y_seed, _, _ = downsample_with_envelope(x_seed, y_seed, downsample_factor)
+                    x_seed, y_seed, _, _ = downsample_with_envelope(x_seed, y_seed, downsample_factor)  # type: ignore[arg-type]
                 
-                ax.plot(x_seed, y_seed, alpha=alpha_individual, linewidth=0.5)
+                ax.plot(x_seed, y_seed, alpha=alpha_individual, linewidth=0.5)  # type: ignore[arg-type]
     
     return ax
 

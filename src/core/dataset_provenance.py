@@ -146,7 +146,7 @@ def get_dataset_provenance(
         provenance['data_source'] = 'medmnist'
         # Lazy import check
         has_mm, medmnist_module = _check_medmnist()
-        provenance['dataset_version'] = f'medmnist_{medmnist_module.__version__}' if has_mm else 'unknown'
+        provenance['dataset_version'] = f'medmnist_{medmnist_module.__version__}' if (has_mm and medmnist_module is not None) else 'unknown'
         provenance['official_url'] = 'https://medmnist.com/'
         provenance['citation'] = 'Yang et al. MedMNIST v2: A Large-Scale Lightweight Benchmark for 2D and 3D Biomedical Image Classification. arXiv:2110.14795'
         
@@ -159,7 +159,7 @@ def get_dataset_provenance(
         provenance['data_source'] = 'huggingface_datasets'
         # Lazy import check
         has_hf, datasets_module = _check_hf_datasets()
-        provenance['dataset_version'] = f'datasets_{datasets_module.__version__}' if has_hf else 'unknown'
+        provenance['dataset_version'] = f'datasets_{datasets_module.__version__}' if (has_hf and datasets_module is not None) else 'unknown'
         provenance['official_url'] = 'https://ai.stanford.edu/~amaas/data/sentiment/'
         provenance['citation'] = 'Maas et al. Learning Word Vectors for Sentiment Analysis. ACL 2011'
         
@@ -281,6 +281,12 @@ def create_experiment_manifest(
         dataset_provenance: Dataset provenance from get_dataset_provenance()
         output_path: Path to save manifest JSON
     """
+    # Extract optional module versions
+    medmnist_check = _check_medmnist()
+    datasets_check = _check_hf_datasets()
+    medmnist_ver = medmnist_check[1].__version__ if medmnist_check[0] and medmnist_check[1] is not None else None  # type: ignore[union-attr]
+    datasets_ver = datasets_check[1].__version__ if datasets_check[0] and datasets_check[1] is not None else None  # type: ignore[union-attr]
+    
     manifest = {
         'experiment_name': experiment_name,
         'created_at': datetime.now(timezone.utc).isoformat(),
@@ -289,8 +295,8 @@ def create_experiment_manifest(
         'environment': {
             'torch_version': torch.__version__ if HAS_TORCH else None,
             'torchvision_version': torchvision.__version__ if HAS_TORCH else None,
-            'medmnist_version': (_check_medmnist()[1].__version__ if _check_medmnist()[0] else None),
-            'datasets_version': (_check_hf_datasets()[1].__version__ if _check_hf_datasets()[0] else None),
+            'medmnist_version': medmnist_ver,
+            'datasets_version': datasets_ver,
         }
     }
     

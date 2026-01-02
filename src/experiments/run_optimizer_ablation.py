@@ -266,6 +266,7 @@ def run_optimizer_ablation(
 
         try:
             for i in range(max_iterations):
+                loss = float('nan')  # Initialize for safety in case of early exceptions
                 try:
                     # CRITICAL FIX (Issue #19): LR Scheduler for SGD
                     # Apply learning rate decay to counter "Constant LR Strawman" criticism
@@ -340,7 +341,7 @@ def run_optimizer_ablation(
                         adv_grad_x, adv_grad_y = test_function.gradient(adv_x, adv_y)
                         adversarial_gradients = (adv_grad_x, adv_grad_y)
                         
-                        # 3. Take step using adversarial gradient
+                        # 3. Take step using adversarial gradient (SAM-specific signature)
                         step_result = optimizer.step((x, y), (grad_x, grad_y), 
                                                     adversarial_gradients=adversarial_gradients)
                     else:

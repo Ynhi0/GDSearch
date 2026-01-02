@@ -129,22 +129,22 @@ def apply_custom_initialization(model: nn.Module, init_method: str):
                 # Xavier/Glorot normal
                 if hasattr(module, 'weight'):
                     nn.init.xavier_normal_(module.weight)
-                if hasattr(layer, 'bias') and layer.bias is not None:
-                    nn.init.constant_(layer.bias, 0.0)
+                if hasattr(module, 'bias') and module.bias is not None:
+                    nn.init.constant_(module.bias, 0.0)
             
             elif init_method == 'kaiming_uniform':
                 # Kaiming/He uniform
-                if hasattr(layer, 'weight'):
-                    nn.init.kaiming_uniform_(layer.weight, nonlinearity='relu')
-                if hasattr(layer, 'bias') and layer.bias is not None:
-                    nn.init.constant_(layer.bias, 0.0)
+                if hasattr(module, 'weight'):
+                    nn.init.kaiming_uniform_(module.weight, nonlinearity='relu')
+                if hasattr(module, 'bias') and module.bias is not None:
+                    nn.init.constant_(module.bias, 0.0)
             
             elif init_method == 'kaiming_normal':
                 # Kaiming/He normal
-                if hasattr(layer, 'weight'):
-                    nn.init.kaiming_normal_(layer.weight, nonlinearity='relu')
-                if hasattr(layer, 'bias') and layer.bias is not None:
-                    nn.init.constant_(layer.bias, 0.0)
+                if hasattr(module, 'weight'):
+                    nn.init.kaiming_normal_(module.weight, nonlinearity='relu')
+                if hasattr(module, 'bias') and module.bias is not None:
+                    nn.init.constant_(module.bias, 0.0)
             
             else:
                 raise ValueError(f"Unknown initialization method: {init_method}")

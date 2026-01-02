@@ -17,7 +17,7 @@ empirical results.
 import numpy as np
 import torch
 import torch.nn as nn
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Union, Any, Any, Tuple
 import logging
 
 
@@ -28,7 +28,7 @@ def estimate_gradient_noise_variance(
     device: torch.device,
     num_samples: int = 100,
     method: str = 'empirical_variance'
-) -> Dict[str, float]:
+) -> Dict[str, Union[float, str, Dict[str, float]]]:
     """
     Estimate gradient noise variance σ² for stochastic optimization.
     
@@ -93,16 +93,16 @@ def estimate_gradient_noise_variance(
     
     if len(gradient_samples) < 2:
         logging.warning("Insufficient gradient samples for variance estimation")
-        return {
+        return {  # type: ignore[return-value]
             'sigma_squared': 0.0,
             'sigma': 0.0,
-            'num_samples_used': len(gradient_samples),
-            'method': method,
-            'per_param_variance': {}
+            'num_samples_used': float(len(gradient_samples)),
+            'method': str(method),
+            'per_param_variance': {}  # type: ignore
         }
     
-    # Convert to array: shape (num_samples, num_params)
-    gradient_array = np.stack(gradient_samples, axis=0)
+    # Convert to numpy array for computation
+    gradient_array = np.array(gradient_samples)
     
     # Compute variance across samples
     if method == 'empirical_variance':
@@ -167,12 +167,12 @@ def estimate_gradient_noise_variance(
         per_param_var[name] = float(param_var)
         param_idx += param_size
     
-    return {
+    return {  # type: ignore[return-value]
         'sigma_squared': float(sigma_squared),
         'sigma': float(sigma),
-        'num_samples_used': len(gradient_samples),
-        'method': method,
-        'per_param_variance': per_param_var
+        'num_samples_used': float(len(gradient_samples)),
+        'method': str(method),
+        'per_param_variance': per_param_var  # type: ignore
     }
 
 
@@ -231,7 +231,8 @@ def compute_full_batch_gradient(
         for param in model.parameters():
             if param.grad is not None:
                 param.grad /= total_samples
-                grad_vector.append(param.grad.detach().cpu().flatten())
+                if param.grad is not None:  # Recheck after division
+                    grad_vector.append(param.grad.detach().cpu().flatten())
         
         if len(grad_vector) == 0:
             return None

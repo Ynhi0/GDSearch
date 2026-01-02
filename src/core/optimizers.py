@@ -98,7 +98,7 @@ class SGD(Optimizer):
             return new_x, new_y
         else:
             # Handle array (for neural networks)
-            effective_grad = gradients.copy()
+            effective_grad = np.array(gradients) if isinstance(gradients, (tuple, list)) else gradients.copy()
             
             # Apply weight decay (L2 regularization)
             if self.weight_decay > 0:
@@ -293,10 +293,11 @@ class RMSProp(Optimizer):
                 self.s = np.zeros_like(params)
             
             # Update squared gradient accumulator
-            self.s = self.decay_rate * self.s + (1 - self.decay_rate) * gradients**2
+            grad_array = np.asarray(gradients)
+            self.s = self.decay_rate * self.s + (1 - self.decay_rate) * grad_array**2
             
             # Update parameters with adaptive learning rate
-            updated = params - self.lr * gradients / (np.sqrt(self.s) + self.epsilon)
+            updated = params - self.lr * grad_array / (np.sqrt(self.s) + self.epsilon)
             self._append_history(updated)
             return updated
     
@@ -393,11 +394,12 @@ class Adam(Optimizer):
             
             # Update biased first moment estimate
             assert self.m is not None
-            self.m = self.beta1 * self.m + (1 - self.beta1) * gradients
+            grad_array = np.asarray(gradients)
+            self.m = self.beta1 * self.m + (1 - self.beta1) * grad_array
             
             # Update biased second moment estimate
             assert self.v is not None
-            self.v = self.beta2 * self.v + (1 - self.beta2) * gradients**2
+            self.v = self.beta2 * self.v + (1 - self.beta2) * grad_array**2
             
             # Compute bias-corrected moment estimates
             m_hat = self.m / max(1 - self.beta1**self.t, 1e-8)
@@ -487,8 +489,9 @@ class AdamW(Optimizer):
             
             assert self.m is not None
             assert self.v is not None
-            self.m = self.beta1 * self.m + (1 - self.beta1) * gradients
-            self.v = self.beta2 * self.v + (1 - self.beta2) * (gradients ** 2)
+            grad_array = np.asarray(gradients)
+            self.m = self.beta1 * self.m + (1 - self.beta1) * grad_array
+            self.v = self.beta2 * self.v + (1 - self.beta2) * (grad_array ** 2)
             m_hat = self.m / max(1 - self.beta1 ** self.t, 1e-8)
             v_hat = self.v / max(1 - self.beta2 ** self.t, 1e-8)
             step = self.lr * m_hat / (np.sqrt(v_hat) + self.epsilon)
@@ -570,8 +573,9 @@ class AMSGrad(Optimizer):
             assert self.m is not None
             assert self.v is not None
             assert self.vhat_max is not None
-            self.m = self.beta1 * self.m + (1 - self.beta1) * gradients
-            self.v = self.beta2 * self.v + (1 - self.beta2) * (gradients ** 2)
+            grad_array = np.asarray(gradients)
+            self.m = self.beta1 * self.m + (1 - self.beta1) * grad_array
+            self.v = self.beta2 * self.v + (1 - self.beta2) * (grad_array ** 2)
             m_hat = self.m / max(1 - self.beta1 ** self.t, 1e-8)
             v_hat = self.v / max(1 - self.beta2 ** self.t, 1e-8)
             self.vhat_max = np.maximum(self.vhat_max, v_hat)
@@ -945,8 +949,9 @@ class AdaBound(Optimizer):
             
             assert self.m is not None
             assert self.v is not None
-            self.m = self.beta1 * self.m + (1 - self.beta1) * gradients
-            self.v = self.beta2 * self.v + (1 - self.beta2) * gradients ** 2
+            grad_array = np.asarray(gradients)
+            self.m = self.beta1 * self.m + (1 - self.beta1) * grad_array
+            self.v = self.beta2 * self.v + (1 - self.beta2) * grad_array ** 2
             
             m_hat = self.m / (1 - self.beta1 ** self.t)
             v_hat = self.v / (1 - self.beta2 ** self.t)
@@ -1044,8 +1049,9 @@ class RAdam(Optimizer):
             
             assert self.m is not None
             assert self.v is not None
-            self.m = self.beta1 * self.m + (1 - self.beta1) * gradients
-            self.v = self.beta2 * self.v + (1 - self.beta2) * gradients ** 2
+            grad_array = np.asarray(gradients)
+            self.m = self.beta1 * self.m + (1 - self.beta1) * grad_array
+            self.v = self.beta2 * self.v + (1 - self.beta2) * grad_array ** 2
             
             m_hat = self.m / max(1 - self.beta1 ** self.t, 1e-8)
             rho_t = self.rho_inf - 2.0 * self.t * (self.beta2 ** self.t) / max(1.0 - self.beta2 ** self.t, 1e-8)
@@ -1142,8 +1148,9 @@ class LAMB(Optimizer):
             
             # Ensure arrays initialized for safe arithmetic
             assert self.m is not None and self.v is not None, "Internal state arrays must be initialized"
-            self.m = self.beta1 * self.m + (1 - self.beta1) * gradients
-            self.v = self.beta2 * self.v + (1 - self.beta2) * gradients ** 2
+            grad_array = np.asarray(gradients)
+            self.m = self.beta1 * self.m + (1 - self.beta1) * grad_array
+            self.v = self.beta2 * self.v + (1 - self.beta2) * grad_array ** 2
             
             m_hat = self.m / (1 - self.beta1 ** self.t)
             v_hat = self.v / (1 - self.beta2 ** self.t)

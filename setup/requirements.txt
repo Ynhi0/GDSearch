@@ -1,0 +1,92 @@
+# Requirements for GDSearch - Gradient Descent Optimizer Benchmarking Framework
+# CRITICAL: All major dependencies are PINNED to ensure reproducibility
+# Last verified: December 2025 with PyTorch 2.6.0
+#
+# PYTHON VERSION COMPATIBILITY:
+# - Recommended: Python 3.11 or 3.12 (full dataset support)
+# - Python 3.13: Partial support (IMDB dataset loading fails due to fsspec glob issues)
+# - Kaggle: Python 3.10 (fully supported)
+#
+# For Kaggle execution, use requirements_kaggle.txt which adapts to pre-installed packages
+# BEST PRACTICE: Kaggle uses NumPy 2.x (modern, performant). Our code is NumPy 2.x compatible.
+# The Kaggle notebook's compatibility check handles any Pandas binary mismatches automatically
+# by reinstalling Pandas (not NumPy) to match the platform version.
+
+# ============================================================================
+# CORE ANALYTICS STACK - PINNED FOR REPRODUCIBILITY
+# ============================================================================
+# NOTE: These pins are for local/dev reproducibility. Kaggle uses its own optimized versions.
+numpy==1.26.4  # PINNED: Compatible with PyTorch 2.6 and scipy
+matplotlib==3.9.2  # PINNED: Stable plotting
+pandas==2.2.3  # PINNED: Data analysis
+scipy==1.14.1  # PINNED: Numerical computing
+
+# ============================================================================
+# DEEP LEARNING STACK - PINNED
+# ============================================================================
+torch==2.6.0  # PINNED: Optimizer behavior varies between versions
+torchvision==0.20.0  # PINNED: Must match torch version
+torchtext==0.18.0; python_version < '3.13'  # PINNED: NLP support (not available for py3.13)
+
+# ============================================================================
+# HYPERPARAMETER OPTIMIZATION & EXPERIMENT TRACKING - PINNED
+# ============================================================================
+optuna==4.1.0  # PINNED: Search algorithms change between versions
+mlflow==2.19.0  # PINNED: Experiment tracking
+
+# ============================================================================
+# VISUALIZATION - PINNED
+# ============================================================================
+plotly==5.24.1  # PINNED: Interactive plots
+kaleido==0.2.1  # PINNED: Static image export
+seaborn==0.13.2  # PINNED: Statistical visualization
+
+# ============================================================================
+# UTILITIES - COMPATIBLE RANGES
+# ============================================================================
+tqdm>=4.66.0,<5.0
+click>=7.0,<9.0,!=8.3.0
+rich>=12.4.4,<14.0
+
+# ============================================================================
+# DATA PROCESSING - VERSION CONSTRAINED
+# ============================================================================
+# NOTE: Python 3.13 has known glob pattern issues with HuggingFace datasets
+# For Python 3.13: IMDB dataset loading will fail - code falls back to synthetic data
+# For Python 3.11/3.12: All datasets work correctly
+# Kaggle uses Python 3.10, so this is not an issue in production
+fsspec>=2023.6.0,<2024.10.0  # Compatible with HuggingFace Hub glob patterns
+pyarrow>=14.0.0,<20.0.0  # Compatible with cudf-cu12 (Kaggle GPU DataFrames)  
+datasets>=2.14.0,<3.0.0  # CRITICAL: HuggingFace datasets library
+huggingface-hub>=0.20.0,<0.25.0  # Compatible with fsspec glob patterns
+transformers>=4.34.0,<5.0
+
+# ============================================================================
+# SPECIALIZED ML LIBRARIES
+# ============================================================================
+portalocker>=2.0.0
+medpy>=0.4.0,<1.0  # Medical image processing
+
+# ============================================================================
+# MEDICAL DATASET SUPPORT (REQUIRED)
+# ============================================================================
+medmnist>=3.0.0  # REQUIRED: Lightweight medical imaging datasets (default for medical experiments)
+
+# ============================================================================
+# OPTIONAL: ADDITIONAL MEDICAL DATASET SOURCES
+# ============================================================================
+# NOTE: Direct Kaggle API downloads are no longer supported by this project. If you need Kaggle datasets,
+# download them manually from the Kaggle website and place them under ./data or provide a local path to loaders.
+
+# ============================================================================
+# SECURITY & COMPATIBILITY
+# ============================================================================
+protobuf>=3.20.3,<4.0.0  # TensorFlow compatibility
+pydantic>=2.0,<2.12  # Gradio/FastAPI compatibility  
+cryptography>=19.0,<44  # pydrive2 compatibility
+pyOpenSSL>=19.1.0,<=24.2.1  # pydrive2 compatibility
+
+# ============================================================================
+# TESTING
+# ============================================================================
+pytest==8.3.4  # PINNED: Test framework

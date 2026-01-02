@@ -81,10 +81,12 @@ def get_mnist_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optiona
         # CRITICAL FIX (Issue #22): Split indices first, then create separate datasets
         # with appropriate transforms (train gets augmentation, val gets test transform)
         # This prevents "Augmented Validation" trap where validation metrics are noisy
-        all_indices = list(range(total_train))
-        # Use torch's random_split on indices list
+        
+        # Use torch's random_split on a dummy dataset to get indices
+        from torch.utils.data import TensorDataset
+        dummy_dataset = TensorDataset(torch.arange(total_train))
         train_idx_subset, val_idx_subset = random_split(
-            all_indices,
+            dummy_dataset,
             [train_size, val_size],
             generator=split_generator
         )
@@ -265,10 +267,12 @@ def get_cifar10_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optio
         # with appropriate transforms (train gets augmentation, val gets test transform)
         # This prevents "Augmented Validation" trap where validation metrics are noisy
         # For CIFAR-10, this is CRITICAL because transform_train has RandomCrop and RandomFlip
-        all_indices = list(range(total_train))
-        # Use torch's random_split on indices list
+        
+        # Use torch's random_split on a dummy dataset to get indices
+        from torch.utils.data import TensorDataset
+        dummy_dataset = TensorDataset(torch.arange(total_train))
         train_idx_subset, val_idx_subset = random_split(
-            all_indices,
+            dummy_dataset,
             [train_size, val_size],
             generator=split_generator
         )

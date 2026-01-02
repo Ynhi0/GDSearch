@@ -76,7 +76,7 @@ def make_dataloader(
     if full_batch:
         # Get dataset size - handle different dataset types
         try:
-            dataset_size = len(dataset)
+            dataset_size = len(dataset)  # type: ignore[arg-type]
         except TypeError:
             # Some datasets don't support len(), estimate from iteration
             import logging

@@ -8,7 +8,6 @@ This script compares our custom optimizer implementations with:
 
 import logging
 import os
-import json
 import numpy as np
 import pandas as pd
 import torch
@@ -18,7 +17,6 @@ import matplotlib.pyplot as plt
 
 from src.experiments.run_nn_experiment import train_and_evaluate, build_model_and_data
 from src.analysis.statistical_analysis import compare_optimizers_ttest, print_ttest_results
-from src.core.data_utils import get_mnist_loaders, get_cifar10_loaders
 from src.utils.type_guards import ensure_dataframe, ensure_series
 
 
@@ -49,7 +47,7 @@ def run_pytorch_baseline(config: Dict) -> pd.DataFrame:
     )
     # build_model_and_data returns a consistent 4-tuple: (model, train_loader, val_loader, test_loader)
     # If no validation split was requested, val_loader will be None.
-    model, train_loader, val_loader, test_loader = ret
+    model, train_loader, _val_loader, test_loader = ret
     
     # Build PyTorch optimizer
     optimizer_name = config['optimizer']
@@ -338,7 +336,7 @@ def print_baseline_summary(summary_df: pd.DataFrame):
 
 def plot_baseline_comparison(summary_df: pd.DataFrame, save_path: Optional[str] = None):
     """Plot baseline comparison."""
-    fig, ax = plt.subplots(figsize=(12, 7))
+    _fig, ax = plt.subplots(figsize=(12, 7))
     
     optimizers = summary_df['Optimizer'].unique()
     x = np.arange(len(optimizers))
@@ -376,9 +374,9 @@ def plot_baseline_comparison(summary_df: pd.DataFrame, save_path: Optional[str] 
         pytorch_means.append(float(pytorch_row['Mean Accuracy']))
         pytorch_stds.append(float(pytorch_row['Std Accuracy']))
     # Bars
-    bars1 = ax.bar(x - width/2, custom_means, width, yerr=custom_stds,
+    _bars1 = ax.bar(x - width/2, custom_means, width, yerr=custom_stds,
                    label='Custom', capsize=8, alpha=0.8, color='#3498db')
-    bars2 = ax.bar(x + width/2, pytorch_means, width, yerr=pytorch_stds,
+    _bars2 = ax.bar(x + width/2, pytorch_means, width, yerr=pytorch_stds,
                    label='PyTorch', capsize=8, alpha=0.8, color='#e74c3c')
     
     # Labels

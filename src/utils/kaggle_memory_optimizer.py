@@ -22,7 +22,7 @@ Best Practices:
 import torch
 import logging
 import gc
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple, Optional, Type
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -139,7 +139,7 @@ def clear_memory_cache():
     logger.debug("Cleared GPU memory cache and ran garbage collection")
 
 
-def setup_mixed_precision_training() -> Tuple[torch.cuda.amp.GradScaler, torch.cuda.amp.autocast]:
+def setup_mixed_precision_training() -> Tuple[torch.cuda.amp.GradScaler, Type[torch.cuda.amp.autocast]]:
     """
     Setup mixed precision training for Kaggle T4.
     
@@ -151,10 +151,10 @@ def setup_mixed_precision_training() -> Tuple[torch.cuda.amp.GradScaler, torch.c
     """
     if not torch.cuda.is_available():
         logger.warning("Mixed precision requested but CUDA not available")
-        return None, None
+        return None, None  # type: ignore[return-value]
     
     scaler = torch.cuda.amp.GradScaler()
-    autocast = torch.cuda.amp.autocast
+    autocast = torch.cuda.amp.autocast  # type: ignore[return-value]
     
     logger.info("Mixed precision training enabled (FP16 + Tensor Cores)")
     

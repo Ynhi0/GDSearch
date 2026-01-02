@@ -254,7 +254,7 @@ class TrajectoryProjector:
         X = np.array(snapshots)
         
         if self.method == 'pca':
-            return self.projector.transform(X)
+            return self.projector.transform(X)  # type: ignore[union-attr]
         elif self.method == 'tsne':
             # CRITICAL: t-SNE cannot project new points consistently
             # Each fit_transform creates a DIFFERENT embedding space
@@ -300,7 +300,7 @@ class TrajectoryProjector:
             
             # Project everything together in ONE consistent space
             X_all = np.array(all_snapshots)
-            projected_all = self.projector.fit_transform(X_all)
+            projected_all = self.projector.fit_transform(X_all)  # type: ignore[union-attr]
             
             # Split back into individual trajectories
             projected_trajectories = {}

@@ -4,22 +4,23 @@ Medical image segmentation (3D U-Net, MONAI) with Dice metric logging and CSV ou
 DEMO/PROOF-OF-CONCEPT SCRIPT
 
 CRITICAL LIMITATION (REVIEW FLAG):
-This is a SCAFFOLD with PLACEHOLDER data paths and supports ONLY the Adam optimizer.
+This is a SCAFFOLD with PLACEHOLDER data paths.
 It is NOT a complete medical imaging experiment and should NOT be used for 
 cross-domain generalization claims without:
 - Real medical imaging dataset (e.g., BraTS, LIDC-IDRI)
-- Full optimizer suite testing (not just Adam)
-- Proper train/val/test splits
+- Proper train/val/test splits with patient-level splitting
 - Statistical validation with multiple seeds
+- Domain-specific augmentation strategies
 
 For SOTA research claims:
 1. Replace placeholder data_dicts with real medical imaging data
-2. Extend to support all optimizers from the benchmark suite
-3. Add multi-seed experiments and statistical analysis
+2. Add multi-seed experiments and statistical analysis
+3. Implement proper train/val/test patient-level splits
 4. Clearly document limitations in reports
 
 This is a scaffold that expects user-provided data dicts or a dataset loader.
 Imports MONAI lazily to avoid hard dependency during CI or environments without MONAI.
+Supports all optimizers from the benchmark suite via create_optimizer_from_config().
 """
 
 from __future__ import annotations
@@ -35,11 +36,15 @@ import torch
 
 def _try_import_monai():
     try:
-        from monai.networks.nets import UNet
-        from monai.transforms import Compose, LoadImaged, EnsureChannelFirstd, ScaleIntensityd, ToTensord
-        from monai.data import CacheDataset, DataLoader
-        from monai.losses import DiceLoss
-        from monai.metrics import DiceMetric
+        from monai.networks.nets.unet import UNet
+        from monai.transforms.compose import Compose
+        from monai.transforms.io.dictionary import LoadImaged
+        from monai.transforms.utility.dictionary import EnsureChannelFirstd, ToTensord
+        from monai.transforms.intensity.dictionary import ScaleIntensityd
+        from monai.data.dataset import CacheDataset
+        from monai.data.dataloader import DataLoader
+        from monai.losses.dice import DiceLoss
+        from monai.metrics.meandice import DiceMetric
         return UNet, Compose, LoadImaged, EnsureChannelFirstd, ScaleIntensityd, ToTensord, CacheDataset, DataLoader, DiceLoss, DiceMetric
     except Exception as e:
         raise RuntimeError("MONAI is required for this script. Install via `pip install monai[all]`." ) from e

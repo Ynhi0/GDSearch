@@ -1096,7 +1096,7 @@ class HessianAnalyzer:
         lambda_min = None  # Requires Lanczos iteration - not implemented
         condition_number = None  # Cannot compute without valid lambda_min
         
-        return {
+        return {  # type: ignore[return-value]
             'lambda_max': lambda_max,
             'lambda_min': lambda_min,  # None - requires proper eigenvalue solver
             'condition_number': condition_number,  # None - invalid without lambda_min

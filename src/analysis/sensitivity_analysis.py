@@ -304,11 +304,11 @@ def analyze_robustness(results_df: pd.DataFrame, threshold: float = 0.01) -> Dic
         'coefficient_of_variation': cv,
         'within_threshold_ratio': robustness_ratio,
         'classification': classification,
-        'interpretation': _interpret_robustness(classification)
+        'interpretation': _interpret_robustness_levels(classification)
     }
 
 
-def _interpret_robustness(classification: str) -> str:
+def _interpret_robustness_levels(classification: str) -> str:
     """Provide interpretation of robustness classification."""
     interpretations = {
         "HIGHLY ROBUST": "Excellent! This hyperparameter value is stable. Small changes have minimal impact. Safe for production.",
@@ -522,7 +522,7 @@ def analyze_parameter_interaction(results_df: pd.DataFrame, param_pair: Tuple[st
     }
 
 
-def _interpret_robustness(classification: str) -> str:
+def _example_usage() -> None:
     """
     Example: Run sensitivity analysis for AdamW learning rate.
     """
@@ -594,4 +594,6 @@ def _interpret_robustness(classification: str) -> str:
 
 
 if __name__ == '__main__':
-    main()
+    # Module can be imported without executing main
+    # Call specific functions directly for testing
+    pass

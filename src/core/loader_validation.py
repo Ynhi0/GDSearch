@@ -86,10 +86,10 @@ def validate_loader_for_tuning(
 
             # Fall back to length + small-sample equality checks (best-effort, cheap)
             if hasattr(base_dataset, '__len__') and hasattr(test_base, '__len__'):
-                if len(base_dataset) == len(test_base) and len(base_dataset) > 0:
+                if len(base_dataset) == len(test_base) and len(base_dataset) > 0:  # type: ignore[arg-type]
                     # Try comparing first few items if possible
                     try:
-                        ncheck = min(3, len(base_dataset))
+                        ncheck = min(3, len(base_dataset))  # type: ignore[arg-type]
                         same_count = 0
                         for i in range(ncheck):
                             a_item = base_dataset[i]

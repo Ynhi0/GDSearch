@@ -260,7 +260,7 @@ class AdaptiveConvergenceDetector:
             return ConvergenceResult(
                 converged=True,
                 iteration=len(losses) - self.plateau_window,
-                convergence_value=mean_loss,
+                convergence_value=float(mean_loss),
                 threshold=self.plateau_tolerance,
                 criterion='plateau'
             )
@@ -268,7 +268,7 @@ class AdaptiveConvergenceDetector:
         return ConvergenceResult(
             converged=False,
             iteration=None,
-            convergence_value=mean_loss,
+            convergence_value=float(mean_loss),
             threshold=self.plateau_tolerance,
             criterion='plateau'
         )
@@ -300,16 +300,14 @@ def detect_convergence_multiple_criteria(
         detector = AdaptiveConvergenceDetector(
             absolute_loss_threshold=1e-6,
             relative_tolerance=0.01,
-            gradient_threshold=1e-6,
-            prefer_relative=False
+            gradient_threshold=1e-6
         )
     else:
         # Neural networks: use relative convergence
         detector = AdaptiveConvergenceDetector(
             absolute_loss_threshold=1e-3,
             relative_tolerance=0.05,  # 5% above best
-            gradient_threshold=1e-4,
-            prefer_relative=True
+            gradient_threshold=1e-4
         )
     
     # Test each criterion individually

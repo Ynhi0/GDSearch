@@ -231,15 +231,18 @@ class OptunaHyperparameterTuner:
         )
         
         # Get best trial
-        best_trial = self.study.best_trial
+        best_trial = self.study.best_trial  # type: ignore[union-attr]
+        
+        if best_trial is None:
+            raise RuntimeError("No trials completed successfully. Cannot determine best trial.")
         
         results = {
             'best_value': best_trial.value,
             'best_params': best_trial.params,
             'best_trial_number': best_trial.number,
             'n_trials': len(self.study.trials),
-            'n_pruned': len([t for t in self.study.trials if t.state == optuna.trial.TrialState.PRUNED]),
-            'n_complete': len([t for t in self.study.trials if t.state == optuna.trial.TrialState.COMPLETE]),
+            'n_pruned': len([t for t in self.study.trials if t.state == optuna.trial.TrialState.PRUNED]),  # type: ignore[union-attr]
+            'n_complete': len([t for t in self.study.trials if t.state == optuna.trial.TrialState.COMPLETE]),  # type: ignore[union-attr]
             'study_name': self.study_name
         }
         
@@ -258,7 +261,7 @@ class OptunaHyperparameterTuner:
     def get_importance(self) -> Dict[str, float]:
         """Get parameter importance scores."""
         try:
-            importance = optuna.importance.get_param_importances(self.study)
+            importance = optuna.importance.get_param_importances(self.study)  # type: ignore[attr-defined]
             return importance
         except Exception as e:
             print(f"Could not compute importance: {e}")
@@ -600,7 +603,7 @@ from typing import Any
 def plot_optimization_history(study: Any, save_path: Optional[str] = None):
     """Plot optimization history."""
     try:
-        fig = optuna.visualization.plot_optimization_history(study)
+        fig = optuna.visualization.plot_optimization_history(study)  # type: ignore[attr-defined]
         if save_path:
             fig.write_image(str(save_path))
             print(f"Saved optimization history to {save_path}")
@@ -613,7 +616,7 @@ def plot_optimization_history(study: Any, save_path: Optional[str] = None):
 def plot_param_importances(study: Any, save_path: Optional[str] = None):
     """Plot parameter importances."""
     try:
-        fig = optuna.visualization.plot_param_importances(study)
+        fig = optuna.visualization.plot_param_importances(study)  # type: ignore[attr-defined]
         if save_path:
             fig.write_image(str(save_path))
             print(f"Saved parameter importances to {save_path}")
@@ -626,7 +629,7 @@ def plot_param_importances(study: Any, save_path: Optional[str] = None):
 def plot_slice(study: Any, save_path: Optional[str] = None):
     """Plot parameter slice plots."""
     try:
-        fig = optuna.visualization.plot_slice(study)
+        fig = optuna.visualization.plot_slice(study)  # type: ignore[attr-defined]
         if save_path:
             fig.write_image(str(save_path))
             print(f"Saved slice plot to {save_path}")
@@ -639,7 +642,7 @@ def plot_slice(study: Any, save_path: Optional[str] = None):
 def plot_contour(study: Any, params: Optional[List[str]] = None, save_path: Optional[str] = None):
     """Plot contour plot of parameter interactions."""
     try:
-        fig = optuna.visualization.plot_contour(study, params=params)
+        fig = optuna.visualization.plot_contour(study, params=params)  # type: ignore[attr-defined]
         if save_path:
             fig.write_image(str(save_path))
             print(f"Saved contour plot to {save_path}")

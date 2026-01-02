@@ -350,7 +350,15 @@ def run_single_imdb(optimizer_name: str, seed: int, lr: float, epochs: int, batc
     try:
         optimizer = create_optimizer_from_config(optimizer_config, model.parameters())
     except Exception as e:
-        logging.warning(f\"Registry creation failed, using fallback: {e}\")\n        # Fallback for backward compatibility\n        name = optimizer_name.upper()\n        if name == 'ADAMW':\n            optimizer = torch.optim.AdamW(model.parameters(), lr=lr)\n        elif name in ('SGD', 'SGD_MOMENTUM', 'SGD-MOMENTUM'):\n            optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9 if 'MOMENTUM' in name else 0.0)\n        else:\n            raise ValueError(f\"Unsupported optimizer: {optimizer_name}\")
+        logging.warning(f"Registry creation failed, using fallback: {e}")
+        # Fallback for backward compatibility
+        name = optimizer_name.upper()
+        if name == 'ADAMW':
+            optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+        elif name in ('SGD', 'SGD_MOMENTUM', 'SGD-MOMENTUM'):
+            optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9 if 'MOMENTUM' in name else 0.0)
+        else:
+            raise ValueError(f"Unsupported optimizer: {optimizer_name}")
 
 
     history = []

@@ -334,7 +334,7 @@ def plot_convergence_comparison(
         output_path: Optional path to save plot
         title: Plot title
     """
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+    _fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
     
     # Left: Loss trajectories
     for opt_name, result in results_dict.items():
@@ -427,7 +427,7 @@ def analyze_experiment_convergence(
     
     # Generate report
     if output_dir:
-        report = generate_convergence_report(results, output_dir / 'convergence_rates.csv')
+        _report = generate_convergence_report(results, output_dir / 'convergence_rates.csv')
         plot_convergence_comparison(results, output_dir / 'convergence_comparison.png')
         logger.info(f"Convergence analysis complete. Results in {output_dir}")
     

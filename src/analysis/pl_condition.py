@@ -176,19 +176,21 @@ def compute_pl_over_trajectory(
          - holds_array: Boolean array (PL holds at each iteration) or None
     """
     losses = df[loss_col].values
+    losses_array = np.asarray(losses)
     grad_norms = df[grad_norm_col].values
-    grad_sq = grad_norms ** 2
+    grad_norms_array = np.asarray(grad_norms)
+    grad_sq = grad_norms_array ** 2
     
     # Estimate f_star if needed
     if f_star is None and auto_estimate_f_star:
-        f_star = estimate_f_star_from_trajectory(losses)
+        f_star = estimate_f_star_from_trajectory(losses_array)
     elif f_star is None:
         # No estimation requested - use 0.0 (legacy behavior)
         f_star = 0.0
     
     # Compute mu_hat per iteration
     mu_hats = []
-    for L, g2 in zip(losses, grad_sq):
+    for L, g2 in zip(losses_array, grad_sq):
         denom = 2.0 * (L - f_star)
         if denom > 1e-12 and np.isfinite(g2):
             mu_hat = g2 / denom
