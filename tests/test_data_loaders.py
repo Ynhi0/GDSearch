@@ -4,7 +4,7 @@ Unit tests for data loader contract verification.
 Tests that get_mnist_loaders and get_cifar10_loaders return the correct 
 tuple arity based on val_split parameter.
 
-This is critical for preventing runtime unpacking errors in experiments.
+This is important for preventing runtime unpacking errors in experiments.
 """
 
 import pytest

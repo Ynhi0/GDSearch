@@ -51,7 +51,7 @@ class SGDWrapper(Optimizer):
         super().__init__(params, defaults)
         self.custom_opt = CustomSGD(lr=lr)
         
-        # CRITICAL: Flag for OOM handler - SGD does NOT require closure
+        # Flag for OOM handler - SGD does not require closure
         self.requires_closure = False
         
     def step(self, closure=None):
@@ -70,7 +70,7 @@ class SGDWrapper(Optimizer):
                 original_shape = param_np.shape
                 original_dtype = p.data.dtype
                 
-                # AUDIT FIX: Check for NaN/Inf before step to fail fast
+                # Validate gradients before step to fail fast on NaN/Inf
                 if not np.isfinite(grad).all():
                     raise ValueError(
                         f"SGDWrapper: Non-finite gradient detected before step.\\n"
@@ -84,7 +84,7 @@ class SGDWrapper(Optimizer):
                 if not isinstance(updated_param, np.ndarray):
                     raise TypeError(f"SGDWrapper: custom optimizer step() must return numpy.ndarray, got {type(updated_param).__name__}")
                 
-                # CRITICAL FIX: Validate shape before reshaping
+                # Validate shape before reshaping
                 if updated_param.size != param_np.size:
                     raise ValueError(
                         f"SGDWrapper: Shape mismatch:\\n"
@@ -116,7 +116,7 @@ class SGDMomentumWrapper(Optimizer):
         # Create one optimizer per parameter (they have state)
         self.custom_opts = {}
         
-        # CRITICAL: Flag for OOM handler - SGDMomentum does NOT require closure
+        # Flag for OOM handler - SGDMomentum does not require closure
         self.requires_closure = False
         
     def step(self, closure=None):
@@ -168,9 +168,9 @@ class SGDMomentumWrapper(Optimizer):
     
     def state_dict(self):
         """Save custom optimizer states with index-based keys for cross-process safety.
-        
-        AUDIT FIX: Use numpy arrays directly instead of .tolist() to reduce memory overhead.
-        Torch will handle numpy array serialization efficiently.
+
+        Uses numpy arrays directly instead of .tolist() to keep serialization lightweight.
+        Torch handles numpy array serialization efficiently.
         """
         base_state = super().state_dict()
         # Serialize custom_opts: map (group_idx, param_idx) to optimizer state (v=velocity, not m)
@@ -178,7 +178,7 @@ class SGDMomentumWrapper(Optimizer):
         for key, opt in self.custom_opts.items():
             # Convert tuple key to string for JSON serialization
             key_str = f"{key[0]},{key[1]}"
-            # AUDIT FIX: Keep as numpy array, torch.save handles this efficiently
+            # Keep as numpy array; torch.save handles this efficiently
             custom_state[key_str] = {
                 'v': opt.v if opt.v is not None else None,  # Keep as numpy, no .tolist()
             }
@@ -216,7 +216,7 @@ class AdamWrapper(Optimizer):
         # Create one optimizer per parameter (they have state)
         self.custom_opts = {}
         
-        # CRITICAL: Flag for OOM handler - Adam does NOT require closure
+        # Flag for OOM handler - Adam does not require closure
         self.requires_closure = False
         
     def step(self, closure=None):
@@ -270,15 +270,15 @@ class AdamWrapper(Optimizer):
     
     def state_dict(self):
         """Save custom Adam optimizer states with index-based keys.
-        
-        AUDIT FIX: Keep numpy arrays instead of .tolist() for efficient serialization.
+
+        Keeps numpy arrays instead of .tolist() for efficient serialization.
         """
         base_state = super().state_dict()
         custom_state = {}
         for key, opt in self.custom_opts.items():
             # Convert tuple key to string for JSON serialization
             key_str = f"{key[0]},{key[1]}"
-            # AUDIT FIX: Keep as numpy arrays for efficient torch.save
+            # Keep as numpy arrays for efficient torch.save
             custom_state[key_str] = {
                 'm': opt.m if opt.m is not None else None,
                 'v': opt.v if opt.v is not None else None,
@@ -321,7 +321,7 @@ class SGDNesterovWrapper(Optimizer):
         super().__init__(params, defaults)
         self.custom_opts = {}
         
-        # CRITICAL: Flag for OOM handler - SGDNesterov does NOT require closure
+        # Flag for OOM handler - SGDNesterov does not require closure
         self.requires_closure = False
 
     def step(self, closure=None):
@@ -373,8 +373,8 @@ class SGDNesterovWrapper(Optimizer):
     
     def state_dict(self):
         """Save Nesterov momentum states with index-based keys.
-        
-        AUDIT FIX: Keep numpy arrays for efficient serialization.
+
+        Keeps numpy arrays for efficient serialization.
         """
         base_state = super().state_dict()
         custom_state = {}
@@ -417,7 +417,7 @@ class RMSPropWrapper(Optimizer):
         # Create one optimizer per parameter (they have state)
         self.custom_opts = {}
         
-        # CRITICAL: Flag for OOM handler - RMSProp does NOT require closure
+        # Flag for OOM handler - RMSProp does not require closure
         self.requires_closure = False
         
     def step(self, closure=None):
@@ -475,8 +475,8 @@ class RMSPropWrapper(Optimizer):
     
     def state_dict(self):
         """Save RMSProp states with index-based keys.
-        
-        AUDIT FIX: Keep numpy arrays for efficient serialization.
+
+        Keeps numpy arrays for efficient serialization.
         """
         base_state = super().state_dict()
         custom_state = {}
@@ -524,7 +524,7 @@ class AdamWWrapper(Optimizer):
         super().__init__(params, defaults)
         self.custom_opts = {}
         
-        # CRITICAL: Flag for OOM handler - AdamW does NOT require closure
+        # Flag for OOM handler - AdamW does not require closure
         self.requires_closure = False
 
     def step(self, closure=None):
@@ -580,8 +580,8 @@ class AdamWWrapper(Optimizer):
     
     def state_dict(self):
         """Save AdamW states with index-based keys.
-        
-        AUDIT FIX: Keep numpy arrays for efficient serialization.
+
+        Keeps numpy arrays for efficient serialization.
         """
         base_state = super().state_dict()
         custom_state = {}
@@ -668,7 +668,7 @@ class SAMWrapper(Optimizer):
         self.rho = rho
         self.adaptive = adaptive
         
-        # CRITICAL: Flag for OOM handler - SAM requires closure
+        # Flag for OOM handler - SAM requires closure
         self.requires_closure = True
         
         # Inherit param_groups and state from base optimizer (reference, not copy)
@@ -790,7 +790,7 @@ class SAMWrapper(Optimizer):
                 "\\nSee PyTorch LBFGS optimizer docs for closure examples."
             )
         
-        # AUDIT FIX: Validate closure is callable
+        # Validate closure is callable
         if not callable(closure):
             raise TypeError(
                 f"SAMWrapper: closure must be callable, got {type(closure).__name__}"
@@ -804,7 +804,7 @@ class SAMWrapper(Optimizer):
                 f"SAMWrapper: closure() failed during first forward pass: {e}"
             ) from e
         
-        # AUDIT FIX: Normalize loss to Python float (accept Tensors or numeric scalars)
+        # Normalize loss to a Python float (accept Tensors or numeric scalars)
         from src.utils.num_utils import safe_to_float
         loss_at_current = safe_to_float(loss)
         if math.isnan(loss_at_current):
@@ -812,7 +812,7 @@ class SAMWrapper(Optimizer):
                 f"SAMWrapper: closure must return a Tensor or numeric scalar, got {type(loss).__name__}"
             ) from None
         
-        # AUDIT FIX: Check for non-finite loss
+        # Check for non-finite loss
         if not math.isfinite(loss_at_current):
             raise ValueError(
                 f"SAMWrapper: Non-finite loss detected at current point: {loss_at_current}\\n"
@@ -845,7 +845,7 @@ class SAMWrapper(Optimizer):
                 f"SAMWrapper: closure must return a Tensor or numeric scalar at adversarial point, got {type(loss_adv).__name__}"
             )
 
-        # AUDIT FIX: Check for non-finite adversarial loss
+        # Check for non-finite adversarial loss
         if not math.isfinite(loss_at_adversarial):
             # Restore parameters
             for group in self.param_groups:
@@ -969,7 +969,7 @@ class LookaheadWrapper(Optimizer):
         defaults = dict(k=k, alpha=alpha)
         super().__init__(params, defaults)
         
-        # CRITICAL: Flag for OOM handler - Lookahead does NOT require closure
+        # Flag for OOM handler - Lookahead does not require closure
         self.requires_closure = False
         
         self.base_optimizer = base_optimizer
@@ -1105,7 +1105,7 @@ class AdaBoundWrapper(Optimizer):
         defaults = dict(lr=lr, beta1=beta1, beta2=beta2, final_lr=final_lr, epsilon=epsilon, gamma=gamma)
         super().__init__(params, defaults)
         
-        # CRITICAL: Flag for OOM handler - AdaBound does NOT require closure
+        # Flag for OOM handler - AdaBound does not require closure
         self.requires_closure = False
         
         # Create separate optimizer for each parameter group
@@ -1172,7 +1172,7 @@ class RAdamWrapper(Optimizer):
         defaults = dict(lr=lr, beta1=beta1, beta2=beta2, epsilon=epsilon)
         super().__init__(params, defaults)
         
-        # CRITICAL: Flag for OOM handler - RAdam does NOT require closure
+        # Flag for OOM handler - RAdam does not require closure
         self.requires_closure = False
         
         # Create separate optimizer for each parameter group
@@ -1237,7 +1237,7 @@ class LAMBWrapper(Optimizer):
         defaults = dict(lr=lr, beta1=beta1, beta2=beta2, epsilon=epsilon, weight_decay=weight_decay)
         super().__init__(params, defaults)
         
-        # CRITICAL: Flag for OOM handler - LAMB does NOT require closure
+        # Flag for OOM handler - LAMB does not require closure
         self.requires_closure = False
         
         # Create separate optimizer for each parameter group

@@ -1,7 +1,7 @@
 """
 GPU Reproducibility and Determinism Utilities.
 
-CRITICAL FIX: Addresses non-deterministic GPU behavior that causes
+Addresses non-deterministic GPU behavior that causes
 irreproducible results even with torch.manual_seed(). This module provides
 comprehensive determinism enforcement for scientific reproducibility.
 
@@ -29,7 +29,7 @@ def set_reproducibility_mode(
     """
     Configure PyTorch for full reproducibility across CPU and GPU.
     
-    CRITICAL for academic research: Without this, repeated runs with the
+    For academic research: Without this, repeated runs with the
     same seed will produce DIFFERENT results on GPU, making experiments
     irreproducible and scientifically invalid.
     

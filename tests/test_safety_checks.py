@@ -20,7 +20,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-class TestAuditFix1_TestLeakageEnforcement:
+class TestLeakageEnforcement:
     """Test stricter test-leakage enforcement in Optuna tuner."""
     
     def test_untagged_loader_with_test_dataset_rejected(self):
@@ -93,7 +93,7 @@ class TestAuditFix1_TestLeakageEnforcement:
             pytest.fail(f"Properly tagged loader should not raise: {e}")
 
 
-class TestAuditFix2_OptunaStudyContamination:
+class TestOptunaStudyContamination:
     """Test Optuna study contamination prevention."""
     
     def test_study_creation_defaults_to_no_reuse(self):
@@ -126,7 +126,7 @@ class TestAuditFix2_OptunaStudyContamination:
             "Studies with same name should be separate instances (no reuse)"
 
 
-class TestAuditFix3_SAM_OOM_Safety:
+class TestSAM_OOM_Safety:
     """Test SAM+OOM safety assertions."""
     
     def test_closure_optimizer_missing_attribute_caught(self):
@@ -171,7 +171,7 @@ class TestAuditFix3_SAM_OOM_Safety:
         assert sam.requires_closure is True, "SAMWrapper requires_closure must be True"
 
 
-class TestAuditFix4_AblationGuard:
+class TestAblationGuard:
     """Test fixed-LR ablation guard."""
     
     def test_ablation_script_requires_flag(self):
@@ -201,7 +201,7 @@ class TestAuditFix4_AblationGuard:
             sys.argv = original_argv
 
 
-class TestAuditFix5_DDP_DeviceMapping:
+class TestDDP_DeviceMapping:
     """Test DDP device mapping robustness."""
     
     def test_local_rank_env_var_usage(self):
@@ -218,7 +218,7 @@ class TestAuditFix5_DDP_DeviceMapping:
         assert 'os.environ.get' in source, "Must use os.environ.get for LOCAL_RANK"
 
 
-class TestAuditFix6_VenvNotTracked:
+class TestVenvNotTracked:
     """Test repository hygiene - venv not tracked."""
     
     def test_venv_in_gitignore(self):

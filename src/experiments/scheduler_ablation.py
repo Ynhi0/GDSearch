@@ -43,7 +43,7 @@ def create_scheduler_configs(
     """
     configs = []
     
-    # CRITICAL FIX: Dynamic T_max to match epochs - prevents unwanted LR restart
+    # Dynamic T_max to match epochs - prevents unwanted LR restart
     # If T_max < epochs, CosineAnnealing will restart and increase LR at the end
     epochs = base_config.get('epochs', 15)
     

@@ -2,7 +2,7 @@
 Comprehensive smoke test for GDSearch workflow.
 
 Tests the complete pipeline from config parsing through execution
-to verify all audit fixes are working correctly.
+to verify all fixes are working correctly.
 """
 import os
 import sys

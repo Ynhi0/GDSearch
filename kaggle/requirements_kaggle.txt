@@ -1,6 +1,6 @@
 # Complete dependencies for Kaggle environment
-# Updated: December 7, 2025 - Deployment Readiness Audit
-# Addresses 7 critical missing dependencies identified in audit
+# Updated: December 7, 2025 - Deployment readiness check
+# Addresses 7 missing dependencies for full functionality
 
 # Core ML Framework
 torch>=2.0.0

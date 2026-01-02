@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Comprehensive Codebase Health Check for GDSearch
-Validates consistency, logical correctness, and integration across all critical modules.
+Validates consistency, logical correctness, and integration across all core modules.
 """
 
 import sys
@@ -49,9 +49,9 @@ def test_requirements():
 
 
 def test_imports():
-    """Test all critical imports."""
+    """Test all core imports."""
     print("\n" + "="*60)
-    print("TEST 2: Critical Imports")
+    print("TEST 2: Core Imports")
     print("="*60)
     
     from src.core.medical_data_utils import (
@@ -72,7 +72,7 @@ def test_imports():
     from src.experiments.run_nn_experiment import build_model_and_data
     print("  ✓ Run NN experiment import successful")
     
-    print("\nAll critical imports successful!")
+    print("\nAll core imports successful!")
 
 
 def test_seed_consistency():

@@ -1,7 +1,7 @@
 """
 Cross-process checkpoint tests for optimizer wrappers.
 
-CRITICAL: Tests that optimizer state survives checkpoint save/load across
+Tests that optimizer state survives checkpoint save/load across
 different Python processes (simulating Kaggle kernel restarts).
 
 This ensures the fix for id(p)-based serialization is working correctly.
@@ -134,7 +134,7 @@ class TestCrossProcessCheckpoint:
         (AdamWWrapper, {'lr': 0.001, 'betas': (0.9, 0.999), 'weight_decay': 0.01}),
     ])
     def test_disk_checkpoint_roundtrip(self, optimizer_class, kwargs):
-        """Test checkpoint save/load through disk (critical for Kaggle)."""
+        """Test checkpoint save/load through disk (important for Kaggle)."""
         with tempfile.TemporaryDirectory() as tmpdir:
             checkpoint_path = Path(tmpdir) / "checkpoint.pt"
             
@@ -194,7 +194,7 @@ class TestCrossProcessCheckpoint:
     
     def test_subprocess_checkpoint_roundtrip(self):
         """
-        CRITICAL TEST: Verify checkpoint works across different Python processes.
+        Test: Verify checkpoint works across different Python processes.
         
         This simulates Kaggle kernel restart scenario where process memory is cleared.
         """

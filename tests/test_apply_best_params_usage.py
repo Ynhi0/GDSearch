@@ -27,6 +27,6 @@ def test_apply_best_params_is_used_in_tuning_pipeline():
             break
 
     assert found, (
-        "BLOCKER: apply_best_params_to_config() is not used in the canonical tuning pipeline. "
+        "apply_best_params_to_config() is not used in the canonical tuning pipeline. "
         "Please ensure tuned parameters are programmatically applied to final experiment configs in 'scripts/tune_nn.py' or 'run_all_kaggle.py'."
     )

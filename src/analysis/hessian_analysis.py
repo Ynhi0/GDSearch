@@ -180,7 +180,7 @@ class HessianAnalyzer:
         eigenvectors = []
         
         # Compute top k eigenvalues using deflation
-        # CRITICAL FIX (HIGH-1): Proper deflation for multi-eigenvalue estimation
+        # Proper deflation for multi-eigenvalue estimation
         # Without deflation, all iterations converge to the top eigenvalue
         for k in range(min(top_k, 10)):  # Limit to 10 for efficiency
             # Power iteration

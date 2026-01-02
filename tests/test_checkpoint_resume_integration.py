@@ -9,7 +9,7 @@ Tests that checkpoint resume properly restores:
 5. RNG states for reproducibility
 
 Created: December 24, 2025
-Purpose: Verify fixes for checkpoint resume bugs discovered in audit
+Purpose: Verify fixes for checkpoint resume bugs
 """
 import pytest
 import torch
@@ -67,11 +67,10 @@ class TestCheckpointResumeEarlyStoppingState:
     
     def test_early_stopping_state_saved_and_restored(self, temp_checkpoint_dir, sample_model, sample_optimizer, sample_scheduler):
         """
-        CRITICAL TEST: Verify early stopping metadata is saved and restored.
+        Test: Verify early stopping metadata is saved and restored.
         
-        This test validates the fix for Bug #2 from the 10-pass audit:
-        - Checkpoint resume must restore best_val_acc and patience_counter
-        - Without this, resumed runs have invalid early stopping behavior
+        This test validates that checkpoint resume restores best_val_acc and patience_counter.
+        Without this, resumed runs have invalid early stopping behavior.
         """
         manager = CheckpointManager(base_dir=temp_checkpoint_dir, max_backups=3)
         

@@ -6,7 +6,7 @@ This test ensures that:
 2. Import-time side effects don't break test harnesses (pytest, etc.)
 3. Global state is not modified at import time
 
-This is critical for CI/CD and programmatic consumption of the codebase.
+This is important for CI/CD and programmatic consumption of the codebase.
 """
 
 import sys

@@ -31,7 +31,7 @@ def run_single_trial(
     """
     Run one trial with a given initial point.
     
-    CRITICAL FIX: Added gradient clipping to prevent NaN explosion on
+    Added gradient clipping to prevent NaN explosion on
     Rosenbrock and other ill-conditioned functions where gradients can
     reach 1e9+ magnitude.
     
@@ -58,7 +58,7 @@ def run_single_trial(
                 'final_y': y
             }
         
-        # CRITICAL FIX: Gradient clipping to prevent exploding gradients
+        # Gradient clipping to prevent exploding gradients
         # Rosenbrock gradients can reach O(1e9) at x,y >> 1
         if grad_norm > grad_clip_value:
             clip_scale = grad_clip_value / grad_norm

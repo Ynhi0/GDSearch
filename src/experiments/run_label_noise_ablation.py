@@ -211,7 +211,7 @@ def train_with_noisy_labels(
     """
     Train model with noisy labels and track performance.
     
-    CRITICAL FIX: Tracks PEAK validation accuracy instead of final accuracy
+    Tracks PEAK validation accuracy instead of final accuracy
     to properly measure robustness to label noise. Models will overfit to
     noise if trained too long, so peak validation performance is the correct
     metric for comparing optimizer robustness.
@@ -283,7 +283,7 @@ def train_with_noisy_labels(
         val_loss /= val_total
         val_acc = 100.0 * val_correct / val_total
         
-        # CRITICAL FIX: Track best validation accuracy (early stopping criterion)
+        # Track best validation accuracy (early stopping criterion)
         # This is crucial for label noise robustness - models overfit to noise
         if val_acc > best_val_acc:
             best_val_acc = val_acc
@@ -313,7 +313,7 @@ def train_with_noisy_labels(
                 f"Train Acc={train_acc:.2f}% Val Acc={val_acc:.2f}%"
             )
     
-    # CRITICAL FIX: Restore best model before final test evaluation
+    # Restore best model before final test evaluation
     # This gives the fairest comparison of optimizer robustness to noise
     if best_model_state is not None:
         model.load_state_dict(best_model_state)
@@ -342,7 +342,7 @@ def train_with_noisy_labels(
     logger.info(f"[{optimizer_name}] Final Test Performance: Loss={test_loss:.4f}, Acc={test_acc:.2f}%")
     logger.info(f"[{optimizer_name}] Best Val Acc: {best_val_acc:.2f}% at epoch {best_val_epoch}")
     
-    # CRITICAL FIX: Add both peak and final metrics for complete analysis
+    # Add both peak and final metrics for complete analysis
     # Peak metrics show robustness; final metrics show overfitting tendency
     if history:
         # Update last epoch with actual test metrics from BEST model
@@ -430,7 +430,7 @@ def run_label_noise_ablation(
                 else:
                     raise ValueError(f"Unsupported model: {model_name}")
                 
-                # CRITICAL FIX: Use optimizer registry for consistency
+                # Use optimizer registry for consistency
                 from src.core.optimizer_registry import create_optimizer_from_config
                 
                 optimizer_config_dict = {'name': optimizer_name}
@@ -549,7 +549,7 @@ def analyze_robustness_to_noise(summary_df: pd.DataFrame) -> pd.DataFrame:
         # Get clean performance (noise_rate=0.0)
         from src.utils.type_guards import ensure_series
         clean_data = opt_data[opt_data['noise_rate'] == 0.0]['test_acc_mean']
-        # AUDIT FIX: Protect against missing clean baseline
+        # Protect against missing clean baseline
         if len(clean_data) == 0:
             logging.warning(f"No clean baseline (noise_rate=0.0) found for {optimizer}, skipping robustness metrics")
             continue
@@ -560,7 +560,7 @@ def analyze_robustness_to_noise(summary_df: pd.DataFrame) -> pd.DataFrame:
         for _, row in opt_data.iterrows():
             if row['noise_rate'] > 0.0:
                 acc_drop = clean_acc - row['test_acc_mean']
-                # AUDIT FIX: Protect against division by zero
+                # Protect against division by zero
                 relative_drop = (acc_drop / clean_acc) * 100.0 if clean_acc > 0 else 0.0
                 
                 robustness_metrics.append({

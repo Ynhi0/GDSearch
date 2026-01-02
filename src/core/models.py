@@ -16,7 +16,7 @@ class SimpleMLP(nn.Module):
     
     EXTENDED: Now supports configurable hidden size, dropout, and batch normalization.
     
-    CRITICAL FIX (Issue #26): Added use_bn parameter to control Batch Normalization.
+    Added use_bn parameter to control Batch Normalization.
     This prevents confounding variables when comparing optimizers:
     - SGD benefits greatly from BN (stabilizes gradients)
     - Adam works well without BN (adaptive scaling handles it)
@@ -40,7 +40,7 @@ class SimpleMLP(nn.Module):
 
         self.fc1 = nn.Linear(input_size, hidden_size)
         
-        # CRITICAL FIX (Issue #26): Optional Batch Normalization
+        # Optional Batch Normalization
         # When use_bn=True, adds BN after first linear layer
         # This allows fair optimizer comparisons with/without normalization
         if use_bn:
@@ -134,7 +134,7 @@ class ConvNet(nn.Module):
             nn.Dropout2d(p=dropout)
         )
         
-        # CRITICAL FIX (Issue #23): Use AdaptiveAvgPool2d instead of hardcoded shape
+        # Use AdaptiveAvgPool2d instead of hardcoded shape
         # This allows the model to work with ANY input resolution (CIFAR 32x32, MNIST 28x28, etc.)
         self.adaptive_pool = nn.AdaptiveAvgPool2d((1, 1))  # Always outputs 128x1x1
         
@@ -301,7 +301,7 @@ class ResNet18(nn.Module):
                 nn.init.normal_(m.weight, 0, 0.01)
                 nn.init.constant_(m.bias, 0)
         
-        # CRITICAL FIX (Issue #25): Zero-Gamma Initialization for residual blocks
+        # Zero-Gamma Initialization for residual blocks
         # Initialize the last BN in each residual block to zero (γ=0)
         # This makes each block initially act as identity: out = x + 0 = x
         if self.zero_init_residual:

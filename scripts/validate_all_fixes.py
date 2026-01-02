@@ -6,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 print("="*70)
-print("VALIDATION TEST - All Critical Fixes")
+print("VALIDATION TEST - All Fixes")
 print("="*70)
 
 # Test 1: OOM Handler

@@ -1,11 +1,8 @@
 """
-Test suite for checkpoint completeness (BLOCKER-2 fix).
+Test suite for checkpoint completeness.
 
 Ensures all training state (scheduler, scaler, EMA) is properly saved
 and restored to prevent training dynamics corruption on resume.
-
-Author: GDSearch Remediation Team
-Date: December 9, 2025
 """
 
 import pytest

@@ -36,7 +36,7 @@ def create_batch_size_configs(
     """
     Create experiment configurations for batch size ablation.
     
-    CRITICAL FIX: Implements Learning Rate Scaling (Linear Scaling Rule)
+    Implements Learning Rate Scaling (Linear Scaling Rule)
     to ensure fair comparison across batch sizes.
     
     Args:

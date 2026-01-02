@@ -34,10 +34,10 @@ A comprehensive Python framework for comparing gradient descent algorithms on 2D
 - **Auto-Test Selection:** Automatically choose appropriate test based on normality
 - **Interactive Visualizations:** Plotly-based 2D/3D plots, animations, loss landscapes
 - **Error Bar Visualization:** Plots with mean ± std bands
-- **Adaptive Overfitting Prevention:** Enforced train/val/test separation (BLOCKER-1 fix)
-- **Checkpoint Robustness:** Complete state saving including scheduler/scaler/EMA (BLOCKER-2 fix)
-- **Config Validation:** Automated schema checks prevent silent errors (BLOCKER-3 fix)
-- **Search Budget Parity:** Automated fairness checks across optimizers (HIGH-2 fix)
+- **Adaptive Overfitting Prevention:** Enforced train/val/test separation
+- **Checkpoint Robustness:** Complete state saving including scheduler/scaler/EMA
+- **Config Validation:** Automated schema checks prevent silent errors
+- **Search Budget Parity:** Automated fairness checks across optimizers
 
 ### Modern Optimization Techniques
 
@@ -202,14 +202,9 @@ GDSearch/
 │   ├── train_resnet18_cifar10.py
 │   ├── tune_nn.py              # Two-stage hyperparameter tuning
 │   ├── validate_all_experiments.py
-│   ├── validate_all_fixes.py
-│   ├── validate_audit_fixes_quick.py
 │   ├── validate_configs.py
 │   ├── validate_config_schema.py
 │   ├── validate_experiment_config.py
-│   ├── validate_neurips_fixes.py
-│   ├── validate_remediation_fixes_quick.py
-│   ├── verify_all_audit_fixes.py
 │   ├── archive/                # Archived scripts
 │   └── legacy/                 # Legacy scripts
 ├── docs/                       # Documentation
@@ -496,9 +491,6 @@ Edit `configs/nn_tuning.json` or `configs/cifar10_tuning.json`:
   ],
   "final": {
     "epochs": 20,
-    "capture_layer_grad_epochs": [1, 10, 20]
-  },
-  "convergence": {
     "grad_norm_threshold": 1e-6,
     "loss_delta_threshold": 1e-7,
     "loss_window": 200
@@ -520,8 +512,6 @@ python scripts/quick_validation_test.py
 # Check configuration schema
 python scripts/validate_config_schema.py
 
-# Verify all fixes are working
-python scripts/verify_all_audit_fixes.py
 ```
 
 ### Analysis and Reporting Scripts
@@ -616,9 +606,6 @@ python scripts/validate_all_experiments.py
 
 # Check for import safety issues
 python scripts/diagnose_imports.py
-
-# Verify optimizer implementations
-python scripts/validate_all_fixes.py
 
 # Test configuration parsing
 python scripts/validate_experiment_config.py

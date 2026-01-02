@@ -1,7 +1,7 @@
 """
 Runtime Saddle Point Detection via Eigenvalue Tracking.
 
-CRITICAL FIX: Addresses the methodological flaw of only tracking grad_norm,
+Addresses the methodological flaw of only tracking grad_norm,
 which goes to 0 at BOTH local minima AND saddle points. This module provides
 runtime Hessian eigenvalue tracking to distinguish between these cases.
 
@@ -178,7 +178,7 @@ def compute_smallest_eigenvalue_power_iteration(
     """
     Compute smallest eigenvalue λ_min using scipy's sparse eigensolver.
     
-    CRITICAL FIX: Power iteration finds the eigenvalue with LARGEST MAGNITUDE,
+    Power iteration finds the eigenvalue with LARGEST MAGNITUDE,
     not the smallest algebraic value. To find the smallest eigenvalue (which
     can be negative at saddle points), we MUST use scipy.sparse.linalg.eigsh
     with which='SA' (Smallest Algebraic).

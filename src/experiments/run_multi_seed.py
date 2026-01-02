@@ -98,7 +98,7 @@ def aggregate_results(result_files: List[str], metric: str = 'test_accuracy', ex
                 values.append(final_value)
     values = np.array(values)
     
-    # CRITICAL FIX: Check for empty array before computing statistics
+    # Check for empty array before computing statistics
     # This can occur when all runs are tainted or no valid data exists
     if len(values) == 0:
         return {

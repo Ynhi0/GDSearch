@@ -2,7 +2,7 @@
 Tests to enforce tuning safety contract:
 - Any function whose name contains 'tune' or 'tuning' MUST NOT accept a parameter named 'test_loader' unless
   its docstring explicitly documents that the parameter is validation data (contains 'validation' or 'val').
-This helps prevent accidental test-set leakage during hyperparameter tuning (BLOCKER-level check).
+This helps prevent accidental test-set leakage during hyperparameter tuning.
 """
 
 import ast
@@ -54,6 +54,6 @@ def test_tuning_functions_do_not_accept_test_loader_without_doc():
                         offenders.append((path, name))
 
     assert not offenders, (
-        "BLOCKER: Tuning functions must not accept 'test_loader' without documenting that it is actually validation data. "
+        "Error: Tuning functions must not accept 'test_loader' without documenting that it is actually validation data. "
         "Offenders: " + ', '.join(f"{p}:{n}" for p, n in offenders)
     )

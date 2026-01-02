@@ -20,7 +20,7 @@ def get_optimal_dataloader_kwargs(
     """
     Get optimal DataLoader kwargs for fair benchmarking.
     
-    CRITICAL: For time-to-convergence comparisons, DataLoader performance
+    For time-to-convergence comparisons, DataLoader performance
     must be consistent across experiments. This function ensures:
     - Optimal num_workers for the platform
     - Proper pin_memory settings for GPU
@@ -101,7 +101,7 @@ def validate_dataloader_consistency(
     """
     Validate that two DataLoaders have consistent settings for fair comparison.
     
-    CRITICAL: When comparing optimizers, DataLoader settings must be identical
+    When comparing optimizers, DataLoader settings must be identical
     to avoid confounding variables.
     
     Args:
@@ -174,7 +174,7 @@ def recommend_batch_size_for_fair_comparison(
     """
     Recommend batch size for fair optimizer comparison.
     
-    CRITICAL: Different batch sizes affect convergence speed and can confound
+    Different batch sizes affect convergence speed and can confound
     optimizer comparisons. This function suggests a batch size that:
     - Fits in GPU memory
     - Is large enough to be efficient

@@ -2,14 +2,14 @@
 """
 Kaggle T4 x2 Production Runner
 
-Demonstrates all critical fixes and optimizations for Kaggle environment.
+Demonstrates all fixes and optimizations for Kaggle environment.
 This script can be run directly in a Kaggle notebook to validate the fixes.
 
 Usage:
     python kaggle_production_runner.py --quick
     python kaggle_production_runner.py --full --experiment all
 
-All 7 critical fixes are integrated and demonstrated here.
+All 7 fixes are integrated and demonstrated here.
 """
 
 import os
@@ -32,7 +32,7 @@ sys.path.insert(0, str(project_root))
 
 def demo_fix_1_medical_segmentation():
     """
-    CRITICAL FIX #1: Un-hardcoded Adam in medical segmentation.
+    Medical Segmentation - Configurable Optimizers.
     
     Previously: Only Adam was supported
     Now: Can use any optimizer via config
@@ -62,7 +62,7 @@ def demo_fix_1_medical_segmentation():
 
 def demo_fix_2_scheduler_ablation():
     """
-    CRITICAL FIX #2: Dynamic T_max in scheduler ablation.
+    Scheduler Ablation - Dynamic T_max.
     
     Previously: T_max=10 hardcoded, causing LR restart at epoch 11-15
     Now: T_max dynamically matches epochs
@@ -96,7 +96,7 @@ def demo_fix_2_scheduler_ablation():
 
 def demo_fix_3_batch_size_scaling():
     """
-    CRITICAL FIX #3: Learning rate scaling in batch size ablation.
+    Batch Size Ablation - LR Scaling.
     
     Previously: LR fixed, leading to unfair comparison
     Now: LR scales with batch size (Linear Scaling Rule)
@@ -140,7 +140,7 @@ def demo_fix_3_batch_size_scaling():
 
 def demo_fix_4_gradient_clipping():
     """
-    CRITICAL FIX #4: Gradient clipping in robustness experiments.
+    Gradient Clipping - NaN Prevention.
     
     Previously: NaN explosion on Rosenbrock function
     Now: Gradients clipped to prevent overflow
@@ -181,7 +181,7 @@ def demo_fix_4_gradient_clipping():
 
 def demo_fix_5_peak_accuracy():
     """
-    CRITICAL FIX #5: Peak accuracy tracking in label noise experiments.
+    Label Noise - Peak Accuracy Tracking.
     
     Previously: Used final accuracy (overfitted to noise)
     Now: Tracks best validation accuracy and restores checkpoint
@@ -224,7 +224,7 @@ def demo_fix_5_peak_accuracy():
 
 def demo_fix_6_theoretical_bounds():
     """
-    CRITICAL FIX #6: Condition number in convergence rate analysis.
+    Convergence Rate - Condition Number.
     
     Previously: Theoretical bounds ignored problem geometry (condition number)
     Now: Properly accounts for kappa = L/mu
@@ -269,7 +269,7 @@ def demo_fix_6_theoretical_bounds():
 
 def demo_fix_7_pairwise_sensitivity():
     """
-    CRITICAL FIX #7: Pairwise sensitivity analysis.
+    Pairwise sensitivity analysis.
     
     Previously: Only one-at-a-time sensitivity (missed interactions)
     Now: Can test parameter pairs jointly
@@ -340,7 +340,7 @@ def run_quick_validation():
     """
     logger.info("\n" + "#"*80)
     logger.info("KAGGLE T4 x2 PRODUCTION VALIDATION")
-    logger.info("Running quick validation of all 7 critical fixes + bonus")
+    logger.info("Running quick validation of all 7 fixes + bonus")
     logger.info("#"*80)
     
     demo_fix_1_medical_segmentation()
@@ -359,7 +359,7 @@ def run_quick_validation():
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Kaggle T4 x2 Production Runner - Validates all critical fixes'
+        description='Kaggle T4 x2 Production Runner - Validates all fixes'
     )
     parser.add_argument('--quick', action='store_true',
                        help='Run quick validation of all fixes')

@@ -4,7 +4,7 @@
 GDSearch Complete Benchmark Suite - Kaggle Edition
 Runs all experiments: MNIST, CIFAR-10, NLP, Medical Segmentation
 """
-# CRITICAL FIX: Move HuggingFace imports to delayed import block (line 274)
+# Move HuggingFace imports to delayed import block (line 274)
 # Top-level import breaks environments without transformers installed
 
 import os
@@ -29,7 +29,7 @@ def import_optional_nlp_dependencies():
         _optional_modules['AutoModelForSequenceClassification'] = AutoModelForSequenceClassification
         _optional_modules['load_dataset'] = load_dataset
     except Exception as e:
-        # AUDIT FIX: Use conditional import to avoid redefining logging from outer scope
+        # Use conditional import to avoid redefining logging from outer scope
         # At import time, logging may not be configured, so we use try-except and print fallback
         try:
             import logging  # noqa: F811  # Reimport in exception handler is intentional for robustness
@@ -80,7 +80,7 @@ def safe_print(*args, **kwargs):
         print(*safe_args, **kwargs)
 
 
-# AUDIT FIX: Import all typing items at once to avoid reimports later
+# Import all typing items at once to avoid reimports later
 from typing import Any, Dict, List, Optional, Union
 from pathlib import Path
 
@@ -161,7 +161,7 @@ import torchvision.transforms as transforms
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-# AUDIT FIX: Removed duplicate 'from pathlib import Path' (already imported at line 85)
+# Removed duplicate 'from pathlib import Path' (already imported at line 85)
 import random
 from tqdm import tqdm
 import argparse
@@ -260,7 +260,7 @@ warnings.filterwarnings('ignore', message='.*cuFFT.*')
 warnings.filterwarnings('ignore', message='.*cuDNN.*')
 warnings.filterwarnings('ignore', message='.*cuBLAS.*')
 warnings.filterwarnings('ignore', message='.*register factory.*')
-# AUDIT FIX: Removed duplicate 'from typing import Dict, List' (already imported at line 84)
+# Removed duplicate 'from typing import Dict, List' (already imported at line 84)
 import traceback
 from datetime import datetime
 warnings.filterwarnings('ignore')
@@ -271,7 +271,7 @@ project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(project_root / 'src'))
 
-# Verify critical imports work (fail fast if dependencies missing)
+# Verify core imports work (fail fast if dependencies missing)
 try:
     from src.core.optimizers import SGD, Adam, AdamW
     from src.core.pytorch_optimizers import SGDWrapper, AdamWrapper, SAMWrapper
@@ -280,7 +280,7 @@ try:
     print("Using canonical ResNet18, BasicBlock, SAM from src/core/")
 except ImportError as e:
     print(f"\n{'='*80}")
-    print(f"CRITICAL: Failed to import core modules from {project_root / 'src'}")
+    print(f"Error: Failed to import core modules from {project_root / 'src'}")
     print(f"{'='*80}")
     print(f"Error: {e}")
     print("\nDEBUGGING STEPS:")
@@ -538,7 +538,7 @@ class PerformanceProfiler:
         return self.metrics
     
     def print_summary(self):
-        """AUDIT FIX: Print performance summary to console (missing method)"""
+        """Print performance summary to console (missing method)"""
         if not self.metrics:
             print("No performance metrics recorded.")
             return
@@ -992,7 +992,7 @@ def error_context(context: str, continue_on_error: bool = False):
             print(traceback_str)
             print('--- END TRACEBACK ---\n')
         except Exception as tb_error:
-            # AUDIT FIX: Renamed 'exc' to 'tb_error' to avoid shadowing outer scope
+            # Renamed 'exc' to 'tb_error' to avoid shadowing outer scope
             logging.debug("Failed while attempting to print traceback for %s: %s", context, tb_error, exc_info=True)
 
         if not continue_on_error:
@@ -1194,7 +1194,7 @@ def is_experiment_completed(results_dir: Union[str, Path], dataset: str, model_n
             # Verify the file has content (at least header + 1 row)
             try:
                 df = pd.read_csv(csv_path)
-                # AUDIT FIX: Check for reasonable completion (not just non-empty)
+                # Check for reasonable completion (not just non-empty)
                 # A run should have at least 2 epochs worth of data for most experiments
                 # Single-row CSVs are likely corrupted/interrupted
                 if len(df) >= 2:
@@ -1445,7 +1445,7 @@ def save_run_artifacts(base_results_dir: Union[str, Path], dataset: str, model_n
             json.dump(meta, f, indent=2)
 
         # Optional tracker artifact upload
-        # AUDIT FIX: Use exp_tracker parameter (renamed to avoid shadowing global)
+        # Use exp_tracker parameter (renamed to avoid shadowing global)
         if exp_tracker:
             try:
                 exp_tracker.log_artifact(str(csv_path), artifact_path=f"{dataset}/results")
@@ -1492,7 +1492,7 @@ def make_dataloader(dataset, batch_size=64, shuffle: Union[bool, int] = False, s
     """
     # Coerce shuffle to bool to silence static typing when callers pass ints (e.g., 0/1 from CLI)
     shuffle = bool(shuffle)
-    # AUDIT FIX: Force num_workers=0 on Windows to prevent hanging/crashes
+    # Force num_workers=0 on Windows to prevent hanging/crashes
     import platform
     if platform.system() == 'Windows' and num_workers > 0:
         logging.debug(f"Windows detected: forcing num_workers=0 (was {num_workers}) for stability")
@@ -1857,7 +1857,7 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
         scaled_lr = base_lr * (batch_size / 256.0)
         print(f"\nBatch Size: {batch_size}, Scaled LR: {scaled_lr:.6f}")
         
-        # AUDIT FIX: Use dataloader kwargs to respect Windows multiprocessing settings
+        # Use dataloader kwargs to respect Windows multiprocessing settings
         dl_kwargs = get_dataloader_kwargs()
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, 
                                   **dl_kwargs)
@@ -1893,7 +1893,7 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
                     data, target = data.to(device), target.to(device)
                     data = data.view(data.size(0), -1)  # Flatten for MLP
                     
-                    # AUDIT FIX: SAM requires closure for step()
+                    # SAM requires closure for step()
                     # Check if optimizer requires closure (SAM, L-BFGS, etc.)
                     assert optimizer is not None
                     requires_closure = bool(getattr(optimizer, 'requires_closure', False))
@@ -2148,7 +2148,7 @@ def run_scheduler_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, 
                 total_loss += loss.item()
             
             avg_loss = total_loss / len(train_loader)
-            # CRITICAL FIX: scheduler.step() called after optimizer.step() completes for all batches
+            # scheduler.step() called after optimizer.step() completes for all batches
             scheduler.step()  # Step scheduler after epoch
             
             # Validation accuracy (use validation set for model selection)
@@ -2406,7 +2406,7 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader
     """
     Quick hyperparameter tuning for an optimizer.
     
-    CRITICAL SAFETY (BLOCKER-1): The 'val_loader' parameter MUST contain
+    CRITICAL SAFETY: The 'val_loader' parameter MUST contain
     VALIDATION data, NOT true test data. Using test data for hyperparameter
     tuning constitutes adaptive overfitting and invalidates generalization claims.
     
@@ -2543,7 +2543,7 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader
             beta2 = trial.suggest_float('beta2', 0.9, 0.9999)
             final_lr = trial.suggest_float('final_lr', 0.01, 0.5)
             gamma = trial.suggest_float('gamma', 1e-4, 1e-2, log=True)
-            # CRITICAL FIX: AdaBoundWrapper expects beta1, beta2 separately (not betas tuple)
+            # AdaBoundWrapper expects beta1, beta2 separately (not betas tuple)
             optimizer = AdaBoundWrapper(model.parameters(), lr=lr, beta1=beta1, beta2=beta2,
                                        final_lr=final_lr, gamma=gamma)
         elif optimizer_name == 'RAdam':
@@ -2551,7 +2551,7 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader
             lr = trial.suggest_float('lr', 1e-5, 1e-2, log=True)
             beta1 = trial.suggest_float('beta1', 0.85, 0.95)
             beta2 = trial.suggest_float('beta2', 0.9, 0.9999)
-            # CRITICAL FIX: RAdamWrapper expects beta1, beta2 separately (not betas tuple)
+            # RAdamWrapper expects beta1, beta2 separately (not betas tuple)
             optimizer = RAdamWrapper(model.parameters(), lr=lr, beta1=beta1, beta2=beta2)
         elif optimizer_name == 'LAMB':
             from src.core.pytorch_optimizers import LAMBWrapper
@@ -2559,7 +2559,7 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader
             beta1 = trial.suggest_float('beta1', 0.85, 0.95)
             beta2 = trial.suggest_float('beta2', 0.9, 0.9999)
             wd = trial.suggest_float('weight_decay', 1e-6, 1e-2, log=True)
-            # CRITICAL FIX: LAMBWrapper expects beta1, beta2 separately (not betas tuple)
+            # LAMBWrapper expects beta1, beta2 separately (not betas tuple)
             optimizer = LAMBWrapper(model.parameters(), lr=lr, beta1=beta1, beta2=beta2, weight_decay=wd)
         else:
             # Fallback: use default hyperparameters and SGD if optimizer name is unrecognized
@@ -2800,7 +2800,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
 
                 # Randomize indices instead of using contiguous ranges
                 # Prevents selection bias if dataset is ordered by class or other characteristics
-                # AUDIT FIX: Use explicit seed for reproducible tuning splits
+                # Use explicit seed for reproducible tuning splits
                 tune_generator = torch.Generator().manual_seed(seeds[0])  # Use first seed for deterministic tuning
                 all_indices = torch.randperm(total_train, generator=tune_generator).tolist()
                 tune_indices = all_indices[:tune_size]
@@ -2828,7 +2828,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                 # This is acceptable for benchmarking but may introduce bias in reporting
                 # Recommendation: For strict reproducibility, use separate tuning dataset
                 
-                # === CRITICAL FIX: Tune ALL optimizers with equal budget ===
+                # === Tune ALL optimizers with equal budget ===
                 # Previously only tuned 5 basic optimizers, leaving advanced ones with defaults
                 # This created unfair advantage for tuned optimizers and invalidated comparisons
                 optimizers_to_tune = [
@@ -2856,7 +2856,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                 AdaBoundWrapper, RAdamWrapper, LAMBWrapper, LookaheadWrapper
             )
             
-            # CRITICAL FIX: Create factory that reads params at call-time, not definition-time
+            # Create factory that reads params at call-time, not definition-time
             # This prevents stale parameter capture when AUTO_LR or other systems modify tuned_params
             def make_optimizer_factory(opt_name, params_dict):
                 """
@@ -3117,7 +3117,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                         patience = 10
                         patience_counter = 0
                         
-                        # CRITICAL FIX: Restore early stopping state from checkpoint metadata
+                        # Restore early stopping state from checkpoint metadata
                         # Without this, resumed runs lose their early stopping progress and may stop incorrectly
                         if checkpoint and 'metadata' in checkpoint:
                             metadata = checkpoint['metadata']
@@ -3260,7 +3260,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                                     break
 
                                 # Add tainted and effective_batch_size to per-epoch history
-                                # AUDIT FIX: Include test metrics for schema consistency with integration tests
+                                # Include test metrics for schema consistency with integration tests
                                 # PROPOSAL REQUIREMENT: Include gradient_norm for convergence rate analysis
                                 # QA INTEGRATION (Issue #2): Include grad_noise_var for theoretical bounds validation
                                 epoch_data = {
@@ -3293,7 +3293,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                                       f"Val Acc={val_acc:.1f}%")
 
                                 # Save checkpoint AFTER metrics update for accurate state
-                                # Enhanced checkpointing with COMPLETE training state (BLOCKER-2 fix)
+                                # Enhanced checkpointing with COMPLETE training state
                                 if checkpoint_manager:
                                     checkpoint_data = {
                                         'model': model.state_dict(),
@@ -3377,7 +3377,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                             'original_batch_size': original_batch_size
                         }
 
-                        # AUDIT FIX: Use exp_tracker parameter name (renamed to avoid shadowing global)
+                        # Use exp_tracker parameter name (renamed to avoid shadowing global)
                         save_run_artifacts(results_dir, 'MNIST', 'SimpleMLP', opt_name,
                                            seed, history, params, device=device, exp_tracker=tracker,
                                            model=model, save_model=True)  # Save model weights
@@ -3414,7 +3414,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                 for opt in set(r['optimizer'] for r in results):
                     opt_results = [r for r in results if r['optimizer'] == opt]
                     if len(opt_results) > 0:
-                        # AUDIT FIX: Use final_test_acc (which exists) instead of test_acc to avoid KeyError
+                        # Use final_test_acc (which exists) instead of test_acc to avoid KeyError
                         avg_metrics.update({
                             f'{opt}_avg_test_acc': sum(r.get('final_test_acc', r.get('test_acc', 0)) for r in opt_results) / len(opt_results),
                             f'{opt}_avg_training_time': sum(r.get('training_time', 0) for r in opt_results) / len(opt_results)
@@ -3648,7 +3648,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
             patience = 10
             patience_counter = 0
             
-            # CRITICAL FIX: Restore early stopping state from checkpoint metadata
+            # Restore early stopping state from checkpoint metadata
             # Without this, resumed runs lose their early stopping progress and may stop incorrectly
             if checkpoint and 'metadata' in checkpoint:
                 metadata = checkpoint['metadata']
@@ -3767,7 +3767,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
 
                     print(f"{opt_name} Epoch {epoch}/{epochs} - Train: {train_acc:.1f}% | Val: {val_acc:.1f}%")
 
-                    # Save checkpoint with complete training state (BLOCKER-2 fix)
+                    # Save checkpoint with complete training state
                     if checkpoint_manager:
                         checkpoint_data = {
                             'model': model.state_dict(),
@@ -3886,7 +3886,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
     seed0 = seeds[0] if seeds else None
     try:
         if seed0 is not None:
-            # AUDIT FIX: Use exp_tracker parameter name (renamed to avoid shadowing global)
+            # Use exp_tracker parameter name (renamed to avoid shadowing global)
             save_run_artifacts(results_dir, 'CIFAR10', 'ResNet18', 'Adam', seed0, all_results, params={
                 'epochs': epochs,
                 'batch_size': 128
@@ -4066,7 +4066,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
 
             tokenized = raw.map(preprocess, batched=True)
 
-            # AUDIT FIX: Create proper train/val/test split to prevent test set leakage
+            # Create proper train/val/test split to prevent test set leakage
             # Validity requires validation set for early stopping, not test set
             train_size_total = min(train_size, len(tokenized['train']))
             val_size = max(int(train_size_total * 0.15), 100)  # 15% for validation, min 100 samples
@@ -4105,7 +4105,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
             # Use num_workers=0 to avoid tokenizer parallelism issues with DataLoader forking
             train_loader = make_dataloader(train_ds, batch_size=batch_size, shuffle=True,
                                            seed=seed, num_workers=0, collate_fn=collate_fn)
-            # AUDIT FIX: Add validation loader for validity
+            # Add validation loader for validity
             val_loader = make_dataloader(val_ds, batch_size=batch_size, shuffle=False,
                                          seed=seed, num_workers=0, collate_fn=collate_fn)
             test_loader = make_dataloader(test_ds, batch_size=batch_size, shuffle=False,
@@ -4128,7 +4128,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                     lr_search_loader = make_dataloader(train_ds, batch_size=batch_size, shuffle=True,
                                                        seed=seed, num_workers=0, collate_fn=collate_fn)
                     
-                    # AUDIT FIX: Correct argument order to match find_optimal_lr(model, train_loader, criterion, device, ...)
+                    # Correct argument order to match find_optimal_lr(model, train_loader, criterion, device, ...)
                     suggested_lr = find_optimal_lr(
                         model=temp_model,
                         train_loader=lr_search_loader,
@@ -4205,7 +4205,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                             saved_opt = checkpoint.get('opt_name', 'unknown')
                             logging.info(f"Loaded checkpoint with compatible optimizer: {saved_opt} -> {opt_name}")
                             
-                            # CRITICAL FIX: Restore early stopping state from checkpoint metadata
+                            # Restore early stopping state from checkpoint metadata
                             # Without this, resumed runs lose their early stopping progress
                             if 'metadata' in checkpoint:
                                 metadata = checkpoint['metadata']
@@ -4272,7 +4272,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                     if train_total < expected_samples * 0.9:
                         logging.warning(f"SANITY CHECK: Only processed {train_total}/{expected_samples} training samples")
 
-                    # AUDIT FIX: Evaluate on VALIDATION set for early stopping (not test set)
+                    # Evaluate on VALIDATION set for early stopping (not test set)
                     # Test set should only be used for final reporting to avoid adaptive overfitting
                     model.eval()
                     val_loss = 0.0
@@ -4303,7 +4303,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                     # Verified scheduler.step() is after optimizer.step() in training loop
                     scheduler.step()
                     
-                    # AUDIT FIX: Best model tracking based on VALIDATION accuracy (not test)
+                    # Best model tracking based on VALIDATION accuracy (not test)
                     # This prevents adaptive overfitting to the test set
                     if val_acc > best_val_acc:
                         best_val_acc = val_acc
@@ -4336,7 +4336,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                     print(f"Epoch {epoch}/{epochs}: Train Loss={train_loss:.4f}, "
                           f"Val Loss={val_loss:.4f}, Val Acc={val_acc:.1f}%")
 
-                    # Save checkpoint with complete training state (BLOCKER-2 fix)
+                    # Save checkpoint with complete training state
                     if checkpoint_manager:
                         checkpoint_data = {
                             'model': model.state_dict(),
@@ -5013,7 +5013,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                             saved_opt = checkpoint.get('opt_name', 'unknown')
                             logging.info(f"Loaded checkpoint with compatible optimizer: {saved_opt} -> {opt_name}")
                             
-                            # CRITICAL FIX: Restore early stopping state from checkpoint metadata
+                            # Restore early stopping state from checkpoint metadata
                             # Without this, resumed runs lose their early stopping progress
                             if 'metadata' in checkpoint:
                                 metadata = checkpoint['metadata']
@@ -5057,7 +5057,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                             loss = criterion(outputs, masks)
                             loss.backward()
                             return loss
-                        # CRITICAL FIX: Pass actual closure to SAM, not dummy lambda
+                        # Pass actual closure to SAM, not dummy lambda
                         # SAM calls closure internally for adversarial gradient computation
                         if optimizer is not None:
                             loss = optimizer.step(closure)  # type: ignore[union-attr]
@@ -5147,7 +5147,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                       f"Train Dice={train_dice:.4f}, Val Loss={val_loss:.4f}, "
                       f"Val Dice={val_dice:.4f}")
 
-                # Save checkpoint with complete training state (BLOCKER-2 fix)
+                # Save checkpoint with complete training state
                 if checkpoint_manager:
                     checkpoint_data = {
                         'model': model.state_dict(),
@@ -6540,7 +6540,7 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=None, resum
                     loss.backward()
                     return loss
 
-                # CRITICAL FIX: Pass actual closure to SAM
+                # Pass actual closure to SAM
                 if optimizer is not None:
                     loss = optimizer.step(closure)  # type: ignore[union-attr]
                 from src.utils.num_utils import safe_to_float
@@ -6945,7 +6945,7 @@ def distributed_training_worker(rank, world_size, backend, results_dir):
 
         dist.init_process_group(backend, rank=rank, world_size=world_size)
 
-        # AUDIT FIX: Use LOCAL_RANK env var if available for cluster compatibility
+        # Use LOCAL_RANK env var if available for cluster compatibility
         local_rank = int(os.environ.get('LOCAL_RANK', rank))
         torch.cuda.set_device(local_rank)
         device = torch.device(f'cuda:{local_rank}')
@@ -7627,7 +7627,7 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
                     loss = criterion(outputs, targets)
                     loss.backward()
                     return loss
-                # CRITICAL FIX: Pass actual closure to SAM
+                # Pass actual closure to SAM
                 if optimizer is not None:
                     loss = optimizer.step(closure)  # type: ignore[union-attr]
                 outputs = model(inputs)  # Recompute after SAM step
@@ -8863,7 +8863,7 @@ Examples:
                     print("   Convergence validation already completed (found existing results)")
                     experiment_results['convergence_validation'] = "Skipped (already complete)"
                 else:
-                    # AUDIT FIX: run_convergence_rate_comparison only accepts output_dir parameter
+                    # run_convergence_rate_comparison only accepts output_dir parameter
                     # The implementation has hardcoded optimizer list and test function
                     run_convergence_rate_comparison(
                         output_dir=validation_dir
@@ -9442,7 +9442,7 @@ Examples:
         plot_script = Path(__file__).parent / "scripts" / "generate_experiment_plots.py"
         if plot_script.exists():
             print(f"Running universal plot generator: {plot_script}")
-            # AUDIT FIX: Force UTF-8 encoding on Windows to prevent UnicodeDecodeError from emoji output
+            # Force UTF-8 encoding on Windows to prevent UnicodeDecodeError from emoji output
             plot_env = os.environ.copy()
             plot_env['PYTHONIOENCODING'] = 'utf-8'
             plot_env['PYTHONUTF8'] = '1'

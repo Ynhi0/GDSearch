@@ -83,7 +83,7 @@ def load_medmnist_dataset(dataset_name: str = 'pathmnist', split: str = 'train',
         # Dynamically get the dataset class
         DataClass = getattr(medmnist, INFO[dataset_name]['python_class'])
         
-        # CRITICAL FIX: Add transforms to ensure tensor output (prevents PIL.Image collate errors)
+        # Add transforms to ensure tensor output (prevents PIL.Image collate errors)
         transform = transforms.Compose([
             transforms.ToTensor(),  # Converts PIL Image to tensor and scales to [0,1]
         ])

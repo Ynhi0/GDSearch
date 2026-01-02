@@ -4,7 +4,7 @@ Training Loop Tests
 
 Validates that training loops follow correct patterns and don't have
 common bugs like:
-- Batch loop outside epoch loop (CRITICAL BUG from review)
+- Batch loop outside epoch loop
 - Metrics calculated incorrectly
 - Division by zero errors
 - NaN/Inf gradient handling
@@ -69,7 +69,7 @@ def test_training_loop_structure(dummy_data, model_and_optimizer):
         correct = 0
         total = 0
         
-        # CRITICAL: Batch loop MUST be inside epoch loop
+        # Batch loop MUST be inside epoch loop
         for inputs, targets in loader:
             optimizer.zero_grad()
             outputs = model(inputs)
@@ -115,7 +115,7 @@ def test_division_by_zero_protection(model_and_optimizer):
         # This loop should never execute
         pass
     
-    # CRITICAL: Protect against division by zero
+    # Protect against division by zero
     if total == 0:
         accuracy = 0.0
     else:
@@ -213,11 +213,11 @@ def test_metric_calculation_per_epoch():
             optimizer.step()
             
             _, predicted = outputs.max(1)
-            # CRITICAL: Accumulate per batch
+            # Accumulate per batch
             epoch_correct += predicted.eq(targets).sum().item()
             epoch_total += targets.size(0)
         
-        # CRITICAL: Calculate metrics per EPOCH
+        # Calculate metrics per EPOCH
         epoch_acc = 100.0 * epoch_correct / epoch_total
         history.append(epoch_acc)
     

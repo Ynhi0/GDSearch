@@ -91,7 +91,7 @@ def medical_image_segmentation(
     model = UNet(spatial_dims=3, in_channels=1, out_channels=1, channels=(16, 32, 64, 128, 256),
                  strides=(2, 2, 2, 2), num_res_units=2).to(device)
     
-    # CRITICAL FIX: Use config-driven optimizer creation instead of hardcoded Adam
+    # Use config-driven optimizer creation instead of hardcoded Adam
     # This allows proper comparison across SGD, Adam, AdamW, etc.
     if optimizer_config is None:
         optimizer_config = {'name': 'Adam', 'lr': 1e-4}

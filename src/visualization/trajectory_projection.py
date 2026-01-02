@@ -1,7 +1,7 @@
 """
 High-Dimensional Trajectory Projection for Neural Network Optimization Visualization.
 
-CRITICAL FIX: Addresses the limitation that trajectory visualization only works
+Addresses the limitation that trajectory visualization only works
 for 2D synthetic functions. This module projects high-dimensional optimization
 paths (e.g., 1M+ parameters) onto 2D planes for visualization.
 
@@ -44,7 +44,7 @@ class TrajectoryProjector:
         """
         Initialize trajectory projector.
         
-        CRITICAL FIX: Default subsample_params set to 10,000 to prevent OOM crashes.
+        Default subsample_params set to 10,000 to prevent OOM crashes.
         
         MEMORY SAFETY ANALYSIS:
         - ResNet-18: ~11M parameters × 4 bytes (float32) = 44 MB per snapshot
@@ -56,7 +56,7 @@ class TrajectoryProjector:
         - Sufficient dimensionality for meaningful trajectory visualization
         - Preserves trajectory structure via random sampling
         
-        CRITICAL: Users must EXPLICITLY set subsample_params=None to use full
+        Users must EXPLICITLY set subsample_params=None to use full
         parameter space, acknowledging the memory risk.
         
         Args:
@@ -162,7 +162,7 @@ class TrajectoryProjector:
         """
         Fit projection on collected trajectories from multiple optimizers.
         
-        CRITICAL FIX: To avoid bias toward optimizers with more snapshots,
+        To avoid bias toward optimizers with more snapshots,
         we balance the dataset by sampling EQUAL number of snapshots from each
         optimizer trajectory before fitting PCA.
         
@@ -234,7 +234,7 @@ class TrajectoryProjector:
         """
         Project parameter trajectory to low-dimensional space.
         
-        CRITICAL FIX FOR t-SNE: t-SNE cannot project new data points because it
+        t-SNE cannot project new data points because it
         is a manifold learning method that computes embeddings globally. Each
         call to fit_transform creates a completely different embedding space.
         
@@ -256,7 +256,7 @@ class TrajectoryProjector:
         if self.method == 'pca':
             return self.projector.transform(X)  # type: ignore[union-attr]
         elif self.method == 'tsne':
-            # CRITICAL: t-SNE cannot project new points consistently
+            # t-SNE cannot project new points consistently
             # Each fit_transform creates a DIFFERENT embedding space
             # Solution: Only allow t-SNE for visualize_trajectories where all
             # data is projected together in one consistent space
@@ -279,7 +279,7 @@ class TrajectoryProjector:
         """
         Create publication-quality trajectory visualization.
         
-        CRITICAL FIX FOR t-SNE: To use t-SNE, ALL trajectories must be projected
+        To use t-SNE, ALL trajectories must be projected
         together in a single fit_transform call. This ensures all points exist
         in the same embedding space, making comparisons meaningful.
         

@@ -106,7 +106,7 @@ def run_single_imdb(optimizer_name: str, seed: int, lr: float, epochs: int, batc
         full_data: If True, use full IMDB dataset (25K train, 25K test). If False, use 2K/1K subset.
         momentum: Momentum coefficient for SGD-based optimizers
     
-    CRITICAL FIX (Issue #27): Added full_data parameter to avoid "Toy Benchmark" deception.
+    Added full_data parameter to avoid "Toy Benchmark" deception.
     For publication, MUST use full_data=True to ensure sufficient statistical power.
     """
     BertTokenizer, BertForSequenceClassification, load_dataset = _try_import_hf()
@@ -174,7 +174,7 @@ def run_single_imdb(optimizer_name: str, seed: int, lr: float, epochs: int, batc
     except Exception:
         _HFDataset = None
 
-    # CRITICAL FIX (Issue #27): Dynamic dataset size based on full_data flag
+    # Dynamic dataset size based on full_data flag
     # For publication-quality results, use full_data=True (25K train, 25K test)
     # Toy mode (2K/1K) is ONLY for quick prototyping and CI testing
     if full_data:
@@ -342,7 +342,7 @@ def run_single_imdb(optimizer_name: str, seed: int, lr: float, epochs: int, batc
     model = cast(Any, BertForSequenceClassification.from_pretrained('bert-base-uncased', num_labels=2))
     model.to(device=device)  # type: ignore[arg-type]
 
-    # CRITICAL FIX: Use optimizer registry for consistency
+    # Use optimizer registry for consistency
     # This ensures proper hyperparameter management across all experiments
     from src.core.optimizer_registry import create_optimizer_from_config
     

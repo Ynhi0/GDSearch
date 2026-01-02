@@ -50,7 +50,7 @@ class TrainingDynamicsTracker:
             param_sample_freq: Only track params every N iterations (to save memory)
             param_snapshot_dir: Directory to save parameter snapshots (default: None = disabled)
         
-        CRITICAL FIX (Issue #30): Removed in-memory param_snapshots list (343GB RAM risk).
+        Removed in-memory param_snapshots list (343GB RAM risk).
         Now writes snapshots to disk incrementally using np.save() to prevent OOM.
         """
         self.iterations: List[int] = []
@@ -60,10 +60,10 @@ class TrainingDynamicsTracker:
         self.param_distances: List[float] = []  # Distance from initialization
         self.learning_rates: List[float] = []
         
-        # CRITICAL FIX (Issue #29): Add normalized speed metric
+        # Add normalized speed metric
         self.normalized_speeds: List[float] = []  # Speed normalized by LR (removes scheduler confounding)
         
-        # CRITICAL FIX (Issue #30): Disk-based parameter tracking
+        # Disk-based parameter tracking
         self.track_params = track_params
         self.param_sample_freq = param_sample_freq
         self.param_snapshot_dir = Path(param_snapshot_dir) if param_snapshot_dir else None
@@ -134,7 +134,7 @@ class TrainingDynamicsTracker:
             distance = torch.norm(current_params - self.initial_params).item()
             self.param_distances.append(distance)
             
-            # CRITICAL FIX (Issue #29): Compute normalized speed (removes LR scheduler confounding)
+            # Compute normalized speed (removes LR scheduler confounding)
             if self.prev_params is not None and lr > 0:
                 step_distance = torch.norm(current_params - self.prev_params).item()
                 normalized_speed = step_distance / lr  # Distance per unit LR
@@ -147,7 +147,7 @@ class TrainingDynamicsTracker:
             self.param_distances.append(0.0)
             self.normalized_speeds.append(0.0)
         
-        # CRITICAL FIX (Issue #30): Write parameter snapshots to DISK (not RAM)
+        # Write parameter snapshots to DISK (not RAM)
         if self.track_params and self.param_snapshot_dir and iteration % self.param_sample_freq == 0:
             param_snapshot = torch.nn.utils.parameters_to_vector(
                 [p for p in model.parameters() if p.requires_grad]
@@ -173,7 +173,7 @@ class TrainingDynamicsTracker:
                 compute_smoothness_index
             )
         
-        # CRITICAL FIX (Issue #30): Load snapshots from disk only when needed (avoid OOM)
+        # Load snapshots from disk only when needed (avoid OOM)
         if self.param_snapshot_dir and self.param_snapshot_dir.exists():
             snapshot_files = sorted(self.param_snapshot_dir.glob("snapshot_iter_*.npy"))
             if len(snapshot_files) > 1:
@@ -208,7 +208,7 @@ class TrainingDynamicsTracker:
             'learning_rate': self.learning_rates
         })
         
-        # CRITICAL FIX (Issue #29): Add normalized speed metric (removes LR scheduler confounding)
+        # Add normalized speed metric (removes LR scheduler confounding)
         if len(self.normalized_speeds) == len(self.iterations):
             df['normalized_speed'] = self.normalized_speeds
         

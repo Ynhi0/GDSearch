@@ -66,14 +66,14 @@ def run_single_optimizer_with_dynamics(
     """
     Train with a single optimizer and track detailed dynamics.
     
-    CRITICAL FIX: Uses optimizer registry instead of hardcoded if-else chain.
+    Uses optimizer registry instead of hardcoded if-else chain.
     This ensures consistency with other experiments and proper hyperparameter handling.
     
     Returns:
         dict: Contains loss history, accuracy history, dynamics metrics
     """
     
-    # CRITICAL FIX: Use optimizer registry for consistent config-driven creation
+    # Use optimizer registry for consistent config-driven creation
     from src.core.optimizer_registry import create_optimizer_from_config
     
     config_dict = {'name': optimizer_name}

@@ -39,31 +39,29 @@ def sgd_convergence_bound(
     # Optimal learning rate for strongly convex functions
     optimal_lr = 2.0 / (L + mu) if (L + mu) > 0 else 0.0
     
-    # Convergence rate
+    # Convergence rate (can be negative; use magnitude for stability checks)
     convergence_rate = 1.0 - mu * lr
+    rate_magnitude = abs(convergence_rate)
     
     # Iterations to reach ε-accuracy (assuming deterministic case)
     # (1 - μη)^T ≤ ε  =>  T ≥ log(ε) / log(1 - μη)
     epsilon = 1e-6
-    if convergence_rate <= 0:
-        # Negative convergence_rate: log will be complex, optimizer oscillates/diverges
+    if rate_magnitude >= 1:
+        # Magnitude >= 1 means no geometric decay (divergent or marginally stable)
         iterations_to_eps = float('inf')
-        logging.warning(f"sgd_convergence_bound: convergence_rate={convergence_rate:.4f} <= 0. "
-                       f"Learning rate lr={lr:.6f} is too large for mu={mu:.6f}. Optimizer diverges.")
-    elif convergence_rate >= 1:
-        # No convergence: rate >= 1 means error does not decrease
-        iterations_to_eps = float('inf')
-        logging.warning(f"sgd_convergence_bound: convergence_rate={convergence_rate:.4f} >= 1. "
-                       f"Learning rate lr={lr:.6f} is too small for mu={mu:.6f}. No convergence.")
+        logging.warning(
+            "sgd_convergence_bound: |convergence_rate|=%.4f >= 1. lr=%.6f, mu=%.6f."
+            " Step size does not yield geometric decay." % (rate_magnitude, lr, mu)
+        )
     else:
-        # Valid convergence case: 0 < rate < 1
-        iterations_to_eps = np.log(epsilon) / np.log(convergence_rate)
+        # Valid convergence case: 0 < |rate| < 1 (allows bounded oscillations)
+        iterations_to_eps = np.log(epsilon) / np.log(rate_magnitude)
     
     # Final error bound (simplified, assuming ||x_0 - x*||^2 = 1)
-    if convergence_rate >= 1:
+    if rate_magnitude >= 1:
         geometric_term = float('inf')  # No geometric decay
     else:
-        geometric_term = convergence_rate ** T
+        geometric_term = rate_magnitude ** T
     
     variance_term = lr * sigma ** 2 / (2 * mu) if mu > 1e-12 else float('inf')
     
@@ -160,20 +158,17 @@ def momentum_convergence_bound(
     
     # Compute iterations to reach ε-accuracy
     epsilon = 1e-6
+    rate_magnitude = abs(convergence_rate)
     if method == 'nesterov' and mu <= 1e-12:
         # For Nesterov in convex case: need T such that 1/T^2 ≤ ε
         iterations_to_eps = np.sqrt(1.0 / epsilon)
-    elif convergence_rate <= 0:
+    elif rate_magnitude >= 1:
         iterations_to_eps = float('inf')
-        logging.warning(f"momentum_convergence_bound: convergence_rate={convergence_rate:.4f} <= 0. "
-                       f"Parameters lr={lr:.6f}, momentum={momentum:.4f} cause divergence.")
-    elif convergence_rate >= 1:
-        iterations_to_eps = float('inf')
-        logging.warning(f"momentum_convergence_bound: convergence_rate={convergence_rate:.4f} >= 1. "
-                       f"No convergence with current parameters.")
+        logging.warning(f"momentum_convergence_bound: |convergence_rate|={rate_magnitude:.4f} >= 1. "
+                       f"Parameters lr={lr:.6f}, momentum={momentum:.4f} do not yield geometric decay.")
     else:
-        # Geometric decay case: ρ^T ≤ ε
-        iterations_to_eps = np.log(epsilon) / np.log(convergence_rate)
+        # Geometric decay case: |ρ|^T ≤ ε (allows bounded oscillations)
+        iterations_to_eps = np.log(epsilon) / np.log(rate_magnitude)
     
     # Compute final error bound
     if method == 'nesterov' and mu <= 1e-12:
@@ -361,7 +356,7 @@ def estimate_smoothness(
     for i in range(len(gradients) - 1):
         for j in range(i + 1, min(i + 10, len(gradients))):  # Sample pairs
             try:
-                # AUDIT FIX: Validate inputs before subtraction to prevent NaN propagation
+                # Validate inputs before subtraction to prevent NaN propagation
                 if not (np.all(np.isfinite(gradients[i])) and np.all(np.isfinite(gradients[j]))):
                     continue  # Skip pairs with NaN/Inf
                 if not (np.all(np.isfinite(params[i])) and np.all(np.isfinite(params[j]))):
@@ -411,7 +406,7 @@ def estimate_strong_convexity(
     for i in range(len(gradients) - 1):
         for j in range(i + 1, min(i + 10, len(gradients))):
             try:
-                # AUDIT FIX: Validate inputs before operations
+                # Validate inputs before operations
                 if not (np.all(np.isfinite(gradients[i])) and np.all(np.isfinite(gradients[j]))):
                     continue
                 if not (np.all(np.isfinite(params[i])) and np.all(np.isfinite(params[j]))):

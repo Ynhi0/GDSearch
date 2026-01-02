@@ -147,7 +147,7 @@ class TuningFairnessValidator:
                 violation_details.append(f"  - {n_trials} trials: {opts}")
             
             self.violations.append(
-                f"Unequal tuning budgets detected (CRITICAL BIAS):\n" +
+                f"Unequal tuning budgets detected:\n" +
                 "\n".join(violation_details) + "\n" +
                 "All optimizers must receive equal n_trials for fair comparison."
             )
@@ -197,7 +197,7 @@ class TuningFairnessValidator:
         
         if tuned_opts and default_opts:
             self.violations.append(
-                f"Mixed tuning approaches (CRITICAL BIAS):\n"
+                f"Mixed tuning approaches:\n"
                 f"  - Tuned optimizers ({len(tuned_opts)}): {tuned_opts}\n"
                 f"  - Default hyperparameters ({len(default_opts)}): {default_opts}\n"
                 "All compared optimizers must either be tuned or use defaults consistently."

@@ -15,7 +15,7 @@ import numpy as np
 from typing import Tuple, List, Dict, Optional, Any
 import re
 
-# CRITICAL FIX: Make datasets import lazy/optional to prevent import-time errors
+# Make datasets import lazy/optional to prevent import-time errors
 # when transformers/datasets are not installed (per "optional dependency" claim)
 try:
     from datasets import load_dataset
@@ -202,7 +202,7 @@ def get_imdb_loaders(
     print("Loading IMDB dataset...")
     print("="*80)
     
-    # CRITICAL FIX: Check if datasets package is available
+    # Check if datasets package is available
     if not HAS_DATASETS or load_dataset is None:
         raise ImportError(
             "IMDB dataset loading requires the 'datasets' package. "

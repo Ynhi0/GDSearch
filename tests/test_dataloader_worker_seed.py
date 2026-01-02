@@ -3,7 +3,7 @@ import pytest
 from src.core.dataloader_utils import make_dataloader
 
 
-@pytest.mark.skip(reason="Dataloader worker pickling issue on Windows - non-critical for Kaggle")
+@pytest.mark.skip(reason="Dataloader worker pickling issue on Windows - non-fatal for Kaggle")
 def test_dataloader_deterministic_with_seed():
     # Create simple dataset: integers 0..99
     data = torch.arange(100)

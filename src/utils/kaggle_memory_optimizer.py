@@ -72,7 +72,7 @@ def estimate_batch_size(
     """
     Estimate maximum safe batch size for a model.
     
-    CRITICAL for Kaggle: Prevents OOM crashes by estimating memory requirements
+    For Kaggle: Prevents OOM crashes by estimating memory requirements
     before running experiments.
     
     Args:

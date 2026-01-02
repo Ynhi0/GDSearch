@@ -78,7 +78,7 @@ def get_mnist_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optiona
         if seed is not None:
             split_generator.manual_seed(int(seed))
         
-        # CRITICAL FIX (Issue #22): Split indices first, then create separate datasets
+        # Split indices first, then create separate datasets
         # with appropriate transforms (train gets augmentation, val gets test transform)
         # This prevents "Augmented Validation" trap where validation metrics are noisy
         
@@ -263,7 +263,7 @@ def get_cifar10_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optio
         if seed is not None:
             split_generator.manual_seed(int(seed))
         
-        # CRITICAL FIX (Issue #22): Split indices first, then create separate datasets
+        # Split indices first, then create separate datasets
         # with appropriate transforms (train gets augmentation, val gets test transform)
         # This prevents "Augmented Validation" trap where validation metrics are noisy
         # For CIFAR-10, this is CRITICAL because transform_train has RandomCrop and RandomFlip

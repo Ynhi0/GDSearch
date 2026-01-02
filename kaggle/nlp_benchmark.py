@@ -160,7 +160,7 @@ def main():
 
     os.makedirs(args.results_dir, exist_ok=True)
     
-    # CRITICAL FIX: Define device before using it in create_data_loaders
+    # Define device before using it in create_data_loaders
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"NLP Benchmark using device: {device}")
 

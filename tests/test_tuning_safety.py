@@ -1,11 +1,8 @@
 """
-Test suite for hyperparameter tuning safety (BLOCKER-1 fix).
+Test suite for hyperparameter tuning safety.
 
 Ensures that tuning objectives never access test loaders, preventing
 adaptive overfitting via test set leakage.
-
-Author: GDSearch Remediation Team
-Date: December 9, 2025
 """
 
 import pytest
@@ -29,7 +26,7 @@ def enforce_validation_only(loader, loader_name: str, phase: str = 'tuning'):
     """
     if phase == 'tuning' and 'test' in loader_name.lower():
         raise RuntimeError(
-            f"BLOCKER: Attempted to use {loader_name} during tuning phase! "
+            f"Error: Attempted to use {loader_name} during tuning phase! "
             f"This constitutes adaptive overfitting. Use val_loader instead."
         )
     return True
@@ -194,7 +191,7 @@ class TestLoaderNaming:
             def access_test_data(self):
                 if self.phase == 'tuning':
                     raise RuntimeError(
-                        "BLOCKER: Cannot access test data during tuning phase! "
+                        "Error: Cannot access test data during tuning phase! "
                         "This constitutes adaptive overfitting."
                     )
                 self.test_accessed = True
@@ -255,13 +252,13 @@ class TestTuningBestPractices:
            - Report test metrics as generalization performance
         
         VIOLATIONS:
-        - Using test set in step 2 → ADAPTIVE OVERFITTING (BLOCKER)
+        - Using test set in step 2 → ADAPTIVE OVERFITTING
         - Multiple test set evaluations → Inflated generalization claims
         - Single-seed results → Unreliable (should use ≥5 seeds)
         """
         
         assert 'VALIDATION set (NOT test!)' in workflow
-        assert 'ADAPTIVE OVERFITTING (BLOCKER)' in workflow
+        assert 'ADAPTIVE OVERFITTING' in workflow
 
 
 if __name__ == '__main__':

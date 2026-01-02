@@ -30,7 +30,7 @@ Note: Neural network experiments (run_nn_experiment.py) are less affected by thi
 issue because NN defaults (0.1 for SGD, 0.001 for Adam) are based on extensive
 empirical research across thousands of NN training runs.
 
-AUDIT FIX: This script now requires --allow-unfair-ablations flag to prevent
+This script now requires --allow-unfair-ablations flag to prevent
 accidental use in canonical benchmarks.
 
 For rigorous comparisons, use run_fair_optimizer_ablation.py instead,
@@ -59,7 +59,7 @@ from src.core.test_functions import Rosenbrock, TestFunction
 from src.core.optimizers import SGD, SGDMomentum, RMSProp, Adam, AdamW, AMSGrad, SAM
 
 
-# AUDIT FIX: Add guard to prevent unfair benchmark usage
+# Add guard to prevent unfair benchmark usage
 def check_ablation_guard(allow_unfair: Optional[bool] = None):
     """Legacy guard for unfair ablations.
 
@@ -180,7 +180,7 @@ def run_optimizer_ablation(
         ('Adam', Adam(lr=lr_map.get('Adam', lr_map.get('default', 0.01)), beta1=0.9, beta2=0.999)),
         ('AdamW', AdamW(lr=lr_map.get('AdamW', lr_map.get('default', 0.01)), beta1=0.9, beta2=0.999, weight_decay=0.01)),
         ('AMSGrad', AMSGrad(lr=lr_map.get('AMSGrad', lr_map.get('default', 0.01)), beta1=0.9, beta2=0.999)),
-        # CRITICAL FIX: Add SAM with proper 2D support
+        # Add SAM with proper 2D support
         ('SAM', SAM(lr=lr_map.get('SAM', lr_map.get('default', 0.01)), rho=0.05, base_optimizer='SGD')),
     ]
     
@@ -200,7 +200,7 @@ def run_optimizer_ablation(
         estimate_strong_convexity,
         sgd_convergence_bound,
         adam_convergence_bound,
-        momentum_convergence_bound  # CRITICAL FIX: Add momentum bounds
+        momentum_convergence_bound  # Add momentum bounds
     )
     import torch
 
@@ -242,7 +242,7 @@ def run_optimizer_ablation(
                 """
                 Dummy step method (not used, but required for Optimizer).
                 
-                AUDIT FIX: Return type varies across PyTorch versions and type stubs.
+                Return type varies across PyTorch versions and type stubs.
                 Using type: ignore[override] to handle inconsistency while preserving
                 runtime compatibility. Returns 0.0 as dummy loss value.
                 """
@@ -268,7 +268,7 @@ def run_optimizer_ablation(
             for i in range(max_iterations):
                 loss = float('nan')  # Initialize for safety in case of early exceptions
                 try:
-                    # CRITICAL FIX (Issue #19): LR Scheduler for SGD
+                    # LR Scheduler for SGD
                     # Apply learning rate decay to counter "Constant LR Strawman" criticism
                     if i > 0 and i % 100 == 0:  # Decay every 100 iterations
                         if hasattr(optimizer, 'lr') and 'SGD' in opt_name and 'Momentum' not in opt_name and 'Adam' not in opt_name:
@@ -285,7 +285,7 @@ def run_optimizer_ablation(
                     if not np.isfinite(loss) or not np.isfinite(grad_x) or not np.isfinite(grad_y):
                         raise OverflowError("Non-finite gradient or loss")
 
-                    # CRITICAL FIX (Issue #21): Gradient Clipping
+                    # Gradient Clipping
                     # Prevents "Gradient Explosion Vulnerability" on steep landscapes (Rosenbrock, etc.)
                     # This is a standard safeguard used in all production codebases
                     max_grad_norm = 10.0  # Clip threshold (prevents catastrophic divergence)
@@ -320,7 +320,7 @@ def run_optimizer_ablation(
                     # Track dynamics (before step)
                     tracker.track_step(i, float(loss), numeric_model, numeric_optim_mock)
 
-                    # CRITICAL FIX: SAM requires closure/oracle for 2D functions
+                    # SAM requires closure/oracle for 2D functions
                     if isinstance(optimizer, SAM):
                         # SAM two-step process:
                         # 1. Compute adversarial point using the test function gradient
@@ -359,7 +359,7 @@ def run_optimizer_ablation(
                     if not np.isfinite(x) or not np.isfinite(y):
                         raise OverflowError("Non-finite parameters after step")
                     
-                    # CRITICAL FIX: Update numeric model to new position for accurate distance tracking
+                    # Update numeric model to new position for accurate distance tracking
                     numeric_model.update_position(x, y)
 
                 except (OverflowError, FloatingPointError) as e:
@@ -433,7 +433,7 @@ def run_optimizer_ablation(
                     
                 init_loss = tracker.losses[0] if np.isfinite(tracker.losses[0]) else 1.0
                 
-                # CRITICAL FIX: Use appropriate theoretical bounds per optimizer type
+                # Use appropriate theoretical bounds per optimizer type
                 if 'Adam' in opt_name or 'AdamW' in opt_name or 'AMSGrad' in opt_name:
                     # Compute bounds for validation (not used in curve, but good for logging)
                     _ = adam_convergence_bound(
@@ -445,7 +445,7 @@ def run_optimizer_ablation(
                     theory_curve = init_loss / np.sqrt(np.maximum(1, theory_iters + 1))
                 
                 elif 'Momentum' in opt_name:
-                    # CRITICAL FIX: Use momentum-specific bounds with acceleration
+                    # Use momentum-specific bounds with acceleration
                     momentum_beta = 0.9  # Default momentum coefficient
                     momentum_stats = momentum_convergence_bound(
                         L=est_L if est_L > 0 else 1.0,

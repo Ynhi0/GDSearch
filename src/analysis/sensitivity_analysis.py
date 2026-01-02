@@ -328,7 +328,7 @@ def run_pairwise_sensitivity_experiment(
     """
     Run 2D sensitivity analysis for parameter interaction.
     
-    CRITICAL FIX: Tests parameter pairs jointly to capture interactions.
+    Tests parameter pairs jointly to capture interactions.
     Example: High LR may be unstable alone, but stable with large batch size
     due to the Linear Scaling Rule. One-at-a-time analysis misses this.
     

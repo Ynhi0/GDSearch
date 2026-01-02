@@ -129,7 +129,7 @@ class TestConfigFairness:
         """
         Test that all optimizers get equal training epochs during tuning.
         
-        CRITICAL: If one optimizer trains for 10 epochs and another for 1,
+        Important: If one optimizer trains for 10 epochs and another for 1,
         the comparison is meaningless.
         """
         for config_file in ['nn_tuning.json', 'cifar10_tuning.json']:

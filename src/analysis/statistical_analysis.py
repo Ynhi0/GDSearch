@@ -101,18 +101,16 @@ def extract_final_metric(
     dfs: List[pd.DataFrame],
     metric: str = 'test_accuracy',
     exclude_tainted: bool = True,
-    exclude_diverged: bool = False,  # CRITICAL FIX: Changed default to False
-    divergence_penalty: Optional[float] = None,  # NEW: Penalty value for diverged runs
-    use_best: bool = False,  # NEW: Use best value instead of last
-    average_last_n: Optional[int] = None  # NEW: Average last N epochs for stability
+    exclude_diverged: bool = False,  # Changed default to False to avoid survivor bias
+    divergence_penalty: Optional[float] = None,  # Penalty value for diverged runs
+    use_best: bool = False,  # Use best value instead of last
+    average_last_n: Optional[int] = None  # Average last N epochs for stability
 ) -> np.ndarray:
     """Extract final metric value from each run.
 
-    **CRITICAL SCIENTIFIC FIX (Issue #17: Survivor Bias):**
-    By default, this function NO LONGER excludes diverged runs to avoid Survivor Bias.
+    By default, this function does not exclude diverged runs to avoid survivor bias.
     Instead, assign them a failure penalty or report success rate separately.
     
-    **CRITICAL SCIENTIFIC FIX (Issue #20: Last Epoch Variance):**
     Added options to use best value or average of last N epochs for robust statistics.
 
     Args:
@@ -321,7 +319,7 @@ def compare_optimizers_ttest(
     if auto_select_test and n_A >= 3 and n_B >= 3:
         # Shapiro-Wilk test requires n >= 3
         try:
-            # CRITICAL FIX: Use safe_shapiro to handle zero variance without warnings
+            # Use safe_shapiro to handle zero variance without warnings
             result_A = safe_shapiro(results_A)
             result_B = safe_shapiro(results_B)
             
@@ -460,7 +458,7 @@ def compare_optimizers_ttest(
             cohens_d = 0.0
         
         # Confidence intervals (95%)
-        # CRITICAL FIX: Check n >= 2 before computing CI to avoid invalid degrees of freedom
+        # Check n >= 2 before computing CI to avoid invalid degrees of freedom
         if n_A >= 2:
             ci_A = stats.t.interval(0.95, n_A - 1, loc=mean_A, scale=stats.sem(results_A))
         else:
@@ -1427,7 +1425,7 @@ def test_normality(
     
     if method == 'shapiro':
         # Shapiro-Wilk test (good for n < 5000)
-        # CRITICAL FIX: Use safe_shapiro helper to prevent warnings
+        # Use safe_shapiro helper to prevent warnings
         result = safe_shapiro(data, alpha=alpha)
         return result
         

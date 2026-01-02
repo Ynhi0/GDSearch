@@ -113,7 +113,7 @@ class OptunaHyperparameterTuner:
             raise ValueError(f"Unknown pruner: {pruner}")
         
         # Create study
-        # AUDIT FIX: Changed default to load_if_exists=False to prevent contamination
+        # Changed default to load_if_exists=False to prevent contamination
         # Users must explicitly set study_name with timestamp/UUID for shared storage
         # or accept risk of reusing old trials
         self.study = optuna.create_study(
@@ -122,7 +122,7 @@ class OptunaHyperparameterTuner:
             sampler=self.sampler,
             pruner=self.pruner,
             storage=storage,
-            load_if_exists=False  # AUDIT FIX: Prevents accidental trial contamination
+            load_if_exists=False  # Prevents accidental trial contamination
         )
         
         if storage is not None:
@@ -139,7 +139,7 @@ class OptunaHyperparameterTuner:
         show_progress_bar: bool = True,
         callbacks: Optional[List[Callable]] = None,
         val_loader = None,  # CRITICAL: Validation loader parameter for test-leakage checks
-        test_dataset = None,  # CRITICAL FIX: Reference test dataset for identity check
+        test_dataset = None,  # Reference test dataset for identity check
         enforce_validation: bool = True  # FIXED: New parameter to enforce validation loader requirement
     ) -> Dict[str, Any]:
         """
@@ -180,11 +180,11 @@ class OptunaHyperparameterTuner:
                     "Cannot enforce test-leakage prevention. Ensure you are not using the test set for tuning."
                 )
         else:
-            # CRITICAL FIX: Enforce test-leakage prevention with stricter checks
+            # Enforce test-leakage prevention with stricter checks
             try:
                 from src.core.loader_validation import enforce_no_test_in_tuning, validate_loader_for_tuning
                 
-                # AUDIT FIX: Use validate_loader_for_tuning with test_dataset for stronger checks
+                # Use validate_loader_for_tuning with test_dataset for stronger checks
                 if test_dataset is not None:
                     validate_loader_for_tuning(val_loader, expected_split='validation', test_dataset=test_dataset)
                     logging.info("PASSED: Validation loader test-leakage check (with dataset identity verification)")

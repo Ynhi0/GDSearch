@@ -1,7 +1,7 @@
 """
 Condition-Number Controlled Test Functions for Geometric Analysis.
 
-CRITICAL FIX: Addresses the methodological flaw of testing on fixed functions
+Addresses the methodological flaw of testing on fixed functions
 (Rosenbrock, Ackley) without systematic control of geometric properties.
 
 This module provides test functions with TUNABLE condition numbers, allowing

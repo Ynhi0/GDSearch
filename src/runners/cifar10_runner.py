@@ -2,7 +2,7 @@
 
 Extracted from run_all_kaggle.py for better modularity.
 
-CRITICAL FIX (Issue #31): Removed circular dependency on root-level run_all_kaggle.py.
+Removed circular dependency on root-level run_all_kaggle.py.
 This file now serves as a THIN WRAPPER that defers to the main implementation.
 For production use, the logic from run_all_kaggle should be moved to src/experiments/.
 """
@@ -27,7 +27,7 @@ def run_cifar10_experiment(
 ) -> Optional[pd.DataFrame]:
     """Run CIFAR-10 benchmark with ResNet-18.
     
-    CRITICAL FIX (Issue #31): This is a THIN WRAPPER that avoids circular import.
+    This is a THIN WRAPPER that avoids circular import.
     The actual implementation lives in run_all_kaggle.py (root level).
     
     For packaging as a library, the implementation should be moved from run_all_kaggle

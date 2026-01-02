@@ -312,7 +312,7 @@ def compare_theory_practice(training_csv: str, optimizer_name: str,
         # Theoretical rate is sublinear (no exponential rate)
         theoretical_rate = None
     
-    # CRITICAL FIX (Issue #24): Compute Optimality Gap
+    # Compute Optimality Gap
     # This is the TRUE theory-practice comparison: difference between fitted and predicted rate
     # Without this, curve fitting is just decoration, not science
     optimality_gap = None

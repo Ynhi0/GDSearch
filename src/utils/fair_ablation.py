@@ -326,7 +326,7 @@ def compute_statistical_significance(
     Uses paired t-test (if normal) or Wilcoxon signed-rank test with
     Holm-Bonferroni correction for multiple comparisons.
     
-    CRITICAL: Ensures paired samples are aligned by 'seed' for valid paired tests.
+    Ensures paired samples are aligned by 'seed' for valid paired tests.
     
     Args:
         results_df: DataFrame with per-seed results for best configs
@@ -355,7 +355,7 @@ def compute_statistical_significance(
         assert isinstance(opt_df, pd.DataFrame)
         opt_df = opt_df.rename(columns={metric: 'opt_metric'})
         
-        # CRITICAL FIX: Merge on seed to ensure paired samples are aligned
+        # Merge on seed to ensure paired samples are aligned
         merged = pd.merge(baseline_df, opt_df, on='seed', how='inner')
         
         if len(merged) < 3:
@@ -420,7 +420,7 @@ def compute_statistical_significance(
     comp_df = cast(pd.DataFrame, comp_df).sort_values(by=['p_value']).reset_index(drop=True)
     n = len(comp_df)
     
-    # CRITICAL FIX: Implement proper step-down procedure
+    # Implement proper step-down procedure
     # Holm-Bonferroni is a sequential rejection procedure:
     # - Sort p-values from smallest to largest
     # - Test each p-value against alpha/(n-rank+1)

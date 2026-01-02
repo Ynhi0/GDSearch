@@ -53,13 +53,13 @@ class Optimizer:
 
 class SGD(Optimizer):
     """
-    Basic Stochastic Gradient Descent (SGD) with optional weight decay (L2 regularization).
-    
+    Basic Stochastic Gradient Descent (SGD) with optional L2 regularization.
+
     Update formula: θ_new = θ_old - lr * gradient - lr * weight_decay * θ_old
-    
-    **CRITICAL SCIENTIFIC FIX (Issue #18: Unregularized SGD):**
-    Added weight_decay parameter to make fair comparisons with AdamW.
-    Without this, SGD is unfairly handicapped in generalization comparisons.
+
+    Note: The weight_decay term here is classic L2 regularization applied to the
+    gradients. This matches standard SGD weight decay but differs from the
+    decoupled weight decay strategy used in AdamW.
     """
     
     def __init__(self, lr: float = 0.01, weight_decay: float = 0.0) -> None:
@@ -68,8 +68,8 @@ class SGD(Optimizer):
         
         Args:
             lr: Learning rate (default: 0.01)
-            weight_decay: L2 regularization coefficient (default: 0.0)
-                         Set to match AdamW's weight_decay for fair comparison
+            weight_decay: L2 regularization coefficient (default: 0.0). This is
+                         applied directly to the gradient term, not decoupled.
         """
         super().__init__()
         self.lr = lr
@@ -163,7 +163,7 @@ class SGDMomentum(Optimizer):
             if self.v is None:
                 self.v = np.zeros_like(params)
             
-            # AUDIT FIX: Check for non-finite gradients
+            # Skip updates when gradients contain NaN or Inf
             if not np.isfinite(gradients).all():
                 logging.warning("SGDMomentum: Non-finite gradients detected, skipping update")
                 return params
@@ -387,7 +387,7 @@ class Adam(Optimizer):
                 self.m = np.zeros_like(params)
                 self.v = np.zeros_like(params)
             
-            # AUDIT FIX: Check for non-finite gradients
+            # Skip updates when gradients contain NaN or Inf
             if not np.isfinite(gradients).all():
                 logging.warning("Adam: Non-finite gradients detected, skipping update")
                 return params
@@ -482,7 +482,7 @@ class AdamW(Optimizer):
                 self.m = np.zeros_like(params)
                 self.v = np.zeros_like(params)
             
-            # AUDIT FIX: Check for non-finite gradients
+            # Skip updates when gradients contain NaN or Inf
             if not np.isfinite(gradients).all():
                 logging.warning("AdamW: Non-finite gradients detected, skipping update")
                 return params

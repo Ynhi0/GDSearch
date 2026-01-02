@@ -295,7 +295,7 @@ def oom_safe_train_step(
                 new_size = max(min_batch_size, old_size // 2)
                 
                 # Check BatchNorm compatibility BEFORE reduction
-                # CRITICAL FIX: Provide more graceful handling for BatchNorm constraints
+                # Provide more graceful handling for BatchNorm constraints
                 if new_size < 2:
                     # New size too small for BatchNorm in training mode
                     if not allow_batchnorm_eval_fallback:

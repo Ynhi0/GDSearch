@@ -1,7 +1,7 @@
 """
 Gradient Noise Variance Estimation for SGD Theoretical Bounds.
 
-CRITICAL FIX: Addresses the methodological flaw of using arbitrary σ² values
+Addresses the methodological flaw of using arbitrary σ² values
 in theoretical convergence bounds. This module provides rigorous estimation of
 gradient noise variance from empirical mini-batch gradients.
 

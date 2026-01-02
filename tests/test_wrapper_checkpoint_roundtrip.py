@@ -4,7 +4,7 @@ Comprehensive tests for optimizer wrapper checkpoint roundtrip.
 Tests ensure that wrapper-specific state (slow_params, step_count, etc.)
 is correctly persisted and restored across save/load cycles.
 
-This is critical for:
+This is important for:
 1. Training resumption without state loss
 2. Reproducible experiments
 3. Reproducibility in optimizer comparisons

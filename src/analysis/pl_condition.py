@@ -1,8 +1,8 @@
 """
 Utilities to estimate/check Polyak-Lojasiewicz (PL) condition for test functions.
 
-CRITICAL FIX: For neural networks, f_star (global minimum) is unknown.
-This module now provides automatic f_star estimation using running minimum.
+For neural networks where the global minimum is unknown, this module provides
+trajectory-based estimation helpers to approximate f_star.
 """
 import numpy as np
 from typing import Optional, Tuple, Union
@@ -16,16 +16,19 @@ def estimate_f_star_from_trajectory(
     window_size: int = 100
 ) -> float:
     """
-    Estimate f_star (global minimum) from observed loss trajectory.
-    
-    For neural networks, the true global minimum is unknown and loss rarely reaches 0.
-    This function provides several estimation strategies:
-    
-    1. 'running_min': min(observed_losses) - assumes we've seen near-optimal
-    2. 'running_min_with_margin': min(observed_losses) - margin * min(observed_losses)
-       Adds safety margin to avoid underestimating f_star
-    3. 'windowed_min': min over last window_size iterations - for still-converging runs
-    
+    Estimate f_star (global minimum) from an observed loss trajectory.
+
+    For neural networks, the true global minimum is typically unknown and the loss
+    seldom reaches zero. This helper provides several practical estimators:
+
+    1. 'running_min': min(observed_losses)
+    2. 'running_min_with_margin': min(observed_losses) scaled by (1 - margin) to avoid
+       overly optimistic estimates
+    3. 'windowed_min': minimum over a recent window, scaled by (1 - margin)
+
+    Note: For neural networks, this estimates the local Polyak-Lojasiewicz constant
+    relative to the best observed loss, not necessarily the global minimum.
+
     Args:
         losses: Array of loss values from training trajectory
         method: Estimation method ('running_min', 'running_min_with_margin', 'windowed_min')
@@ -71,12 +74,11 @@ def pl_mu_estimate(
 ) -> float:
     """
     Estimate local PL constant: mu_hat = ||grad||^2 / (2 * (f - f_star)).
-    
-    CRITICAL CHANGE: Now handles unknown f_star for neural networks.
-    - If f_star is provided explicitly, uses that value (for synthetic functions)
-    - If f_star is None but losses_trajectory is provided, estimates f_star automatically
-    - Returns np.nan if denominator is too small or inputs are invalid
-    
+
+    - If f_star is provided explicitly, that value is used (synthetic functions)
+    - If f_star is None but losses_trajectory is provided, f_star is estimated automatically
+    - Returns np.nan if the denominator is too small or inputs are invalid
+
     Args:
         loss: Current loss value
         grad_norm_sq: Squared gradient norm ||∇f||^2
@@ -121,9 +123,7 @@ def pl_holds_at_point(
 ) -> bool:
     """
     Check whether PL inequality holds: ||∇f||^2 >= 2μ(f - f_star).
-    
-    CRITICAL CHANGE: Now handles unknown f_star for neural networks.
-    
+
     Args:
         loss: Current loss value
         grad_norm_sq: Squared gradient norm
@@ -158,10 +158,8 @@ def compute_pl_over_trajectory(
     auto_estimate_f_star: bool = True
 ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
     """
-    Compute PL constant μ_hat per iteration over entire trajectory.
-    
-    CRITICAL CHANGE: Now automatically estimates f_star for neural networks.
-    
+    Compute PL constant μ_hat per iteration over an entire trajectory.
+
     Args:
         df: DataFrame with loss and grad_norm columns
         loss_col: Name of loss column

@@ -8,7 +8,7 @@ Tests that training handles edge cases where data loaders are empty:
 4. Proper default handling when loader has 0 batches
 
 Created: December 24, 2025
-Purpose: Verify fixes for division by zero bugs discovered in audit
+Purpose: Verify fixes for division by zero bugs
 """
 import pytest
 import torch
@@ -73,9 +73,9 @@ class TestEmptyValidationLoader:
     
     def test_validation_loss_with_empty_loader(self, sample_model, sample_criterion, empty_loader):
         """
-        CRITICAL TEST: Verify division by zero protection in validation loss calculation.
+        Test: Verify division by zero protection in validation loss calculation.
         
-        This test validates the fix for Bug #3 from the 10-pass audit:
+        This test validates the fix for division by zero in validation loss:
         - val_loss /= len(val_loader) must use max(1, len(val_loader))
         - Without this, empty loaders cause ZeroDivisionError
         """

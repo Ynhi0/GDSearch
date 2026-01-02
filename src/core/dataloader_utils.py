@@ -41,7 +41,7 @@ def make_dataloader(
     """
     Create a DataLoader with deterministic worker seeding when `seed` is provided.
     
-    CRITICAL FIX: Added `full_batch` parameter for TRUE Gradient Descent (not mini-batch SGD).
+    Added `full_batch` parameter for TRUE Gradient Descent (not mini-batch SGD).
     When full_batch=True, batch_size is set to len(dataset) and shuffle=False to ensure
     deterministic, full-batch gradient computation (required for theoretical GD analysis).
     
@@ -72,7 +72,7 @@ def make_dataloader(
     multiprocessing issues. This ensures testing works on Windows while still
     allowing full multiprocessing on Kaggle/Linux.
     """
-    # CRITICAL FIX: Full-Batch GD mode for true Gradient Descent (not mini-batch SGD)
+    # Full-Batch GD mode for true Gradient Descent (not mini-batch SGD)
     if full_batch:
         # Get dataset size - handle different dataset types
         try:
@@ -88,7 +88,7 @@ def make_dataloader(
             import logging
             logging.info(f"Full-Batch GD mode enabled: batch_size={batch_size} (entire dataset), shuffle=False")
     
-    # AUDIT FIX: Force num_workers=0 on Windows to prevent hanging/crashes
+    # Force num_workers=0 on Windows to prevent hanging/crashes
     import platform
     import logging
     if platform.system() == 'Windows' and num_workers > 0:

@@ -61,7 +61,7 @@ class EffectiveLRTracker:
         """
         Compute effective LR for Adam optimizer WITH FULL BIAS CORRECTION.
         
-        CRITICAL FIX: Adam's true update includes TWO bias correction terms:
+        Adam's true update includes TWO bias correction terms:
         
         m_hat = m_t / (1 - β₁ᵗ)
         v_hat = v_t / (1 - β₂ᵗ)

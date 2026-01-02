@@ -181,7 +181,7 @@ def compare_to_theoretical_bounds(
     """
     Compare empirical convergence rate to theoretical bounds.
     
-    CRITICAL FIX: Properly accounts for problem condition number (kappa = L/mu)
+    Properly accounts for problem condition number (kappa = L/mu)
     in theoretical rate predictions. Without this, theoretical bounds are
     meaningless as they ignore the problem geometry.
     
@@ -211,7 +211,7 @@ def compare_to_theoretical_bounds(
     else:
         opt_key = 'SGD'  # Default
     
-    # CRITICAL FIX: Compute theoretical rate using condition number
+    # Compute theoretical rate using condition number
     if condition_number is not None and problem_type == 'strongly_convex':
         kappa = condition_number
         # Estimate mu: for normalized problems, assume L ~ 1, so mu ~ 1/kappa
