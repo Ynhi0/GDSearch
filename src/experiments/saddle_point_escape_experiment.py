@@ -97,10 +97,9 @@ def run_saddle_point_escape_experiment(
             # Compute Hessian eigenvalues periodically
             if i % eigenvalue_check_interval == 0:
                 try:
-                    # Compute 2x2 Hessian analytically for SaddlePoint
-                    # f(x,y) = x^2 - y^2
-                    # H = [[2, 0], [0, -2]]
-                    hessian = np.array([[2.0, 0.0], [0.0, -2.0]])
+                    # Compute Hessian dynamically from the test function
+                    # This ensures the eigenvalues match the actual loss landscape
+                    hessian = test_fn.hessian(x, y)
                     eigenvalues, _ = np.linalg.eig(hessian)
                     lambda_min = float(np.min(eigenvalues))
                     lambda_max = float(np.max(eigenvalues))

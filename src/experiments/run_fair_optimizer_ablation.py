@@ -284,6 +284,54 @@ def run_fair_optimizer_ablation_published_defaults(
         except Exception as e:
             logger.warning(f"Could not compute statistical significance: {e}")
             significance_df = None
+        
+        # Add Friedman Test (omnibus test for multiple optimizers across multiple seeds)
+        logger.info("\n" + "="*80)
+        logger.info("FRIEDMAN TEST (Non-parametric omnibus test)")
+        logger.info("="*80)
+        try:
+            from src.analysis.statistical_analysis import friedman_test, print_friedman_results
+            
+            # Reshape data: (n_seeds x n_optimizers) matrix with final_loss
+            optimizer_names = sorted(converged_results_df['optimizer'].unique())
+            seeds_list = sorted(converged_results_df['seed'].unique())
+            
+            # Build matrix where rows = seeds, cols = optimizers
+            friedman_matrix = np.zeros((len(seeds_list), len(optimizer_names)))
+            for i, seed in enumerate(seeds_list):
+                for j, opt_name in enumerate(optimizer_names):
+                    # Get final_loss for this seed+optimizer combo
+                    mask = (converged_results_df['optimizer'] == opt_name) & (converged_results_df['seed'] == seed)
+                    values = converged_results_df.loc[mask, 'final_loss'].values
+                    if len(values) > 0:
+                        friedman_matrix[i, j] = values[0]
+                    else:
+                        friedman_matrix[i, j] = np.nan
+            
+            # Remove rows with any NaN (incomplete seed coverage)
+            valid_rows = ~np.isnan(friedman_matrix).any(axis=1)
+            friedman_matrix = friedman_matrix[valid_rows, :]
+            
+            if friedman_matrix.shape[0] >= 2:  # Need at least 2 seeds
+                friedman_results = friedman_test(friedman_matrix, optimizer_names=optimizer_names)
+                print_friedman_results(friedman_results)
+                
+                # Save Friedman results
+                friedman_summary = {
+                    'test': 'friedman',
+                    'statistic': float(friedman_results['statistic']),
+                    'p_value': float(friedman_results['p_value']),
+                    'significant': bool(friedman_results['significant']),
+                    'ranks': {opt: float(rank) for opt, rank in zip(optimizer_names, friedman_results['mean_ranks'])}
+                }
+                import json
+                with open(f"{results_dir}/friedman_test.json", 'w') as f:
+                    json.dump(friedman_summary, f, indent=2)
+                logger.info(f"Friedman test results saved to {results_dir}/friedman_test.json")
+            else:
+                logger.warning("Insufficient data for Friedman test (need at least 2 complete seeds)")
+        except Exception as e:
+            logger.warning(f"Could not compute Friedman test: {e}")
     else:
         significance_df = None
     

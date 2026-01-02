@@ -156,8 +156,8 @@ def run_all_smoke_tests():
     results = []
     for name, test_fn in tests:
         try:
-            result = test_fn()
-            results.append((name, result))
+            test_fn()  # Test functions use assertions, don't return values
+            results.append((name, True))
         except Exception as e:
             print(f"✗ {name} crashed: {e}")
             results.append((name, False))

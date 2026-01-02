@@ -10,7 +10,7 @@ import numpy as np
 from torch.optim.optimizer import Optimizer
 import math
 from collections import OrderedDict
-from typing import Any, cast
+from typing import Any, cast, Optional
 
 # Import custom optimizers - handle path properly
 try:
@@ -54,7 +54,7 @@ class SGDWrapper(Optimizer):
         # Flag for OOM handler - SGD does not require closure
         self.requires_closure = False
         
-    def step(self, closure=None):
+    def step(self, closure=None) -> Optional[float]:  # type: ignore[override]
         loss = None
         if closure is not None:
             loss = closure()
@@ -110,8 +110,8 @@ class SGDWrapper(Optimizer):
 class SGDMomentumWrapper(Optimizer):
     """PyTorch wrapper for custom SGD with momentum optimizer."""
     
-    def __init__(self, params, lr=0.01, momentum=0.9):
-        defaults = dict(lr=lr, momentum=momentum)
+    def __init__(self, params, lr=0.01, momentum=0.9, weight_decay=0.0):
+        defaults = dict(lr=lr, momentum=momentum, weight_decay=weight_decay)
         super().__init__(params, defaults)
         # Create one optimizer per parameter (they have state)
         self.custom_opts = {}
@@ -119,7 +119,7 @@ class SGDMomentumWrapper(Optimizer):
         # Flag for OOM handler - SGDMomentum does not require closure
         self.requires_closure = False
         
-    def step(self, closure=None):
+    def step(self, closure=None) -> Optional[float]:  # type: ignore[override]
         loss = None
         if closure is not None:
             loss = closure()
@@ -137,7 +137,8 @@ class SGDMomentumWrapper(Optimizer):
                     # Map torch's momentum -> beta in custom optimizer
                     self.custom_opts[key] = CustomSGDMomentum(
                         lr=group['lr'],
-                        beta=group['momentum']
+                        beta=group['momentum'],
+                        weight_decay=group['weight_decay']
                     )
                 
                 # Get gradient as numpy
@@ -187,7 +188,6 @@ class SGDMomentumWrapper(Optimizer):
     
     def load_state_dict(self, state_dict):
         """Restore custom optimizer states from checkpoint using index mapping."""
-        import numpy as np
         custom_state = state_dict.pop('custom_opts', {})
         super().load_state_dict(state_dict)
         
@@ -219,7 +219,7 @@ class AdamWrapper(Optimizer):
         # Flag for OOM handler - Adam does not require closure
         self.requires_closure = False
         
-    def step(self, closure=None):
+    def step(self, closure=None) -> Optional[float]:  # type: ignore[override]
         loss = None
         if closure is not None:
             loss = closure()
@@ -289,7 +289,6 @@ class AdamWrapper(Optimizer):
     
     def load_state_dict(self, state_dict):
         """Restore custom Adam states using index mapping."""
-        import numpy as np
         custom_state = state_dict.pop('custom_opts', {})
         super().load_state_dict(state_dict)
         
@@ -324,7 +323,7 @@ class SGDNesterovWrapper(Optimizer):
         # Flag for OOM handler - SGDNesterov does not require closure
         self.requires_closure = False
 
-    def step(self, closure=None):
+    def step(self, closure=None) -> Optional[float]:  # type: ignore[override]
         loss = None
         if closure is not None:
             loss = closure()
@@ -389,7 +388,6 @@ class SGDNesterovWrapper(Optimizer):
     
     def load_state_dict(self, state_dict):
         """Restore Nesterov states using index mapping."""
-        import numpy as np
         custom_state = state_dict.pop('custom_opts', {})
         super().load_state_dict(state_dict)
         
@@ -419,8 +417,8 @@ class RMSPropWrapper(Optimizer):
         
         # Flag for OOM handler - RMSProp does not require closure
         self.requires_closure = False
-        
-    def step(self, closure=None):
+
+    def step(self, closure=None) -> Optional[float]:  # type: ignore[override]
         loss = None
         if closure is not None:
             loss = closure()
@@ -491,7 +489,6 @@ class RMSPropWrapper(Optimizer):
     
     def load_state_dict(self, state_dict):
         """Restore RMSProp states using index mapping."""
-        import numpy as np
         custom_state = state_dict.pop('custom_opts', {})
         super().load_state_dict(state_dict)
         
@@ -512,7 +509,6 @@ class RMSPropWrapper(Optimizer):
                     opt.s = np.array(opt_state['s'], dtype=np.float32) if opt_state['s'] is not None else None
                     self.custom_opts[key] = opt
             else:
-                import logging
                 logging.warning("Skipping invalid optimizer state for key %s (indices out of bounds)", key_str)
 
 
@@ -527,7 +523,7 @@ class AdamWWrapper(Optimizer):
         # Flag for OOM handler - AdamW does not require closure
         self.requires_closure = False
 
-    def step(self, closure=None):
+    def step(self, closure=None) -> Optional[float]:  # type: ignore[override]
         loss = None
         if closure is not None:
             loss = closure()
@@ -598,7 +594,6 @@ class AdamWWrapper(Optimizer):
     
     def load_state_dict(self, state_dict):
         """Restore AdamW states using index mapping."""
-        import numpy as np
         custom_state = state_dict.pop('custom_opts', {})
         super().load_state_dict(state_dict)
         
@@ -763,7 +758,7 @@ class SAMWrapper(Optimizer):
         # Apply base optimizer update with adversarial gradients
         self.base_optimizer.step()
     
-    def step(self, closure=None):
+    def step(self, closure=None) -> Optional[float]:  # type: ignore[override]
         """
         Perform SAM optimization step.
         
@@ -866,7 +861,13 @@ class SAMWrapper(Optimizer):
         # Restore parameters and apply update
         self._descent_step()
         
-        return loss
+        # Convert loss to float for return (PyTorch optimizers return Optional[float])
+        if isinstance(loss, torch.Tensor):
+            return float(loss.item())
+        elif loss is not None:
+            # type: ignore for generic object conversion
+            return float(loss)  # type: ignore[arg-type]
+        return None
     
     def zero_grad(self, set_to_none: bool = False):
         """Delegate to base optimizer."""
@@ -982,7 +983,7 @@ class LookaheadWrapper(Optimizer):
         for p in self.param_groups[0]['params']:
             self.slow_params.append(p.data.clone())
     
-    def step(self, closure=None):
+    def step(self, closure=None) -> Optional[float]:  # type: ignore[override]
         """Perform Lookahead update step."""
         loss = self.base_optimizer.step(closure)
         
@@ -995,7 +996,11 @@ class LookaheadWrapper(Optimizer):
             except (RuntimeError, TypeError):
                 loss_value = 0.0
         else:
-            loss_value = loss
+            # Convert to float if it's a Tensor
+            if isinstance(loss, torch.Tensor):
+                loss_value = float(loss.item())
+            else:
+                loss_value = float(loss) if loss is not None else None
         
         # Increment step counter
         self.step_count += 1
@@ -1011,7 +1016,13 @@ class LookaheadWrapper(Optimizer):
                     p.data.copy_(self.slow_params[idx])
                     idx += 1
         
-        return loss_value
+        # Ensure return type is Optional[float]
+        if loss_value is None:
+            return None
+        elif isinstance(loss_value, torch.Tensor):
+            return float(loss_value.item())
+        else:
+            return float(loss_value)  # type: ignore[arg-type]
     
     def state_dict(self):
         """Return state dict including base optimizer and slow params state."""
@@ -1120,7 +1131,7 @@ class AdaBoundWrapper(Optimizer):
                 gamma=group['gamma']
             )
     
-    def step(self, closure=None):
+    def step(self, closure=None) -> Optional[float]:  # type: ignore[override]
         loss = None
         if closure is not None:
             loss = closure()
@@ -1160,7 +1171,7 @@ class AdaBoundWrapper(Optimizer):
                     raise RuntimeError(
                         f"Failed to reshape AdaBound output: {e}. "
                         f"Original shape: {original_shape}, flat size: {new_param_flat.size}"
-                    )
+                    ) from e
         
         return loss
 
@@ -1185,7 +1196,7 @@ class RAdamWrapper(Optimizer):
                 epsilon=group['epsilon']
             )
     
-    def step(self, closure=None):
+    def step(self, closure=None) -> Optional[float]:  # type: ignore[override]
         loss = None
         if closure is not None:
             loss = closure()
@@ -1225,7 +1236,7 @@ class RAdamWrapper(Optimizer):
                     raise RuntimeError(
                         f"Failed to reshape RAdam output: {e}. "
                         f"Original shape: {original_shape}, flat size: {new_param_flat.size}"
-                    )
+                    ) from e
         
         return loss
 
@@ -1251,7 +1262,7 @@ class LAMBWrapper(Optimizer):
                 weight_decay=group['weight_decay']
             )
     
-    def step(self, closure=None):
+    def step(self, closure=None) -> Optional[float]:  # type: ignore[override]
         loss = None
         if closure is not None:
             loss = closure()
@@ -1291,7 +1302,7 @@ class LAMBWrapper(Optimizer):
                     raise RuntimeError(
                         f"Failed to reshape LAMB output: {e}. "
                         f"Original shape: {original_shape}, flat size: {new_param_flat.size}"
-                    )
+                    ) from e
         
         return loss
 

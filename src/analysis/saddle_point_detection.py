@@ -141,6 +141,9 @@ def compute_largest_eigenvalue_power_iteration(
     v_norm = torch.sqrt(v_norm_sq)
     v = [vi / v_norm for vi in v]
     
+    # Initialize lambda_estimate to ensure it's bound in all code paths
+    lambda_estimate = torch.tensor(0.0)
+    
     for iteration in range(max_iter):
         # Compute Hessian-vector product: H*v
         Hv = hessian_vector_product(model, loss, params, v)

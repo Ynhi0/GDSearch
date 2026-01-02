@@ -32,16 +32,22 @@ class Optimizer:
             except (TypeError, ValueError, AttributeError):
                 pass
     
-    def step(self, params: Union[Tuple[float, float], Any], gradients: Union[Tuple[float, float], Any]) -> Union[Tuple[float, float], Any]:
+    def step(self, params: Union[Tuple[float, float], Any], gradients: Union[Tuple[float, float], Any], **kwargs: Any) -> Union[Tuple[float, float], Any]:
         """
         Perform one parameter update step.
         
         Args:
             params: Tuple (x, y) - current parameters
             gradients: Tuple (grad_x, grad_y) - gradient at current parameters
+            **kwargs: Additional optimizer-specific arguments (e.g., loss_fn for SAM)
             
         Returns:
             Tuple (new_x, new_y) - parameters after update
+            
+        Note:
+            Subclasses may extend the signature with optimizer-specific kwargs.
+            This allows SAM to accept `loss_fn` and `adversarial_gradients`
+            without violating the Liskov Substitution Principle.
         """
         raise NotImplementedError("The step method must be implemented in subclass")
     
@@ -108,7 +114,7 @@ class SGD(Optimizer):
         else:
             self.name = f"SGD(lr={lr})"
     
-    def step(self, params: Union[Tuple[float, float], Any], gradients: Union[Tuple[float, float], Any]) -> Union[Tuple[float, float], Any]:
+    def step(self, params: Union[Tuple[float, float], Any], gradients: Union[Tuple[float, float], Any], **kwargs: Any) -> Union[Tuple[float, float], Any]:
         """Perform one SGD step with optional weight decay."""
         # Supports both tuple (x,y) and numpy array
         if isinstance(params, tuple):
@@ -138,44 +144,57 @@ class SGD(Optimizer):
             return updated
     
     def reset(self) -> None:
-        """SGD has no internal state."""
-        # Stateless optimizer
-        pass
+        """SGD has no internal state - no action needed."""
+        # Stateless optimizer - no state to reset
 
 
 class SGDMomentum(Optimizer):
     """
-    SGD with Momentum.
+    SGD with Momentum with optional L2 regularization.
     
     Update formula:
-        v_new = beta * v_old + gradient
+        v_new = beta * v_old + gradient + weight_decay * params  # L2 regularization
         θ_new = θ_old - lr * v_new
+    
+    Note: This uses coupled L2 weight decay (applied to gradient), matching
+    standard PyTorch SGD behavior. This differs from decoupled weight decay
+    used in AdamW.
     """
     
-    def __init__(self, lr=0.01, beta=0.9):
+    def __init__(self, lr=0.01, beta=0.9, weight_decay=0.0):
         """
         Initialize SGD with Momentum optimizer.
         
         Args:
             lr: Learning rate (default: 0.01)
             beta: Momentum coefficient (default: 0.9)
+            weight_decay: L2 regularization coefficient (default: 0.0)
         """
         super().__init__()
         self.lr = lr
         self.beta = beta
-        self.name = f"SGDMomentum(lr={lr}, beta={beta})"
+        self.weight_decay = weight_decay
+        if weight_decay > 0:
+            self.name = f"SGDMomentum(lr={lr}, beta={beta}, wd={weight_decay})"
+        else:
+            self.name = f"SGDMomentum(lr={lr}, beta={beta})"
         
         # Initialize velocity
         self.v_x = 0.0
         self.v_y = 0.0
         self.v = None  # For neural networks
     
-    def step(self, params, gradients):
-        """Perform one SGD with Momentum step."""
+    def step(self, params, gradients, **kwargs) -> Union[Tuple[float, float], Any]:
+        """Perform one SGD with Momentum step with optional weight decay."""
         # Supports both tuple (x,y) and numpy array
         if isinstance(params, tuple):
             x, y = params
             grad_x, grad_y = gradients
+            
+            # Apply weight decay (L2 regularization) to gradients
+            if self.weight_decay > 0:
+                grad_x += self.weight_decay * x
+                grad_y += self.weight_decay * y
             
             # Update velocity
             self.v_x = self.beta * self.v_x + grad_x
@@ -197,8 +216,13 @@ class SGDMomentum(Optimizer):
                 logging.warning("SGDMomentum: Non-finite gradients detected, skipping update")
                 return params
             
+            # Apply weight decay (L2 regularization)
+            effective_grad = gradients.copy() if hasattr(gradients, 'copy') else np.array(gradients)
+            if self.weight_decay > 0:
+                effective_grad += self.weight_decay * params
+            
             # Update velocity
-            self.v = self.beta * self.v + gradients
+            self.v = self.beta * self.v + effective_grad
             
             # Update parameters
             updated = params - self.lr * self.v
@@ -236,7 +260,7 @@ class SGDNesterov(Optimizer):
         self.v_y = 0.0
         self.v = None  # array state for NN
 
-    def step(self, params, gradients):
+    def step(self, params, gradients, **kwargs) -> Union[Tuple[float, float], Any]:
         if isinstance(params, tuple):
             x, y = params
             grad_x, grad_y = gradients
@@ -297,7 +321,7 @@ class RMSProp(Optimizer):
         self.s_y = 0.0
         self.s = None  # For neural networks
     
-    def step(self, params, gradients):
+    def step(self, params, gradients, **kwargs) -> Union[Tuple[float, float], Any]:
         """Perform one RMSProp step."""
         # Supports both tuple (x,y) and numpy array
         if isinstance(params, tuple):
@@ -393,7 +417,7 @@ class Adam(Optimizer):
         # Timestep counter
         self.t = 0
     
-    def step(self, params, gradients):
+    def step(self, params, gradients, **kwargs) -> Union[Tuple[float, float], Any]:
         """Perform one Adam step with optional L2 regularization."""
         # Increment timestep
         self.t += 1
@@ -501,7 +525,7 @@ class AdamW(Optimizer):
         self.v = None
         self.t = 0
 
-    def step(self, params, gradients):
+    def step(self, params, gradients, **kwargs) -> Union[Tuple[float, float], Any]:
         self.t += 1
         if isinstance(params, tuple):
             x, y = params
@@ -591,7 +615,7 @@ class AMSGrad(Optimizer):
 
         self.t = 0
 
-    def step(self, params, gradients):
+    def step(self, params, gradients, **kwargs) -> Union[Tuple[float, float], Any]:
         self.t += 1
         if isinstance(params, tuple):
             x, y = params
@@ -769,7 +793,7 @@ class SAM(Optimizer):
             
             return adv_params
     
-    def step(self, params, gradients, loss_fn=None, adversarial_gradients=None):
+    def step(self, params, gradients, loss_fn=None, adversarial_gradients=None, **kwargs) -> Union[Tuple[float, float], Any]:
         """
         Perform SAM update step.
         
@@ -778,6 +802,7 @@ class SAM(Optimizer):
             gradients: Gradients at current parameters
             loss_fn: Loss function (needed for 2D case to compute adversarial gradients)
             adversarial_gradients: Pre-computed gradients at adversarial point (optional)
+            **kwargs: Additional arguments (unused, for signature compatibility)
             
         Returns:
             Updated parameters
@@ -874,7 +899,7 @@ class Lookahead(Optimizer):
             self.slow_params = (1 - self.alpha) * self.slow_params + self.alpha * params
             return self.slow_params
     
-    def step(self, params, gradients):
+    def step(self, params, gradients, **kwargs) -> Union[Tuple[float, float], Any]:
         """
         Perform Lookahead update.
         
@@ -956,7 +981,7 @@ class AdaBound(Optimizer):
         self.m, self.v = None, None
         self.t = 0
     
-    def step(self, params, gradients):
+    def step(self, params, gradients, **kwargs) -> Union[Tuple[float, float], Any]:
         """Perform one AdaBound step."""
         self.t += 1
         
@@ -1055,7 +1080,7 @@ class RAdam(Optimizer):
         # Compute rho_inf (maximum length of approximated SMA)
         self.rho_inf = 2.0 / (1.0 - self.beta2) - 1.0
     
-    def step(self, params, gradients):
+    def step(self, params, gradients, **kwargs) -> Union[Tuple[float, float], Any]:
         """Perform one RAdam step."""
         self.t += 1
         
@@ -1152,7 +1177,7 @@ class LAMB(Optimizer):
         self.m, self.v = None, None
         self.t = 0
     
-    def step(self, params, gradients):
+    def step(self, params, gradients, **kwargs) -> Union[Tuple[float, float], Any]:
         """Perform one LAMB step."""
         self.t += 1
         

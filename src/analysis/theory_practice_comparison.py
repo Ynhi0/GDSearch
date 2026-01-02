@@ -431,6 +431,9 @@ def batch_compare_optimizers(results_dir: str, output_dir: str,
         if stats:
             all_stats.append(stats)
     
+    # Initialize comparison_df to ensure it's bound in all code paths
+    comparison_df = None
+    
     # Create comparison table
     if all_stats:
         comparison_df = pd.DataFrame(all_stats)

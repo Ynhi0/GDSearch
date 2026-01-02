@@ -2266,25 +2266,76 @@ def run_scheduler_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, 
 # SHARED UTILITIES AND MODELS
 # ==============================================================================
 
+# ============================================================================
+# DEPRECATION WARNING: Local SimpleMLP Definition (Backward Compatibility)
+# ============================================================================
+# This class is duplicated from src.core.models.SimpleMLP for backward compatibility
+# with existing Kaggle scripts. The canonical version is in src.core.models.
+#
+# KNOWN ISSUE: This version uses `hidden_dims` (list) while src.core.models uses
+# `hidden_size` (int) + `use_bn` (bool). This creates incompatibility.
+#
+# ACTION REQUIRED: Migrate to src.core.models.SimpleMLP for:
+# - Batch Normalization support (critical for fair SGD vs Adam comparisons)
+# - Consistent hyperparameter interface
+# - Checkpoint compatibility
+#
+# For new experiments, use: from src.core.models import SimpleMLP
+# ============================================================================
+
 class SimpleMLP(nn.Module):
-    def __init__(self, input_dim=28*28, hidden_dims=None, num_classes=10):
+    """
+    DEPRECATED: Use src.core.models.SimpleMLP instead.
+    
+    This local version is maintained for backward compatibility but lacks:
+    - use_bn parameter (critical for optimizer fairness)
+    - Proper hyperparameter interface
+    """
+    def __init__(self, input_dim=28*28, hidden_dims=None, num_classes=10, 
+                 use_bn=False, dropout=0.0):
+        """
+        Args:
+            input_dim: Input dimension (default: 28*28 for MNIST)
+            hidden_dims: List of hidden layer sizes (default: [256, 128])
+            num_classes: Number of output classes
+            use_bn: Whether to use Batch Normalization (added for compatibility)
+            dropout: Dropout rate (added for compatibility)
+        
+        Note: For consistency with src.core.models.SimpleMLP, prefer:
+            SimpleMLP(input_size=784, hidden_size=256, use_bn=True)
+        """
         super().__init__()
         if hidden_dims is None:
             hidden_dims = [256, 128]
         self.input_dim = input_dim
         self.hidden_dims = hidden_dims
         self.num_classes = num_classes
+        self.use_bn = use_bn
+        self.dropout_rate = dropout
         
-        # Build layers dynamically
+        # Build layers dynamically with optional BN
         layers = []
         prev_dim = input_dim
-        for hidden_dim in hidden_dims:
+        for i, hidden_dim in enumerate(hidden_dims):
             layers.append(nn.Linear(prev_dim, hidden_dim))
+            if use_bn:
+                layers.append(nn.BatchNorm1d(hidden_dim))
             layers.append(nn.ReLU())
+            if dropout > 0:
+                layers.append(nn.Dropout(dropout))
             prev_dim = hidden_dim
         layers.append(nn.Linear(prev_dim, num_classes))
         
         self.network = nn.Sequential(*layers)
+        
+        # Issue deprecation warning
+        import warnings
+        warnings.warn(
+            "Using local SimpleMLP from run_all_kaggle.py. "
+            "Migrate to 'from src.core.models import SimpleMLP' for consistency.",
+            DeprecationWarning,
+            stacklevel=2
+        )
 
     def forward(self, x):
         x = x.view(x.size(0), -1)

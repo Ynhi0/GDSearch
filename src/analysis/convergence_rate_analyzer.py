@@ -410,6 +410,10 @@ def compute_empirical_rate(
     
     results = {'iterations': iterations, 'losses': losses}
     
+    # Initialize to None to avoid unbound variable errors
+    power_fit = None
+    exp_fit = None
+    
     if method in ['power', 'auto']:
         power_fit = fit_power_law(
             iterations + 1, losses,
@@ -428,8 +432,8 @@ def compute_empirical_rate(
     
     # Select best fit based on R²
     if method == 'auto':
-        power_r2 = power_fit.get('r_squared', -1) if power_fit.get('success') else -1
-        exp_r2 = exp_fit.get('r_squared', -1) if exp_fit.get('success') else -1
+        power_r2 = power_fit.get('r_squared', -1) if power_fit and power_fit.get('success') else -1
+        exp_r2 = exp_fit.get('r_squared', -1) if exp_fit and exp_fit.get('success') else -1
         
         if power_r2 > exp_r2:
             results['best_fit'] = 'power_law'
@@ -439,10 +443,10 @@ def compute_empirical_rate(
             results['best_r_squared'] = exp_r2
     elif method == 'power':
         results['best_fit'] = 'power_law'
-        results['best_r_squared'] = power_fit.get('r_squared', 0)
+        results['best_r_squared'] = power_fit.get('r_squared', 0) if power_fit else 0
     else:
         results['best_fit'] = 'exponential'
-        results['best_r_squared'] = exp_fit.get('r_squared', 0)
+        results['best_r_squared'] = exp_fit.get('r_squared', 0) if exp_fit else 0
     
     results['success'] = True
     return results

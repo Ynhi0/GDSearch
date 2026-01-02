@@ -244,11 +244,38 @@ def main():
         val_split=0.1  # Use same validation fraction as during tuning
     )
 
-    # Combine train + val datasets into a single training dataset
-    from torch.utils.data import ConcatDataset, DataLoader
-    combined_dataset = ConcatDataset([train_loader_final.dataset, val_loader_final.dataset])
+    # SCIENTIFIC FIX: Combine train + val datasets with CONSISTENT transforms
+    # PROBLEM: ConcatDataset([train.dataset, val.dataset]) mixes augmented (train) 
+    # with non-augmented (val) data, creating a heterogeneous distribution.
+    # SOLUTION: Get the underlying base dataset and create a combined subset with
+    # training transforms applied to ALL samples.
+    from torch.utils.data import Subset, DataLoader
+    import torchvision.transforms as transforms
+    
+    # Get the base MNIST dataset (before splitting)
+    from torchvision.datasets import MNIST
+    train_transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.1307,), (0.3081,))
+    ])
+    
+    # Load full training set with consistent transforms
+    full_train_dataset = MNIST(root='./data', train=True, download=True, transform=train_transform)
+    
+    # Get the indices from train and val loaders
+    train_indices = train_loader_final.dataset.indices if hasattr(train_loader_final.dataset, 'indices') else range(len(train_loader_final.dataset))
+    val_indices = val_loader_final.dataset.indices if hasattr(val_loader_final.dataset, 'indices') else range(len(val_loader_final.dataset))
+    
+    # Combine indices
+    combined_indices = list(train_indices) + list(val_indices)
+    
+    # Create combined dataset with training transforms applied to ALL samples
+    combined_dataset = Subset(full_train_dataset, combined_indices)
     train_val_loader = DataLoader(combined_dataset, batch_size=128, shuffle=True, num_workers=2)
     test_loader = test_loader_final
+    
+    logging.info(f"Combined dataset size: {len(combined_dataset)} (train: {len(train_indices)}, val: {len(val_indices)})")
+    logging.info("All samples use training transforms for consistency.")
 
     # Create model with best params (num_classes not output_size)
     from src.core.models import SimpleMLP

@@ -23,7 +23,7 @@ from src.core.test_functions import (
 )
 
 # Import optimizers
-from src.core.optimizers import SGD, SGDMomentum, Adam, RMSProp  # Fixed: RMSProp not RMSprop
+from src.core.optimizers import SGD, SGDMomentum, Adam, RMSProp, SAM  # Fixed: RMSProp not RMSprop
 
 # Import config loader
 from src.utils.config_loader import load_optimizer_config, ConfigurationError
@@ -100,12 +100,19 @@ def run_stochastic_2d_experiments(
         sgdm_cfg = load_optimizer_config('benchmark_hyperparameters', '2d_optimization', 'SGDMomentum')
         adam_cfg = load_optimizer_config('benchmark_hyperparameters', '2d_optimization', 'Adam')
         rmsprop_cfg = load_optimizer_config('benchmark_hyperparameters', '2d_optimization', 'RMSProp')
+        # SAM config (if available, otherwise use default)
+        try:
+            sam_cfg = load_optimizer_config('benchmark_hyperparameters', '2d_optimization', 'SAM')
+            sam_opt = SAM(**sam_cfg)
+        except (ConfigurationError, FileNotFoundError):
+            sam_opt = SAM(lr=0.01, rho=0.05, base_optimizer='SGD')
         
         optimizers = [
             ("SGD", SGD(**sgd_cfg)),
             ("SGD_Momentum", SGDMomentum(**sgdm_cfg)),
             ("Adam", Adam(**adam_cfg)),
             ("RMSProp", RMSProp(**rmsprop_cfg)),
+            ("SAM", sam_opt),
         ]
         logging.debug("Loaded optimizer configs from benchmark_hyperparameters.json")
     except (ConfigurationError, FileNotFoundError) as e:
@@ -115,6 +122,7 @@ def run_stochastic_2d_experiments(
             ("SGD_Momentum", SGDMomentum(lr=0.05, beta=0.9)),
             ("Adam", Adam(lr=0.1)),
             ("RMSProp", RMSProp(lr=0.01)),
+            ("SAM", SAM(lr=0.01, rho=0.05, base_optimizer='SGD')),
         ]
     
     results = []
@@ -142,8 +150,30 @@ def run_stochastic_2d_experiments(
                     # Compute STOCHASTIC gradient (this is the key fix!)
                     grad_x, grad_y = func.gradient(x, y, noise_std=noise_std, noise_type=noise_type)
                     
-                    # Update parameters
-                    x, y = optimizer.step((x, y), (grad_x, grad_y))
+                    # Update parameters (with SAM-specific handling)
+                    if isinstance(optimizer, SAM):
+                        # SAM requires adversarial gradients
+                        # Compute adversarial point manually (avoid protected method warning)
+                        grad_norm = np.hypot(grad_x, grad_y)
+                        if grad_norm >= 1e-12:
+                            # Normalize gradient direction
+                            grad_dir_x = grad_x / grad_norm
+                            grad_dir_y = grad_y / grad_norm
+                            # Adversarial step: θ + ρ * (g / ||g||)
+                            adv_x = x + optimizer.rho * grad_dir_x
+                            adv_y = y + optimizer.rho * grad_dir_y
+                        else:
+                            adv_x, adv_y = x, y
+                        
+                        # Compute gradient at adversarial point (with same noise characteristics)
+                        adv_grad_x, adv_grad_y = func.gradient(adv_x, adv_y, noise_std=noise_std, noise_type=noise_type)
+                        adversarial_gradients = (adv_grad_x, adv_grad_y)
+                        
+                        # SAM step with adversarial gradients
+                        x, y = optimizer.step((x, y), (grad_x, grad_y), adversarial_gradients=adversarial_gradients)
+                    else:
+                        # Standard optimizer step
+                        x, y = optimizer.step((x, y), (grad_x, grad_y))
                     
                     # Convergence check
                     if loss < 1e-8:

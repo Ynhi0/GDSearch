@@ -250,8 +250,8 @@ def main():
     results = []
     for test in tests:
         try:
-            result = test()
-            results.append(result)
+            test()  # Test functions use assertions, don't return values
+            results.append(True)
         except Exception as e:
             print(f"\n✗ Test crashed: {e}")
             import traceback
