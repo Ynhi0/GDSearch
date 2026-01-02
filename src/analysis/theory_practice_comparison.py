@@ -387,6 +387,11 @@ def compare_theory_practice(training_csv: str, optimizer_name: str,
         'theoretical_final': float(theoretical[-1])
     }
     
+    # Save stats to CSV in output_dir
+    stats_csv = Path(output_dir) / f'{optimizer_name}_theory_practice_stats.csv'
+    pd.DataFrame([stats]).to_csv(stats_csv, index=False)
+    logging.info(f"✓ Stats saved to {stats_csv}")
+    
     return stats
 
 
@@ -440,6 +445,77 @@ def batch_compare_optimizers(results_dir: str, output_dir: str,
         print(comparison_df[['optimizer', 'fit_r_squared', 'mean_relative_error']])
     
     return comparison_df if all_stats else None
+
+
+def fit_convergence_rate(iterations: np.ndarray, values: np.ndarray) -> Dict:
+    """
+    Fit convergence rate with automatic model selection.
+    
+    Tries multiple convergence models (linear/geometric, sublinear O(1/k), sqrt O(1/√k))
+    and returns the best fit based on R² score.
+    
+    Args:
+        iterations: Array of iteration numbers
+        values: Observed values (typically gradient norms or losses)
+        
+    Returns:
+        Dict containing:
+            - 'best_model': Name of best-fitting model ('linear', 'sublinear', or 'sqrt')
+            - 'best_r_squared': R² score of best model
+            - 'linear': Dict with 'rate', 'fitted_curve', 'r_squared', 'formula'
+            - 'sublinear': Dict with 'alpha', 'C', 'fitted_curve', 'r_squared', 'formula'
+            - 'sqrt': Dict with 'C', 'fitted_curve', 'r_squared', 'formula'
+    """
+    # Try all three models
+    models = {}
+    
+    # Linear/Geometric convergence: f(k) = C * ρ^k
+    rate_linear, fitted_linear, r2_linear = fit_empirical_rate(iterations, values, 'linear')
+    models['linear'] = {
+        'rate': rate_linear,
+        'fitted_curve': fitted_linear,
+        'r_squared': r2_linear,
+        'formula': f'{values[0]:.4e} * exp(-{rate_linear:.4f} * k)' if len(values) > 0 else 'N/A'
+    }
+    
+    # Sublinear convergence: f(k) = C / k
+    rate_sublinear, fitted_sublinear, r2_sublinear = fit_empirical_rate(iterations, values, 'sublinear')
+    models['sublinear'] = {
+        'C': rate_sublinear,
+        'alpha': 1.0,  # O(1/k^1)
+        'fitted_curve': fitted_sublinear,
+        'r_squared': r2_sublinear,
+        'formula': f'{rate_sublinear:.4e} / k'
+    }
+    
+    # Square root convergence: f(k) = C / √k
+    rate_sqrt, fitted_sqrt, r2_sqrt = fit_empirical_rate(iterations, values, 'sqrt')
+    models['sqrt'] = {
+        'C': rate_sqrt,
+        'fitted_curve': fitted_sqrt,
+        'r_squared': r2_sqrt,
+        'formula': f'{rate_sqrt:.4e} / sqrt(k)'
+    }
+    
+    # Select best model by R²
+    best_model = 'linear'
+    best_r2 = r2_linear
+    
+    if r2_sublinear > best_r2:
+        best_model = 'sublinear'
+        best_r2 = r2_sublinear
+    
+    if r2_sqrt > best_r2:
+        best_model = 'sqrt'
+        best_r2 = r2_sqrt
+    
+    return {
+        'best_model': best_model,
+        'best_r_squared': best_r2,
+        'linear': models['linear'],
+        'sublinear': models['sublinear'],
+        'sqrt': models['sqrt']
+    }
 
 
 if __name__ == "__main__":

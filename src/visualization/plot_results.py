@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 from matplotlib import cm
 # Removed unused imports: Axes3D, mcolors
 from src.utils.plot_helpers import arr_to_numpy_float
+from src.analysis.theoretical_bounds import sgd_convergence_bound
 
 
 class TwoDTestFunction(Protocol):
@@ -955,6 +956,85 @@ def plot_multiseed_comparison(
     if save_path:
         plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
         print(f"Multi-seed comparison plot saved to: {save_path}")
+        plt.close()
+    else:
+        plt.show()
+
+
+def plot_sgd_vs_momentum_with_theory(
+    sgd_df: pd.DataFrame,
+    momentum_df: pd.DataFrame,
+    kappa: float,
+    lr_sgd: float,
+    lr_momentum: float,
+    title: str = "SGD vs Momentum: Theory vs Practice",
+    save_path: Optional[str] = None
+):
+    """
+    Overlay theoretical convergence curves on observed loss for SGD and SGD+Momentum.
+
+    Args:
+        sgd_df: DataFrame containing loss trajectory for SGD (columns: iteration/epoch and loss)
+        momentum_df: DataFrame for SGD+Momentum with same schema
+        kappa: Estimated condition number (L/μ)
+        lr_sgd: Learning rate for SGD
+        lr_momentum: Learning rate for SGD with momentum
+    """
+
+    def _extract_curve(df: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray]:
+        if df is None or df.empty:
+            raise ValueError("Input DataFrame is empty; cannot plot convergence")
+
+        if 'loss' in df.columns:
+            losses = arr_to_numpy_float(df['loss'])
+        elif 'train_loss' in df.columns:
+            losses = arr_to_numpy_float(df['train_loss'])
+        else:
+            raise ValueError("Expected 'loss' or 'train_loss' column for convergence plotting")
+
+        if 'iteration' in df.columns:
+            iters = arr_to_numpy_float(df['iteration'])
+        elif 'epoch' in df.columns:
+            iters = arr_to_numpy_float(df['epoch'])
+        else:
+            iters = np.arange(1, len(losses) + 1, dtype=float)
+
+        return iters, losses
+
+    def _theoretical_curve(initial_loss: float, lr: float, steps: int) -> Tuple[np.ndarray, float]:
+        mu = 1.0 / max(kappa, 1e-8)
+        L = kappa * mu
+        bound = sgd_convergence_bound(L=L, mu=mu, lr=lr, T=steps)
+        rate = abs(bound['convergence_rate'])
+        iterations = np.arange(1, steps + 1, dtype=float)
+        theory_loss = initial_loss * (rate ** (iterations - 1))
+        return theory_loss, rate
+
+    sgd_iters, sgd_losses = _extract_curve(sgd_df)
+    mom_iters, mom_losses = _extract_curve(momentum_df)
+
+    max_steps = int(max(len(sgd_losses), len(mom_losses)))
+    sgd_theory, sgd_rate = _theoretical_curve(float(sgd_losses[0]), lr_sgd, max_steps)
+    mom_theory, mom_rate = _theoretical_curve(float(mom_losses[0]), lr_momentum, max_steps)
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.plot(sgd_iters, sgd_losses, label='SGD (observed)', color='tab:blue', linewidth=2)
+    ax.plot(mom_iters, mom_losses, label='Momentum (observed)', color='tab:orange', linewidth=2)
+
+    ax.plot(np.arange(1, len(sgd_theory) + 1), sgd_theory, '--', color='tab:blue', alpha=0.65,
+            label=f'SGD theory |1-μη|={sgd_rate:.4f}')
+    ax.plot(np.arange(1, len(mom_theory) + 1), mom_theory, '--', color='tab:orange', alpha=0.65,
+            label=f'Momentum theory |1-μη|={mom_rate:.4f}')
+
+    ax.set_xlabel('Iteration')
+    ax.set_ylabel('Loss')
+    ax.set_title(title + f" (κ≈{kappa:.2e})")
+    ax.set_yscale('log')
+    ax.grid(alpha=0.3)
+    ax.legend()
+
+    if save_path:
+        plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
         plt.close()
     else:
         plt.show()

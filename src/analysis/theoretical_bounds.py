@@ -51,7 +51,7 @@ def sgd_convergence_bound(
         iterations_to_eps = float('inf')
         logging.warning(
             "sgd_convergence_bound: |convergence_rate|=%.4f >= 1. lr=%.6f, mu=%.6f."
-            " Step size does not yield geometric decay." % (rate_magnitude, lr, mu)
+            " Step size does not yield geometric decay.", rate_magnitude, lr, mu
         )
     else:
         # Valid convergence case: 0 < |rate| < 1 (allows bounded oscillations)
@@ -164,8 +164,9 @@ def momentum_convergence_bound(
         iterations_to_eps = np.sqrt(1.0 / epsilon)
     elif rate_magnitude >= 1:
         iterations_to_eps = float('inf')
-        logging.warning(f"momentum_convergence_bound: |convergence_rate|={rate_magnitude:.4f} >= 1. "
-                       f"Parameters lr={lr:.6f}, momentum={momentum:.4f} do not yield geometric decay.")
+        logging.warning("momentum_convergence_bound: |convergence_rate|=%.4f >= 1. "
+                       "Parameters lr=%.6f, momentum=%.4f do not yield geometric decay.", 
+                       rate_magnitude, lr, momentum)
     else:
         # Geometric decay case: |ρ|^T ≤ ε (allows bounded oscillations)
         iterations_to_eps = np.log(epsilon) / np.log(rate_magnitude)

@@ -73,10 +73,10 @@ class SGDWrapper(Optimizer):
                 # Validate gradients before step to fail fast on NaN/Inf
                 if not np.isfinite(grad).all():
                     raise ValueError(
-                        f"SGDWrapper: Non-finite gradient detected before step.\\n"
-                        f"  Gradient contains NaN or Inf values.\\n"
-                        f"  This indicates numerical instability in the forward/backward pass.\\n"
-                        f"  Consider: gradient clipping, smaller learning rate, or mixed precision training."
+                        "SGDWrapper: Non-finite gradient detected before step.\\n"
+                        "  Gradient contains NaN or Inf values.\\n"
+                        "  This indicates numerical instability in the forward/backward pass.\\n"
+                        "  Consider: gradient clipping, smaller learning rate, or mixed precision training."
                     )
                 
                 # Compute update
@@ -513,7 +513,7 @@ class RMSPropWrapper(Optimizer):
                     self.custom_opts[key] = opt
             else:
                 import logging
-                logging.warning(f"Skipping invalid optimizer state for key {key_str} (indices out of bounds)")
+                logging.warning("Skipping invalid optimizer state for key %s (indices out of bounds)", key_str)
 
 
 class AdamWWrapper(Optimizer):
@@ -992,7 +992,7 @@ class LookaheadWrapper(Optimizer):
             logging.debug("LookaheadWrapper: base optimizer.step returned None; normalizing to tensor(0.0)")
             try:
                 loss_value = torch.tensor(0.0)
-            except Exception:
+            except (RuntimeError, TypeError):
                 loss_value = 0.0
         else:
             loss_value = loss
@@ -1063,12 +1063,12 @@ def test_sam_and_lookahead():
         else:
             try:
                 loss_val = float(cast(Any, loss))
-            except Exception:
+            except (ValueError, TypeError, RuntimeError):
                 logging.warning("SAM step returned non-numeric loss: %s", type(loss))
                 loss_val = float('nan')
-        logging.info(f"  SAM step completed successfully, loss: {loss_val:.4f}")
-    except Exception as e:
-        logging.error(f"  SAM failed: {e}", exc_info=True)
+        logging.info("  SAM step completed successfully, loss: %.4f", loss_val)
+    except (RuntimeError, ValueError, TypeError) as e:
+        logging.error("  SAM failed: %s", e, exc_info=True)
     
     # Test Lookahead
     logging.info("  Testing Lookahead...")
@@ -1089,12 +1089,12 @@ def test_sam_and_lookahead():
         else:
             try:
                 loss_val = float(cast(Any, loss))
-            except Exception:
+            except (ValueError, TypeError, RuntimeError):
                 logging.warning("Lookahead step returned non-numeric loss: %s", type(loss))
                 loss_val = float('nan')
-        logging.info(f"  Lookahead step completed successfully, loss: {loss_val:.4f}")
-    except Exception as e:
-        logging.error(f"  Lookahead failed: {e}", exc_info=True)
+        logging.info("  Lookahead step completed successfully, loss: %.4f", loss_val)
+    except (RuntimeError, ValueError, TypeError) as e:
+        logging.error("  Lookahead failed: %s", e, exc_info=True)
     
     logging.info("\nSAM and Lookahead optimizer wrappers tested!")
 
@@ -1313,7 +1313,7 @@ if __name__ == '__main__':
     }
     
     for name, optimizer in optimizers.items():
-        logging.info(f"\nTesting {name}:")        
+        logging.info("\nTesting %s:", name)        
         # Reset model
         model = torch.nn.Linear(10, 2)
         
@@ -1328,12 +1328,12 @@ if __name__ == '__main__':
         # Optimizer step
         optimizer.step()
         
-    logging.info("\nAll optimizer wrappers work correctly!")
+    logging.info("\\nAll optimizer wrappers work correctly!")
     
     # Test new optimizers
-    logging.info("\n" + "="*60)
+    logging.info("\\n%s", "="*60)
     logging.info("Testing new optimizer wrappers (AdaBound, RAdam, LAMB)...")
-    logging.info("="*60)
+    logging.info("%s", "="*60)
     
     model = torch.nn.Linear(10, 2)
     x = torch.randn(5, 10)
@@ -1346,7 +1346,7 @@ if __name__ == '__main__':
     }
     
     for name, optimizer in new_optimizers.items():
-        logging.info(f"\n  Testing {name}...")
+        logging.info("\n  Testing %s...", name)
         model_test = torch.nn.Linear(10, 2)
         opt_test = new_optimizers[name].__class__(model_test.parameters(), lr=0.001)
         
@@ -1356,9 +1356,9 @@ if __name__ == '__main__':
             loss = torch.nn.functional.cross_entropy(output, y)
             loss.backward()
             opt_test.step()
-            logging.info(f"    {name} step completed successfully, loss: {loss.item():.4f}")
-        except Exception as e:
-            logging.info(f"    {name} failed: {e}")
+            logging.info("    %s step completed successfully, loss: %.4f", name, loss.item())
+        except (RuntimeError, ValueError, TypeError) as e:
+            logging.info("    %s failed: %s", name, e)
     
     logging.info("\nNew optimizer wrappers tested!")
     logging.info("\nAll optimizer wrappers working!")

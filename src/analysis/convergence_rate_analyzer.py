@@ -19,22 +19,155 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
-def fit_power_law(iterations: np.ndarray, losses: np.ndarray) -> Dict[str, Any]:
+def fit_power_law(
+    iterations: np.ndarray,
+    losses: np.ndarray,
+    known_min: Optional[float] = None,
+    use_log_space: bool = True
+) -> Dict[str, Any]:
     """
     Fit power-law convergence: loss(t) = A * t^(-α) + B
     
     Args:
         iterations: Array of iteration indices (1-indexed to avoid log(0))
         losses: Array of loss values
+        known_min: If provided, fix B to this value (e.g., 0 for Rosenbrock)
+        use_log_space: If True, fit in log-log space for better asymptotic behavior
     
     Returns:
         Dict with keys: alpha (convergence exponent), A, B, r_squared, success
+    
+    Scientific Note:
+        - For 2D test functions with known minimum (e.g., 0), set known_min to avoid
+          overfitting B and get accurate convergence rates.
+        - Log-space fitting focuses on tail behavior (asymptotic regime) rather than
+          early chaotic transients, which is the mathematically correct approach.
     """
     try:
         # Ensure iterations start at 1 (not 0)
         t = np.maximum(iterations, 1)
         
-        # Initial guess
+        if known_min is not None:
+            # Fix B to known minimum - fit only A and alpha
+            B = known_min
+            
+            if use_log_space:
+                # Log-log space fitting: log(loss - B) = log(A) - alpha * log(t)
+                # This is the mathematically correct way to verify power-law rates
+                shifted_losses = losses - B
+                # Filter out non-positive values (shouldn't happen if B is correct)
+                valid_mask = shifted_losses > 0
+                if np.sum(valid_mask) < 5:
+                    logger.warning("Too few valid points after shifting by known_min")
+                    use_log_space = False  # Fall back to linear fitting
+                else:
+                    log_t = np.log(t[valid_mask])
+                    log_loss = np.log(shifted_losses[valid_mask])
+                    
+                    # Linear regression in log-log space
+                    # log_loss = log_A - alpha * log_t
+                    coeffs = np.polyfit(log_t, log_loss, 1)
+                    alpha = -coeffs[0]  # Slope is -alpha
+                    log_A = coeffs[1]   # Intercept is log(A)
+                    A = np.exp(log_A)
+                    
+                    # Compute fitted values in original space
+                    fitted = A * np.power(t, -alpha) + B
+                    
+                    # R² in original space
+                    ss_res = np.sum((losses - fitted) ** 2)
+                    ss_tot = np.sum((losses - np.mean(losses)) ** 2)
+                    r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
+                    
+                    return {
+                        'alpha': alpha,
+                        'A': A,
+                        'B': B,
+                        'r_squared': r_squared,
+                        'fitted_values': fitted,
+                        'success': True,
+                        'fit_method': 'log-log (known B)'
+                    }
+            
+            # Linear space fitting with fixed B
+            def power_model_fixed(t, A, alpha):
+                return A * np.power(t, -alpha) + B
+            
+            popt, pcov = optimize.curve_fit(
+                power_model_fixed, t, losses,
+                p0=[losses[0] - B, 0.5],
+                maxfev=10000,
+                bounds=([0, 0], [np.inf, 5])
+            )
+            
+            A, alpha = popt
+            fitted = power_model_fixed(t, A, alpha)
+            
+            # Could use pcov for uncertainty estimation in future
+            _ = pcov  # Suppress unused warning
+            
+            # Compute R²
+            ss_res = np.sum((losses - fitted) ** 2)
+            ss_tot = np.sum((losses - np.mean(losses)) ** 2)
+            r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
+            
+            return {
+                'alpha': alpha,
+                'A': A,
+                'B': B,
+                'r_squared': r_squared,
+                'fitted_values': fitted,
+                'success': True,
+                'fit_method': 'linear (known B)'
+            }
+        
+        # Original code: fit all parameters including B
+        if use_log_space:
+            # Estimate B first using last few points
+            B_estimate = np.mean(losses[-10:]) if len(losses) > 10 else losses[-1]
+            shifted_losses = losses - B_estimate
+            valid_mask = shifted_losses > 0
+            
+            if np.sum(valid_mask) >= 5:
+                log_t = np.log(t[valid_mask])
+                log_loss = np.log(shifted_losses[valid_mask])
+                
+                # Linear regression
+                coeffs = np.polyfit(log_t, log_loss, 1)
+                alpha = -coeffs[0]
+                A = np.exp(coeffs[1])
+                B = B_estimate
+                
+                # Refine B with nonlinear fit
+                def power_model(t, A, alpha, B):
+                    return A * np.power(t, -alpha) + B
+                
+                popt, pcov = optimize.curve_fit(
+                    power_model, t, losses,
+                    p0=[A, alpha, B],
+                    maxfev=10000,
+                    bounds=([0, 0, -np.inf], [np.inf, 5, np.inf])
+                )
+                
+                A, alpha, B = popt
+                fitted = power_model(t, A, alpha, B)
+                _ = pcov
+                
+                ss_res = np.sum((losses - fitted) ** 2)
+                ss_tot = np.sum((losses - np.mean(losses)) ** 2)
+                r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
+                
+                return {
+                    'alpha': alpha,
+                    'A': A,
+                    'B': B,
+                    'r_squared': r_squared,
+                    'fitted_values': fitted,
+                    'success': True,
+                    'fit_method': 'log-log initialized'
+                }
+        
+        # Fallback: original linear-space fitting
         def power_model(t, A, alpha, B):
             return A * np.power(t, -alpha) + B
         
@@ -63,27 +196,150 @@ def fit_power_law(iterations: np.ndarray, losses: np.ndarray) -> Dict[str, Any]:
             'B': B,
             'r_squared': r_squared,
             'fitted_values': fitted,
-            'success': True
+            'success': True,
+            'fit_method': 'linear (all params)'
         }
-    except Exception as e:
-        logger.warning(f"Power-law fit failed: {e}")
+    except (RuntimeError, ValueError, TypeError) as e:
+        logger.warning("Power-law fit failed: %s", e)
         return {'success': False, 'error': str(e)}
 
 
-def fit_exponential(iterations: np.ndarray, losses: np.ndarray) -> Dict[str, Any]:
+def fit_exponential(
+    iterations: np.ndarray,
+    losses: np.ndarray,
+    known_min: Optional[float] = None,
+    use_log_space: bool = True
+) -> Dict[str, Any]:
     """
     Fit exponential convergence: loss(t) = A * exp(-β * t) + B
     
     Args:
         iterations: Array of iteration indices
         losses: Array of loss values
+        known_min: If provided, fix B to this value
+        use_log_space: If True, fit in log-linear space for better asymptotic behavior
     
     Returns:
         Dict with keys: beta (convergence rate), A, B, r_squared, success
+    
+    Scientific Note:
+        - Log-linear fitting: log(loss - B) = log(A) - beta * t
+        - This focuses on tail behavior (asymptotic regime)
     """
     try:
         t = iterations
         
+        if known_min is not None:
+            # Fix B to known minimum
+            B = known_min
+            
+            if use_log_space:
+                shifted_losses = losses - B
+                valid_mask = shifted_losses > 0
+                
+                if np.sum(valid_mask) < 5:
+                    logger.warning("Too few valid points after shifting by known_min")
+                    use_log_space = False
+                else:
+                    log_loss = np.log(shifted_losses[valid_mask])
+                    t_valid = t[valid_mask]
+                    
+                    # Linear regression: log_loss = log_A - beta * t
+                    coeffs = np.polyfit(t_valid, log_loss, 1)
+                    beta = -coeffs[0]  # Slope is -beta
+                    log_A = coeffs[1]   # Intercept is log(A)
+                    A = np.exp(log_A)
+                    
+                    fitted = A * np.exp(-beta * t) + B
+                    
+                    ss_res = np.sum((losses - fitted) ** 2)
+                    ss_tot = np.sum((losses - np.mean(losses)) ** 2)
+                    r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
+                    
+                    return {
+                        'beta': beta,
+                        'A': A,
+                        'B': B,
+                        'r_squared': r_squared,
+                        'fitted_values': fitted,
+                        'success': True,
+                        'fit_method': 'log-linear (known B)'
+                    }
+            
+            # Linear space fitting with fixed B
+            def exp_model_fixed(t, A, beta):
+                return A * np.exp(-beta * t) + B
+            
+            popt, pcov = optimize.curve_fit(
+                exp_model_fixed, t, losses,
+                p0=[losses[0] - B, 0.01],
+                maxfev=10000,
+                bounds=([0, 0], [np.inf, 1])
+            )
+            
+            A, beta = popt
+            fitted = exp_model_fixed(t, A, beta)
+            _ = pcov
+            
+            ss_res = np.sum((losses - fitted) ** 2)
+            ss_tot = np.sum((losses - np.mean(losses)) ** 2)
+            r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
+            
+            return {
+                'beta': beta,
+                'A': A,
+                'B': B,
+                'r_squared': r_squared,
+                'fitted_values': fitted,
+                'success': True,
+                'fit_method': 'linear (known B)'
+            }
+        
+        # Original code: fit all parameters
+        if use_log_space:
+            B_estimate = np.mean(losses[-10:]) if len(losses) > 10 else losses[-1]
+            shifted_losses = losses - B_estimate
+            valid_mask = shifted_losses > 0
+            
+            if np.sum(valid_mask) >= 5:
+                log_loss = np.log(shifted_losses[valid_mask])
+                t_valid = t[valid_mask]
+                
+                coeffs = np.polyfit(t_valid, log_loss, 1)
+                beta = -coeffs[0]
+                A = np.exp(coeffs[1])
+                B = B_estimate
+                
+                # Refine with nonlinear fit
+                def exp_model(t, A, beta, B):
+                    return A * np.exp(-beta * t) + B
+                
+                popt, pcov = optimize.curve_fit(
+                    exp_model, t, losses,
+                    p0=[A, beta, B],
+                    maxfev=10000,
+                    bounds=([0, 0, -np.inf], [np.inf, 1, np.inf])
+                )
+                
+                A, beta, B = popt
+                fitted = exp_model(t, A, beta, B)
+                _ = pcov
+                
+                ss_res = np.sum((losses - fitted) ** 2)
+                ss_tot = np.sum((losses - np.mean(losses)) ** 2)
+                r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
+                
+                return {
+                    'beta': beta,
+                    'A': A,
+                    'B': B,
+                    'r_squared': r_squared,
+                    'fitted_values': fitted,
+                    'success': True,
+                    'fit_method': 'log-linear initialized'
+                }
+        
+        # Fallback: original linear-space fitting
         def exp_model(t, A, beta, B):
             return A * np.exp(-beta * t) + B
         
@@ -112,16 +368,19 @@ def fit_exponential(iterations: np.ndarray, losses: np.ndarray) -> Dict[str, Any
             'B': B,
             'r_squared': r_squared,
             'fitted_values': fitted,
-            'success': True
+            'success': True,
+            'fit_method': 'linear (all params)'
         }
-    except Exception as e:
-        logger.warning(f"Exponential fit failed: {e}")
+    except (RuntimeError, ValueError, TypeError) as e:
+        logger.warning("Exponential fit failed: %s", e)
         return {'success': False, 'error': str(e)}
 
 
 def compute_empirical_rate(
     loss_history: List[float],
-    method: str = 'auto'
+    method: str = 'auto',
+    known_min: Optional[float] = None,
+    use_log_space: bool = True
 ) -> Dict[str, Any]:
     """
     Compute empirical convergence rate from loss trajectory.
@@ -129,9 +388,19 @@ def compute_empirical_rate(
     Args:
         loss_history: List of loss values over training
         method: 'power', 'exponential', or 'auto' (tries both)
+        known_min: For 2D functions with known minimum (e.g., 0 for Rosenbrock),
+                   fix B to this value for more accurate rate estimation
+        use_log_space: Use log-space fitting for better asymptotic behavior
     
     Returns:
         Dict with convergence metrics and best-fit model
+    
+    Example:
+        # For 2D Rosenbrock (known minimum = 0)
+        rate = compute_empirical_rate(losses, known_min=0.0)
+        
+        # For neural networks (unknown minimum)
+        rate = compute_empirical_rate(losses)
     """
     if len(loss_history) < 10:
         return {'success': False, 'error': 'Insufficient data (<10 points)'}
@@ -142,11 +411,19 @@ def compute_empirical_rate(
     results = {'iterations': iterations, 'losses': losses}
     
     if method in ['power', 'auto']:
-        power_fit = fit_power_law(iterations + 1, losses)  # +1 to avoid log(0)
+        power_fit = fit_power_law(
+            iterations + 1, losses,
+            known_min=known_min,
+            use_log_space=use_log_space
+        )
         results['power_law'] = power_fit
     
     if method in ['exponential', 'auto']:
-        exp_fit = fit_exponential(iterations, losses)
+        exp_fit = fit_exponential(
+            iterations, losses,
+            known_min=known_min,
+            use_log_space=use_log_space
+        )
         results['exponential'] = exp_fit
     
     # Select best fit based on R²
@@ -316,7 +593,7 @@ def generate_convergence_report(
     
     if output_path:
         df.to_csv(output_path, index=False)
-        logger.info(f"Convergence report saved to {output_path}")
+        logger.info("Convergence report saved to %s", output_path)
     
     return df
 
@@ -377,7 +654,7 @@ def plot_convergence_comparison(
     
     if output_path:
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        logger.info(f"Convergence plot saved to {output_path}")
+        logger.info("Convergence plot saved to %s", output_path)
     
     plt.close()
 
@@ -429,7 +706,7 @@ def analyze_experiment_convergence(
     if output_dir:
         _report = generate_convergence_report(results, output_dir / 'convergence_rates.csv')
         plot_convergence_comparison(results, output_dir / 'convergence_comparison.png')
-        logger.info(f"Convergence analysis complete. Results in {output_dir}")
+        logger.info("Convergence analysis complete. Results in %s", output_dir)
     
     return results
 

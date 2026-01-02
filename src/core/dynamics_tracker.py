@@ -62,6 +62,10 @@ class TrainingDynamicsTracker:
         
         # Add normalized speed metric
         self.normalized_speeds: List[float] = []  # Speed normalized by LR (removes scheduler confounding)
+
+        # Pseudo-convergence detection (saddle-like regions)
+        self.pseudo_convergence_flags: List[bool] = []
+        self.pseudo_escape_times: List[float] = []
         
         # Disk-based parameter tracking
         self.track_params = track_params
@@ -191,6 +195,52 @@ class TrainingDynamicsTracker:
         if len(self.losses) > 1:
             losses_arr = np.array(self.losses)
             self.loss_oscillations = compute_oscillation_magnitude(losses_arr, ema_alpha=0.1)
+
+        # Detect pseudo-convergence (near-zero gradients at high loss) and estimate escape time
+        self._compute_pseudo_convergence()
+
+    def _compute_pseudo_convergence(
+        self,
+        grad_tol: float = 1e-4,
+        loss_margin: float = 0.1,
+        escape_drop: float = 0.05,
+        max_window: int = 500
+    ):
+        """
+        Identify iterations where gradients are near zero yet loss remains high (saddle-like pseudo-convergence)
+        and estimate iterations needed to escape via a meaningful loss drop.
+        """
+        if not self.losses or not self.grad_norms:
+            self.pseudo_convergence_flags = []
+            self.pseudo_escape_times = []
+            return
+
+        losses = np.asarray(self.losses, dtype=float)
+        grads = np.asarray(self.grad_norms, dtype=float)
+
+        flags: List[bool] = [False] * len(losses)
+        escape_steps: List[float] = [np.nan] * len(losses)
+
+        best_loss = float('inf')
+        for i, (loss, grad) in enumerate(zip(losses, grads)):
+            best_loss = min(best_loss, loss)
+
+            is_flat = grad <= grad_tol
+            significantly_above_best = loss > best_loss * (1.0 + loss_margin)
+
+            if is_flat and significantly_above_best:
+                flags[i] = True
+                target_loss = min(loss * (1.0 - escape_drop), best_loss * (1.0 + loss_margin / 2.0))
+
+                # Look ahead up to max_window steps to see when loss meaningfully decreases
+                upper = min(len(losses), i + max_window)
+                for j in range(i + 1, upper):
+                    if losses[j] <= target_loss:
+                        escape_steps[i] = float(j - i)
+                        break
+
+        self.pseudo_convergence_flags = flags
+        self.pseudo_escape_times = escape_steps
     
     def save_dynamics(self, output_path: str):
         """
@@ -215,6 +265,12 @@ class TrainingDynamicsTracker:
         # Add oscillations if computed
         if self.loss_oscillations is not None:
             df['loss_oscillation'] = self.loss_oscillations
+
+        # Add pseudo-convergence markers and escape times if available
+        if self.pseudo_convergence_flags and len(self.pseudo_convergence_flags) == len(self.iterations):
+            df['pseudo_convergence'] = self.pseudo_convergence_flags
+        if self.pseudo_escape_times and len(self.pseudo_escape_times) == len(self.iterations):
+            df['time_to_escape'] = self.pseudo_escape_times
         
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         df.to_csv(output_path, index=False)

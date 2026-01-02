@@ -11,8 +11,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
-from scipy.optimize import curve_fit
 import logging
+
+from src.analysis.theory_practice_comparison import fit_convergence_rate
 
 try:
     from src.core.test_functions import Rosenbrock, IllConditionedQuadratic
@@ -22,103 +23,6 @@ except ImportError:
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     from src.core.test_functions import Rosenbrock, IllConditionedQuadratic
     from src.core.optimizers import SGD, SGDMomentum, Adam, RMSProp
-
-
-def linear_convergence(k, c, rate):
-    """Linear (geometric) convergence: c * rate^k"""
-    return c * (rate ** k)
-
-
-def sublinear_convergence(k, c, alpha):
-    """Sublinear convergence: c / k^alpha (e.g., O(1/k) has alpha=1)"""
-    return c / (k ** alpha)
-
-
-def fit_convergence_rate(iterations: np.ndarray, grad_norms: np.ndarray) -> Dict:
-    """
-    Fit observed gradient norms to theoretical convergence models.
-    
-    Returns:
-        results: Dictionary with fitted parameters and goodness-of-fit
-    """
-    # Remove zeros/invalid values
-    valid = (iterations > 0) & (grad_norms > 1e-12)
-    iters_valid = iterations[valid]
-    gnorms_valid = grad_norms[valid]
-    
-    if len(iters_valid) < 5:
-        return {
-            'model': 'insufficient_data',
-            'r_squared': 0.0,
-            'params': {}
-        }
-    
-    results = {}
-    
-    # Try sublinear fit O(1/k^alpha)
-    try:
-        popt_sub, _ = curve_fit(
-            sublinear_convergence,
-            iters_valid,
-            gnorms_valid,
-            p0=[gnorms_valid[0], 1.0],
-            bounds=([0, 0.1], [np.inf, 5.0]),
-            maxfev=10000
-        )
-        pred_sub = sublinear_convergence(iters_valid, *popt_sub)
-        residuals_sub = gnorms_valid - pred_sub
-        ss_res_sub = np.sum(residuals_sub**2)
-        ss_tot = np.sum((gnorms_valid - np.mean(gnorms_valid))**2)
-        r2_sub = 1 - (ss_res_sub / ss_tot) if ss_tot > 0 else 0.0
-        
-        results['sublinear'] = {
-            'c': popt_sub[0],
-            'alpha': popt_sub[1],
-            'r_squared': r2_sub,
-            'formula': f'{popt_sub[0]:.2e} / k^{popt_sub[1]:.2f}'
-        }
-    except Exception as e:
-        logging.debug(f"Sublinear fit failed: {e}")
-        results['sublinear'] = {'r_squared': 0.0}
-    
-    # Try linear (geometric) fit c * rate^k
-    try:
-        popt_lin, _ = curve_fit(
-            linear_convergence,
-            iters_valid,
-            gnorms_valid,
-            p0=[gnorms_valid[0], 0.9],
-            bounds=([0, 0.0], [np.inf, 1.0]),
-            maxfev=10000
-        )
-        pred_lin = linear_convergence(iters_valid, *popt_lin)
-        residuals_lin = gnorms_valid - pred_lin
-        ss_res_lin = np.sum(residuals_lin**2)
-        r2_lin = 1 - (ss_res_lin / ss_tot) if ss_tot > 0 else 0.0
-        
-        results['linear'] = {
-            'c': popt_lin[0],
-            'rate': popt_lin[1],
-            'r_squared': r2_lin,
-            'formula': f'{popt_lin[0]:.2e} * {popt_lin[1]:.4f}^k'
-        }
-    except Exception as e:
-        logging.debug(f"Linear fit failed: {e}")
-        results['linear'] = {'r_squared': 0.0}
-    
-    # Determine best model
-    r2_sub = results.get('sublinear', {}).get('r_squared', 0.0)
-    r2_lin = results.get('linear', {}).get('r_squared', 0.0)
-    
-    if r2_sub > r2_lin:
-        results['best_model'] = 'sublinear'
-        results['best_r_squared'] = r2_sub
-    else:
-        results['best_model'] = 'linear'
-        results['best_r_squared'] = r2_lin
-    
-    return results
-
 
 def validate_convergence_rate(
     optimizer_name: str,

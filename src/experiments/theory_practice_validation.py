@@ -22,18 +22,16 @@ import re
 # Import theory-practice comparison module (tolerant to missing module or missing symbols)
 try:
     import src.analysis.theory_practice_comparison as tp_comp
-    predict_theoretical_rate = getattr(tp_comp, 'predict_theoretical_rate', None)
-    fit_observed_rate = getattr(tp_comp, 'fit_observed_rate', None)
-    compare_rates = getattr(tp_comp, 'compare_rates', None)
-    generate_comparison_report = getattr(tp_comp, 'generate_comparison_report', None)
-    HAS_THEORY_MODULE = all(fn is not None for fn in (predict_theoretical_rate, fit_observed_rate, compare_rates, generate_comparison_report))
-except Exception:
+    from src.analysis.theory_practice_comparison import (
+        fit_convergence_rate,
+        compare_theory_practice
+    )
+    HAS_THEORY_MODULE = True
+except Exception as e:
     HAS_THEORY_MODULE = False
-    predict_theoretical_rate = None
-    fit_observed_rate = None
-    compare_rates = None
-    generate_comparison_report = None
-    print("Theory-practice comparison module not available")
+    fit_convergence_rate = None
+    compare_theory_practice = None
+    print(f"Theory-practice comparison module not available: {e}")
 
 
 def extract_optimizer_from_filename(filepath: str) -> str:
@@ -190,12 +188,28 @@ def run_theory_practice_validation(
                     continue
                 
                 # Compare with theory
-                if not callable(compare_rates):
-                    raise RuntimeError("compare_rates not available; ensure theory-practice module is installed")
-                comparison_raw = compare_rates(
-                    observed_losses=loss_history,
+                if not callable(compare_theory_practice):
+                    raise RuntimeError("compare_theory_practice not available; ensure theory-practice module is installed")
+                
+                # Save temporary CSV for comparison (compare_theory_practice expects CSV path)
+                temp_csv = output_dir / 'temp_trajectories' / f'{optimizer_name}_temp.csv'
+                temp_csv.parent.mkdir(parents=True, exist_ok=True)
+                temp_df = pd.DataFrame({
+                    'iteration': np.arange(len(loss_history)),
+                    'loss': loss_history
+                })
+                temp_df.to_csv(temp_csv, index=False)
+                
+                # Estimate L and mu from problem type
+                L_est = 10.0 if problem_type == 'ill_conditioned' else 1.0
+                mu_est = 0.1 if problem_type == 'strongly_convex' else None
+                
+                comparison_raw = compare_theory_practice(
+                    training_csv=str(temp_csv),
                     optimizer_name=optimizer_name,
-                    problem_type=problem_type
+                    output_dir=str(output_dir / 'theory_comparison'),
+                    L=L_est,
+                    mu=mu_est
                 )
                 # Ensure we have a plain dict with string keys for downstream processing
                 comparison: Dict[str, Any]
@@ -282,7 +296,7 @@ def plot_theory_vs_practice(
     Args:
         loss_history: Array of loss values
         optimizer_name: Name of optimizer
-        comparison: Comparison results from compare_rates()
+        comparison: Comparison results from compare_theory_practice()
         output_path: Path to save plot
     """
     fig, axes = plt.subplots(1, 2, figsize=(12, 4), dpi=300)

@@ -6532,13 +6532,16 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=None, resum
             for inputs, targets in train_loader:
                 inputs, targets = inputs.to(device), targets.to(device)
 
+                # Initialize loss to avoid unbound variable error
+                loss = None
+                
                 def closure():
                     if optimizer is not None:
                         optimizer.zero_grad()  # type: ignore[union-attr]
                     outputs = model(inputs)
-                    loss = criterion(outputs, targets)
-                    loss.backward()
-                    return loss
+                    loss_inner = criterion(outputs, targets)
+                    loss_inner.backward()
+                    return loss_inner
 
                 # Pass actual closure to SAM
                 if optimizer is not None:
@@ -7620,13 +7623,16 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
             inputs, targets = inputs.to(device), targets.to(device)
 
             if isinstance(optimizer, SAMWrapper):
+                # Initialize loss to avoid unbound variable error
+                loss = None
+                
                 def closure():
                     if optimizer is not None:
                         optimizer.zero_grad()  # type: ignore[union-attr]
                     outputs = model(inputs)
-                    loss = criterion(outputs, targets)
-                    loss.backward()
-                    return loss
+                    loss_inner = criterion(outputs, targets)
+                    loss_inner.backward()
+                    return loss_inner
                 # Pass actual closure to SAM
                 if optimizer is not None:
                     loss = optimizer.step(closure)  # type: ignore[union-attr]
@@ -7842,11 +7848,11 @@ def run_highdim_experiment(results_dir="results_highdim", seeds=None, quick=Fals
                         def closure():
                             if optimizer is not None:
                                 optimizer.zero_grad()  # type: ignore[union-attr]
-                            loss = torch.sum(x**2)
+                            loss_c = torch.sum(x**2)
                             for j in range(dim-1):
-                                loss += 0.1 * x[j] * x[j+1]
-                            loss.backward()
-                            return loss
+                                loss_c += 0.1 * x[j] * x[j+1]
+                            loss_c.backward()
+                            return loss_c
                         if optimizer is not None:
                             optimizer.step(closure)  # type: ignore[union-attr]
                     else:

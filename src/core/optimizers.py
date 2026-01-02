@@ -25,11 +25,11 @@ class Optimizer:
             else:
                 # For array-like params, store a copy
                 self.history_params.append(np.array(params, copy=True))
-        except Exception:
+        except (TypeError, ValueError, AttributeError):
             # Never raise during logging of history
             try:
                 self.history_params.append(params)
-            except Exception:
+            except (TypeError, ValueError, AttributeError):
                 pass
     
     def step(self, params: Union[Tuple[float, float], Any], gradients: Union[Tuple[float, float], Any]) -> Union[Tuple[float, float], Any]:
@@ -44,6 +44,35 @@ class Optimizer:
             Tuple (new_x, new_y) - parameters after update
         """
         raise NotImplementedError("The step method must be implemented in subclass")
+    
+    def set_lr(self, lr: float) -> None:
+        """
+        Update learning rate (for scheduler compatibility).
+        
+        This enables learning rate scheduling in 2D optimization experiments,
+        matching the scheduler support in PyTorch neural network training.
+        
+        Args:
+            lr: New learning rate value
+        
+        Note:
+            This method allows simulating Cosine Annealing, OneCycle, etc.
+            in 2D test function experiments to maintain consistency with
+            neural network training experiments.
+        """
+        if hasattr(self, 'lr'):
+            self.lr = lr
+        else:
+            logging.warning("%s does not have 'lr' attribute", self.__class__.__name__)
+    
+    def get_lr(self) -> float:
+        """
+        Get current learning rate.
+        
+        Returns:
+            Current learning rate, or 0.0 if not defined
+        """
+        return getattr(self, 'lr', 0.0)
     
     def reset(self) -> None:
         """Reset internal optimizer state."""
@@ -111,7 +140,7 @@ class SGD(Optimizer):
     def reset(self) -> None:
         """SGD has no internal state."""
         # Stateless optimizer
-        super().reset()
+        pass
 
 
 class SGDMomentum(Optimizer):
@@ -225,7 +254,7 @@ class SGDNesterov(Optimizer):
             if self.v is None:
                 self.v = np.zeros_like(params)
             elif self.v.shape != params.shape:
-                logging.warning(f"SGDNesterov: Parameter shape changed from {self.v.shape} to {params.shape}. Resizing state.")
+                logging.warning("SGDNesterov: Parameter shape changed from %s to %s. Resizing state.", self.v.shape, params.shape)
                 self.v = np.zeros_like(params)
             self.v = self.beta * self.v + gradients
             d = gradients + self.beta * self.v
@@ -289,7 +318,7 @@ class RMSProp(Optimizer):
             if self.s is None:
                 self.s = np.zeros_like(params)
             elif self.s.shape != params.shape:
-                logging.warning(f"RMSProp: Parameter shape changed from {self.s.shape} to {params.shape}. Resizing state.")
+                logging.warning("RMSProp: Parameter shape changed from %s to %s. Resizing state.", self.s.shape, params.shape)
                 self.s = np.zeros_like(params)
             
             # Update squared gradient accumulator
@@ -310,17 +339,26 @@ class RMSProp(Optimizer):
 
 class Adam(Optimizer):
     """
-    Adam (Adaptive Moment Estimation).
+    Adam (Adaptive Moment Estimation) with optional L2 regularization.
+    
+    CRITICAL NOTE: This implements L2 regularization (grad += wd * param),
+    NOT decoupled weight decay. Use AdamW for decoupled weight decay.
+    
+    The L2 variant is included to demonstrate WHY AdamW was necessary:
+    L2 regularization interacts poorly with adaptive learning rates.
     
     Update formula:
-        m_new = beta1 * m_old + (1 - beta1) * gradient
-        v_new = beta2 * v_old + (1 - beta2) * gradient^2
+        grad_effective = grad + weight_decay * param  (L2 reg, if enabled)
+        m_new = beta1 * m_old + (1 - beta1) * grad_effective
+        v_new = beta2 * v_old + (1 - beta2) * grad_effective^2
         m_hat = m_new / (1 - beta1^t)
         v_hat = v_new / (1 - beta2^t)
         θ_new = θ_old - lr * m_hat / (sqrt(v_hat) + epsilon)
+    
+    For proper weight decay with Adam, use AdamW instead.
     """
     
-    def __init__(self, lr=0.001, beta1=0.9, beta2=0.999, epsilon=1e-8):
+    def __init__(self, lr=0.001, beta1=0.9, beta2=0.999, epsilon=1e-8, weight_decay=0.0):
         """
         Initialize Adam optimizer.
         
@@ -329,13 +367,20 @@ class Adam(Optimizer):
             beta1: Decay coefficient for first moment (default: 0.9)
             beta2: Decay coefficient for second moment (default: 0.999)
             epsilon: Small constant to avoid division by zero (default: 1e-8)
+            weight_decay: L2 regularization coefficient (default: 0.0)
+                         WARNING: This is coupled L2, not decoupled decay.
+                         Use AdamW for decoupled weight decay.
         """
         super().__init__()
         self.lr = lr
         self.beta1 = beta1
         self.beta2 = beta2
         self.epsilon = epsilon
-        self.name = f"Adam(lr={lr})"
+        self.weight_decay = weight_decay
+        if weight_decay > 0:
+            self.name = f"Adam(lr={lr}, L2_wd={weight_decay})"
+        else:
+            self.name = f"Adam(lr={lr})"
         
         # Initialize moment estimates
         self.m_x = 0.0
@@ -349,7 +394,7 @@ class Adam(Optimizer):
         self.t = 0
     
     def step(self, params, gradients):
-        """Perform one Adam step."""
+        """Perform one Adam step with optional L2 regularization."""
         # Increment timestep
         self.t += 1
         
@@ -357,6 +402,11 @@ class Adam(Optimizer):
         if isinstance(params, tuple):
             x, y = params
             grad_x, grad_y = gradients
+            
+            # Apply L2 regularization (coupled to gradient, the 'wrong' way)
+            if self.weight_decay > 0:
+                grad_x = grad_x + self.weight_decay * x
+                grad_y = grad_y + self.weight_decay * y
             
             # Update biased first moment estimate
             self.m_x = self.beta1 * self.m_x + (1 - self.beta1) * grad_x
@@ -383,7 +433,7 @@ class Adam(Optimizer):
                 self.m = np.zeros_like(params)
                 self.v = np.zeros_like(params)
             elif self.m.shape != params.shape:
-                logging.warning(f"Adam: Parameter shape changed from {self.m.shape} to {params.shape}. Resizing state.")
+                logging.warning("Adam: Parameter shape changed from %s to %s. Resizing state.", self.m.shape, params.shape)
                 self.m = np.zeros_like(params)
                 self.v = np.zeros_like(params)
             
@@ -392,9 +442,13 @@ class Adam(Optimizer):
                 logging.warning("Adam: Non-finite gradients detected, skipping update")
                 return params
             
+            # Apply L2 regularization (coupled to gradient)
+            grad_array = np.asarray(gradients)
+            if self.weight_decay > 0:
+                grad_array = grad_array + self.weight_decay * params
+            
             # Update biased first moment estimate
             assert self.m is not None
-            grad_array = np.asarray(gradients)
             self.m = self.beta1 * self.m + (1 - self.beta1) * grad_array
             
             # Update biased second moment estimate
@@ -478,7 +532,7 @@ class AdamW(Optimizer):
                 self.m = np.zeros_like(params)
                 self.v = np.zeros_like(params)
             elif self.m.shape != params.shape:
-                logging.warning(f"AdamW: Parameter shape changed from {self.m.shape} to {params.shape}. Resizing state.")
+                logging.warning("AdamW: Parameter shape changed from %s to %s. Resizing state.", self.m.shape, params.shape)
                 self.m = np.zeros_like(params)
                 self.v = np.zeros_like(params)
             
@@ -566,7 +620,7 @@ class AMSGrad(Optimizer):
                 self.v = np.zeros_like(params)
                 self.vhat_max = np.zeros_like(params)
             elif self.m.shape != params.shape:
-                logging.warning(f"AMSGrad: Parameter shape changed from {self.m.shape} to {params.shape}. Resizing state.")
+                logging.warning("AMSGrad: Parameter shape changed from %s to %s. Resizing state.", self.m.shape, params.shape)
                 self.m = np.zeros_like(params)
                 self.v = np.zeros_like(params)
                 self.vhat_max = np.zeros_like(params)
@@ -1189,7 +1243,7 @@ def create_optimizer_instance(name: str, **kwargs) -> Optimizer:
     """
     try:
         from src.core.optimizer_registry import normalize_optimizer_name
-    except Exception as e:
+    except (ImportError, ModuleNotFoundError, AttributeError) as e:
         logging.debug("optimizer_registry import failed: %s", e, exc_info=True)
         # Minimal fallback normalization
         def normalize_optimizer_name(name: str) -> str:

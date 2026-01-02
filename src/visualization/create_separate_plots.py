@@ -139,10 +139,10 @@ def create_separate_plots(
             if len(parts) == 2:
                 conv_rates.append(int(parts[0]) / int(parts[1]) * 100)
             else:
-                logging.warning(f"Malformed convergence data: {conv}, using 0%")
+                logging.warning("Malformed convergence data: %s, using 0%%", conv)
                 conv_rates.append(0)
         except (ValueError, ZeroDivisionError, IndexError) as e:
-            logging.warning(f"Failed to parse convergence '{conv}': {e}, using 0%")
+            logging.warning("Failed to parse convergence '%s': %s, using 0%%", conv, e)
             conv_rates.append(0)
     
     bars = plt.bar(range(len(optimizers)), conv_rates, 

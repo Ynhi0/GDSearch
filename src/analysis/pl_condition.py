@@ -5,7 +5,7 @@ For neural networks where the global minimum is unknown, this module provides
 trajectory-based estimation helpers to approximate f_star.
 """
 import numpy as np
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple
 import pandas as pd
 
 

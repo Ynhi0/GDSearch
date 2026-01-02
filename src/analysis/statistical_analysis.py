@@ -149,16 +149,16 @@ def extract_final_metric(
                 else:
                     s = str(col).strip().lower()
                     is_diverged = s in ('true', '1', 't', 'yes', 'y')
-            except Exception as e:
-                logging.warning(f"Failed to parse diverged column: {e}. Assuming not diverged.")
+            except (ValueError, TypeError, AttributeError) as e:
+                logging.warning("Failed to parse diverged column: %s. Assuming not diverged.", e)
         
         # Handle diverged runs
         if is_diverged:
             if exclude_diverged:
-                logging.warning(f"SURVIVOR BIAS: Excluding diverged run. This biases statistics!")
+                logging.warning("SURVIVOR BIAS: Excluding diverged run. This biases statistics!")
                 continue
             elif divergence_penalty is not None:
-                logging.info(f"Assigning divergence penalty: {divergence_penalty}")
+                logging.info("Assigning divergence penalty: %s", divergence_penalty)
                 values.append(divergence_penalty)
                 continue
             # Otherwise, extract actual value (may be NaN/Inf)
@@ -180,11 +180,10 @@ def extract_final_metric(
                     is_tainted = s in ('true', '1', 't', 'yes', 'y')
 
                 if is_tainted:
-                    logging.info(f"Excluding tainted run from statistical analysis")
+                    logging.info("Excluding tainted run from statistical analysis")
                     continue
-            except Exception as e:
-                logging.warning(f"Failed to parse tainted column: {e}. Assuming not tainted.")
-                pass
+            except (ValueError, TypeError, AttributeError) as e:
+                logging.warning("Failed to parse tainted column: %s. Assuming not tainted.", e)
 
         eval_df = df[df['phase'] == 'eval']
         if not eval_df.empty:
@@ -298,10 +297,10 @@ def compare_optimizers_ttest(
     
     # Clip extreme values to prevent overflow in variance computation
     if np.any(np.abs(results_A) > MAX_SAFE_VALUE):
-        logging.warning(f"Clipping extreme values in results_A (max={np.max(np.abs(results_A)):.2e}) to prevent overflow")
+        logging.warning("Clipping extreme values in results_A (max=%.2e) to prevent overflow", np.max(np.abs(results_A)))
         results_A = np.clip(results_A, -MAX_SAFE_VALUE, MAX_SAFE_VALUE)
     if np.any(np.abs(results_B) > MAX_SAFE_VALUE):
-        logging.warning(f"Clipping extreme values in results_B (max={np.max(np.abs(results_B)):.2e}) to prevent overflow")
+        logging.warning("Clipping extreme values in results_B (max=%.2e) to prevent overflow", np.max(np.abs(results_B)))
         results_B = np.clip(results_B, -MAX_SAFE_VALUE, MAX_SAFE_VALUE)
     
     # Compute statistics
@@ -760,10 +759,10 @@ def power_analysis_report(
     
     # Clip extreme values to prevent overflow in variance computation
     if np.any(np.abs(results_A) > MAX_SAFE_VALUE):
-        logging.warning(f"Clipping extreme values in results_A (max={np.max(np.abs(results_A)):.2e}) to prevent overflow")
+        logging.warning("Clipping extreme values in results_A (max=%.2e) to prevent overflow", np.max(np.abs(results_A)))
         results_A = np.clip(results_A, -MAX_SAFE_VALUE, MAX_SAFE_VALUE)
     if np.any(np.abs(results_B) > MAX_SAFE_VALUE):
-        logging.warning(f"Clipping extreme values in results_B (max={np.max(np.abs(results_B)):.2e}) to prevent overflow")
+        logging.warning("Clipping extreme values in results_B (max=%.2e) to prevent overflow", np.max(np.abs(results_B)))
         results_B = np.clip(results_B, -MAX_SAFE_VALUE, MAX_SAFE_VALUE)
     
     # Compute observed effect size

@@ -55,15 +55,48 @@ class Rosenbrock(TestFunction):
         """Compute value of Rosenbrock function."""
         return float((self.a - x)**2 + self.b * (y - x**2)**2)
     
-    def gradient(self, x: float, y: float) -> Tuple[float, float]:
+    def gradient(self, x: float, y: float, noise_std: float = 0.0, noise_type: str = 'additive', batch_size: int = 1) -> Tuple[float, float]:
         """
-        Compute analytical gradient of Rosenbrock function.
+        Compute analytical gradient of Rosenbrock function with optional stochastic noise.
         
         df/dx = -2(a - x) - 4bx(y - x^2)
         df/dy = 2b(y - x^2)
+        
+        Args:
+            x, y: Point at which to compute gradient
+            noise_std: Base standard deviation of gradient noise (0 = deterministic)
+            noise_type: 'additive' (Gaussian) or 'multiplicative' (scales with gradient magnitude)
+            batch_size: Simulated batch size (noise variance scales as 1/batch_size)
+        
+        Note: Adding noise simulates Stochastic Gradient Descent (SGD) behavior.
+              Without noise, this is standard Gradient Descent (GD).
+              
+        Scientific Note on Batch Size:
+              - In real SGD, gradient variance \u221d 1/B where B is batch size
+              - actual_noise_std = noise_std / sqrt(batch_size)
+              - This allows studying batch size effects on convergence and saddle escape
         """
         grad_x = float(-2 * (self.a - x) - 4 * self.b * x * (y - x**2))
         grad_y = float(2 * self.b * (y - x**2))
+        
+        if noise_std > 0:
+            # Scale noise by batch size: variance \u221d 1/B
+            actual_noise_std = noise_std / np.sqrt(batch_size)
+            
+            if noise_type == 'multiplicative':
+                # Multiplicative noise: noise vanishes at stationary points (mimics real SGD)
+                grad_norm = np.sqrt(grad_x**2 + grad_y**2)
+                noise_scale = actual_noise_std * grad_norm
+                noise_x = np.random.normal(0, noise_scale)
+                noise_y = np.random.normal(0, noise_scale)
+            else:  # additive
+                # Additive Gaussian noise (simple but less realistic)
+                noise_x = np.random.normal(0, actual_noise_std)
+                noise_y = np.random.normal(0, actual_noise_std)
+            
+            grad_x += noise_x
+            grad_y += noise_y
+        
         return grad_x, grad_y
     
     def hessian(self, x: float, y: float) -> np.ndarray:
@@ -90,6 +123,10 @@ class IllConditionedQuadratic(TestFunction):
     
     This is a simple quadratic function with controlled condition number.
     Global minimum at (0, 0) with value 0.
+    
+    NOTE: Neural networks typically have condition numbers in range 1000-100000.
+          Default kappa=100 is "easy mode" and may not reflect real optimization difficulty.
+          Use kappa >= 1000 for realistic experiments.
     """
     
     def __init__(self, kappa=100):
@@ -98,6 +135,7 @@ class IllConditionedQuadratic(TestFunction):
         
         Args:
             kappa: Condition number - ratio between axes (default: 100)
+                   Recommended: kappa=1000 or kappa=10000 for realistic NN simulation
         """
         super().__init__()
         self.kappa = kappa
@@ -149,15 +187,36 @@ class SaddlePoint(TestFunction):
         """Compute value of Saddle Point function."""
         return 0.5 * (x**2 - y**2)
     
-    def gradient(self, x, y):
+    def gradient(self, x, y, noise_std: float = 0.0, noise_type: str = 'additive', batch_size: int = 1):
         """
-        Compute gradient of Saddle Point function.
+        Compute gradient of Saddle Point function with optional stochastic noise.
         
         df/dx = x
         df/dy = -y
+        
+        Args:
+            noise_std: Base standard deviation of gradient noise (0 = deterministic GD)
+            noise_type: 'additive' or 'multiplicative'
+            batch_size: Simulated batch size (noise variance scales as 1/batch_size)
         """
         grad_x = x
         grad_y = -y
+        
+        # Add stochastic noise for SGD simulation
+        if noise_std > 0:
+            # Scale noise by batch size
+            actual_noise_std = noise_std / np.sqrt(batch_size)
+            
+            if noise_type == 'multiplicative':
+                grad_norm = np.sqrt(grad_x**2 + grad_y**2)
+                if grad_norm > 0:  # Avoid division by zero at stationary point
+                    noise_scale = actual_noise_std * grad_norm
+                    grad_x += np.random.normal(0, noise_scale)
+                    grad_y += np.random.normal(0, noise_scale)
+            else:  # additive
+                grad_x += np.random.normal(0, actual_noise_std)
+                grad_y += np.random.normal(0, actual_noise_std)
+        
         return grad_x, grad_y
     
     def hessian(self, x, y):
@@ -197,7 +256,14 @@ class Ackley2D(TestFunction):
         term2 = -np.exp(0.5 * (np.cos(self.c * x) + np.cos(self.c * y)))
         return term1 + term2 + self.a + np.e
 
-    def gradient(self, x, y):
+    def gradient(self, x, y, noise_std: float = 0.0, noise_type: str = 'additive', batch_size: int = 1):
+        """Compute gradient with optional stochastic noise for SGD simulation.
+        
+        Args:
+            noise_std: Base standard deviation of gradient noise
+            noise_type: 'additive' or 'multiplicative'
+            batch_size: Simulated batch size (noise variance scales as 1/batch_size)
+        """
         x = float(x)
         y = float(y)
         r = np.sqrt(0.5 * (x * x + y * y))
@@ -211,14 +277,32 @@ class Ackley2D(TestFunction):
         exp2 = np.exp(0.5 * (np.cos(self.c * x) + np.cos(self.c * y)))
         d2x = 0.5 * self.c * np.sin(self.c * x) * exp2
         d2y = 0.5 * self.c * np.sin(self.c * y) * exp2
-        return d1x + d2x, d1y + d2y
+        
+        grad_x = d1x + d2x
+        grad_y = d1y + d2y
+        
+        # Add stochastic noise for SGD simulation
+        if noise_std > 0:
+            # Scale noise by batch size: variance ∝ 1/B
+            actual_noise_std = noise_std / np.sqrt(batch_size)
+            
+            if noise_type == 'multiplicative':
+                grad_norm = np.sqrt(grad_x**2 + grad_y**2)
+                noise_scale = actual_noise_std * grad_norm
+                grad_x += np.random.normal(0, noise_scale)
+                grad_y += np.random.normal(0, noise_scale)
+            else:  # additive
+                grad_x += np.random.normal(0, actual_noise_std)
+                grad_y += np.random.normal(0, actual_noise_std)
+        
+        return grad_x, grad_y
 
     def hessian(self, x, y):
         # Numerical Hessian (central difference)
         x = float(x)
         y = float(y)
         eps = 1e-4
-        gx, gy = self.gradient(x, y)
+        # Removed unused: gx, gy = self.gradient(x, y)
         gx_xp, _ = self.gradient(x + eps, y)
         gx_xm, _ = self.gradient(x - eps, y)
         gx_yp, _ = self.gradient(x, y + eps)
