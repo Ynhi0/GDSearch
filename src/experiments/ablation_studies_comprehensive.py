@@ -10,13 +10,18 @@ Systematically evaluates the contribution of each advanced feature:
 6. Advanced training features (Label Smoothing, EMA, AMP)
 
 Standardized Hyperparameters
-All ablations use FIXED hyperparameters to ensure ceteris paribus:
+SCIENTIFIC VALIDITY NOTE: These are NOT pure single-variable ablations.
+Multiple hyperparameters differ between optimizer families:
 - Batch size: 128 (consistent across all optimizers)
 - Epochs: 10 (quick validation) or 20 (full study)
-- Learning rates: Scaled appropriately per optimizer family
+- Learning rates: DIFFERENT per optimizer family (confounds direct comparison)
   - SGD family: lr=0.01 (standard for SGD without adaptive scaling)
   - Adam family: lr=0.001 (1/10 of SGD, standard Adam default)
+  - This violates ceteris paribus but reflects real-world best practices
 - All other settings identical across compared optimizers
+
+INTERPRETATION: Results show optimizer performance with their respective
+recommended learning rates, not pure algorithmic differences.
 """
 
 import numpy as np

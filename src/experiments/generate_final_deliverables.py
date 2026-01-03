@@ -9,7 +9,9 @@ Integrates all unused modules to produce comprehensive research outputs:
 5. Sensitivity analysis
 6. Baseline comparisons
 7. Statistical reports
-8. LaTeX research report
+
+NOTE: LaTeX table generation is available via scripts/generate_latex_tables.py,
+but automated full research report generation is not yet implemented.
 
 This module ensures no implemented feature goes unused.
 """

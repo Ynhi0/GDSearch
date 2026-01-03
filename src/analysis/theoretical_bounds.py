@@ -2,6 +2,13 @@
 Theoretical analysis utilities for optimizer convergence.
 
 Provides tools for analyzing convergence bounds, regret analysis, and complexity estimates.
+
+TODO (Proposal Compliance): Implement explicit Polyak-Łojasiewicz (PL) condition
+verification/estimation. The proposal commits to analyzing PL-condition assumptions
+but currently only strong convexity (mu) is used in bounds. Add:
+- pl_condition_check(loss_fn, params, tolerance) -> bool
+- estimate_pl_constant(loss_values, grad_norms) -> float
+See docs/proposal_text.txt lines 2838-2866 for original commitment.
 """
 
 import numpy as np
@@ -246,6 +253,128 @@ def adam_convergence_bound(
         'convergence_rate_class': 'O(1/√T)',
         'beta1': beta1,
         'beta2': beta2
+    }
+
+
+def estimate_pl_constant(
+    loss_values: np.ndarray,
+    grad_norms: np.ndarray,
+    f_star: Optional[float] = None
+) -> Dict[str, Any]:
+    """
+    Estimate Polyak-Łojasiewicz (PL) constant from trajectory data.
+    
+    PL condition: ||∇f(x)||² ≥ 2μ(f(x) - f*) for all x
+    
+    If satisfied, guarantees linear convergence even for non-convex functions.
+    
+    Args:
+        loss_values: Array of loss values along trajectory
+        grad_norms: Array of gradient norms (||∇f||)
+        f_star: Optimal value (if known). If None, uses minimum observed loss.
+        
+    Returns:
+        Dict containing:
+          - pl_constant_estimate: Estimated μ from ||∇f||²/(2(f-f*))
+          - pl_condition_satisfied: Whether PL holds with estimated μ
+          - violation_ratio: Fraction of points violating PL condition
+          - analysis: Statistical summary
+    
+    Note: This is an empirical estimate from observed data, not a theoretical proof.
+    """
+    loss_values = np.asarray(loss_values, dtype=float)
+    grad_norms = np.asarray(grad_norms, dtype=float)
+    
+    # Use minimum observed loss if f* unknown
+    if f_star is None:
+        f_star = float(np.min(loss_values))
+    
+    # Filter valid points (finite and above f*)
+    valid_mask = np.isfinite(loss_values) & np.isfinite(grad_norms) & (loss_values > f_star + 1e-10)
+    
+    if not np.any(valid_mask):
+        return {
+            'pl_constant_estimate': 0.0,
+            'pl_condition_satisfied': False,
+            'violation_ratio': 1.0,
+            'analysis': 'Insufficient valid data points'
+        }
+    
+    loss_valid = loss_values[valid_mask]
+    grad_valid = grad_norms[valid_mask]
+    
+    # Estimate μ from PL inequality: ||∇f||² ≥ 2μ(f-f*)
+    # μ ≤ ||∇f||² / (2(f-f*))
+    mu_estimates = (grad_valid ** 2) / (2 * (loss_valid - f_star))
+    
+    # Use conservative estimate (minimum) as the PL constant
+    mu_estimate = float(np.min(mu_estimates))
+    
+    # Check how many points satisfy PL with this μ
+    pl_rhs = 2 * mu_estimate * (loss_valid - f_star)
+    pl_lhs = grad_valid ** 2
+    violations = pl_lhs < pl_rhs
+    violation_ratio = float(np.mean(violations))
+    
+    return {
+        'pl_constant_estimate': mu_estimate,
+        'pl_condition_satisfied': violation_ratio < 0.1,  # Allow 10% numerical tolerance
+        'violation_ratio': violation_ratio,
+        'analysis': {
+            'mean_mu': float(np.mean(mu_estimates)),
+            'median_mu': float(np.median(mu_estimates)),
+            'min_mu': float(np.min(mu_estimates)),
+            'max_mu': float(np.max(mu_estimates)),
+            'num_points': int(np.sum(valid_mask))
+        }
+    }
+
+
+def check_pl_condition(
+    loss_values: np.ndarray,
+    grad_norms: np.ndarray,
+    mu: float,
+    f_star: Optional[float] = None,
+    tolerance: float = 0.1
+) -> Dict[str, Any]:
+    """
+    Verify if Polyak-Łojasiewicz condition holds for given μ.
+    
+    Args:
+        loss_values: Loss trajectory
+        grad_norms: Gradient norm trajectory
+        mu: PL constant to verify
+        f_star: Optimal value
+        tolerance: Allowed violation fraction
+        
+    Returns:
+        Dict with verification results
+    """
+    loss_values = np.asarray(loss_values, dtype=float)
+    grad_norms = np.asarray(grad_norms, dtype=float)
+    
+    if f_star is None:
+        f_star = float(np.min(loss_values))
+    
+    valid_mask = np.isfinite(loss_values) & np.isfinite(grad_norms) & (loss_values > f_star + 1e-10)
+    
+    if not np.any(valid_mask):
+        return {'satisfied': False, 'violation_ratio': 1.0}
+    
+    loss_valid = loss_values[valid_mask]
+    grad_valid = grad_norms[valid_mask]
+    
+    # Check PL: ||∇f||² ≥ 2μ(f-f*)
+    pl_rhs = 2 * mu * (loss_valid - f_star)
+    pl_lhs = grad_valid ** 2
+    violations = pl_lhs < pl_rhs
+    violation_ratio = float(np.mean(violations))
+    
+    return {
+        'satisfied': violation_ratio <= tolerance,
+        'violation_ratio': violation_ratio,
+        'num_violations': int(np.sum(violations)),
+        'num_points': int(np.sum(valid_mask))
     }
 
 

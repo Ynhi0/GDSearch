@@ -240,8 +240,8 @@ def plot_vector_field_overlay(
     # Ensure parent directory exists
     try:
         output_path.parent.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        # Best-effort: if path isn't a Path (e.g., string), ignore
+    except (OSError, AttributeError):
+        # Best-effort: if path isn't a Path object or filesystem error, ignore
         pass
     plt.savefig(output_path, dpi=150, bbox_inches='tight')
     plt.close()

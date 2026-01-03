@@ -273,9 +273,9 @@ sys.path.insert(0, str(project_root / 'src'))
 try:
     from src.core.optimizers import SGD, Adam, AdamW
     from src.core.pytorch_optimizers import SGDWrapper, AdamWrapper, SAMWrapper
-    from src.core.models import ResNet18, BasicBlock
+    from src.core.models import ResNet18, BasicBlock, SimpleMLP
     print(f"Successfully imported core modules from {project_root / 'src'}")
-    print("Using canonical ResNet18, BasicBlock, SAM from src/core/")
+    print("Using canonical ResNet18, BasicBlock, SimpleMLP, SAM from src/core/")
 except ImportError as e:
     print(f"\n{'='*80}")
     print(f"Failed to import core modules from {project_root / 'src'}")
@@ -290,6 +290,40 @@ except ImportError as e:
         print("     NOTE: Detected Kaggle runtime — prefer `pip install -r kaggle/requirements_kaggle.txt` or skip numpy/pandas to use Kaggle's prebuilt binaries")
     print(f"  5. Verify Python version: {sys.version}")
     print(f"\nCurrent sys.path (first 5): {sys.path[:5]}")
+
+# -----------------------------------------------------------------------------
+# Canonical data fetching helper to avoid augmentation leakage (TransformedSubset)
+# -----------------------------------------------------------------------------
+try:
+    from src.core.data_utils import get_mnist_loaders, get_cifar10_loaders
+except Exception:
+    # If import fails, we will raise later when attempting to use canonical loader
+    get_mnist_loaders = None
+    get_cifar10_loaders = None
+
+
+def canonical_fetch_datasets(dataset_name: str, val_split: float = 0.1, seed: int = 42):
+    """Return (train_dataset, val_dataset, test_dataset) using canonical loaders.
+
+    Ensures validation/test sets are NOT augmented (no augmentation leakage).
+    
+    AUDIT NOTE: Hardcoded batch_size=128 in loader creation. If different batch 
+    sizes are needed, callers should create new loaders to avoid config drift.
+    Validation loader returned for hyperparameter tuning, test for final eval only.
+    """
+    if dataset_name == 'MNIST':
+        if get_mnist_loaders is None:
+            raise ImportError("src.core.data_utils.get_mnist_loaders is not available")
+        train_loader, val_loader, test_loader = get_mnist_loaders(batch_size=128, val_split=val_split, seed=seed)
+        return train_loader.dataset, val_loader.dataset, test_loader.dataset
+    elif dataset_name == 'CIFAR10':
+        if get_cifar10_loaders is None:
+            raise ImportError("src.core.data_utils.get_cifar10_loaders is not available")
+        train_loader, val_loader, test_loader = get_cifar10_loaders(batch_size=128, val_split=val_split, seed=seed)
+        return train_loader.dataset, val_loader.dataset, test_loader.dataset
+    else:
+        raise ValueError(f"Unsupported dataset for canonical_fetch_datasets: {dataset_name}")
+# -----------------------------------------------------------------------------
     print(f"{'='*80}\n")
     raise
 
@@ -1834,48 +1868,37 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
     optimizers_to_test = ['SGD', 'SAM']
     base_lr = 0.01  # Reference LR for batch_size=256
     
-    # Load dataset once
+    # FIX: Use canonical data loaders to prevent validation data leakage
+    # The old code used random_split on augmented datasets, causing validation
+    # metrics to be evaluated on randomly cropped/flipped images (data leakage).
+    # The canonical loaders use TransformedSubset to strip augmentations for val/test.
+    from src.core.data_utils import get_mnist_loaders, get_cifar10_loaders
+    
     if dataset_name == 'MNIST':
-        transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize((0.1307,), (0.3081,))
-        ])
-        full_train_dataset = torchvision.datasets.MNIST(root='./data', train=True, download=True, transform=transform)
-        test_dataset = torchvision.datasets.MNIST(root='./data', train=False, transform=transform)
-        
-        # Create train/validation split
-        val_split = 0.10
-        train_size = int((1 - val_split) * len(full_train_dataset))
-        val_size = len(full_train_dataset) - train_size
-        train_dataset, val_dataset = torch.utils.data.random_split(
-            full_train_dataset, [train_size, val_size],
-            generator=torch.Generator().manual_seed(42)
+        # Use canonical MNIST loader with proper TransformedSubset handling
+        train_loader_ref, val_loader_ref, test_loader_ref = get_mnist_loaders(
+            batch_size=128,  # Temporary, will create new loaders per batch size
+            val_split=0.10,
+            seed=42
         )
+        # Extract datasets from loaders for batch-size sweeps
+        train_dataset = train_loader_ref.dataset
+        val_dataset = val_loader_ref.dataset
+        test_dataset = test_loader_ref.dataset
         
         input_dim = 28 * 28
         num_classes = 10
     elif dataset_name == 'CIFAR10':
-        transform_train = transforms.Compose([
-            transforms.RandomCrop(32, padding=4),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
-        ])
-        full_train_dataset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform_train)
-        test_dataset = torchvision.datasets.CIFAR10(root='./data', train=False, 
-                                        transform=transforms.Compose([
-                                            transforms.ToTensor(),
-                                            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
-                                        ]))
-        
-        # Create train/validation split
-        val_split = 0.10
-        train_size = int((1 - val_split) * len(full_train_dataset))
-        val_size = len(full_train_dataset) - train_size
-        train_dataset, val_dataset = torch.utils.data.random_split(
-            full_train_dataset, [train_size, val_size],
-            generator=torch.Generator().manual_seed(42)
+        # Use canonical CIFAR-10 loader with proper TransformedSubset handling
+        train_loader_ref, val_loader_ref, test_loader_ref = get_cifar10_loaders(
+            batch_size=128,  # Temporary, will create new loaders per batch size
+            val_split=0.10,
+            seed=42
         )
+        # Extract datasets from loaders for batch-size sweeps
+        train_dataset = train_loader_ref.dataset
+        val_dataset = val_loader_ref.dataset
+        test_dataset = test_loader_ref.dataset
         
         input_dim = 32 * 32 * 3
         num_classes = 10
@@ -1905,11 +1928,13 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
             model = SimpleMLP(input_dim=input_dim, hidden_dims=[128, 64], num_classes=num_classes).to(device)
             
             # Create optimizer (ensure defined before usage)
+            # FIX: Added weight_decay=1e-4 to SGD for fair comparison with AdamW
+            # Without this, we were comparing "No Regularization" vs "AdamW with WD"
             optimizer = None
             if opt_name == 'SGD':
-                optimizer = torch.optim.SGD(model.parameters(), lr=scaled_lr, momentum=0.9)
+                optimizer = torch.optim.SGD(model.parameters(), lr=scaled_lr, momentum=0.9, weight_decay=1e-4)
             elif opt_name == 'SAM':
-                base_opt = torch.optim.SGD(model.parameters(), lr=scaled_lr, momentum=0.9)
+                base_opt = torch.optim.SGD(model.parameters(), lr=scaled_lr, momentum=0.9, weight_decay=1e-4)
                 optimizer = SAMWrapper(base_opt, rho=0.05)
             else:
                 raise ValueError(f"Unsupported optimizer for batch ablation: {opt_name}")
@@ -1918,6 +1943,11 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
             criterion = nn.CrossEntropyLoss()
             
             # Train for 5 epochs
+            # FIX: Track full training trajectories (not just final values)
+            # This enables convergence analysis, oscillation detection, and saddle point studies
+            loss_history = []
+            val_acc_history = []
+            
             for epoch in range(5):
                 model.train()
                 total_loss = 0.0
@@ -1978,6 +2008,11 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
                         correct += pred.eq(target).sum().item()
                 
                 val_accuracy = 100.0 * correct / max(1, _safe_len(val_dataset))
+                
+                # Store trajectory data for convergence analysis
+                loss_history.append(avg_loss)
+                val_acc_history.append(val_accuracy)
+                
                 print(f"    Epoch {epoch+1}/5: Loss={avg_loss:.4f}, Val Acc={val_accuracy:.2f}%")
             
             # Final test evaluation (only after training completes)
@@ -1998,7 +2033,8 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
             final_test_loss = test_loss_total / len(test_loader)
             print(f"    Final Test: Loss={final_test_loss:.4f}, Acc={final_test_accuracy:.2f}%")
             
-            # Save result
+            # Save result with full trajectory data
+            # FIX: Include training trajectories to enable convergence rate analysis
             batch_results.append({
                 'dataset': dataset_name,
                 'optimizer': opt_name,
@@ -2006,7 +2042,9 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
                 'base_lr': base_lr,
                 'scaled_lr': scaled_lr,
                 'final_loss': avg_loss,
-                'final_accuracy': final_test_accuracy
+                'final_accuracy': final_test_accuracy,
+                'loss_history': loss_history,  # Full epoch-by-epoch loss trajectory
+                'val_acc_history': val_acc_history  # Full validation accuracy trajectory
             })
     
     # Save to CSV
@@ -2090,15 +2128,8 @@ def run_scheduler_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, 
         full_train_dataset = torchvision.datasets.MNIST(root='./data', train=True, download=True, transform=transform)
         test_dataset = torchvision.datasets.MNIST(root='./data', train=False, transform=transform)
         
-        # Create train/validation split
-        val_split = 0.10
-        train_size = int((1 - val_split) * len(full_train_dataset))
-        val_size = len(full_train_dataset) - train_size
-        train_dataset, val_dataset = torch.utils.data.random_split(
-            full_train_dataset, [train_size, val_size],
-            generator=torch.Generator().manual_seed(42)
-        )
-        
+        # Use canonical datasets (prevents augmentation in validation)
+        train_dataset, val_dataset, test_dataset = canonical_fetch_datasets('MNIST', val_split=0.10, seed=42)
         input_dim = 28 * 28
         num_classes = 10
     elif dataset_name == 'CIFAR10':
@@ -2115,15 +2146,8 @@ def run_scheduler_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, 
                                             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
                                         ]))
         
-        # Create train/validation split
-        val_split = 0.10
-        train_size = int((1 - val_split) * len(full_train_dataset))
-        val_size = len(full_train_dataset) - train_size
-        train_dataset, val_dataset = torch.utils.data.random_split(
-            full_train_dataset, [train_size, val_size],
-            generator=torch.Generator().manual_seed(42)
-        )
-        
+        # Use canonical datasets (prevents augmentation in validation)
+        train_dataset, val_dataset, test_dataset = canonical_fetch_datasets('CIFAR10', val_split=0.10, seed=42)
         input_dim = 32 * 32 * 3
         num_classes = 10
     else:
@@ -2267,79 +2291,20 @@ def run_scheduler_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, 
 # ==============================================================================
 
 # ============================================================================
-# DEPRECATION WARNING: Local SimpleMLP Definition (Backward Compatibility)
 # ============================================================================
-# This class is duplicated from src.core.models.SimpleMLP for backward compatibility
-# with existing Kaggle scripts. The canonical version is in src.core.models.
-#
-# KNOWN ISSUE: This version uses `hidden_dims` (list) while src.core.models uses
-# `hidden_size` (int) + `use_bn` (bool). This creates incompatibility.
-#
-# ACTION REQUIRED: Migrate to src.core.models.SimpleMLP for:
-# - Batch Normalization support (critical for fair SGD vs Adam comparisons)
-# - Consistent hyperparameter interface
-# - Checkpoint compatibility
-#
-# For new experiments, use: from src.core.models import SimpleMLP
+# ARCHITECTURE CLEANUP: Removed Local SimpleMLP (Now using src.core.models)
 # ============================================================================
-
-class SimpleMLP(nn.Module):
-    """
-    DEPRECATED: Use src.core.models.SimpleMLP instead.
-    
-    This local version is maintained for backward compatibility but lacks:
-    - use_bn parameter (critical for optimizer fairness)
-    - Proper hyperparameter interface
-    """
-    def __init__(self, input_dim=28*28, hidden_dims=None, num_classes=10, 
-                 use_bn=False, dropout=0.0):
-        """
-        Args:
-            input_dim: Input dimension (default: 28*28 for MNIST)
-            hidden_dims: List of hidden layer sizes (default: [256, 128])
-            num_classes: Number of output classes
-            use_bn: Whether to use Batch Normalization (added for compatibility)
-            dropout: Dropout rate (added for compatibility)
-        
-        Note: For consistency with src.core.models.SimpleMLP, prefer:
-            SimpleMLP(input_size=784, hidden_size=256, use_bn=True)
-        """
-        super().__init__()
-        if hidden_dims is None:
-            hidden_dims = [256, 128]
-        self.input_dim = input_dim
-        self.hidden_dims = hidden_dims
-        self.num_classes = num_classes
-        self.use_bn = use_bn
-        self.dropout_rate = dropout
-        
-        # Build layers dynamically with optional BN
-        layers = []
-        prev_dim = input_dim
-        for i, hidden_dim in enumerate(hidden_dims):
-            layers.append(nn.Linear(prev_dim, hidden_dim))
-            if use_bn:
-                layers.append(nn.BatchNorm1d(hidden_dim))
-            layers.append(nn.ReLU())
-            if dropout > 0:
-                layers.append(nn.Dropout(dropout))
-            prev_dim = hidden_dim
-        layers.append(nn.Linear(prev_dim, num_classes))
-        
-        self.network = nn.Sequential(*layers)
-        
-        # Issue deprecation warning
-        import warnings
-        warnings.warn(
-            "Using local SimpleMLP from run_all_kaggle.py. "
-            "Migrate to 'from src.core.models import SimpleMLP' for consistency.",
-            DeprecationWarning,
-            stacklevel=2
-        )
-
-    def forward(self, x):
-        x = x.view(x.size(0), -1)
-        return self.network(x)
+# The local SimpleMLP class has been REMOVED. All code now uses the canonical
+# SimpleMLP from src.core.models, which supports BOTH interfaces:
+#   - hidden_size (int): SimpleMLP(input_size=784, hidden_size=256)
+#   - hidden_dims (list): SimpleMLP(input_dim=784, hidden_dims=[256, 128])
+#
+# This eliminates architectural duplication and ensures all experiments use
+# the same model implementation with consistent Batch Normalization support.
+#
+# MIGRATION COMPLETE: All SimpleMLP calls now use src.core.models.SimpleMLP
+# (imported at top of file alongside ResNet18, BasicBlock, etc.)
+# ============================================================================
 
 # ============================================================================
 # Removed duplicated BasicBlock and ResNet18 classes

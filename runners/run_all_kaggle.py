@@ -275,7 +275,7 @@ sys.path.insert(0, str(project_root / 'src'))
 try:
     from src.core.optimizers import SGD, Adam, AdamW
     from src.core.pytorch_optimizers import SGDWrapper, AdamWrapper, SAMWrapper
-    from src.core.models import ResNet18, BasicBlock
+    from src.core.models import ResNet18, BasicBlock, SimpleMLP
     print(f"Successfully imported core modules from {project_root / 'src'}")
     print("Using canonical ResNet18, BasicBlock, SAM from src/core/")
 except ImportError as e:
@@ -2235,32 +2235,16 @@ def run_scheduler_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, 
 
 
 # ==============================================================================
-# SHARED UTILITIES AND MODELS
+# ARCHITECTURE CLEANUP: Removed Local SimpleMLP (Now using src.core.models)
 # ==============================================================================
-
-class SimpleMLP(nn.Module):
-    def __init__(self, input_dim=28*28, hidden_dims=None, num_classes=10):
-        super().__init__()
-        if hidden_dims is None:
-            hidden_dims = [256, 128]
-        self.input_dim = input_dim
-        self.hidden_dims = hidden_dims
-        self.num_classes = num_classes
-        
-        # Build layers dynamically
-        layers = []
-        prev_dim = input_dim
-        for hidden_dim in hidden_dims:
-            layers.append(nn.Linear(prev_dim, hidden_dim))
-            layers.append(nn.ReLU())
-            prev_dim = hidden_dim
-        layers.append(nn.Linear(prev_dim, num_classes))
-        
-        self.network = nn.Sequential(*layers)
-
-    def forward(self, x):
-        x = x.view(x.size(0), -1)
-        return self.network(x)
+# The local SimpleMLP class has been REMOVED. All code now uses the canonical
+# SimpleMLP from src.core.models, which supports BOTH interfaces:
+#   - hidden_size (int): SimpleMLP(input_size=784, hidden_size=256)
+#   - hidden_dims (list): SimpleMLP(input_dim=784, hidden_dims=[256, 128])
+#
+# This eliminates architectural duplication and ensures all experiments use
+# the same model implementation with consistent Batch Normalization support.
+# ==============================================================================
 
 # ============================================================================
 # Removed duplicated BasicBlock and ResNet18 classes

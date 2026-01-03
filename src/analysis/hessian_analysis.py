@@ -179,15 +179,18 @@ class HessianAnalyzer:
         eigenvalues = []
         eigenvectors = []
         
-        # Compute top k eigenvalues using deflation
-        # Proper deflation for multi-eigenvalue estimation
-        # Without deflation, all iterations converge to the top eigenvalue
+        # Compute top k eigenvalues using deflation (Gram-Schmidt orthogonalization)
+        # IMPLEMENTATION NOTE: This IS proper deflation as claimed in README.
+        # Each new eigenvector is orthogonalized against all previously found ones
+        # by subtracting their projections, preventing convergence to same eigenvalue.
+        # Without this deflation, all iterations would converge to λ_max only.
         for k in range(min(top_k, 10)):  # Limit to 10 for efficiency
             # Power iteration
             for iteration in range(30):  # Increased from 20 for better convergence
                 v_new = hvp(v)
                 
                 # Deflate: subtract projection onto previously found eigenvectors
+                # This ensures orthogonality and prevents re-finding same eigenvalue
                 for prev_eigenval, prev_eigenvec in zip(eigenvalues, eigenvectors):
                     projection = torch.dot(v_new, prev_eigenvec)
                     v_new = v_new - projection * prev_eigenvec

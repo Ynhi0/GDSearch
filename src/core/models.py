@@ -11,10 +11,14 @@ import torch.nn.functional as F
 
 class SimpleMLP(nn.Module):
     """
-    A simple 2-layer MLP for MNIST classification.
-    Architecture: Flatten -> Linear(hidden) -> [BN] -> ReLU -> [Dropout] -> Linear(num_classes)
+    A universal MLP for MNIST/CIFAR classification.
+    Architecture: Flatten -> [Linear -> [BN] -> ReLU -> [Dropout]]* -> Linear(num_classes)
     
-    EXTENDED: Now supports configurable hidden size, dropout, and batch normalization.
+    UNIVERSAL COMPATIBILITY: Accepts BOTH:
+    - hidden_size (int): Single hidden layer [DEPRECATED for multi-layer]
+    - hidden_dims (list): Multiple hidden layers [RECOMMENDED]
+    
+    This dual interface allows migration from run_all_kaggle.py without breaking changes.
     
     Added use_bn parameter to control Batch Normalization.
     This prevents confounding variables when comparing optimizers:
@@ -25,45 +29,67 @@ class SimpleMLP(nn.Module):
 
     def __init__(
         self,
-        input_size: int = 28 * 28,
-        hidden_size: int = 256,
+        input_size: Optional[int] = None,
+        input_dim: Optional[int] = None,  # Alias for backward compatibility
+        hidden_size: Optional[int] = None,
+        hidden_dims: Optional[list] = None,
         num_classes: int = 10,
         dropout: float = 0.0,
         use_bn: bool = False
     ):
         super().__init__()
+        
+        # Handle input_size vs input_dim alias
+        if input_size is None and input_dim is None:
+            input_size = 28 * 28  # Default for MNIST
+        elif input_size is None:
+            input_size = input_dim
+        
+        # Handle hidden_size (int) vs hidden_dims (list)
+        # Priority: hidden_dims > hidden_size > default
+        if hidden_dims is not None:
+            self.hidden_layers = hidden_dims
+        elif hidden_size is not None:
+            self.hidden_layers = [hidden_size]
+        else:
+            self.hidden_layers = [256]  # Default single hidden layer
+        
         self.input_size = input_size
-        self.hidden_size = hidden_size
         self.num_classes = num_classes
         self.dropout_rate = dropout
         self.use_bn = use_bn
 
-        self.fc1 = nn.Linear(input_size, hidden_size)
+        # Build network dynamically
+        layers = []
+        # Type safety: input_size is guaranteed to be int here
+        assert input_size is not None, "input_size must be specified"
+        prev_dim: int = input_size
         
-        # Optional Batch Normalization
-        # When use_bn=True, adds BN after first linear layer
-        # This allows fair optimizer comparisons with/without normalization
-        if use_bn:
-            self.bn1 = nn.BatchNorm1d(hidden_size)
-        else:
-            self.bn1 = None
+        for hidden_dim in self.hidden_layers:
+            layers.append(nn.Linear(prev_dim, hidden_dim))
+            
+            # Optional Batch Normalization
+            if use_bn:
+                layers.append(nn.BatchNorm1d(hidden_dim))
+            
+            layers.append(nn.ReLU())
+            
+            # Optional Dropout
+            if dropout > 0.0:
+                layers.append(nn.Dropout(dropout))
+            
+            prev_dim = hidden_dim
         
-        self.dropout = nn.Dropout(dropout) if dropout > 0.0 else nn.Identity()
-        self.fc2 = nn.Linear(hidden_size, num_classes)
+        # Output layer
+        layers.append(nn.Linear(prev_dim, num_classes))
+        
+        self.network = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x: (N, 1, 28, 28) or (N, input_size)
+        # Flatten to (N, input_size)
         x = torch.flatten(x, 1)
-        x = self.fc1(x)
-        
-        # Apply BN if enabled
-        if self.bn1 is not None:
-            x = self.bn1(x)
-        
-        x = F.relu(x)
-        x = self.dropout(x)
-        x = self.fc2(x)
-        return x
+        return self.network(x)
 
 
 class SimpleCNN(nn.Module):

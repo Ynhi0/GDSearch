@@ -13,7 +13,7 @@ def _safe_float(x: object) -> float:
     """
     try:
         return float(cast(Any, x))
-    except Exception:
+    except (ValueError, TypeError, OverflowError):  # Any conversion error -> NaN
         return float('nan')
 
 
@@ -29,7 +29,7 @@ def arr_to_numpy_float(x: Any) -> NDArray[np.float64]:
     if isinstance(x, pd.Series):
         try:
             return x.to_numpy(dtype=float).astype(np.float64)
-        except Exception:
+        except (ValueError, TypeError):  # Conversion failed, try fallback
             return np.asarray(x.to_numpy(), dtype=np.float64)  # type: ignore[arg-type]
 
     # Fast path for numpy arrays or array-like objects (avoid passing unknown object directly to numpy)
@@ -39,7 +39,7 @@ def arr_to_numpy_float(x: Any) -> NDArray[np.float64]:
             if np.iscomplexobj(arr):
                 arr = np.real(arr)
             return arr.astype(np.float64)
-        except Exception:
+        except (ValueError, TypeError):  # Array conversion failed, fall through to element-wise path
             pass
 
     # If x is iterable, build list of floats element-wise

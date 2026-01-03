@@ -217,7 +217,9 @@ class SGDMomentum(Optimizer):
                 return params
             
             # Apply weight decay (L2 regularization)
-            effective_grad = gradients.copy() if hasattr(gradients, 'copy') else np.array(gradients)
+            # Type safety: gradients is array-like here (not tuple)
+            grad_array = np.asarray(gradients)
+            effective_grad = grad_array.copy()
             if self.weight_decay > 0:
                 effective_grad += self.weight_decay * params
             

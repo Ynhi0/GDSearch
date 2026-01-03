@@ -36,8 +36,13 @@ def create_batch_size_configs(
     """
     Create experiment configurations for batch size ablation.
     
-    Implements Learning Rate Scaling (Linear Scaling Rule)
-    to ensure fair comparison across batch sizes.
+    SCIENTIFIC VALIDITY WARNING: This is NOT a pure single-variable ablation.
+    By default, this function applies Learning Rate Scaling (Linear Scaling Rule)
+    which CHANGES BOTH batch size AND learning rate simultaneously.
+    This confounds variables and violates ceteris paribus principle.
+    
+    Set apply_lr_scaling=False for true single-variable batch size ablation,
+    but note that this may lead to unfair comparisons due to scale mismatch.
     
     Args:
         base_config: Base configuration with model, dataset, etc.
