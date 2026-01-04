@@ -31,10 +31,14 @@ def validate_convergence_rate(
     test_function: str = 'ill_conditioned',
     x0: np.ndarray = np.array([-1.5, 2.0]),
     max_iters: int = 2000,
-    tol: float = 1e-8
+    tol: float = 1e-8,
+    noise_std: float = 0.0  # GAP FIX: Add noise_std parameter for true SGD
 ):
     """
     Validate convergence rate for a single optimizer.
+    
+    GAP FIX: Added noise_std parameter. Without noise, "SGD" is actually deterministic GD.
+    To validate true SGD convergence (O(1/√k)), set noise_std > 0.
     
     Args:
         optimizer_name: Name for results
@@ -44,6 +48,7 @@ def validate_convergence_rate(
         x0: Initial point
         max_iters: Maximum iterations
         tol: Tolerance for convergence
+        noise_std: Gradient noise std dev (0 = deterministic GD, >0 = SGD simulation)
         
     Returns:
         results: Dictionary with trajectory and fitted rates
@@ -55,7 +60,9 @@ def validate_convergence_rate(
         test_fn = Rosenbrock()
     
     func = test_fn.compute
-    grad_func = lambda x, y: np.array(test_fn.gradient(x, y))
+    # GAP FIX: Pass noise_std to gradient for true SGD simulation
+    # Without noise, SGD experiments are actually GD (deterministic)
+    grad_func = lambda x, y: np.array(test_fn.gradient(x, y, noise_std=noise_std))
     
     # Initialize optimizer
     optimizer = optimizer_class(**optimizer_params)

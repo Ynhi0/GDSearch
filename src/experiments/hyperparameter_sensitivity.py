@@ -117,13 +117,21 @@ def momentum_beta_sweep(
     x0=np.array([-1.5, 2.0]),
     max_iters=1000,
     output_dir='results/hyperparameter_sensitivity',
-    use_coupled_lr=False
+    use_coupled_lr=False,
+    noise_std: float = 0.1  # GAP FIX: Add noise for realistic momentum analysis
 ):
     """
     Systematic sweep of momentum β parameter.
     
     Addresses research proposal requirement: "khảo sát hệ thống ảnh hưởng của 
     các siêu tham số đặc trưng (β cho Momentum)"
+    
+    GAP FIX: Added noise_std parameter (default 0.1).
+    The primary role of Momentum (β) is to dampen STOCHASTIC NOISE.
+    Testing on deterministic functions (noise=0) is scientifically invalid:
+    - High β might cause oscillation on smooth surfaces
+    - But high β REDUCES oscillation in noisy settings (by averaging)
+    - Conclusions without noise will be OPPOSITE to reality for SGD!
     
     SCIENTIFIC NOTE - Beta vs. Learning Rate Coupling:
     The effective step size in momentum is approximately lr/(1-β).
@@ -135,6 +143,7 @@ def momentum_beta_sweep(
     
     Args:
         use_coupled_lr: If True, scale lr by (1-beta) to decouple magnitude from dynamics
+        noise_std: Gradient noise std dev (default 0.1 for realistic SGD analysis)
     """
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     
@@ -145,7 +154,8 @@ def momentum_beta_sweep(
         test_fn = Ackley2D()
     
     func = test_fn.compute
-    grad_func = lambda x, y: np.array(test_fn.gradient(x, y))
+    # GAP FIX: Pass noise_std to gradient for realistic sensitivity analysis
+    grad_func = lambda x, y: np.array(test_fn.gradient(x, y, noise_std=noise_std))
     
     results = []
     

@@ -73,8 +73,8 @@ def iterations_to_convergence(
 
 
 def momentum_heatmap(
-    beta_values: List[float] = None,
-    lr_values: List[float] = None,
+    beta_values: Optional[List[float]] = None,
+    lr_values: Optional[List[float]] = None,
     test_function: str = 'ill_conditioned',
     output_dir: str = 'visualizations/heatmaps',
     seed: int = 42
@@ -155,9 +155,11 @@ def momentum_heatmap(
     print(f"✓ Heatmap saved to {save_path}")
     
     # Save data to CSV
-    df = pd.DataFrame(grid, 
-                      index=[f'beta_{beta:.2f}' for beta in beta_values],
-                      columns=[f'lr_{lr:.4f}' for lr in lr_values])
+    df = pd.DataFrame(
+        grid, 
+        index=[f'beta_{beta:.2f}' for beta in beta_values],  # type: ignore[arg-type]
+        columns=[f'lr_{lr:.4f}' for lr in lr_values]  # type: ignore[arg-type]
+    )
     csv_path = Path(output_dir) / f'momentum_heatmap_{func_name}.csv'
     df.to_csv(csv_path)
     print(f"✓ Data saved to {csv_path}")
@@ -166,8 +168,8 @@ def momentum_heatmap(
 
 
 def adam_beta_heatmap(
-    beta1_values: List[float] = None,
-    beta2_values: List[float] = None,
+    beta1_values: Optional[List[float]] = None,
+    beta2_values: Optional[List[float]] = None,
     lr: float = 0.01,
     test_function: str = 'ill_conditioned',
     output_dir: str = 'visualizations/heatmaps',
@@ -250,9 +252,11 @@ def adam_beta_heatmap(
     print(f"✓ Heatmap saved to {save_path}")
     
     # Save data
-    df = pd.DataFrame(grid,
-                      index=[f'beta1_{b1:.2f}' for b1 in beta1_values],
-                      columns=[f'beta2_{b2:.4f}' for b2 in beta2_values])
+    df = pd.DataFrame(
+        grid,
+        index=[f'beta1_{b1:.2f}' for b1 in beta1_values],  # type: ignore[arg-type]
+        columns=[f'beta2_{b2:.4f}' for b2 in beta2_values]  # type: ignore[arg-type]
+    )
     csv_path = Path(output_dir) / f'adam_heatmap_{func_name}_lr{lr}.csv'
     df.to_csv(csv_path)
     print(f"✓ Data saved to {csv_path}")
@@ -261,8 +265,8 @@ def adam_beta_heatmap(
 
 
 def rmsprop_heatmap(
-    beta_values: List[float] = None,
-    epsilon_values: List[float] = None,
+    beta_values: Optional[List[float]] = None,
+    epsilon_values: Optional[List[float]] = None,
     lr: float = 0.01,
     test_function: str = 'ill_conditioned',
     output_dir: str = 'visualizations/heatmaps',
@@ -345,9 +349,11 @@ def rmsprop_heatmap(
     print(f"✓ Heatmap saved to {save_path}")
     
     # Save data
-    df = pd.DataFrame(grid,
-                      index=[f'beta_{beta:.2f}' for beta in beta_values],
-                      columns=[f'epsilon_{eps:.1e}' for eps in epsilon_values])
+    df = pd.DataFrame(
+        grid,
+        index=[f'beta_{beta:.2f}' for beta in beta_values],  # type: ignore[arg-type]
+        columns=[f'epsilon_{eps:.1e}' for eps in epsilon_values]  # type: ignore[arg-type]
+    )
     csv_path = Path(output_dir) / f'rmsprop_heatmap_{func_name}_lr{lr}.csv'
     df.to_csv(csv_path)
     print(f"✓ Data saved to {csv_path}")

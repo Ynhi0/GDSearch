@@ -196,12 +196,18 @@ def generate_adam_comparison_plot(df: pd.DataFrame, results_dir: str) -> None:
     try:
         fig, axes = plt.subplots(1, 2, figsize=(14, 5))
         
-        for i, func_name in enumerate(df['function'].unique()):
+        # Get unique function names using pandas unique() which handles Series properly
+        unique_functions = df['function'].unique()
+        for i, func_name in enumerate(unique_functions):
             ax = axes[i]
-            func_data = df[df['function'] == func_name]
+            func_mask = df['function'] == func_name
+            func_data = df.loc[func_mask]
             
             # Group by weight_decay and optimizer
-            for wd in sorted(func_data['weight_decay'].unique()):
+            # Cast to Series explicitly for type checker
+            wd_series = pd.Series(func_data['weight_decay'])
+            unique_wds = wd_series.unique()
+            for wd in sorted(unique_wds):
                 wd_data = func_data[func_data['weight_decay'] == wd]
                 
                 # Adam L2

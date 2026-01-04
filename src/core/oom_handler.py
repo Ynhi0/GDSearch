@@ -90,7 +90,13 @@ def oom_safe_train_step(
     device: torch.device,
     max_retries: int = 3,
     min_batch_size: int = 1,
-    allow_batchnorm_eval_fallback: bool = False
+    # GAP #22 FIX: Removed allow_batchnorm_eval_fallback parameter
+    # Switching model to eval() during training is SCIENTIFICALLY INVALID:
+    # 1. BatchNorm uses wrong statistics (running mean/var instead of batch)
+    # 2. Dropout is disabled, changing the effective model
+    # 3. Gradients computed in eval mode don't match train mode
+    # SOLUTION: Only use batch size reduction, NEVER switch to eval() mode
+    # allow_batchnorm_eval_fallback: bool = False,  # PERMANENTLY DISABLED
 ) -> Tuple[float, int, Any, bool]:
     """
     OOM-safe training step with automatic batch size reduction.
@@ -308,7 +314,9 @@ def oom_safe_train_step(
                 # Check BatchNorm compatibility BEFORE reduction
                 # Provide more graceful handling for BatchNorm constraints
                 if new_size < 2:
+                    # GAP #22 FIX: Hardcode False (never allow eval mode fallback)
                     # New size too small for BatchNorm in training mode
+                    allow_batchnorm_eval_fallback = False  # PERMANENTLY False for scientific validity
                     if not allow_batchnorm_eval_fallback:
                         logging.error(
                             "OOM: New batch size %d is too small for BatchNorm in training mode and eval-mode fallback is disabled.",

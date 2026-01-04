@@ -47,11 +47,19 @@ def create_scheduler_configs(
     # If T_max < epochs, CosineAnnealing will restart and increase LR at the end
     epochs = base_config.get('epochs', 15)
     
+    # GAP #15, #16, #17 FIX: Comprehensive scheduler parameter dictionary
     scheduler_params = {
         'None': {},
-        'StepLR': {'step_size': max(1, epochs // 3), 'gamma': 0.5},
+        'LinearWarmup': {'warmup_epochs': max(1, epochs // 10)},  # GAP #16: 10% warmup
+        'StepLR_25': {'step_size': max(1, epochs // 4), 'gamma': 0.1},  # GAP #15: Decay at 25%
+        'StepLR_33': {'step_size': max(1, epochs // 3), 'gamma': 0.1},  # GAP #15: Decay at 33%
+        'StepLR_50': {'step_size': max(1, epochs // 2), 'gamma': 0.1},  # GAP #15: Decay at 50%
+        'StepLR_75': {'step_size': max(1, 3 * epochs // 4), 'gamma': 0.1},  # GAP #15: Decay at 75%
+        'StepLR': {'step_size': max(1, epochs // 3), 'gamma': 0.5},  # Keep original for backward compatibility
         'ExponentialLR': {'gamma': 0.95},
         'CosineAnnealingLR': {'T_max': epochs, 'eta_min': 1e-6},  # Match training length
+        'OneCycleLR': {'max_lr': base_config.get('lr', 0.1) * 10, 'epochs': epochs,  # GAP #17
+                       'steps_per_epoch': 1, 'pct_start': 0.3},
         'ReduceLROnPlateau': {'mode': 'min', 'factor': 0.5, 'patience': max(1, epochs // 10)}
     }
     
@@ -71,13 +79,19 @@ def create_scheduler_configs(
 
 def run_scheduler_ablation(
     base_config: Dict,
-    schedulers: List[str] = ['None', 'StepLR', 'ExponentialLR', 'CosineAnnealingLR'],
+    schedulers: List[str] = ['None', 'LinearWarmup', 'StepLR_25', 'StepLR_33', 'StepLR_50', 
+                             'StepLR_75', 'ExponentialLR', 'CosineAnnealingLR', 'OneCycleLR'],
     optimizers: List[str] = ['SGD', 'Adam', 'AdamW'],
     seeds: List[int] = [1, 2, 3, 4, 5],
     results_dir: str = 'results/scheduler_ablation'
 ) -> Dict[str, pd.DataFrame]:
     """
     Run scheduler ablation study with multiple seeds.
+    
+    GAP #15, #16, #17 FIX: Comprehensive scheduler comparison
+    - LinearWarmup (GAP #16): Essential for Adam + large batch training
+    - Multiple StepLR configs (GAP #15): Fair comparison at 25%, 33%, 50%, 75% of training
+    - OneCycleLR (GAP #17): Tests super-convergence phenomenon (Smith 2018)
     
     Args:
         base_config: Base experiment configuration

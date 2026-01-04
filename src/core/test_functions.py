@@ -145,15 +145,39 @@ class IllConditionedQuadratic(TestFunction):
         """Compute value of ill-conditioned quadratic function."""
         return 0.5 * (self.kappa * x**2 + y**2)
     
-    def gradient(self, x, y):
+    def gradient(self, x, y, noise_std: float = 0.0, noise_type: str = 'additive', batch_size: int = 1):
         """
-        Compute gradient of ill-conditioned quadratic function.
+        Compute gradient of ill-conditioned quadratic function with optional noise.
+        
+        GAP FIX: Added noise_std parameter for stochastic experiments.
+        Without this, SGD experiments on Quadratic are actually GD (deterministic).
         
         df/dx = kappa * x
         df/dy = y
+        
+        Args:
+            x, y: Point at which to compute gradient
+            noise_std: Base standard deviation of gradient noise (0 = deterministic GD)
+            noise_type: 'additive' or 'multiplicative'
+            batch_size: Simulated batch size (variance scales as 1/batch_size)
         """
         grad_x = self.kappa * x
         grad_y = y
+        
+        # Add stochastic noise for SGD simulation
+        if noise_std > 0:
+            actual_noise_std = noise_std / np.sqrt(batch_size)
+            
+            if noise_type == 'multiplicative':
+                grad_norm = np.sqrt(grad_x**2 + grad_y**2)
+                if grad_norm > 0:
+                    noise_scale = actual_noise_std * grad_norm
+                    grad_x += np.random.normal(0, noise_scale)
+                    grad_y += np.random.normal(0, noise_scale)
+            else:  # additive
+                grad_x += np.random.normal(0, actual_noise_std)
+                grad_y += np.random.normal(0, actual_noise_std)
+        
         return grad_x, grad_y
     
     def hessian(self, x, y):

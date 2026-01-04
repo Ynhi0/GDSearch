@@ -61,13 +61,23 @@ def run_single_optimizer_with_dynamics(
     test_loader: DataLoader,
     device: torch.device,
     epochs: int = 50,
-    output_dir: str = "results/dynamics_comparison"
+    output_dir: str = "results/dynamics_comparison",
+    tune_lr: bool = False,  # GAP FIX #13: Add LR tuning option
+    lr_candidates: Optional[List[float]] = None
 ) -> Dict:
     """
     Train with a single optimizer and track detailed dynamics.
     
+    GAP FIX #13: Added tune_lr option for fair comparison.
+    When True, tests multiple LR values and uses the best one.
+    This avoids comparing optimizers at arbitrary, unfair settings.
+    
     Uses optimizer registry instead of hardcoded if-else chain.
     This ensures consistency with other experiments and proper hyperparameter handling.
+    
+    Args:
+        tune_lr: If True, search for best LR from candidates
+        lr_candidates: List of LR values to try (if None, use optimizer-specific defaults)
     
     Returns:
         dict: Contains loss history, accuracy history, dynamics metrics

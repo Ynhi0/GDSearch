@@ -8,6 +8,17 @@ ARCHITECTURE STANDARDIZATION (Dec 2025):
     - Reason: Match Kaggle benchmarks for valid cross-comparison
     - SimpleCIFARNet deprecated but available in models.py as SimpleCNN
 
+GAP 43 NOTE - OPTIMIZER IMPLEMENTATION:
+    This benchmark uses PyTorch's built-in optimizer implementations (torch.optim)
+    for performance reasons. This is the "PyTorch Baseline" benchmark.
+    
+    For experiments using custom GDSearch implementations:
+        from src.core.pytorch_optimizers import SGDWrapper, AdamWrapper
+        optimizer = AdamWrapper(model.parameters(), lr=0.001)
+    
+    The custom implementations in src.core.optimizers.py are educational/prototype
+    versions that are tested in tests/test_optimizers.py.
+
 Outputs per-run CSVs compatible with the project's result conventions.
 """
 
@@ -419,7 +430,7 @@ def main():
     results_dir = Path(args.results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    # GAP 54 FIX: Added SGD_Nesterov to optimizer config
+        # GAP 54 FIX: Added SGD_Nesterov to optimizer config
     # GAP 47 FIX: Learning rates tuned for fair comparison with standardized weight_decay
     opt_config = [
         ('SGD', 0.1), 

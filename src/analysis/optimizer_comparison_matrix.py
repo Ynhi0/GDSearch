@@ -177,8 +177,8 @@ def create_comparison_matrix(
                 p_values_corrected[i, j] = comparison['p_value']
             effect_sizes[i, j] = comparison['cohens_d']
             
-            # Determine win/loss/tie
-            if comparison['is_significant']:
+            # GAP #23 FIX: Use corrected p-values for significance determination
+            if p_values_corrected[i, j] < alpha:
                 if comparison['mean_diff'] > 0:
                     win_loss[i, j] = 1  # opt_a wins
                 else:
@@ -186,10 +186,11 @@ def create_comparison_matrix(
             # else: tie (remains 0)
     
     # Convert to DataFrames
-    p_value_df = pd.DataFrame(p_values, index=pd.Index(optimizers), columns=pd.Index(optimizers))
+    p_value_df = pd.DataFrame(p_values_corrected, index=pd.Index(optimizers), columns=pd.Index(optimizers))  # GAP #23: Return corrected p-values
     effect_size_df = pd.DataFrame(effect_sizes, index=pd.Index(optimizers), columns=pd.Index(optimizers))
     win_loss_df = pd.DataFrame(win_loss, index=pd.Index(optimizers), columns=pd.Index(optimizers))
     
+    logging.info(f"GAP #23 FIX: Applied {correction} correction ({num_comparisons} comparisons)")
     return p_value_df, effect_size_df, win_loss_df
 
 

@@ -35,8 +35,20 @@ class SimpleModel(nn.Module):
         return self.fc2(x)
 
 
-def train_n_steps(model: nn.Module, optimizer: torch.optim.Optimizer, n_steps: int = 5, closure_fn: Optional[Callable] = None) -> List[float]:
-    """Train model for n steps and return losses."""
+# Type alias for optimizers that can be used in training (includes custom wrappers)
+OptimizerLike = torch.optim.Optimizer | Any  # Any covers DelayedOptimizer and other wrappers
+
+
+def train_n_steps(model: nn.Module, optimizer: OptimizerLike, n_steps: int = 5, closure_fn: Optional[Callable[..., Any]] | bool = None) -> List[float]:
+    """Train model for n steps and return losses.
+    
+    Args:
+        model: The neural network model
+        optimizer: The optimizer to use (supports torch.optim.Optimizer and custom wrappers)
+        n_steps: Number of training steps
+        closure_fn: If True or a callable, use closure-based stepping (required for SAM).
+                   If None/False, use standard gradient stepping.
+    """
     model.train()
     model = model.float()
     losses: List[float] = []
@@ -54,7 +66,8 @@ def train_n_steps(model: nn.Module, optimizer: torch.optim.Optimizer, n_steps: i
         
         if closure_fn or isinstance(optimizer, SAMWrapper):
             # SAM requires closure
-            loss_val = optimizer.step(closure)
+            # PyTorch type stubs expect closure to return float, but actually returns Tensor
+            loss_val = optimizer.step(closure)  # type: ignore[arg-type]
         else:
             optimizer.zero_grad()
             output = model(x)

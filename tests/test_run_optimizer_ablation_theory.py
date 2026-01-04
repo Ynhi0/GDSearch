@@ -25,7 +25,8 @@ def test_theory_overlay_and_dynamics_written(tmp_path):
     assert 'Has_Theoretical_Curve' in df_summary.columns, 'Has_Theoretical_Curve missing'
 
     # At least one optimizer should have a theoretical curve (heuristic possibility)
-    assert df_summary['Has_Theoretical_Curve'].any(), 'No theoretical curves were recorded'
+    has_theoretical = df_summary['Has_Theoretical_Curve'].any()
+    assert bool(has_theoretical), 'No theoretical curves were recorded'
 
     # Check dynamics CSV files exist for at least one optimizer
     dyn_dir = os.path.join(plots_dir, 'dynamics')
@@ -33,7 +34,7 @@ def test_theory_overlay_and_dynamics_written(tmp_path):
 
     has_csv = False
     for opt_name in df_summary['Optimizer']:
-        safe_name = opt_name.replace(' ', '_')
+        safe_name = str(opt_name).replace(' ', '_')
         candidate = os.path.join(dyn_dir, safe_name, f"{opt_name}_dynamics.csv")
         if os.path.exists(candidate):
             has_csv = True

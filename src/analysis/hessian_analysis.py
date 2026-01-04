@@ -142,29 +142,37 @@ class HessianAnalyzer:
         Compute top eigenvalues using power iteration (Lanczos method).
         
         This is much more efficient than computing full Hessian for large models.
-        """
-        batch_iter = iter(dataloader)
         
-        # Hessian-vector product function
+        CRITICAL FIX (GAP #3): Pre-load fixed batches BEFORE power iteration loop.
+        Power iteration mathematically requires H to be a CONSTANT operator.
+        Using different batches per iteration makes H stochastic, preventing convergence.
+        """
+        # GAP FIX: Pre-load fixed batches ONCE before all iterations
+        # This ensures the Hessian operator H is constant during power iteration
+        fixed_batches = []
+        batch_iter = iter(dataloader)
+        for _ in range(num_batches):
+            try:
+                inputs, targets = next(batch_iter)
+                fixed_batches.append((inputs.to(self.device), targets.to(self.device)))
+            except StopIteration:
+                break
+        
+        if not fixed_batches:
+            logging.warning("No batches available for Hessian computation")
+            return torch.tensor([0.0], dtype=torch.float)
+        
+        # Hessian-vector product function using FIXED batches
         def hvp(vector):
-            """Compute Hessian-vector product H @ v"""
-            nonlocal batch_iter
+            """Compute Hessian-vector product H @ v on FIXED data"""
             # Zero gradients
             self.model.zero_grad()
             
-            # Accumulate over multiple batches for stability
+            # Accumulate over FIXED batches for stability
             hv = None
-            for _ in range(num_batches):
-                try:
-                    inputs, targets = next(batch_iter)
-                except StopIteration:
-                    batch_iter = iter(dataloader)
-                    inputs, targets = next(batch_iter)
+            for inputs, targets in fixed_batches:
                 
-                inputs = inputs.to(self.device)
-                targets = targets.to(self.device)
-                
-                # Compute gradients
+                # Compute gradients (inputs/targets already on device)
                 outputs = self.model(inputs)
                 loss = self.criterion(outputs, targets)
                 
@@ -250,6 +258,11 @@ class HessianAnalyzer:
         This measures the maximum loss increase in a small neighborhood,
         which correlates with generalization performance.
         
+        GAP FIX: Now uses SAME data for base_loss and perturbed_loss.
+        Previously, if dataloader had shuffle=True, base_loss and perturbed_loss
+        were computed on DIFFERENT data samples. The difference was dominated by
+        sampling variance, not the actual perturbation effect.
+        
         Args:
             dataloader: DataLoader for computing loss
             rho: Neighborhood radius (default: 0.05)
@@ -259,17 +272,24 @@ class HessianAnalyzer:
         """
         logging.info(f"Computing sharpness (SAM metric with ρ={rho})...")
         
-        # Compute base loss
-        base_loss = self._compute_loss(dataloader)
-        
-        # Compute gradient
-        self.model.zero_grad()
+        # GAP FIX: Cache a fixed batch for consistent base/perturbed comparison
+        # This ensures we measure true sharpness, not data sampling variance
         batch_iter = iter(dataloader)
-        inputs, targets = next(batch_iter)
-        inputs, targets = inputs.to(self.device), targets.to(self.device)
+        fixed_inputs, fixed_targets = next(batch_iter)
+        fixed_inputs = fixed_inputs.to(self.device)
+        fixed_targets = fixed_targets.to(self.device)
         
-        outputs = self.model(inputs)
-        loss = self.criterion(outputs, targets)
+        # Compute base loss on FIXED batch
+        self.model.eval()
+        with torch.no_grad():
+            base_outputs = self.model(fixed_inputs)
+            base_loss = self.criterion(base_outputs, fixed_targets).item()
+        
+        # Compute gradient for perturbation direction
+        self.model.train()
+        self.model.zero_grad()
+        outputs = self.model(fixed_inputs)
+        loss = self.criterion(outputs, fixed_targets)
         loss.backward()
         
         # Compute adversarial perturbation
@@ -290,8 +310,11 @@ class HessianAnalyzer:
                 if p.grad is not None:
                     p.data.add_(p.grad * scale)
         
-        # Compute perturbed loss
-        perturbed_loss = self._compute_loss(dataloader)
+        # Compute perturbed loss on SAME FIXED batch
+        self.model.eval()
+        with torch.no_grad():
+            perturbed_outputs = self.model(fixed_inputs)
+            perturbed_loss = self.criterion(perturbed_outputs, fixed_targets).item()
         
         # Restore original parameters
         with torch.no_grad():
@@ -299,6 +322,7 @@ class HessianAnalyzer:
                 if p.grad is not None:
                     p.data.sub_(p.grad * scale)
         
+        self.model.train()
         sharpness = perturbed_loss - base_loss
         logging.info(f"Sharpness: {sharpness:.6f} (lower is better)")
         

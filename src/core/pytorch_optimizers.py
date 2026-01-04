@@ -1021,8 +1021,15 @@ class LookaheadWrapper(Optimizer):
             return None
         elif isinstance(loss_value, torch.Tensor):
             return float(loss_value.item())
+        elif isinstance(loss_value, (int, float)):
+            return float(loss_value)
         else:
-            return float(loss_value)  # type: ignore[arg-type]
+            # Fallback for other types
+            try:
+                return float(loss_value)  # type: ignore[arg-type]
+            except (ValueError, TypeError):
+                logging.warning("Lookahead: Could not convert loss_value to float: %s", type(loss_value))
+                return None
     
     def state_dict(self):
         """Return state dict including base optimizer and slow params state."""
@@ -1068,15 +1075,8 @@ def test_sam_and_lookahead():
     
     try:
         loss = sam_opt.step(closure)
-        # Normalize to float safely in case loss is a Tensor or Python number
-        if isinstance(loss, torch.Tensor):
-            loss_val = float(loss.item())
-        else:
-            try:
-                loss_val = float(cast(Any, loss))
-            except (ValueError, TypeError, RuntimeError):
-                logging.warning("SAM step returned non-numeric loss: %s", type(loss))
-                loss_val = float('nan')
+        # step() returns Optional[float], so no need to check for Tensor
+        loss_val = float(loss) if loss is not None else 0.0
         logging.info("  SAM step completed successfully, loss: %.4f", loss_val)
     except (RuntimeError, ValueError, TypeError) as e:
         logging.error("  SAM failed: %s", e, exc_info=True)
@@ -1095,14 +1095,8 @@ def test_sam_and_lookahead():
             return loss
         
         loss = lookahead_opt.step(lookahead_closure)
-        if isinstance(loss, torch.Tensor):
-            loss_val = float(loss.item())
-        else:
-            try:
-                loss_val = float(cast(Any, loss))
-            except (ValueError, TypeError, RuntimeError):
-                logging.warning("Lookahead step returned non-numeric loss: %s", type(loss))
-                loss_val = float('nan')
+        # step() returns Optional[float], so no need to check for Tensor
+        loss_val = float(loss) if loss is not None else 0.0
         logging.info("  Lookahead step completed successfully, loss: %.4f", loss_val)
     except (RuntimeError, ValueError, TypeError) as e:
         logging.error("  Lookahead failed: %s", e, exc_info=True)

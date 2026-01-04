@@ -30,15 +30,22 @@ from src.utils.num_utils import safe_to_float
 def create_weight_decay_configs(
     base_config: Dict,
     weight_decays: List[float],
-    optimizers: List[str]
+    optimizers: List[str],
+    exclude_bn_from_wd: bool = True
 ) -> List[Dict]:
     """
     Create experiment configurations for weight decay ablation.
+    
+    GAP #14 FIX: Added exclude_bn_from_wd parameter (default=True)
+    Scientific Rationale: Batch Normalization is scale-invariant, so weight decay on BN
+    parameters does NOT provide regularization - it only increases the effective learning rate.
+    For fair comparison, WD should only apply to convolutional/linear layer weights.
     
     Args:
         base_config: Base configuration with model, dataset, etc.
         weight_decays: List of weight decay values to test
         optimizers: List of optimizer names
+        exclude_bn_from_wd: If True, exclude BatchNorm parameters from weight decay (RECOMMENDED)
         
     Returns:
         List of configuration dictionaries
@@ -51,6 +58,7 @@ def create_weight_decay_configs(
             config.update({
                 'optimizer': optimizer,
                 'weight_decay': wd,
+                'exclude_bn_from_wd': exclude_bn_from_wd,  # GAP #14 FIX
                 'name': f"{optimizer}_wd{wd:.1e}"
             })
             configs.append(config)

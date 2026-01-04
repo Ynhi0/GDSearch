@@ -53,8 +53,8 @@ class TestInitializationMethods:
         # Xavier should initialize with variance ~2/(fan_in + fan_out)
         # Just check it's not zero and not too large
         for layer in model.init_layers:
-            if hasattr(layer, 'weight'):
-                weight = layer.weight
+            if hasattr(layer, 'weight') and isinstance(layer.weight, torch.Tensor):
+                weight: torch.Tensor = layer.weight
                 assert not torch.allclose(weight, torch.zeros_like(weight))
                 assert weight.abs().max() < 10  # Not too large
     
@@ -65,8 +65,8 @@ class TestInitializationMethods:
         
         # Kaiming should initialize with variance ~2/fan_in
         for layer in model.init_layers:
-            if hasattr(layer, 'weight'):
-                weight = layer.weight
+            if hasattr(layer, 'weight') and isinstance(layer.weight, torch.Tensor):
+                weight: torch.Tensor = layer.weight
                 assert not torch.allclose(weight, torch.zeros_like(weight))
                 assert weight.abs().max() < 10
     
@@ -94,12 +94,16 @@ class TestReproducibility:
         set_seed(42)
         model1 = SimpleCNN(num_classes=10)
         model1.apply_initialization('xavier_normal')
-        weights1 = model1.conv1.weight.clone()
+        weight1 = model1.conv1.weight
+        assert isinstance(weight1, torch.Tensor)
+        weights1 = weight1.clone()
         
         set_seed(42)
         model2 = SimpleCNN(num_classes=10)
         model2.apply_initialization('xavier_normal')
-        weights2 = model2.conv1.weight.clone()
+        weight2 = model2.conv1.weight
+        assert isinstance(weight2, torch.Tensor)
+        weights2 = weight2.clone()
         
         assert torch.allclose(weights1, weights2), \
             "Same seed should give same initialization"
@@ -109,12 +113,16 @@ class TestReproducibility:
         set_seed(42)
         model1 = SimpleCNN(num_classes=10)
         model1.apply_initialization('xavier_normal')
-        weights1 = model1.conv1.weight.clone()
+        weight1 = model1.conv1.weight
+        assert isinstance(weight1, torch.Tensor)
+        weights1 = weight1.clone()
         
         set_seed(123)
         model2 = SimpleCNN(num_classes=10)
         model2.apply_initialization('xavier_normal')
-        weights2 = model2.conv1.weight.clone()
+        weight2 = model2.conv1.weight
+        assert isinstance(weight2, torch.Tensor)
+        weights2 = weight2.clone()
         
         assert not torch.allclose(weights1, weights2), \
             "Different seeds should give different initializations"

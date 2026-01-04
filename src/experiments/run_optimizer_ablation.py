@@ -412,16 +412,17 @@ def run_optimizer_ablation(
         analytical_mu = None
         
         # Get analytical values if available from test function
+        # Note: These methods are optional extensions not defined in base TestFunction class
         try:
             if hasattr(test_function, 'get_smoothness_constant'):
-                analytical_L = test_function.get_smoothness_constant()
+                analytical_L = test_function.get_smoothness_constant()  # type: ignore[attr-defined]
             if hasattr(test_function, 'get_strong_convexity_constant'):
-                analytical_mu = test_function.get_strong_convexity_constant()
+                analytical_mu = test_function.get_strong_convexity_constant()  # type: ignore[attr-defined]
             
             # Fallback: known analytical values for standard test functions
             func_name = test_function.__class__.__name__
             if func_name == 'IllConditionedQuadratic' and hasattr(test_function, 'kappa'):
-                analytical_L = float(test_function.kappa)
+                analytical_L = float(test_function.kappa)  # type: ignore[attr-defined]
                 analytical_mu = 1.0
             elif func_name == 'SaddlePoint':
                 # Saddle point is not strongly convex (one negative eigenvalue)

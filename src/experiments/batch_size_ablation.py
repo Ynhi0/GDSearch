@@ -92,10 +92,15 @@ def run_batch_size_ablation(
     batch_sizes: List[int] = [16, 32, 64, 128, 256, 512],
     optimizers: List[str] = ['SGD', 'SGD_Momentum', 'Adam', 'AdamW'],
     seeds: List[int] = [1, 2, 3, 4, 5],
-    results_dir: str = 'results/batch_ablation'
+    results_dir: str = 'results/batch_ablation',
+    apply_lr_scaling: bool = True  # GAP FIX: Make LR scaling optional
 ) -> Dict[str, pd.DataFrame]:
     """
     Run batch size ablation study with multiple seeds.
+    
+    GAP FIX: Added apply_lr_scaling parameter for scientifically valid single-variable ablation.
+    - True (default): Scale LR with batch size (tests practical scalability)
+    - False: Keep LR constant (isolates batch size effect for theoretical analysis)
     
     Args:
         base_config: Base experiment configuration
@@ -103,6 +108,7 @@ def run_batch_size_ablation(
         optimizers: List of optimizers to compare
         seeds: Random seeds for reproducibility
         results_dir: Output directory
+        apply_lr_scaling: Whether to scale learning rate with batch size (default: True)
         
     Returns:
         Dictionary mapping config names to aggregated results
@@ -119,8 +125,10 @@ def run_batch_size_ablation(
     print(f"Seeds: {seeds}")
     print("="*80)
     
-    # Create configurations
-    configs = create_batch_size_configs(base_config, batch_sizes, optimizers)
+    # Create configurations with optional LR scaling
+    configs = create_batch_size_configs(
+        base_config, batch_sizes, optimizers, apply_lr_scaling=apply_lr_scaling
+    )
     
     results = {}
     

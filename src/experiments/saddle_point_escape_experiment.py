@@ -23,19 +23,32 @@ logging.basicConfig(level=logging.INFO)
 
 
 def run_saddle_point_escape_experiment(
-    initial_point=(0.1, 0.1),
+    initial_point=(1e-6, 0.0),  # GAP FIX: Initialize AT saddle point (0,0) or very close
     max_iters: int = 1000,
     eigenvalue_check_interval: int = 10,
-    output_dir: str = 'results/saddle_point_escape'
+    output_dir: str = 'results/saddle_point_escape',
+    noise_std: float = 0.01  # GAP FIX: Add noise for true SGD simulation
 ) -> Dict:
     """
     Run saddle point escape experiment with Hessian eigenvalue tracking.
     
+    SCIENTIFIC FIX:
+    A true saddle point escape experiment MUST:
+    1. Initialize AT or very close to the saddle point (0,0) where ∇f = 0
+    2. Use SGD noise (noise_std > 0) because deterministic GD cannot escape strict saddles
+    
+    The SaddlePoint function f(x,y) = 0.5*(x² - y²) has:
+    - Saddle at (0,0) with ∇f = (0, 0)
+    - Eigenvalues λ = [1, -1] (mixed signs → saddle)
+    - Without noise: optimizer CANNOT move from (0,0) since gradient is zero
+    - With noise: stochastic perturbation allows escape along negative curvature direction
+    
     Args:
-        initial_point: Starting point near saddle (default near (0,0))
+        initial_point: Starting point AT or near saddle (default: (1e-6, 0))
         max_iters: Maximum iterations
         eigenvalue_check_interval: Compute eigenvalues every N iterations
         output_dir: Directory to save results
+        noise_std: Gradient noise standard deviation (default 0.01 for SGD simulation)
         
     Returns:
         Dictionary with results for each optimizer
@@ -43,6 +56,14 @@ def run_saddle_point_escape_experiment(
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     
     test_fn = SaddlePoint()
+    
+    # Validate scientific setup
+    if noise_std == 0.0:
+        logging.warning(
+            "SCIENTIFIC WARNING: noise_std=0 means deterministic GD.\n"
+            "GD cannot escape strict saddle points where ∇f=0.\n"
+            "Set noise_std > 0 for realistic SGD saddle escape analysis."
+        )
     
     optimizers = {
         'SGD': SGD(lr=0.01),
@@ -85,7 +106,9 @@ def run_saddle_point_escape_experiment(
         
         for i in range(max_iters):
             loss = test_fn.compute(x, y)
-            grad_x, grad_y = test_fn.gradient(x, y)
+            # GAP FIX: Add noise_std for true SGD simulation
+            # Without noise, deterministic GD cannot escape saddle points where ∇f=0
+            grad_x, grad_y = test_fn.gradient(x, y, noise_std=noise_std)
             grad_norm = np.linalg.norm([grad_x, grad_y])
             
             history['iteration'].append(i)

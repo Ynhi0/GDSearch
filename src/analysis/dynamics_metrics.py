@@ -121,50 +121,68 @@ def compute_oscillation_magnitude(values: np.ndarray, ema_alpha: float = 0.1) ->
 
 def compute_convergence_smoothness(losses: np.ndarray, window: int = 50) -> float:
     """
-    Measure convergence smoothness by fitting exponential decay and computing residuals.
+    Measure convergence smoothness by fitting decay model and computing residuals.
+    
+    GAP FIX #12: Try BOTH exponential (linear convergence) and power-law (sublinear).
+    Standard SGD has O(1/t) convergence (power-law), not exponential.
+    Use the model with better fit (lower RMSE).
     
     Args:
         losses: Training loss values over iterations
         window: Window size for moving statistics
         
     Returns:
-        float: Normalized RMSE of fit (lower = smoother convergence)
+        float: Normalized RMSE of best fit (lower = smoother convergence)
     """
     if len(losses) < window:
         return float('inf')
     
     from scipy.optimize import curve_fit
     
-    # Fit exponential decay: L(t) = L_inf + (L_0 - L_inf) * exp(-λt)
+    iterations = np.arange(len(losses)) + 1  # +1 to avoid log(0)
+    
+    # Model 1: Exponential decay L(t) = L_inf + (L_0 - L_inf) * exp(-λt)
     def exp_decay(t, L_inf, L_0, lam):
         return L_inf + (L_0 - L_inf) * np.exp(-lam * t)
     
+    # Model 2: Power-law decay L(t) = L_inf + A / t^α (for sublinear convergence)
+    def power_decay(t, L_inf, A, alpha):
+        return L_inf + A / (t ** alpha)
+    
+    best_rmse = float('inf')
+    
+    # Try exponential fit
     try:
-        iterations = np.arange(len(losses))
-        # Initial guess
         p0 = [losses[-1], losses[0], 0.01]
-        
-        params, _ = curve_fit(exp_decay, iterations, losses, p0=p0, maxfev=5000)
-        
-        # Compute fit quality
-        fitted = exp_decay(iterations, *params)
-        residuals = losses - fitted
-        rmse = np.sqrt(np.mean(residuals ** 2))
-        
-        # Normalize by loss range
-        loss_range = losses[0] - losses[-1]
-        if loss_range > 0:
-            normalized_rmse = rmse / loss_range
-        else:
-            normalized_rmse = rmse
-        
-        return float(normalized_rmse)
-        
+        params_exp, _ = curve_fit(exp_decay, iterations, losses, p0=p0, maxfev=5000)
+        fitted_exp = exp_decay(iterations, *params_exp)
+        residuals_exp = losses - fitted_exp
+        rmse_exp = np.sqrt(np.mean(residuals_exp ** 2))
+        best_rmse = min(best_rmse, rmse_exp)
     except Exception as e:
-        # Specify exception type for better error tracking
-        # Fit failed - return high value
-        logging.debug(f"Smoothness fit failed: {e}")
-        return float('inf')
+        logging.debug(f"Exponential fit failed: {e}")
+        rmse_exp = float('inf')
+    
+    # Try power-law fit
+    try:
+        p0 = [losses[-1], losses[0] - losses[-1], 0.5]
+        params_power, _ = curve_fit(power_decay, iterations, losses, p0=p0, maxfev=5000)
+        fitted_power = power_decay(iterations, *params_power)
+        residuals_power = losses - fitted_power
+        rmse_power = np.sqrt(np.mean(residuals_power ** 2))
+        best_rmse = min(best_rmse, rmse_power)
+    except Exception as e:
+        logging.debug(f"Power-law fit failed: {e}")
+        rmse_power = float('inf')
+    
+    # Normalize by loss range
+    loss_range = losses[0] - losses[-1]
+    if loss_range > 0:
+        normalized_rmse = best_rmse / loss_range
+    else:
+        normalized_rmse = best_rmse
+    
+    return float(normalized_rmse)
 
 
 def compute_update_magnitude_stats(grad_norms: np.ndarray, 

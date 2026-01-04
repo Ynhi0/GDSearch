@@ -37,6 +37,7 @@ def test_run_mnist_marks_tainted_on_checkpoint_failure(monkeypatch):
     # DataFrame should have been returned and contain tainted==True somewhere
     assert isinstance(df, pd.DataFrame)
     if 'tainted' in df.columns:
-        assert df['tainted'].any(), "Run should be marked tainted when checkpoint save fails"
+        tainted_any = df['tainted'].any()
+        assert bool(tainted_any), "Run should be marked tainted when checkpoint save fails"
     else:
         pytest.skip("run_mnist_experiment did not return taint metadata in this configuration")

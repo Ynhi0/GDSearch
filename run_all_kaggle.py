@@ -2244,7 +2244,7 @@ def run_scheduler_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, 
                     pred = output.argmax(dim=1)
                     correct += pred.eq(target).sum().item()
             
-            val_accuracy = 100.0 * correct / len(val_dataset)
+            val_accuracy = 100.0 * correct / len(val_dataset)  # type: ignore[arg-type]
             current_lr = optimizer.param_groups[0]['lr']
             print(f"  Epoch {epoch+1}/10: Loss={avg_loss:.4f}, Val Acc={val_accuracy:.2f}%, LR={current_lr:.6f}")
         
@@ -2262,7 +2262,7 @@ def run_scheduler_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, 
                 pred = output.argmax(dim=1)
                 test_correct += pred.eq(target).sum().item()
         
-        final_test_accuracy = 100.0 * test_correct / len(test_dataset)
+        final_test_accuracy = 100.0 * test_correct / len(test_dataset)  # type: ignore[arg-type]
         final_test_loss = test_loss_total / len(test_loader)
         print(f"  Final Test: Loss={final_test_loss:.4f}, Acc={final_test_accuracy:.2f}%")
         
@@ -6170,13 +6170,18 @@ def run_theory_analysis_pipeline(
                 # Add detailed sections
                 if theory_results['theory_practice_validation'] is not None:
                     f.write("## Theory-Practice Validation Results\n\n")
-                    df = theory_results['theory_practice_validation']
-                    # Check if df is a DataFrame with len support
-                    if hasattr(df, '__len__'):
-                        f.write(f"- **Total Comparisons**: {len(df)}\n")
-                        if hasattr(df, 'columns') and 'relative_error' in df.columns:
-                            mean_error = df['relative_error'].mean()
-                            f.write(f"- **Mean Relative Error**: {mean_error:.2%}\n")
+                    validation_data = theory_results['theory_practice_validation']
+                    # Type-safe access - check type and use getattr for column access
+                    if isinstance(validation_data, pd.DataFrame):
+                        f.write(f"- **Total Comparisons**: {len(validation_data)}\n")
+                        col_names = getattr(validation_data, 'columns', [])
+                        if 'relative_error' in col_names:
+                            rel_err_col = getattr(validation_data, 'relative_error', None)
+                            if rel_err_col is not None:
+                                mean_error = float(rel_err_col.mean())
+                                f.write(f"- **Mean Relative Error**: {mean_error:.2%}\n")
+                    elif hasattr(validation_data, '__len__'):
+                        f.write(f"- **Total Comparisons**: {len(validation_data)}\n")
                     f.write("\n")
                 
                 # Check if advanced_bounds is a dict before checking membership
@@ -8442,7 +8447,7 @@ def get_kaggle_t4_config():
     return config
 
 
-def main():
+def main():  # type: ignore[misc]  # pyright: complexity limit exceeded (10k+ line file)
     """Main execution orchestrator with CLI argument parsing"""
     # Configure logging before any other operations
     logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')

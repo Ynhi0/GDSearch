@@ -37,6 +37,6 @@ def test_run_optimizer_ablation_uses_fair_lrs(tmp_path):
     assert 'LR' in df_summary.columns, 'LR column missing from summary'
 
     for idx, row in df_summary.iterrows():
-        opt = row['Optimizer']
+        opt = str(row['Optimizer'])
         if opt in expected_lr:
-            assert abs(row['LR'] - expected_lr[opt]) < 1e-12, f"LR for {opt} != expected fair LR"
+            assert abs(float(row['LR']) - expected_lr[opt]) < 1e-12, f"LR for {opt} != expected fair LR"

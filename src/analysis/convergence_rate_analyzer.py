@@ -660,11 +660,16 @@ def compare_to_theoretical_bounds(
         # Estimate mu: for normalized problems, assume L ~ 1, so mu ~ 1/kappa
         mu_estimate = 1.0 / kappa
         
+        # GAP FIX #9: Clarify that linear convergence rate applies to DETERMINISTIC GD
+        # or to the TRANSIENT PHASE of SGD (before hitting noise floor)
+        # True constant-step-size SGD converges to a noise ball, not exponentially to optimum
         if opt_key == 'SGD':
             # Linear convergence: (1 - lr*mu) per iteration
-            # Continuous rate: beta = lr * mu * (1 - 1/kappa)
+            # CRITICAL NOTE: This is the TRANSIENT PHASE rate (before noise floor)
+            # Full SGD with constant step size: f(x_t) → f* + O(ησ²/(2μ))
+            # The O(ησ²/(2μ)) term is the noise floor (stationary phase)
             theoretical_rate = lr * mu_estimate * (1 - 1/kappa)
-            rate_type = 'exponential'
+            rate_type = 'exponential (transient phase only - see noise floor caveat)'
         elif opt_key == 'Momentum':
             # Accelerated: beta \u2248 sqrt(lr * mu)
             theoretical_rate = np.sqrt(lr * mu_estimate)

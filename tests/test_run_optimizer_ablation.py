@@ -36,7 +36,7 @@ def test_run_optimizer_ablation_outputs(tmp_path):
 
     # Verify LR mapping approximately matches expected defaults
     for _, row in df.iterrows():
-        opt = row['Optimizer']
+        opt = str(row['Optimizer'])
         lr = float(row['LR'])
         assert np.isclose(lr, expected_lr[opt], rtol=1e-2) or np.isclose(lr, 0.01, rtol=1e-2)  # allow legacy fallback
 

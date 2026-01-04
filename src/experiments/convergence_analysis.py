@@ -171,19 +171,41 @@ class ConvergenceAnalyzer:
         """
         Estimate convergence rate type and value.
         
+        GAP FIX #10: Detect noise floor for SGD and fit rate only on transient phase.
+        SGD with constant step size: f(x_t) → f* + O(ησ²/(2μ)) (noise ball).
+        The transient phase has linear convergence; the stationary phase is flat.
+        
         Returns:
             (rate_type, rate_value) where rate_type is one of:
             - 'sublinear': O(1/k) or slower
-            - 'linear': O(ρ^k) with ρ < 1
+            - 'linear': O(ρ^k) with ρ < 1 (transient phase)
+            - 'linear_with_noise_floor': Linear convergence stopped by noise
             - 'superlinear': faster than linear
             - 'unknown': cannot determine
         """
         if len(losses) < self.window_size:
             return 'unknown', np.nan
         
-        # Use last window for rate estimation
-        window_losses = losses[-self.window_size:]
-        window_iters = iterations[-self.window_size:]
+        # GAP FIX: Detect noise floor (plateau in loss trajectory)
+        # Use last 20% of trajectory to detect stagnation
+        tail_fraction = 0.2
+        tail_start = int(len(losses) * (1 - tail_fraction))
+        tail_losses = losses[tail_start:]
+        tail_std = np.std(tail_losses)
+        tail_mean = np.mean(tail_losses)
+        
+        # If coefficient of variation < 5%, likely hit noise floor
+        has_noise_floor = (tail_std / (tail_mean + 1e-10)) < 0.05
+        
+        # If noise floor detected, fit rate only on TRANSIENT PHASE (before plateau)
+        if has_noise_floor and tail_start > self.window_size:
+            # Use data before tail for rate estimation
+            window_losses = losses[:tail_start]
+            window_iters = iterations[:tail_start]
+        else:
+            # Use last window for rate estimation
+            window_losses = losses[-self.window_size:]
+            window_iters = iterations[-self.window_size:]
         
         # Filter out non-positive losses for log analysis
         positive_mask = window_losses > 1e-16

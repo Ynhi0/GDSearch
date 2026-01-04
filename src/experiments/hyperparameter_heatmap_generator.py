@@ -15,7 +15,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
-from typing import Tuple, List
+from typing import Tuple, List, Optional
 import logging
 
 from src.core.test_functions import Rosenbrock, IllConditionedQuadratic
@@ -27,8 +27,8 @@ logging.basicConfig(level=logging.INFO)
 def run_momentum_beta_heatmap(
     test_function=None,
     initial_point: Tuple[float, float] = (-1.5, 2.0),
-    beta_range: List[float] = None,
-    lr_range: List[float] = None,
+    beta_range: Optional[List[float]] = None,
+    lr_range: Optional[List[float]] = None,
     max_iters: int = 5000,
     convergence_threshold: float = 1e-6,
     output_dir: str = 'results/hyperparameter_heatmaps'
@@ -51,11 +51,9 @@ def run_momentum_beta_heatmap(
     if test_function is None:
         test_function = Rosenbrock()
     
-    if beta_range is None:
-        beta_range = np.linspace(0.0, 0.99, 20)  # 0.0 to 0.99 in 20 steps
-    
-    if lr_range is None:
-        lr_range = np.logspace(-4, -1, 15)  # 0.0001 to 0.1
+    # Set defaults and convert to list for type safety
+    beta_list: List[float] = list(beta_range) if beta_range is not None else list(np.linspace(0.0, 0.99, 20))
+    lr_list: List[float] = list(lr_range) if lr_range is not None else list(np.logspace(-4, -1, 15))
     
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     
@@ -65,15 +63,15 @@ def run_momentum_beta_heatmap(
     print("Momentum Beta Sensitivity Heatmap")
     print("="*60)
     print(f"Test Function: {test_function.__class__.__name__}")
-    print(f"Beta range: [{beta_range[0]:.2f}, {beta_range[-1]:.2f}] ({len(beta_range)} values)")
-    print(f"LR range: [{lr_range[0]:.4f}, {lr_range[-1]:.4f}] ({len(lr_range)} values)")
-    print(f"Total configurations: {len(beta_range) * len(lr_range)}")
+    print(f"Beta range: [{beta_list[0]:.2f}, {beta_list[-1]:.2f}] ({len(beta_list)} values)")
+    print(f"LR range: [{lr_list[0]:.4f}, {lr_list[-1]:.4f}] ({len(lr_list)} values)")
+    print(f"Total configurations: {len(beta_list) * len(lr_list)}")
     
-    total = len(beta_range) * len(lr_range)
+    total = len(beta_list) * len(lr_list)
     count = 0
     
-    for beta in beta_range:
-        for lr in lr_range:
+    for beta in beta_list:
+        for lr in lr_list:
             count += 1
             if count % 20 == 0:
                 print(f"  Progress: {count}/{total} ({100*count/total:.1f}%)")
@@ -139,8 +137,8 @@ def run_momentum_beta_heatmap(
 def run_adam_beta_heatmap(
     test_function=None,
     initial_point: Tuple[float, float] = (-1.5, 2.0),
-    beta1_range: List[float] = None,
-    beta2_range: List[float] = None,
+    beta1_range: Optional[List[float]] = None,
+    beta2_range: Optional[List[float]] = None,
     lr: float = 0.001,
     max_iters: int = 5000,
     convergence_threshold: float = 1e-6,
@@ -165,11 +163,9 @@ def run_adam_beta_heatmap(
     if test_function is None:
         test_function = Rosenbrock()
     
-    if beta1_range is None:
-        beta1_range = np.linspace(0.5, 0.99, 15)  # First moment decay
-    
-    if beta2_range is None:
-        beta2_range = np.linspace(0.9, 0.9999, 15)  # Second moment decay
+    # Convert to lists for type safety
+    beta1_values: List[float] = list(beta1_range) if beta1_range is not None else list(np.linspace(0.5, 0.99, 15))
+    beta2_values: List[float] = list(beta2_range) if beta2_range is not None else list(np.linspace(0.9, 0.9999, 15))
     
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     
@@ -179,16 +175,16 @@ def run_adam_beta_heatmap(
     print("Adam Beta Sensitivity Heatmap")
     print("="*60)
     print(f"Test Function: {test_function.__class__.__name__}")
-    print(f"Beta1 range: [{beta1_range[0]:.3f}, {beta1_range[-1]:.3f}] ({len(beta1_range)} values)")
-    print(f"Beta2 range: [{beta2_range[0]:.3f}, {beta2_range[-1]:.4f}] ({len(beta2_range)} values)")
+    print(f"Beta1 range: [{beta1_values[0]:.3f}, {beta1_values[-1]:.3f}] ({len(beta1_values)} values)")
+    print(f"Beta2 range: [{beta2_values[0]:.3f}, {beta2_values[-1]:.4f}] ({len(beta2_values)} values)")
     print(f"Fixed LR: {lr}")
-    print(f"Total configurations: {len(beta1_range) * len(beta2_range)}")
+    print(f"Total configurations: {len(beta1_values) * len(beta2_values)}")
     
-    total = len(beta1_range) * len(beta2_range)
+    total = len(beta1_values) * len(beta2_values)
     count = 0
     
-    for beta1 in beta1_range:
-        for beta2 in beta2_range:
+    for beta1 in beta1_values:
+        for beta2 in beta2_values:
             count += 1
             if count % 20 == 0:
                 print(f"  Progress: {count}/{total} ({100*count/total:.1f}%)")

@@ -149,50 +149,85 @@ def run_fair_optimizer_ablation_published_defaults(
     os.makedirs(results_dir, exist_ok=True)
     os.makedirs(plots_dir, exist_ok=True)
     
-    # SCIENTIFIC FIX: Function-specific LR scaling
+    # GAP #18 FIX: Hessian-Based LR Calculation Instead of Magic Numbers
     # 
-    # PROBLEM: Published defaults from ImageNet (SGD lr=0.1, SGD+Momentum lr=0.01)
-    # are tuned for high-dimensional neural networks with millions of parameters.
-    # On 2D test functions like Rosenbrock, gradients can be O(1e6) near the saddle,
-    # making these LRs cause immediate divergence (parameters → ±infinity).
+    # PROBLEM: Previous code used lr_scale = 0.01 (arbitrary magic number scaled from ImageNet)
+    # This gives different relative LRs for different test functions, making comparisons unfair.
     #
-    # SOLUTION: Scale down LRs by 100x for convex 2D test functions.
-    # This is mathematically justified: for quadratic f(x) = 0.5*x^T*A*x,
-    # optimal LR ≈ 2/(lambda_min + lambda_max). For Rosenbrock, this is O(0.001).
+    # SOLUTION: Estimate smoothness constant L at initial point using Hessian eigenvalues.
+    # Theoretical optimal LR ≈ 1/L (Nesterov 2004), so we use this as baseline.
     #
-    # CITATION: Polyak (1987), "Introduction to Optimization"
+    # CITATION: Nesterov (2004), "Introductory Lectures on Convex Optimization"
     
-    lr_scale = 0.01  # 100x reduction for 2D test functions
+    # Calculate Hessian-based LR
+    try:
+        from src.analysis.theoretical_bounds import estimate_smoothness
+        
+        # Generate gradient and parameter samples around initial point
+        # estimate_smoothness expects List[np.ndarray] for gradients and params
+        x_init = np.array([initial_point[0], initial_point[1]])
+        num_samples = 50
+        sample_radius = 0.1  # Sample in neighborhood of initial point
+        
+        gradients: List[np.ndarray] = []
+        params: List[np.ndarray] = []
+        
+        for _ in range(num_samples):
+            # Sample point in neighborhood
+            x_sample = x_init + np.random.randn(2) * sample_radius
+            params.append(x_sample)
+            
+            # Compute gradient at sampled point
+            grad = np.array(test_function.gradient(x_sample[0], x_sample[1]))
+            gradients.append(grad)
+        
+        # Estimate smoothness L from gradient-parameter pairs
+        L_estimate = estimate_smoothness(gradients, params)
+        
+        # Baseline LR = 1/L (theoretically optimal for smooth convex functions)
+        baseline_lr = 1.0 / L_estimate
+        lr_scale = 1.0  # No arbitrary scaling
+        
+        logger.info(f"GAP #18 FIX: Hessian-based LR calculation")
+        logger.info(f"  Estimated smoothness L = {L_estimate:.6f}")
+        logger.info(f"  Baseline LR = 1/L = {baseline_lr:.6f}")
+        
+    except Exception as e:
+        logger.warning(f"Could not estimate Hessian-based LR: {e}")
+        logger.warning("Falling back to heuristic lr_scale=0.01")
+        baseline_lr = 0.001
+        lr_scale = 0.01
+        L_estimate = 1000.0  # Default fallback value for citation string
     
     optimizer_configs = {
         'SGD': {
             'class': SGD,
-            'params': {'lr': 0.1 * lr_scale},  # 0.001 for 2D functions
-            'citation': f'Krizhevsky et al. 2012 (scaled {lr_scale}x for 2D functions)'
+            'params': {'lr': baseline_lr},  # GAP #18 FIX: Use Hessian-based LR
+            'citation': f'Nesterov 2004 (LR = 1/L, L={L_estimate if "L_estimate" in locals() else "N/A"})'
         },
         'SGD+Momentum': {
             'class': SGDMomentum,
-            'params': {'lr': 0.01 * lr_scale, 'beta': 0.9},  # 0.0001 for 2D
-            'citation': f'{PUBLISHED_DEFAULTS["SGDMomentum"]["source"]} (scaled {lr_scale}x)'
+            'params': {'lr': baseline_lr, 'beta': 0.9},  # GAP #18 FIX
+            'citation': f'Nesterov 2004 + Polyak 1964 (LR = 1/L)'
         },
         'RMSProp': {
             'class': RMSProp,
-            'params': {'lr': 0.001, 'decay_rate': 0.99},  # Already appropriate
+            'params': {'lr': baseline_lr, 'decay_rate': 0.99},  # GAP #18 FIX
             'citation': PUBLISHED_DEFAULTS['RMSProp']['source']
         },
         'Adam': {
             'class': Adam,
-            'params': {'lr': 0.001, 'beta1': 0.9, 'beta2': 0.999, 'epsilon': 1e-8},
+            'params': {'lr': baseline_lr, 'beta1': 0.9, 'beta2': 0.999, 'epsilon': 1e-8},  # GAP #18 FIX
             'citation': PUBLISHED_DEFAULTS['Adam']['source']
         },
         'AdamW': {
             'class': AdamW,
-            'params': {'lr': 0.001, 'beta1': 0.9, 'beta2': 0.999, 'weight_decay': 0.01},
+            'params': {'lr': baseline_lr, 'beta1': 0.9, 'beta2': 0.999, 'weight_decay': 0.01},  # GAP #18 FIX
             'citation': PUBLISHED_DEFAULTS['AdamW']['source']
         },
         'AMSGrad': {
             'class': AMSGrad,
-            'params': {'lr': 0.001, 'beta1': 0.9, 'beta2': 0.999},
+            'params': {'lr': baseline_lr, 'beta1': 0.9, 'beta2': 0.999},  # GAP #18 FIX
             'citation': 'Reddi et al. ICLR 2018'
         },
     }
@@ -264,14 +299,17 @@ def run_fair_optimizer_ablation_published_defaults(
     
     # Statistical significance testing
     converged_results = results_df[results_df['converged'] == True]
+    converged_results_df: Optional[pd.DataFrame] = None  # Initialize before try block
     if len(converged_results) > 0:
         logger.info("\n" + "="*80)
         logger.info("STATISTICAL SIGNIFICANCE TESTING")
         logger.info("="*80)
         
+        # Cast outside try block so it's always defined when converged_results is non-empty
+        from typing import cast
+        converged_results_df = cast(pd.DataFrame, converged_results)
+        
         try:
-            from typing import cast
-            converged_results_df = cast(pd.DataFrame, converged_results)
             significance_df = compute_statistical_significance(
                 converged_results_df,
                 metric='final_loss',

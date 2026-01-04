@@ -188,16 +188,16 @@ def calculate_local_lipschitz(
     if gradient_col not in df.columns:
         raise ValueError(f"Gradient column '{gradient_col}' not found")
     
-    grad_norms = df[gradient_col].values
+    grad_norms = np.asarray(df[gradient_col].values)
     
     # Approximate parameter distance if not directly tracked
     if param_col in df.columns:
-        param_norms = df[param_col].values
+        param_norms = np.asarray(df[param_col].values)
         param_distances = np.abs(np.diff(param_norms))
     else:
         # Use loss change as proxy (very rough)
         if 'train_loss' in df.columns:
-            loss_values = df['train_loss'].values
+            loss_values = np.asarray(df['train_loss'].values)
             param_distances = np.abs(np.diff(loss_values)) / (grad_norms[:-1] + 1e-10)
         else:
             raise ValueError("Cannot estimate parameter distance")
@@ -248,7 +248,10 @@ def plot_correlation_analysis(
         
         # Calculate correlation
         if len(hess_conv_data) > 2:
-            corr, p_value = pearsonr(hess_conv_data['lambda_max'], hess_conv_data['steps_to_threshold'])
+            result = pearsonr(hess_conv_data['lambda_max'], hess_conv_data['steps_to_threshold'])
+            # scipy.stats returns named tuples; use index access for compatibility
+            corr = float(result[0])  # type: ignore[arg-type]
+            p_value = float(result[1])  # type: ignore[arg-type]
             ax.text(0.05, 0.95, f'Pearson r = {corr:.3f}\np-value = {p_value:.4f}',
                    transform=ax.transAxes, fontsize=10, verticalalignment='top',
                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
@@ -289,7 +292,10 @@ def plot_correlation_analysis(
         
         # Calculate correlation (negative expected: flatter = lower sharpness = higher accuracy)
         if len(sharp_acc_data) > 2:
-            corr, p_value = spearmanr(sharp_acc_data['sharpness'], sharp_acc_data['test_accuracy'])
+            result = spearmanr(sharp_acc_data['sharpness'], sharp_acc_data['test_accuracy'])
+            # scipy.stats returns named tuples; use index access for compatibility
+            corr = float(result[0])  # type: ignore[index]
+            p_value = float(result[1])  # type: ignore[index]
             ax.text(0.05, 0.05, f'Spearman ρ = {corr:.3f}\np-value = {p_value:.4f}',
                    transform=ax.transAxes, fontsize=10,
                    bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.5))
@@ -326,7 +332,10 @@ def plot_correlation_analysis(
         f.write("## Key Findings\n\n")
         
         if not hess_conv_data.empty and len(hess_conv_data) > 2:
-            corr_hess, p_hess = pearsonr(hess_conv_data['lambda_max'], hess_conv_data['steps_to_threshold'])
+            result_hess = pearsonr(hess_conv_data['lambda_max'], hess_conv_data['steps_to_threshold'])
+            # scipy.stats returns named tuples; use index access for compatibility
+            corr_hess = float(result_hess[0])  # type: ignore[arg-type]
+            p_hess = float(result_hess[1])  # type: ignore[arg-type]
             f.write(f"### 1. Curvature vs. Convergence\n\n")
             f.write(f"- **Pearson r**: {corr_hess:.3f}\n")
             f.write(f"- **p-value**: {p_hess:.4f}\n")
@@ -342,7 +351,10 @@ def plot_correlation_analysis(
             f.write(f"- **Status**: Insufficient data\n\n")
         
         if not sharp_acc_data.empty and len(sharp_acc_data) > 2:
-            corr_sharp, p_sharp = spearmanr(sharp_acc_data['sharpness'], sharp_acc_data['test_accuracy'])
+            result_sharp = spearmanr(sharp_acc_data['sharpness'], sharp_acc_data['test_accuracy'])
+            # scipy.stats returns named tuples; use index access for compatibility
+            corr_sharp = float(result_sharp[0])  # type: ignore[index]
+            p_sharp = float(result_sharp[1])  # type: ignore[index]
             f.write(f"### 2. Sharpness vs. Generalization\n\n")
             f.write(f"- **Spearman ρ**: {corr_sharp:.3f}\n")
             f.write(f"- **p-value**: {p_sharp:.4f}\n")

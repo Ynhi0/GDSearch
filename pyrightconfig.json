@@ -1,0 +1,20 @@
+{
+    "include": ["src", "run_all_kaggle.py", "tests"],
+    "exclude": [
+        "**/node_modules",
+        "**/__pycache__",
+        "archive",
+        "kaggle",
+        "runners",
+        "scripts",
+        "tools",
+        "setup"
+    ],
+    "reportMissingImports": "warning",
+    "reportMissingTypeStubs": false,
+    "reportOptionalMemberAccess": "warning",
+    "reportPossiblyUnbound": "warning",
+    "reportUnusedImport": false,
+    "pythonVersion": "3.12",
+    "typeCheckingMode": "basic"
+}

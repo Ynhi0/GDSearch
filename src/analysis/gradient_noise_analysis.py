@@ -56,7 +56,10 @@ def estimate_gradient_noise_variance(
           - method: Method used for estimation
           - per_param_variance: Variance broken down by parameter group
     """
-    model.eval()  # Disable dropout/batchnorm randomness
+    # GAP FIX: Use train() mode to include Dropout/BatchNorm noise in variance estimate
+    # Using eval() mode underestimates σ² by ignoring architectural noise
+    # This leads to overly optimistic theoretical bounds that don't match practice
+    model.train()  # CRITICAL: Must be train mode to capture all gradient noise sources
     
     gradient_samples = []
     param_names = [name for name, _ in model.named_parameters() if _.requires_grad]

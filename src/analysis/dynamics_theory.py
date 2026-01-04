@@ -17,7 +17,7 @@ References:
 """
 
 import numpy as np
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Any
 import logging
 
 
@@ -26,7 +26,7 @@ def theoretical_velocity_magnitude(
     L: float,
     momentum: float = 0.0,
     sigma: float = 0.0
-) -> Dict[str, float]:
+) -> Dict[str, Any]:
     """
     Predict expected velocity (step size) magnitude.
     
@@ -81,7 +81,7 @@ def theoretical_oscillation_amplitude(
     mu: float,
     momentum: float,
     sigma: float = 0.0
-) -> Dict[str, float]:
+) -> Dict[str, Any]:
     """
     Predict oscillation amplitude for momentum-based methods.
     
@@ -166,7 +166,7 @@ def theoretical_smoothness_index(
     lr: float,
     momentum: float,
     sigma: float = 0.0
-) -> Dict[str, float]:
+) -> Dict[str, Any]:
     """
     Predict trajectory smoothness (angle changes between steps).
     
@@ -225,7 +225,7 @@ def theoretical_path_efficiency(
     mu: float,
     momentum: float,
     T: int
-) -> Dict[str, float]:
+) -> Dict[str, Any]:
     """
     Predict path efficiency (ratio of direct distance to path length).
     

@@ -7,6 +7,19 @@ This module provides a centralized registry for all optimizers, enabling:
 - Easy addition of new optimizers
 - Consistent hyperparameter management
 
+GAP 43 FIX - IMPLEMENTATION NOTE:
+    This registry defaults to PyTorch's built-in optimizers for performance.
+    For thesis claims about "our implementation," use:
+    - src.core.pytorch_optimizers.SGDWrapper (wraps custom SGD)
+    - src.core.pytorch_optimizers.AdamWrapper (wraps custom Adam)
+    
+    The custom implementations in src.core.optimizers are educational/prototype.
+    They are tested in tests/test_optimizers.py but NOT used in main benchmarks.
+    
+    To use custom implementations in experiments:
+        from src.core.pytorch_optimizers import SGDWrapper, AdamWrapper
+        optimizer = AdamWrapper(model.parameters(), lr=0.001)
+
 Usage:
     # Register an optimizer
     registry.register('MyOptimizer', MyOptimizerClass, default_lr=0.01)

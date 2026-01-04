@@ -220,6 +220,8 @@ class TrainingDynamicsTracker:
 
         # Detect pseudo-convergence (near-zero gradients at high loss) and estimate escape time
         self._compute_pseudo_convergence()
+        
+        return None  # Explicit return for pylint; method modifies state in-place
 
     def _compute_pseudo_convergence(
         self,

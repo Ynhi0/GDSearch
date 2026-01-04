@@ -18,7 +18,7 @@ References:
 """
 
 import numpy as np
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Union, Any
 import logging
 
 
@@ -29,7 +29,7 @@ def saddle_escape_time_bound(
     method: str = 'perturbed_gd',
     momentum: float = 0.0,
     lr: Optional[float] = None
-) -> Dict[str, float]:
+) -> Dict[str, Any]:
     """
     Theoretical bound on time to escape saddle points.
     
@@ -143,7 +143,7 @@ def adam_nonconvex_full_bound(
     sigma: float = 0.0,
     Delta: float = 1.0,
     d: int = 1000
-) -> Dict[str, float]:
+) -> Dict[str, Any]:
     """
     Complete Adam non-convex convergence bound (Reddi et al. 2018).
     
@@ -239,7 +239,7 @@ def hessian_based_tighter_bound(
     T: int,
     sigma: float = 0.0,
     use_spectral_norm: bool = True
-) -> Dict[str, float]:
+) -> Dict[str, Any]:
     """
     Tighter convergence bounds using Hessian spectral information.
     
@@ -332,7 +332,7 @@ def variance_reduction_bound(
     T: int,
     method: str = 'svrg',
     m: Optional[int] = None
-) -> Dict[str, float]:
+) -> Dict[str, Any]:
     """
     Convergence bounds for variance-reduced methods (SVRG, SAGA, SAG).
     

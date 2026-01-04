@@ -33,6 +33,16 @@ except Exception as e:
     compare_theory_practice = None
     print(f"Theory-practice comparison module not available: {e}")
 
+# GAP FIX #7: Import L/mu estimation functions instead of using magic numbers
+try:
+    from src.analysis.theoretical_bounds import estimate_smoothness, estimate_strong_convexity
+    HAS_ESTIMATION_MODULE = True
+except Exception as e:
+    HAS_ESTIMATION_MODULE = False
+    estimate_smoothness = None
+    estimate_strong_convexity = None
+    print(f"Theoretical bounds estimation module not available: {e}")
+
 # Import PL condition module for non-convex analysis (GAP 4 FIX)
 try:
     from src.analysis.pl_condition import estimate_f_star_from_trajectory, pl_mu_estimate
@@ -199,6 +209,32 @@ def run_theory_practice_validation(
                 elif 'loss' in df.columns:
                     loss_history = df['loss'].values
                 
+                # GAP FIX #7: Estimate L and μ from ACTUAL trajectory data
+                # Don't use arbitrary magic numbers like L=10.0, μ=0.1
+                L_est = None
+                mu_est = None
+                if HAS_ESTIMATION_MODULE and loss_history is not None and len(loss_history) > 10:
+                    # Extract parameter trajectory if available
+                    # If not available, use loss/grad_norm trajectory as proxy
+                    if 'params' in df.columns:
+                        try:
+                            param_history = [np.array(p) for p in df['params'].values if p is not None]
+                            grad_history = [np.array(g) for g in df['gradients'].values if g is not None]
+                            if len(param_history) >= 2 and len(grad_history) >= 2 and callable(estimate_smoothness) and callable(estimate_strong_convexity):
+                                L_est = estimate_smoothness(grad_history, param_history)
+                                mu_est = estimate_strong_convexity(grad_history, param_history)
+                                print(f"     ✓ Measured L={L_est:.6f}, μ={mu_est:.6f} from trajectory")
+                        except Exception as e:
+                            print(f"     ⚠ Could not extract params: {e}")
+                
+                # Fallback: Use heuristic estimates only if measurement failed
+                if L_est is None or L_est == 0.0:
+                    print(f"     ⚠ Using heuristic L estimate (measurement not available)")
+                    L_est = 10.0 if problem_type == 'ill_conditioned' else 1.0
+                if mu_est is None or mu_est == 0.0:
+                    # For non-convex, μ should be 0 (not arbitrary 0.1)
+                    mu_est = 0.1 if problem_type == 'strongly_convex' else 0.0
+                
                 if loss_history is not None:
                     loss_history = loss_history[np.isfinite(loss_history)]
                 
@@ -211,6 +247,9 @@ def run_theory_practice_validation(
                 primary_metric = grad_norm_history if grad_norm_history is not None else loss_history
                 metric_name = 'grad_norm' if grad_norm_history is not None else 'loss'
                 
+                # Ensure primary_metric is not None (type narrowing for pyright)
+                assert primary_metric is not None, "primary_metric must be set at this point"
+                
                 if len(primary_metric) < 10:
                     print(f"     {metric_name} history too short: {len(primary_metric)} steps")
                     continue
@@ -220,7 +259,12 @@ def run_theory_practice_validation(
                     raise RuntimeError("compare_theory_practice not available; ensure theory-practice module is installed")
                 
                 # Save temporary CSV for comparison (compare_theory_practice expects CSV path)
-                temp_csv = output_dir / 'temp_trajectories' / f'{optimizer_name}_temp.csv'
+                # Ensure loss_history is not None before using
+                if loss_history is None:
+                    print(f"     ⚠ Loss history is None for {optimizer_name}, skipping CSV save")
+                    continue
+                    
+                temp_csv = Path(output_dir) / 'temp_trajectories' / f'{optimizer_name}_temp.csv'
                 temp_csv.parent.mkdir(parents=True, exist_ok=True)
                 temp_df = pd.DataFrame({
                     'iteration': np.arange(len(loss_history)),
@@ -313,7 +357,7 @@ def run_theory_practice_validation(
                                 print(f"     ⚠ Failed to load PL constant: {e}")
                     
                     # Priority 2: Estimate PL constant from training trajectory if module available
-                    if pl_const_est is None and HAS_PL_MODULE and len(loss_history) > 10:
+                    if pl_const_est is None and HAS_PL_MODULE and loss_history is not None and callable(estimate_f_star_from_trajectory) and callable(pl_mu_estimate) and len(loss_history) > 10:
                         try:
                             # Estimate f_star from trajectory
                             f_star_est = estimate_f_star_from_trajectory(
@@ -353,7 +397,7 @@ def run_theory_practice_validation(
                 # These fallbacks are for robustness, not for research conclusions
                 if L_est is None:
                     # Estimate L from empirical loss curvature as last resort
-                    if len(loss_history) > 1:
+                    if loss_history is not None and len(loss_history) > 1:
                         # Rough estimate: L ≈ max |Δloss| / (η * T)
                         loss_changes = np.abs(np.diff(loss_history))
                         L_est = np.percentile(loss_changes, 95) * 10  # Heuristic scaling
@@ -482,37 +526,25 @@ def run_theory_practice_validation(
                 comparison_raw = compare_theory_practice(
                     training_csv=str(temp_csv),
                     optimizer_name=optimizer_name,
-                    output_dir=str(output_dir / 'theory_comparison'),
-                    L=L_est,
-                    mu=mu_est,
-                    sigma=sigma_est,  # Pass measured gradient noise variance
-                    pl_constant=pl_const_est  # Pass PL constant for non-convex analysis (GAP 4 FIX)
+                    output_dir=str(Path(output_dir) / 'theory_comparison'),
+                    L=float(L_est),
+                    mu=float(mu_est) if mu_est is not None else None,
+                    sigma=float(sigma_est) if sigma_est is not None else None,  # Pass measured gradient noise variance
+                    pl_constant=float(pl_const_est) if pl_const_est is not None else None  # Pass PL constant for non-convex analysis (GAP 4 FIX)
                 )
                 # Ensure we have a plain dict with string keys for downstream processing
-                comparison: Dict[str, Any]
-                try:
-                    if isinstance(comparison_raw, dict):
-                        # Coerce keys to str to satisfy static typing and downstream consumers
-                        comparison = {str(k): v for k, v in comparison_raw.items()}
-                    elif isinstance(comparison_raw, Mapping):
-                        try:
-                            comparison = {str(k): v for k, v in comparison_raw.items()}
-                        except Exception:
-                            comparison = {}
-                    else:
-                        # Not a mapping-like object; avoid calling dict() on arbitrary objects
-                        comparison = {}
-                except Exception:
-                    # Defensive fallback: ensure we have a dict to mutate
-                    comparison = {}
+                comparison: Dict[str, Any] = {}
+                if comparison_raw is not None and isinstance(comparison_raw, (dict, Mapping)):
+                    # Coerce keys to str to satisfy static typing and downstream consumers
+                    comparison = {str(k): v for k, v in comparison_raw.items()}
 
                 # Add metadata
                 comparison['experiment'] = experiment
                 comparison['dataset'] = experiment.upper()
                 comparison['n_iterations'] = len(loss_history)
-                comparison['initial_loss'] = loss_history[0]
-                comparison['final_loss'] = loss_history[-1]
-                comparison['loss_reduction'] = loss_history[0] - loss_history[-1]
+                comparison['initial_loss'] = float(loss_history[0])
+                comparison['final_loss'] = float(loss_history[-1])
+                comparison['loss_reduction'] = float(loss_history[0] - loss_history[-1])
                 
                 # SCIENTIFIC METADATA (GAP 5 FIX): for filtering/interpretation
                 comparison['stability_ok'] = not stability_violated

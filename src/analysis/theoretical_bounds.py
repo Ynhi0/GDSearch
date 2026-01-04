@@ -498,10 +498,14 @@ def adam_convergence_bound(
         per_iteration_regret = None
         convergence_regime = 'sublinear (gradient norm)'
     
+    # Compute fallback values for missing bounds
+    fallback_gradient_bound = L * np.sqrt(1.0 / T)
+    fallback_regret = fallback_gradient_bound * T
+    
     return {
-        'regret_bound': regret_bound if regret_bound is not None else gradient_norm_bound * T,
-        'per_iteration_regret': per_iteration_regret if per_iteration_regret is not None else gradient_norm_bound,
-        'gradient_norm_bound': gradient_norm_bound if gradient_norm_bound is not None else L * np.sqrt(1.0 / T),
+        'regret_bound': regret_bound if regret_bound is not None else (gradient_norm_bound * T if gradient_norm_bound is not None else fallback_regret),
+        'per_iteration_regret': per_iteration_regret if per_iteration_regret is not None else (gradient_norm_bound if gradient_norm_bound is not None else fallback_gradient_bound),
+        'gradient_norm_bound': gradient_norm_bound if gradient_norm_bound is not None else fallback_gradient_bound,
         'optimal_alpha': 1.0 / (L * np.sqrt(T)),  # Heuristic from theory
         'iterations_to_eps': float((2 * 1.0) / (alpha * (1 - beta1) * 1e-12)) if problem_type == 'non_convex' else float('inf'),
         'convergence_rate_class': 'O(1/√T)' if problem_type == 'non_convex' else 'O(√T) regret',
@@ -517,7 +521,8 @@ def adam_convergence_bound(
 def estimate_pl_constant(
     loss_values: np.ndarray,
     grad_norms: np.ndarray,
-    f_star: Optional[float] = None
+    f_star: Optional[float] = None,
+    known_f_star: Optional[float] = None  # GAP FIX #8: Add explicit known minimum
 ) -> Dict[str, Any]:
     """
     Estimate Polyak-Łojasiewicz (PL) constant from trajectory data.
@@ -526,10 +531,19 @@ def estimate_pl_constant(
     
     If satisfied, guarantees linear convergence even for non-convex functions.
     
+    GAP FIX #8: Added known_f_star parameter to avoid tautological estimation.
+    WARNING: Using f_star = min(loss_values) is BIASED:
+    - If model stuck in local minimum (e.g., loss=0.5), f_star=0.5
+    - This makes (f-f*) artificially small, inflating μ estimate
+    - For synthetic functions (Rosenbrock, Quadratic), use known_f_star=0.0
+    - For neural networks, use best known loss from exhaustive search or acknowledge bias
+    
     Args:
         loss_values: Array of loss values along trajectory
         grad_norms: Array of gradient norms (||∇f||)
         f_star: Optimal value (if known). If None, uses minimum observed loss.
+        known_f_star: TRUE global minimum (for synthetic functions, e.g., 0.0)
+                      Overrides f_star if provided to avoid bias.
         
     Returns:
         Dict containing:
@@ -537,15 +551,25 @@ def estimate_pl_constant(
           - pl_condition_satisfied: Whether PL holds with estimated μ
           - violation_ratio: Fraction of points violating PL condition
           - analysis: Statistical summary
+          - f_star_used: The f* value used (known or estimated)
+          - f_star_source: 'known_analytical' or 'min_observed' (for transparency)
     
     Note: This is an empirical estimate from observed data, not a theoretical proof.
     """
     loss_values = np.asarray(loss_values, dtype=float)
     grad_norms = np.asarray(grad_norms, dtype=float)
     
-    # Use minimum observed loss if f* unknown
-    if f_star is None:
+    # GAP FIX: Prioritize known_f_star to avoid tautological estimation
+    if known_f_star is not None:
+        f_star = float(known_f_star)
+        f_star_source = 'known_analytical'
+    elif f_star is not None:
+        f_star = float(f_star)
+        f_star_source = 'user_provided'
+    else:
+        # Fallback: Use minimum observed loss (BIASED - document this!)
         f_star = float(np.min(loss_values))
+        f_star_source = 'min_observed (BIASED)'
     
     # Filter valid points (finite and above f*)
     valid_mask = np.isfinite(loss_values) & np.isfinite(grad_norms) & (loss_values > f_star + 1e-10)
@@ -578,6 +602,8 @@ def estimate_pl_constant(
         'pl_constant_estimate': mu_estimate,
         'pl_condition_satisfied': violation_ratio < 0.1,  # Allow 10% numerical tolerance
         'violation_ratio': violation_ratio,
+        'f_star_used': float(f_star),  # GAP FIX: Report what f* was used
+        'f_star_source': f_star_source,  # GAP FIX: Document if biased
         'analysis': {
             'mean_mu': float(np.mean(mu_estimates)),
             'median_mu': float(np.median(mu_estimates)),

@@ -13,7 +13,7 @@ def test_plot_vector_field_creates_file(tmp_path):
 
     fn = SaddlePoint()
     func = fn.compute
-    grad = lambda x, y: fn.gradient(x, y)
+    grad = lambda x, y: np.array(fn.gradient(x, y))
 
     # Run with low density to keep the test fast
     plot_vector_field_overlay(func, grad, (-1, 1), (-1, 1), out_file, density=8, normalize=True)

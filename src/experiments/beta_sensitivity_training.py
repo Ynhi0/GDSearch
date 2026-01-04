@@ -54,23 +54,39 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from src.utils.plot_helpers import arr_to_numpy_float
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, TYPE_CHECKING
 from src.core.dataloader_utils import make_dataloader
 import os
 import json
 from tqdm import tqdm
 import logging
 
+# Type checking imports (never executed at runtime)
+if TYPE_CHECKING:
+    from src.core.dynamics_tracker import TrainingDynamicsTracker
+
 logger = logging.getLogger(__name__)
 
-# Import dynamics tracking
+# Import dynamics tracking with runtime-safe imports
+HAS_DYNAMICS: bool = False
+_TrainingDynamicsTracker: Optional[type] = None
+_compute_smoothness_index: Optional[Any] = None
+
 try:
-    from src.core.dynamics_tracker import TrainingDynamicsTracker
-    from src.analysis.dynamics_metrics import compute_instantaneous_speed, compute_smoothness_index
+    from src.core.dynamics_tracker import TrainingDynamicsTracker as _TDT
+    from src.analysis.dynamics_metrics import compute_instantaneous_speed, compute_smoothness_index as _csi
     HAS_DYNAMICS = True
+    _TrainingDynamicsTracker = _TDT
+    _compute_smoothness_index = _csi
 except ImportError:
-    HAS_DYNAMICS = False
     print("Dynamics tracking not available - metrics will be limited")
+
+
+def _create_dynamics_tracker() -> Optional["TrainingDynamicsTracker"]:
+    """Factory function to create dynamics tracker (handles optional import)."""
+    if _TrainingDynamicsTracker is not None:
+        return _TrainingDynamicsTracker()  # type: ignore[return-value]
+    return None
 
 # Import centralized model (FIX #4: Remove duplicate SimpleMLP)
 from src.core.models import SimpleMLP
@@ -110,7 +126,7 @@ def train_with_beta(
     track_dynamics: bool = True,
     quick: bool = False,
     seed: int = 42,
-    use_beta_scaled_lr: bool = False
+    use_beta_scaled_lr: bool = True  # GAP FIX #11: Changed default to True
 ) -> Dict:
     """
     Train MNIST with specific β value and track comprehensive metrics
@@ -169,11 +185,11 @@ def train_with_beta(
         logging.info(f"Beta-scaled LR: base={lr:.6f}, beta={beta:.4f}, effective={effective_lr:.6f}")
     
     # Initialize dynamics tracker
+    dynamics_tracker: Optional["TrainingDynamicsTracker"] = None
     if track_dynamics and HAS_DYNAMICS:
-        dynamics_tracker = TrainingDynamicsTracker()
-        dynamics_tracker.set_initial_params(model)
-    else:
-        dynamics_tracker = None
+        dynamics_tracker = _create_dynamics_tracker()
+        if dynamics_tracker is not None:
+            dynamics_tracker.set_initial_params(model)
     
     # Training history
     history: Dict[str, Any] = {
@@ -286,7 +302,7 @@ def train_with_beta(
     dynamics_metrics = {}
     
     if dynamics_tracker is not None and len(dynamics_tracker.iterations) > 0:
-        # Compute derived metrics
+        # Compute derived metrics (modifies tracker state in-place, returns None)
         dynamics_tracker.compute_derived_metrics()
         
         # Get summary
@@ -307,8 +323,8 @@ def train_with_beta(
         dynamics_metrics['std_speed'] = np.std(speeds)
         
         # Smoothness (angle changes)
-        if HAS_DYNAMICS:
-            smoothness = compute_smoothness_index(param_array)
+        if HAS_DYNAMICS and _compute_smoothness_index is not None:
+            smoothness = _compute_smoothness_index(param_array)
             dynamics_metrics['smoothness'] = smoothness
         
         # Loss oscillations
@@ -567,10 +583,12 @@ def run_adam_beta2_sensitivity(
             optimizer = optim.Adam(model.parameters(), lr=lr, betas=(beta1, beta2))
             criterion = nn.CrossEntropyLoss()
             
-            # Track dynamics
+            # Initialize dynamics tracker (define at outer scope for pyright)
+            dynamics_tracker: Optional["TrainingDynamicsTracker"] = None
             if HAS_DYNAMICS:
-                dynamics_tracker = TrainingDynamicsTracker()
-                dynamics_tracker.set_initial_params(model)
+                dynamics_tracker = _create_dynamics_tracker()
+                if dynamics_tracker is not None:
+                    dynamics_tracker.set_initial_params(model)
             
             # Training
             for epoch in range(epochs):
@@ -585,7 +603,7 @@ def run_adam_beta2_sensitivity(
                     optimizer.step()
                     
                     # Track dynamics
-                    if HAS_DYNAMICS and batch_idx % 10 == 0:
+                    if dynamics_tracker is not None and batch_idx % 10 == 0:
                         dynamics_tracker.track_step(
                             iteration=epoch * len(train_loader) + batch_idx,
                             loss=loss.item(),
@@ -598,11 +616,18 @@ def run_adam_beta2_sensitivity(
             train_acc, train_loss = evaluate(model, train_loader, criterion, device)
             test_acc, test_loss = evaluate(model, test_loader, criterion, device)
             
-            # Compute dynamics metrics
-            dynamics_metrics = {}
-            if HAS_DYNAMICS:
-                if len(dynamics_tracker.iterations) > 0:
-                    dynamics_metrics = dynamics_tracker.compute_derived_metrics()
+            # Compute dynamics metrics (method modifies tracker state in-place)
+            dynamics_metrics: Dict[str, float] = {}
+            if dynamics_tracker is not None and len(dynamics_tracker.iterations) > 0:
+                dynamics_tracker.compute_derived_metrics()
+                # Extract metrics from tracker attributes (use local vars for type narrowing)
+                tracker = dynamics_tracker  # Narrow type for pyright
+                grad_norms = tracker.grad_norms
+                smoothness_idx = tracker.smoothness_index
+                dynamics_metrics = {
+                    'mean_grad_norm': float(np.mean(grad_norms)) if grad_norms else 0.0,
+                    'smoothness_index': float(smoothness_idx) if smoothness_idx else 0.0,
+                }
             
             result = {
                 'seed': seed,
@@ -705,10 +730,12 @@ def run_adam_beta1_beta2_grid(
                 optimizer = optim.Adam(model.parameters(), lr=lr, betas=(beta1, beta2))
                 criterion = nn.CrossEntropyLoss()
                 
-                # Track dynamics
+                # Initialize dynamics tracker (define at outer scope for pyright)
+                dynamics_tracker: Optional["TrainingDynamicsTracker"] = None
                 if HAS_DYNAMICS:
-                    dynamics_tracker = TrainingDynamicsTracker()
-                    dynamics_tracker.set_initial_params(model)
+                    dynamics_tracker = _create_dynamics_tracker()
+                    if dynamics_tracker is not None:
+                        dynamics_tracker.set_initial_params(model)
                 
                 # Training
                 for epoch in range(epochs):
@@ -723,7 +750,7 @@ def run_adam_beta1_beta2_grid(
                         optimizer.step()
                         
                         # Track dynamics
-                        if HAS_DYNAMICS and batch_idx % 10 == 0:
+                        if dynamics_tracker is not None and batch_idx % 10 == 0:
                             dynamics_tracker.track_step(
                                 iteration=epoch * len(train_loader) + batch_idx,
                                 loss=loss.item(),
@@ -736,11 +763,18 @@ def run_adam_beta1_beta2_grid(
                 train_acc, train_loss = evaluate(model, train_loader, criterion, device)
                 test_acc, test_loss = evaluate(model, test_loader, criterion, device)
                 
-                # Compute dynamics metrics
-                dynamics_metrics = {}
-                if HAS_DYNAMICS:
-                    if len(dynamics_tracker.iterations) > 0:
-                        dynamics_metrics = dynamics_tracker.compute_derived_metrics()
+                # Compute dynamics metrics (method modifies tracker state in-place)
+                dynamics_metrics: Dict[str, float] = {}
+                if dynamics_tracker is not None and len(dynamics_tracker.iterations) > 0:
+                    dynamics_tracker.compute_derived_metrics()
+                    # Extract metrics from tracker attributes (use local vars for type narrowing)
+                    tracker = dynamics_tracker  # Narrow type for pyright
+                    grad_norms = tracker.grad_norms
+                    smoothness_idx = tracker.smoothness_index
+                    dynamics_metrics = {
+                        'mean_grad_norm': float(np.mean(grad_norms)) if grad_norms else 0.0,
+                        'smoothness_index': float(smoothness_idx) if smoothness_idx else 0.0,
+                    }
                 
                 result = {
                     'seed': seed,
