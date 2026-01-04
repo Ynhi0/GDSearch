@@ -454,7 +454,18 @@ class FinalDeliverablesGenerator:
         return outputs
     
     def generate_statistical_reports(self) -> List[str]:
-        """Generate statistical analysis reports."""
+        """
+        Generate statistical analysis reports.
+        
+        GAP 35 FIX: Group results by dataset before computing statistics.
+        Mixing MNIST (acc~0.99), CIFAR-10 (acc~0.92), and Medical/NLP (acc~0.80)
+        produces meaningless statistics where std reflects dataset differences,
+        not optimizer stability.
+        
+        GAP 37 FIX: Exclude tuning trial results from final analysis.
+        Optuna trials with bad hyperparameters (lr=10.0) should not pollute
+        the "Best Case" analysis.
+        """
         outputs = []
         
         # Find experiment results
@@ -465,28 +476,75 @@ class FinalDeliverablesGenerator:
             return outputs
         
         try:
-            # Aggregate results by optimizer
-            optimizer_metrics = {}
+            # GAP 35 FIX: Group by dataset, then by optimizer
+            # Structure: {dataset: {optimizer: [accuracies]}}
+            dataset_optimizer_metrics: Dict[str, Dict[str, List[float]]] = {}
             
             for csv_file in csv_files:
                 try:
+                    # GAP 37 FIX: Skip tuning trial files
+                    filename = csv_file.name.lower()
+                    parent_dir = csv_file.parent.name.lower()
+                    
+                    # Exclude tuning directories and trial files
+                    if 'tuning' in parent_dir or 'trial' in filename or 'optuna' in parent_dir:
+                        logging.debug(f"Skipping tuning file: {csv_file.name}")
+                        continue
+                    
+                    # Extract dataset from filename (e.g., NN_ResNet18_CIFAR10_...)
+                    parts = csv_file.stem.split('_')
+                    dataset = 'unknown'
+                    for known_ds in ['MNIST', 'CIFAR10', 'CIFAR100', 'Medical', 'NLP', 'IMDB']:
+                        if known_ds in parts or known_ds.lower() in [p.lower() for p in parts]:
+                            dataset = known_ds
+                            break
+                    
                     df = pd.read_csv(csv_file)
-                    if 'optimizer' in df.columns and 'test_acc' in df.columns:
-                        opt = df['optimizer'].iloc[0]
-                        final_acc = df['test_acc'].iloc[-1]
+                    
+                    # Try multiple ways to get optimizer name
+                    if 'optimizer' in df.columns:
+                        opt = str(df['optimizer'].iloc[0])
+                    else:
+                        # Parse from filename: NN_Model_Dataset_Optimizer_lr...
+                        opt = 'Unknown'
+                        for i, part in enumerate(parts):
+                            if part.startswith('lr'):
+                                # Optimizer is the part(s) before 'lr'
+                                opt_parts = []
+                                for j in range(i - 1, 0, -1):
+                                    if parts[j] in ['MNIST', 'CIFAR10', 'CIFAR100', 'Medical', 'NLP', 'IMDB', 'ResNet18', 'SimpleCNN', 'NN']:
+                                        break
+                                    opt_parts.insert(0, parts[j])
+                                if opt_parts:
+                                    opt = '_'.join(opt_parts)
+                                break
+                    
+                    if 'test_acc' in df.columns:
+                        final_acc = float(df['test_acc'].iloc[-1])
                         
-                        if opt not in optimizer_metrics:
-                            optimizer_metrics[opt] = []
-                        optimizer_metrics[opt].append(final_acc)
-                except Exception:
+                        if dataset not in dataset_optimizer_metrics:
+                            dataset_optimizer_metrics[dataset] = {}
+                        if opt not in dataset_optimizer_metrics[dataset]:
+                            dataset_optimizer_metrics[dataset][opt] = []
+                        dataset_optimizer_metrics[dataset][opt].append(final_acc)
+                        
+                except Exception as e:
+                    logging.debug(f"Could not process {csv_file}: {e}")
                     continue
             
-            if len(optimizer_metrics) >= 2:
-                # Generate statistical comparison
-                output_path = self.output_dir / "reports" / "statistical_analysis.txt"
+            # GAP 35 FIX: Generate SEPARATE report for EACH dataset
+            for dataset, optimizer_metrics in dataset_optimizer_metrics.items():
+                if len(optimizer_metrics) < 1:
+                    continue
+                    
+                # Generate per-dataset statistical comparison
+                output_path = self.output_dir / "reports" / f"statistical_analysis_{dataset}.txt"
                 
                 with open(output_path, 'w', encoding='utf-8') as f:
-                    f.write("STATISTICAL ANALYSIS REPORT\n")
+                    f.write(f"STATISTICAL ANALYSIS REPORT - {dataset.upper()}\n")
+                    f.write("="*80 + "\n")
+                    f.write("GAP 35 FIX: Results grouped by dataset.\n")
+                    f.write("Standard deviations reflect optimizer stability, NOT dataset difficulty.\n")
                     f.write("="*80 + "\n\n")
                     
                     # Summary statistics
@@ -494,14 +552,16 @@ class FinalDeliverablesGenerator:
                     f.write("-"*80 + "\n")
                     for opt, values in sorted(optimizer_metrics.items()):
                         mean_val = np.mean(values)
-                        std_val = np.std(values)
+                        std_val = np.std(values) if len(values) > 1 else 0.0
                         f.write(f"{opt:20s}: {mean_val:.4f} ± {std_val:.4f} (n={len(values)})\n")
                     
                     f.write("\n" + "="*80 + "\n")
-                    f.write("See results/ directory for detailed experiment data.\n")
+                    f.write(f"Dataset: {dataset}\n")
+                    f.write(f"Total runs: {sum(len(v) for v in optimizer_metrics.values())}\n")
+                    f.write("NOTE: Tuning trials excluded (Gap 37 fix).\n")
                 
                 outputs.append(str(output_path))
-                logging.info("Generated statistical report: %s", output_path.name)
+                logging.info("Generated per-dataset statistical report: %s", output_path.name)
         
         except Exception as e:
             logging.error("Could not generate statistical reports: %s", e, exc_info=True)

@@ -135,12 +135,71 @@ class LabelSmoothingCrossEntropy(nn.Module):
     Reference:
         "Rethinking the Inception Architecture for Computer Vision"
         Szegedy et al., CVPR 2016
+        
+    GAP 36 FIX - Entropy Floor Warning:
+        Label smoothing enforces a mathematical minimum loss (Entropy Floor) > 0.
+        For num_classes=10 and smoothing=0.1:
+            min_loss ≈ -[0.9*log(0.9) + 9*(0.1/9)*log(0.1/9)] ≈ 0.54
+        
+        This means:
+        - Loss will NEVER converge to 0, even with perfect predictions
+        - Convergence analysis must account for this floor
+        - Use get_entropy_floor() to compute the theoretical minimum
     """
     
     def __init__(self, smoothing: float = 0.1, reduction: str = 'mean'):
         super().__init__()
         self.smoothing = smoothing
         self.reduction = reduction
+        
+    @staticmethod
+    def compute_entropy_floor(num_classes: int, smoothing: float) -> float:
+        """
+        GAP 36 FIX: Compute the theoretical minimum loss for label smoothing.
+        
+        When using label smoothing, the loss cannot converge to 0.
+        This function computes the entropy floor so convergence analysis
+        can subtract it from the loss curve.
+        
+        Args:
+            num_classes: Number of output classes
+            smoothing: Label smoothing factor
+            
+        Returns:
+            Entropy floor (minimum achievable loss)
+            
+        Example:
+            For CIFAR-10 (10 classes) with smoothing=0.1:
+            >>> LabelSmoothingCrossEntropy.compute_entropy_floor(10, 0.1)
+            0.5404...  # Loss will never go below this
+        """
+        import math
+        if smoothing == 0.0:
+            return 0.0
+        
+        # Smoothed target distribution: [1-s, s/(n-1), s/(n-1), ...]
+        p_true = 1.0 - smoothing
+        p_other = smoothing / (num_classes - 1) if num_classes > 1 else 0.0
+        
+        # Cross-entropy with perfect predictions (q = p):
+        # H(p, q) = -sum(p * log(q)) = -p_true*log(p_true) - (n-1)*p_other*log(p_other)
+        entropy = -p_true * math.log(p_true + 1e-12)
+        if p_other > 0:
+            entropy -= (num_classes - 1) * p_other * math.log(p_other + 1e-12)
+        
+        return entropy
+    
+    def get_entropy_floor(self, num_classes: int) -> float:
+        """
+        Get the entropy floor for this loss function instance.
+        
+        Args:
+            num_classes: Number of output classes
+            
+        Returns:
+            Minimum achievable loss value
+        """
+        return self.compute_entropy_floor(num_classes, self.smoothing)
         
     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         """

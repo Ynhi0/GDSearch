@@ -155,6 +155,38 @@ def estimate_gradient_noise_variance(
     
     sigma = np.sqrt(sigma_squared)
     
+    # GAP 17 FIX: Test for heavy-tailed gradients (Shapiro-Wilk normality test)
+    # If gradients are NOT Gaussian (heavy-tailed/Levy), standard SGD theory is invalid
+    # This is critical for scientific rigor: you can't use Gaussian-based bounds on Levy noise
+    normality_pvalue = None
+    is_gaussian = None
+    
+    try:
+        from scipy.stats import shapiro
+        
+        # Test normality on a sample of gradient components (testing all is too slow)
+        # Sample 5000 random gradient components across all samples
+        n_components_test = min(5000, gradient_array.size)
+        flat_grads = gradient_array.flatten()
+        sample_indices = np.random.choice(len(flat_grads), n_components_test, replace=False)
+        sample_grads = flat_grads[sample_indices]
+        
+        # Shapiro-Wilk test: H0 = data is Gaussian
+        stat, p_value = shapiro(sample_grads)
+        normality_pvalue = float(p_value)
+        is_gaussian = bool(p_value >= 0.05)  # Fail to reject H0 at α=0.05
+        
+        if is_gaussian:
+            logging.info(f"Gradient noise is approximately Gaussian (p={p_value:.4f} ≥ 0.05)")
+        else:
+            logging.warning(f"HEAVY-TAILED GRADIENTS DETECTED: p={p_value:.4f} < 0.05. "
+                          f"Standard SGD theory assumes Gaussian noise → bounds may be invalid!")
+    
+    except ImportError:
+        logging.warning("scipy not available, skipping normality test")
+    except Exception as e:
+        logging.warning(f"Normality test failed: {e}")
+    
     # Compute per-parameter variance breakdown
     per_param_var = {}
     param_idx = 0
@@ -172,7 +204,11 @@ def estimate_gradient_noise_variance(
         'sigma': float(sigma),
         'num_samples_used': float(len(gradient_samples)),
         'method': str(method),
-        'per_param_variance': per_param_var  # type: ignore
+        'per_param_variance': per_param_var,  # type: ignore
+        # GAP 17: Heavy-tail detection
+        'normality_test_pvalue': float(normality_pvalue) if normality_pvalue is not None else None,
+        'is_gaussian': bool(is_gaussian) if is_gaussian is not None else None,
+        'heavy_tailed_warning': not is_gaussian if is_gaussian is not None else False
     }
 
 

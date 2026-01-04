@@ -15,13 +15,20 @@ A comprehensive Python framework for comparing gradient descent algorithms on 2D
 - **Convergence Detection:** Dual conditions (grad norm threshold OR loss delta)
 - **Automatic Visualization:** Every experiment generates both static (PNG) and interactive (HTML) plots immediately after completion
 - **Advanced Analysis:**
-- **Hessian eigenvalue tracking** (λ_min, λ_max, condition number) with **proper deflation**
-- Loss landscape 1D/2D visualization
-- **Flatness Analysis:** Training stability, generalization gap, loss smoothness metrics
-- **SAM Minima Visualization:** Contour plots comparing Adam vs SAM minima flatness
-- Per-layer gradient norms
-- Curvature analysis (trajectory turning angles)
-- Generalization gap monitoring
+  - **Hessian eigenvalue tracking** (λ_min, λ_max, condition number) with **proper deflation**
+  - Loss landscape 1D/2D visualization
+  - **Flatness Analysis:** Training stability, generalization gap, loss smoothness metrics
+  - **SAM Minima Visualization:** Contour plots comparing Adam vs SAM minima flatness
+  - Per-layer gradient norms
+  - Curvature analysis (trajectory turning angles)
+  - Generalization gap monitoring
+- **Theory-Practice Validation:** Integrated pipeline for scientific validation (use `--with-theory-analysis`)
+  - Measured vs theoretical convergence bounds (SGD, momentum, Adam)
+  - Saddle point escape time (Jin et al. 2017)
+  - Full Adam non-convex convergence analysis (Reddi et al. 2018)
+  - Hessian-based tighter bounds with spectral analysis
+  - Variance reduction theory (SVRG/SAGA)
+
 
 ### Reproducibility & Statistical Validity
 
@@ -325,6 +332,9 @@ python run_all_kaggle.py --resume
 
 # Enable advanced features
 python run_all_kaggle.py --use-amp --use-ema --label-smoothing 0.1
+
+# Run with theory-practice validation (adds ~10-40 min, generates comprehensive report)
+python run_all_kaggle.py --ultra-quick --with-theory-analysis
 ```
 
 **Available Experiments:**

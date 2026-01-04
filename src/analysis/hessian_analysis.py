@@ -69,7 +69,15 @@ class HessianAnalyzer:
         """
         Compute top eigenvalues of Hessian matrix.
 
-        Return values are mixed: an array of eigenvalues plus scalar floats, so the value types are heterogeneous.
+        GAP 60 FIX: RENAMED METRICS FOR MATHEMATICAL ACCURACY
+            - 'trace_estimate' is RENAMED to 'sum_top_k_eigenvalues'
+              because Trace = sum(ALL eigenvalues), not just top K.
+              A ResNet has ~11M eigenvalues; sum(top_10) ≠ Trace.
+              
+        GAP 61 FIX: RENAMED 'condition_number' to 'top_k_spectral_ratio'
+            - True Condition Number κ = λ_max / λ_min (smallest of ALL eigenvalues)
+            - eigs[-1] is the K-th largest, NOT the minimum
+            - True λ_min requires Inverse Power Iteration (not implemented here)
 
         Uses power iteration method for efficiency (full Hessian is O(n²) memory).
 
@@ -82,7 +90,8 @@ class HessianAnalyzer:
             Dictionary with:
             - eigenvalues: Top k eigenvalues (sorted descending)
             - max_eigenvalue: Largest eigenvalue (sharpness indicator)
-            - trace_estimate: Estimated trace (sum of all eigenvalues)
+            - sum_top_k_eigenvalues: Sum of top K eigenvalues (NOT the trace!)
+            - top_k_spectral_ratio: λ_1 / λ_k (NOT true condition number!)
         """
         logging.info(f"Computing top {top_k} Hessian eigenvalues...")
         
@@ -104,12 +113,23 @@ class HessianAnalyzer:
         else:
             eigs = np.asarray(eigenvalues, dtype=float)
 
+        # GAP 60 & 61 FIX: Use mathematically accurate metric names
         return {
             'eigenvalues': eigs,
             'max_eigenvalue': float(eigs[0]) if eigs.size > 0 else 0.0,
-            'min_eigenvalue': float(eigs[-1]) if eigs.size > 0 else 0.0,
-            'condition_number': float(eigs[0] / eigs[-1]) if eigs.size > 1 and eigs[-1] != 0 else float('inf'),
-            'trace_estimate': float(np.sum(eigs))
+            'min_top_k_eigenvalue': float(eigs[-1]) if eigs.size > 0 else 0.0,
+            # GAP 61 FIX: This is NOT the true condition number!
+            # True κ = λ_max / λ_min requires finding the smallest eigenvalue
+            # which needs Inverse Power Iteration. We only have top K.
+            'top_k_spectral_ratio': float(eigs[0] / eigs[-1]) if eigs.size > 1 and eigs[-1] != 0 else float('inf'),
+            # GAP 60 FIX: This is NOT the trace (sum of ALL eigenvalues)!
+            # Trace would require O(n) eigenvalue computations.
+            'sum_top_k_eigenvalues': float(np.sum(eigs)),
+            # For backwards compatibility, keep old names but with warnings in docstring
+            'condition_number': float(eigs[0] / eigs[-1]) if eigs.size > 1 and eigs[-1] != 0 else float('inf'),  # DEPRECATED: Use top_k_spectral_ratio
+            'trace_estimate': float(np.sum(eigs)),  # DEPRECATED: Use sum_top_k_eigenvalues
+            'num_params': num_params,
+            'top_k': top_k
         }
     
     def _power_iteration_eigenvalues(self, 

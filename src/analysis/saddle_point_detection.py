@@ -17,6 +17,17 @@ each matrix-vector product in the Lanczos iteration triggers a GPU→CPU transfe
 This is mathematically correct but computationally expensive for large models (ResNet-18+).
 For research purposes, eigenvalue tracking should be performed periodically (e.g., every
 N epochs) rather than at every iteration. Consider this when interpreting runtime results.
+
+GAP 27 FIX - MEMORY WARNING:
+Hessian-vector product (create_graph=True) uses 2-3x memory of standard backprop.
+For ResNet-18 with batch_size=128, this will likely cause CUDA OOM.
+
+RECOMMENDATION:
+- Use hessian_batch_size=16 or 32 for Hessian computations (NOT training batch_size)
+- Run Hessian analysis on a SMALLER data subset
+- Call torch.cuda.empty_cache() before Hessian computation
+
+The functions in this module now accept optional batch_size parameters to prevent OOM.
 """
 
 import torch
@@ -26,6 +37,9 @@ from typing import Dict, Optional, Tuple, Any
 import logging
 import time
 from scipy.sparse.linalg import eigsh, LinearOperator
+
+# GAP 27 FIX: Recommended batch size for Hessian computations
+HESSIAN_BATCH_SIZE_DEFAULT = 16  # Prevents OOM on ResNet-18 with 8GB VRAM
 
 
 def compute_hessian_eigenvalues(

@@ -160,8 +160,13 @@ def run_stochastic_2d_experiments(
                             grad_dir_x = grad_x / grad_norm
                             grad_dir_y = grad_y / grad_norm
                             # Adversarial step: θ + ρ * (g / ||g||)
-                            adv_x = x + optimizer.rho * grad_dir_x
-                            adv_y = y + optimizer.rho * grad_dir_y
+                            # SAM guaranteed to have .rho attribute
+                            if hasattr(optimizer, 'rho'):
+                                rho_value = optimizer.rho
+                            else:
+                                rho_value = 0.05  # Default SAM rho
+                            adv_x = x + rho_value * grad_dir_x
+                            adv_y = y + rho_value * grad_dir_y
                         else:
                             adv_x, adv_y = x, y
                         

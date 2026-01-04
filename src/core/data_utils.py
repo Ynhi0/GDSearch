@@ -220,7 +220,7 @@ def get_mnist_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optiona
         return train_loader, test_loader
 
 
-def get_cifar10_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optional[int] = None, val_split: Optional[float] = None) -> Tuple[DataLoader, ...]:
+def get_cifar10_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optional[int] = None, val_split: Optional[float] = None, augment: bool = True) -> Tuple[DataLoader, ...]:
     """
     Create train and test DataLoaders for CIFAR-10.
     Normalization uses CIFAR-10 mean/std.
@@ -231,6 +231,15 @@ def get_cifar10_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optio
         num_workers: Number of worker threads
         seed: Random seed for reproducibility
         val_split: If provided, fraction of training data to use for validation (e.g., 0.1 for 10%)
+        augment: If True, apply RandomCrop and RandomFlip to training data (default: True)
+                 GAP 21 FIX: Set to False for pure optimization experiments to avoid
+                 the "augmentation noise" confounding variable. Augmentation creates
+                 a shifting objective F(x) = E[f(Aug(x))], which prevents interpolation
+                 and causes empirical loss to flatten at a noise floor, invalidating
+                 comparison with deterministic convergence theory (O(1/k), etc.).
+                 
+                 RECOMMENDATION: Use augment=False for "Theory vs. Practice" comparisons.
+                 Use augment=True for generalization experiments.
         
     Returns:
         If val_split is None: (train_loader, test_loader)
@@ -243,12 +252,22 @@ def get_cifar10_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optio
     mean = (0.4914, 0.4822, 0.4465)
     std = (0.2470, 0.2435, 0.2616)
 
-    transform_train = transforms.Compose([
-        transforms.RandomHorizontalFlip(),
-        transforms.RandomCrop(32, padding=4),
-        transforms.ToTensor(),
-        transforms.Normalize(mean, std),
-    ])
+    # GAP 21 FIX: Conditional augmentation for scientific rigor
+    if augment:
+        # Standard augmentation for generalization experiments
+        transform_train = transforms.Compose([
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomCrop(32, padding=4),
+            transforms.ToTensor(),
+            transforms.Normalize(mean, std),
+        ])
+    else:
+        # NO augmentation - pure optimization on fixed objective
+        # Critical for validating theoretical convergence bounds
+        transform_train = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(mean, std),
+        ])
 
     transform_test = transforms.Compose([
         transforms.ToTensor(),
@@ -391,11 +410,18 @@ def get_cifar10_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optio
         return train_loader, test_loader
 
 
-def get_cifar100_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optional[int] = None, val_split: Optional[float] = None):
+def get_cifar100_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optional[int] = None, val_split: Optional[float] = None, augment: bool = True):
     """
     Create train and test DataLoaders for CIFAR-100.
     Normalization uses CIFAR-100 mean/std.
     If seed is provided, DataLoader workers and RNG are seeded for determinism.
+    
+    Args:
+        batch_size: Batch size
+        num_workers: Number of workers
+        seed: Random seed
+        val_split: Validation split fraction
+        augment: If True, apply augmentation (default). Set False for pure optimization experiments (Gap 21)
     
     Returns:
         If val_split is None: (train_loader, test_loader)
@@ -403,12 +429,19 @@ def get_cifar100_loaders(batch_size: int = 128, num_workers: int = 2, seed: Opti
     """
     data_root = get_data_root()
     
-    transform_train = transforms.Compose([
-        transforms.RandomCrop(32, padding=4),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize((0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761)),
-    ])
+    # GAP 21 FIX: Conditional augmentation
+    if augment:
+        transform_train = transforms.Compose([
+            transforms.RandomCrop(32, padding=4),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize((0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761)),
+        ])
+    else:
+        transform_train = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761)),
+        ])
     
     transform_test = transforms.Compose([
         transforms.ToTensor(),

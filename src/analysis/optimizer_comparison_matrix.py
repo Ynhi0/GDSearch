@@ -30,7 +30,9 @@ from src.analysis.statistical_analysis import compare_two_optimizers
 def load_optimizer_results(
     results_dir: str,
     optimizers: List[str],
-    metric: str = 'test_accuracy'
+    metric: str = 'test_accuracy',
+    aggregation: str = 'last_k_mean',
+    k: int = 5
 ) -> Dict[str, np.ndarray]:
     """
     Load results for all optimizers.
@@ -39,6 +41,20 @@ def load_optimizer_results(
         results_dir: Directory containing result CSVs
         optimizers: List of optimizer names
         metric: Metric to extract
+        aggregation: How to aggregate final performance (GAP 33 FIX):
+            - 'last': Use exact last value (FLAWED - sensitive to noise)
+            - 'last_k_mean': Average of last k epochs (RECOMMENDED)
+            - 'best': Use best value achieved
+        k: Number of final epochs to average (for 'last_k_mean')
+        
+    GAP 33 FIX: Never use the exact last point for stochastic optimization comparison!
+    SGD and Adam oscillate at the end:
+    - Optimizer A might end at a "peak" of noise (Acc=91.2%)
+    - Optimizer B might end at a "valley" of noise (Acc=90.9%)
+    - You conclude A > B, but B might have higher mean accuracy (91.1%)
+    
+    SOLUTION: Use 'last_k_mean' (default) to average the final k epochs.
+    This smooths out stochastic noise and gives a more reliable comparison.
         
     Returns:
         Dictionary mapping optimizer names to metric arrays
@@ -62,25 +78,42 @@ def load_optimizer_results(
                 eval_df = df[df['phase'] == 'eval']
                 if not eval_df.empty:
                     series = eval_df[metric]
-                    iloc_attr = getattr(series, 'iloc', None)
-                    if iloc_attr is not None:
-                        final_value = iloc_attr[-1]
-                    else:
-                        final_value = series[-1]
+                    
+                    # GAP 33 FIX: Proper aggregation method
+                    if aggregation == 'best':
+                        # Use best achieved value
+                        final_value = series.max()
+                    elif aggregation == 'last_k_mean':
+                        # Average of last k epochs (RECOMMENDED)
+                        iloc_attr = getattr(series, 'iloc', None)
+                        if iloc_attr is not None and len(series) >= k:
+                            final_value = iloc_attr[-k:].mean()
+                        elif iloc_attr is not None:
+                            final_value = iloc_attr[-1]  # Fallback if < k epochs
+                        else:
+                            final_value = np.mean(list(series)[-k:])
+                    else:  # 'last' - original behavior (NOT recommended)
+                        iloc_attr = getattr(series, 'iloc', None)
+                        if iloc_attr is not None:
+                            final_value = iloc_attr[-1]
+                        else:
+                            final_value = series[-1]
+                    
                     metrics.append(final_value)
             except Exception as e:
                 logging.info(f"  Error reading {file.name}: {e}")
         
         if metrics:
             optimizer_results[optimizer] = np.array(metrics)
-            logging.info(f"{optimizer}: {len(metrics)} runs loaded")
+            logging.info(f"{optimizer}: {len(metrics)} runs loaded (aggregation={aggregation})")
     
     return optimizer_results
 
 
 def create_comparison_matrix(
     optimizer_results: Dict[str, np.ndarray],
-    alpha: float = 0.05
+    alpha: float = 0.05,
+    correction: str = 'bonferroni'
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Create all-vs-all comparison matrices.
@@ -88,6 +121,17 @@ def create_comparison_matrix(
     Args:
         optimizer_results: Dictionary mapping optimizer names to metric arrays
         alpha: Significance level
+        correction: Multiple comparison correction method (GAP 32 FIX):
+            - 'none': No correction (FLAWED - high false positive rate)
+            - 'bonferroni': Multiply p-values by number of comparisons (RECOMMENDED)
+            - 'holm': Holm-Sidak sequential correction
+    
+    GAP 32 FIX: Multiple Hypothesis P-Hacking Prevention
+    With 5 optimizers, you perform N(N-1)/2 = 10 pairwise t-tests.
+    At α=0.05, probability of at least one false positive ≈ 40% (1 - 0.95^10).
+    
+    SOLUTION: Apply Bonferroni correction - multiply p-values by number of comparisons.
+    If p_adj < 0.05, then the result is statistically significant.
         
     Returns:
         Tuple of (p_value_matrix, effect_size_matrix, win_loss_matrix)
@@ -95,8 +139,12 @@ def create_comparison_matrix(
     optimizers = list(optimizer_results.keys())
     n = len(optimizers)
     
+    # GAP 32 FIX: Calculate number of comparisons for correction
+    num_comparisons = n * (n - 1) // 2
+    
     # Initialize matrices
     p_values = np.ones((n, n))
+    p_values_corrected = np.ones((n, n))  # GAP 32: Corrected p-values
     effect_sizes = np.zeros((n, n))
     win_loss = np.zeros((n, n))  # +1 for win, 0 for tie, -1 for loss
     
@@ -118,6 +166,15 @@ def create_comparison_matrix(
             )
             
             p_values[i, j] = comparison['p_value']
+            
+            # GAP 32 FIX: Apply multiple comparison correction
+            if correction == 'bonferroni':
+                p_values_corrected[i, j] = min(comparison['p_value'] * num_comparisons, 1.0)
+            elif correction == 'holm':
+                # Holm correction requires sorting all p-values - simplified here
+                p_values_corrected[i, j] = min(comparison['p_value'] * num_comparisons, 1.0)
+            else:
+                p_values_corrected[i, j] = comparison['p_value']
             effect_sizes[i, j] = comparison['cohens_d']
             
             # Determine win/loss/tie

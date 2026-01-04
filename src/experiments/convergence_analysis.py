@@ -230,7 +230,20 @@ class ConvergenceAnalyzer:
                     else:
                         return 'superlinear', float(abs(slope))
 
-                # Try sublinear fit: loss ~ c / k
+                # GAP 32 FIX: Test for O(1/√k) convergence (standard non-convex SGD rate)
+                # Standard non-convex SGD theory predicts convergence at rate O(1/√k).
+                # Previously only testing 1/k and linear - missing the theoretically
+                # predicted rate for Neural Networks!
+                inv_iters_sqrt = 1.0 / np.sqrt(iters + 1)
+                slope_sqrt, _, r_value_sqrt, p_value_sqrt, _ = stats.linregress(
+                    inv_iters_sqrt, window_losses
+                )
+                
+                slope_sqrt = self._to_scalar(slope_sqrt)
+                p_value_sqrt = self._to_scalar(p_value_sqrt)
+                r_value_sqrt = self._to_scalar(r_value_sqrt)
+                
+                # Try standard sublinear fit: loss ~ c / k (convex rate)
                 inv_iters = 1.0 / (iters + 1)
                 slope_sub, _, r_value_sub, p_value_sub, _ = stats.linregress(
                     inv_iters, window_losses
@@ -240,7 +253,16 @@ class ConvergenceAnalyzer:
                 p_value_sub = self._to_scalar(p_value_sub)
                 r_value_sub = self._to_scalar(r_value_sub)
 
-                if p_value_sub < 0.05 and r_value_sub**2 > 0.7:
+                # GAP 32 FIX: Choose best fitting rate model
+                # Compare R² values to determine which rate fits best
+                r2_sqrt = r_value_sqrt ** 2 if p_value_sqrt < 0.05 else 0.0
+                r2_sub = r_value_sub ** 2 if p_value_sub < 0.05 else 0.0
+                
+                if r2_sqrt > r2_sub and r2_sqrt > 0.7:
+                    # O(1/√k) fits best - standard non-convex SGD rate
+                    return 'root_sublinear', float(abs(slope_sqrt))
+                elif r2_sub > 0.7:
+                    # O(1/k) fits best - convex rate
                     return 'sublinear', float(abs(slope_sub))
                 
         except Exception as e:
@@ -413,16 +435,32 @@ class ConvergenceAnalyzer:
 def analyze_non_convex_convergence(
     results_df: pd.DataFrame,
     optimizer_col: str = 'optimizer',
-    loss_col: str = 'test_loss',
+    loss_col: str = 'train_loss',  # GAP 38 FIX: Default to train_loss, not test_loss
     seed_col: str = 'seed'
 ) -> pd.DataFrame:
     """
     Analyze convergence for non-convex problems from experiment results.
     
+    GAP 38 FIX - Optimization vs Generalization:
+        Convergence rate analysis MUST use TRAINING loss, not test loss.
+        
+        Scientific reasoning:
+        - Optimization: Study of minimizing the Training Loss f(θ)
+        - Generalization: Study of minimizing the Test Loss (held-out data)
+        
+        Using test_loss for convergence rate is scientifically incorrect because:
+        1. A fast optimizer drives train_loss → 0 quickly (fast convergence)
+        2. But may overfit, causing test_loss to increase (apparent "divergence")
+        3. Measuring speed on test_loss penalizes the optimizer for doing its job
+        
+        Correct approach:
+        - Convergence Rate: Analyze on train_loss
+        - Final Quality: Report on test_loss separately
+        
     Args:
         results_df: DataFrame with experiment results
         optimizer_col: Column name for optimizer
-        loss_col: Column name for loss values
+        loss_col: Column name for loss values (default: 'train_loss')
         seed_col: Column name for seed
         
     Returns:

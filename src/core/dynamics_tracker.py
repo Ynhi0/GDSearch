@@ -123,11 +123,24 @@ class TrainingDynamicsTracker:
         lr = optimizer.param_groups[0]['lr']
         self.learning_rates.append(lr)
         
-        # Estimate update magnitude (before optimizer step)
-        # For SGD: update = lr * grad
-        # For Adam: update ≈ lr * grad (approximation)
-        update_mag = lr * grad_norm
-        self.update_magnitudes.append(update_mag)
+        # GAP 31 FIX: Compute ACTUAL update magnitude, not SGD approximation
+        # 
+        # PROBLEM: The formula "update_mag = lr * grad_norm" is only valid for vanilla SGD.
+        # For Adam/RMSProp, the actual update is: Δθ = lr * m / (√v + ε)
+        # where m ≈ grad and v ≈ grad². This normalizes gradients, so ||Δθ|| ≈ lr * √N_params
+        # (independent of grad_norm!)
+        # 
+        # SOLUTION: Use actual parameter change ||θ_t - θ_{t-1}|| computed below
+        # instead of the theoretical SGD formula.
+        #
+        # We store both for comparison:
+        # - sgd_update_estimate: lr * grad_norm (theoretical SGD step)
+        # - actual_step_size: ||θ_t - θ_{t-1}|| (true parameter change)
+        #
+        # For Adam, actual_step_size stays relatively constant while sgd_update_estimate
+        # shrinks with gradient norm - this is the key difference!
+        sgd_update_estimate = lr * grad_norm
+        self.update_magnitudes.append(sgd_update_estimate)  # Keep for backward compat
         
         # Compute distance from initialization
         if self.initial_params is not None:
@@ -138,13 +151,22 @@ class TrainingDynamicsTracker:
             distance = torch.norm(current_params - self.initial_params).item()
             self.param_distances.append(distance)
             
-            # Compute normalized speed (removes LR scheduler confounding)
+            # GAP 31 FIX: Compute ACTUAL step distance (true update magnitude)
+            # This is the correct metric for ALL optimizers including Adam
             if self.prev_params is not None and lr > 0:
                 step_distance = torch.norm(current_params - self.prev_params).item()
                 normalized_speed = step_distance / lr  # Distance per unit LR
                 self.normalized_speeds.append(normalized_speed)
+                
+                # Store actual step size (GAP 31 critical fix)
+                if not hasattr(self, 'actual_step_sizes'):
+                    self.actual_step_sizes = []
+                self.actual_step_sizes.append(step_distance)
             else:
                 self.normalized_speeds.append(0.0)
+                if not hasattr(self, 'actual_step_sizes'):
+                    self.actual_step_sizes = []
+                self.actual_step_sizes.append(0.0)
             
             self.prev_params = current_params.clone()
         else:

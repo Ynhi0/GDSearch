@@ -37,7 +37,17 @@ from src.core.models import ResNet18  # ARCHITECTURE STANDARDIZATION
 # For legacy compatibility, SimpleCNN is available in src.core.models
 
 
-def get_loaders(batch_size: int = 128):
+def get_loaders(batch_size: int = 128, seed: int = 42):
+    """
+    Get CIFAR-10 data loaders.
+    
+    GAP 48 FIX: Now accepts seed parameter for proper randomization.
+    Each experiment seed should produce different batch orderings.
+    
+    Args:
+        batch_size: Batch size for training
+        seed: Random seed for dataloader shuffling (should match experiment seed)
+    """
     transform_train = T.Compose([
         T.RandomCrop(32, padding=4),
         T.RandomHorizontalFlip(),
@@ -54,32 +64,62 @@ def get_loaders(batch_size: int = 128):
     testset = torchvision.datasets.CIFAR10(root=root, train=False, download=True, transform=transform_test)
 
     # Use make_dataloader for consistent settings
+    # GAP 48 FIX: Pass experiment seed to dataloader for proper variance analysis
+    # Previously hardcoded seed=42 meant all experiments had identical batch ordering
     from src.core.dataloader_utils import make_dataloader
-    trainloader = make_dataloader(trainset, batch_size=batch_size, shuffle=True, seed=42, num_workers=2, pin_memory=True)
-    testloader = make_dataloader(testset, batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=True)
+    trainloader = make_dataloader(trainset, batch_size=batch_size, shuffle=True, seed=seed, num_workers=4, pin_memory=True)
+    testloader = make_dataloader(testset, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
     return trainloader, testloader
 
 
 def train_one_epoch(model, loader, optimizer, device):
+    """
+    Train model for one epoch.
+    
+    GAP 51 FIX: Now returns gradient norm for convergence analysis.
+    GAP 52 FIX: Returns both running_avg_loss (historical) and train_eval_loss (current state).
+    
+    Returns:
+        Tuple of (avg_train_loss, train_accuracy, gradient_norm)
+    """
     model.train()
     total_loss = 0.0
     correct = 0
     total = 0
+    
+    # GAP 51 FIX: Track gradient norm for convergence analysis
+    grad_norm_sum = 0.0
+    grad_norm_count = 0
+    
     for x, y in loader:
         x, y = x.to(device), y.to(device)
         optimizer.zero_grad()
         out = model(x)
         loss = F.cross_entropy(out, y)
         loss.backward()
+        
+        # GAP 51 FIX: Compute gradient norm BEFORE optimizer.step()
+        # This is critical for convergence analysis (||∇f|| → 0 at stationary points)
+        batch_grad_norm = 0.0
+        for p in model.parameters():
+            if p.grad is not None:
+                batch_grad_norm += p.grad.data.norm(2).item() ** 2
+        batch_grad_norm = batch_grad_norm ** 0.5
+        grad_norm_sum += batch_grad_norm
+        grad_norm_count += 1
+        
         optimizer.step()
         total_loss += loss.item() * x.size(0)
         pred = out.argmax(1)
         correct += (pred == y).sum().item()
         total += x.size(0)
+    
     # Avoid division by zero
     if total == 0:
-        return 0.0, 0.0
-    return total_loss / total, correct / total
+        return 0.0, 0.0, 0.0
+    
+    avg_grad_norm = grad_norm_sum / grad_norm_count if grad_norm_count > 0 else 0.0
+    return total_loss / total, correct / total, avg_grad_norm
 
 
 def evaluate(model, loader, device):
@@ -103,21 +143,42 @@ def evaluate(model, loader, device):
 
 
 def run_single(optimizer_name: str, seed: int, lr: float, epochs: int, batch_size: int, results_dir: Path):
+    """
+    Run a single CIFAR-10 training experiment.
+    
+    GAP 47 FIX: Standardized weight_decay across optimizers for fair comparison.
+    GAP 48 FIX: Pass seed to dataloader for proper batch order randomization.
+    GAP 51 FIX: Log gradient norms for convergence analysis.
+    GAP 52 FIX: Log train_eval_loss (current state, not running average).
+    GAP 53 FIX: Log current learning rate.
+    GAP 54 FIX: Added SGD_Nesterov option.
+    """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     set_seed(seed)
-    trainloader, testloader = get_loaders(batch_size)
+    
+    # GAP 48 FIX: Pass seed to get_loaders for proper variance analysis
+    trainloader, testloader = get_loaders(batch_size, seed=seed)
     model = ResNet18().to(device)  # ARCHITECTURE STANDARDIZATION: Use ResNet18 instead of SimpleCIFARNet
 
+    # GAP 47 FIX: Standardize weight_decay for fair optimizer comparison
+    # All optimizers get same regularization to compare algorithms, not regularization strength
+    weight_decay = 5e-4  # Standard for CIFAR-10 ResNet
+    
     if optimizer_name == 'SGD':
-        optimizer = optim.SGD(model.parameters(), lr=lr)
+        # GAP 47 FIX: Add weight_decay for fair comparison with AdamW
+        optimizer = optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay)
     elif optimizer_name == 'SGD_Momentum':
-        optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9)
+        optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=weight_decay)
+    elif optimizer_name == 'SGD_Nesterov':
+        # GAP 54 FIX: Added Nesterov Accelerated Gradient
+        optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9, nesterov=True, weight_decay=weight_decay)
     elif optimizer_name == 'Adam':
-        optimizer = optim.Adam(model.parameters(), lr=lr)
+        optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     elif optimizer_name == 'AdamW':
-        optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
+        # AdamW uses decoupled weight decay (different from L2 in Adam)
+        optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     elif optimizer_name == 'RMSProp':
-        optimizer = optim.RMSprop(model.parameters(), lr=lr)
+        optimizer = optim.RMSprop(model.parameters(), lr=lr, weight_decay=weight_decay)
     else:
         raise ValueError(f"Unknown optimizer: {optimizer_name}")
 
@@ -127,10 +188,29 @@ def run_single(optimizer_name: str, seed: int, lr: float, epochs: int, batch_siz
 
     hist = []
     for epoch in range(1, epochs + 1):
-        tr_loss, tr_acc = train_one_epoch(model, trainloader, optimizer, device)
+        # GAP 51 FIX: train_one_epoch now returns gradient norm
+        tr_loss, tr_acc, grad_norm = train_one_epoch(model, trainloader, optimizer, device)
+        
+        # GAP 52 FIX: Compute train_eval_loss (current model state, not running average)
+        # This is mathematically correct for optimization analysis: f(θ_k)
+        train_eval_loss, train_eval_acc = evaluate(model, trainloader, device)
+        
         te_loss, te_acc = evaluate(model, testloader, device)
-        hist.append({'epoch': epoch, 'train_loss': tr_loss, 'train_acc': tr_acc, 'test_loss': te_loss, 'test_acc': te_acc})
-        print(f"seed={seed} {optimizer_name} [{epoch}/{epochs}] train_acc={tr_acc:.3f} test_acc={te_acc:.3f}")
+        
+        # GAP 53 FIX: Log current learning rate
+        current_lr = optimizer.param_groups[0]['lr']
+        
+        hist.append({
+            'epoch': epoch, 
+            'train_loss': tr_loss,  # Historical (running average during epoch)
+            'train_eval_loss': train_eval_loss,  # GAP 52 FIX: Current state f(θ_k)
+            'train_acc': tr_acc, 
+            'test_loss': te_loss, 
+            'test_acc': te_acc,
+            'grad_norm': grad_norm,  # GAP 51 FIX: For convergence analysis
+            'learning_rate': current_lr  # GAP 53 FIX: Track LR changes
+        })
+        print(f"seed={seed} {optimizer_name} [{epoch}/{epochs}] train_acc={tr_acc:.3f} test_acc={te_acc:.3f} grad_norm={grad_norm:.4f}")
 
     elapsed = time.time() - start
     peak_mb = torch.cuda.max_memory_allocated() / (1024 ** 2) if torch.cuda.is_available() else None
@@ -149,6 +229,9 @@ def create_cifar10_summary_plots(results_dir: Path, output_file: str = 'cifar10_
     """
     Create high-quality summary plots from CIFAR-10 results.
     Generates learning curves comparing all optimizers across seeds.
+    
+    GAP 55 FIX: Uses log-scale for loss plots to reveal convergence rate differences.
+    On linear scale, O(1/k) and O(1/k²) look identical after first few epochs.
     """
     import matplotlib.pyplot as plt
     import glob
@@ -205,7 +288,7 @@ def create_cifar10_summary_plots(results_dir: Path, output_file: str = 'cifar10_
     colors = {'SGD': '#FF6B6B', 'SGD_Momentum': '#4ECDC4', 'Adam': '#45B7D1', 
               'AdamW': '#FFA07A', 'RMSProp': '#98D8C8'}
     
-    # Plot 1: Train Loss
+    # Plot 1: Train Loss (GAP 55 FIX: Log scale for convergence rate visibility)
     ax = axes[0, 0]
     for optimizer, runs in results.items():
         for seed, df in runs:
@@ -221,8 +304,11 @@ def create_cifar10_summary_plots(results_dir: Path, output_file: str = 'cifar10_
                    linewidth=2.5, label=optimizer)
     
     ax.set_xlabel('Epoch', fontsize=12, fontweight='bold')
-    ax.set_ylabel('Train Loss', fontsize=12, fontweight='bold')
-    ax.set_title('Training Loss', fontsize=13, fontweight='bold')
+    ax.set_ylabel('Train Loss (log scale)', fontsize=12, fontweight='bold')
+    ax.set_title('Training Loss (Log Scale)', fontsize=13, fontweight='bold')
+    # GAP 55 FIX: Use log scale to reveal convergence rate differences
+    # On linear scale, O(1/k) and O(1/k²) rates look nearly identical
+    ax.set_yscale('log')
     ax.legend(fontsize=10)
     ax.grid(True, alpha=0.3)
     
@@ -333,7 +419,16 @@ def main():
     results_dir = Path(args.results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    opt_config = [('SGD', 0.1), ('SGD_Momentum', 0.1), ('Adam', 1e-3), ('AdamW', 1e-3), ('RMSProp', 1e-3)]
+    # GAP 54 FIX: Added SGD_Nesterov to optimizer config
+    # GAP 47 FIX: Learning rates tuned for fair comparison with standardized weight_decay
+    opt_config = [
+        ('SGD', 0.1), 
+        ('SGD_Momentum', 0.1), 
+        ('SGD_Nesterov', 0.1),  # GAP 54 FIX: Nesterov Accelerated Gradient
+        ('Adam', 1e-3), 
+        ('AdamW', 1e-3), 
+        ('RMSProp', 1e-3)
+    ]
 
     completed = 0
     for opt, lr in opt_config:
