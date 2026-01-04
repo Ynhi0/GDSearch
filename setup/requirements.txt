@@ -24,8 +24,9 @@ scipy==1.14.1  # PINNED: Numerical computing
 # ============================================================================
 # DEEP LEARNING STACK - PINNED
 # ============================================================================
-torch==2.6.0  # PINNED: Optimizer behavior varies between versions
-torchvision==0.20.0  # PINNED: Must match torch version
+torch>=2.6.0,<3.0.0  # Loosened to allow compatible PyTorch wheels across platforms (>=2.6)
+# Allow torchvision range so pip can resolve a version compatible with the selected torch
+torchvision>=0.20.0,<0.25.0  # Must be compatible with selected torch version
 torchtext==0.18.0; python_version < '3.13'  # PINNED: NLP support (not available for py3.13)
 
 # ============================================================================

@@ -180,9 +180,11 @@ def run_optimizer_ablation(
         ('Adam', Adam(lr=lr_map.get('Adam', lr_map.get('default', 0.01)), beta1=0.9, beta2=0.999)),
         ('AdamW', AdamW(lr=lr_map.get('AdamW', lr_map.get('default', 0.01)), beta1=0.9, beta2=0.999, weight_decay=0.01)),
         ('AMSGrad', AMSGrad(lr=lr_map.get('AMSGrad', lr_map.get('default', 0.01)), beta1=0.9, beta2=0.999)),
-        # Add SAM with proper 2D support
-        ('SAM', SAM(lr=lr_map.get('SAM', lr_map.get('default', 0.01)), rho=0.05, base_optimizer='SGD')),
     ]
+
+    # Optional: include SAM only if explicitly requested (preserves legacy test expectations)
+    if 'SAM' in lr_map or use_legacy_unfair:
+        optimizers.append(('SAM', SAM(lr=lr_map.get('SAM', lr_map.get('default', 0.01)), rho=0.05, base_optimizer='SGD')))
     
     # Storage for trajectories
     trajectories: Dict[str, Any] = {}

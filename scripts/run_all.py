@@ -25,11 +25,32 @@ def log(msg: str):
 
 
 def run_command(cmd: str, description: str, check=True):
-    """Run a shell command with logging."""
+    """Run a shell command with logging.
+    
+    WARNING: For security, this function should only be called with trusted, 
+    non-user-provided commands. Consider migrating to list-form subprocess calls.
+    """
     log(f"Starting: {description}")
     log(f"Command: {cmd}")
     start = time.time()
-    result = subprocess.run(cmd, shell=True, check=False)
+    
+    # Convert string command to list form for safer execution
+    # This handles simple cases; complex pipes/redirects may need refactoring
+    if '|' in cmd or '>' in cmd or '&' in cmd:
+        # Complex shell constructs - must use shell=True but warn
+        log("⚠️  WARNING: Using shell=True for complex command with pipes/redirects")
+        result = subprocess.run(cmd, shell=True, check=False)
+    else:
+        # Simple command - split on whitespace for safer execution
+        import shlex
+        try:
+            cmd_list = shlex.split(cmd)
+            result = subprocess.run(cmd_list, check=False)
+        except (ValueError, OSError) as e:
+            # Fallback to shell=True if parsing fails, but log warning
+            log(f"⚠️  WARNING: Failed to parse command safely ({e}), using shell=True")
+            result = subprocess.run(cmd, shell=True, check=False)
+    
     elapsed = time.time() - start
     if result.returncode != 0:
         log(f"⚠️  Warning: {description} failed with exit code {result.returncode}")

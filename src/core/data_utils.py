@@ -11,12 +11,35 @@ from torch.utils.data import DataLoader, random_split, Subset
 from torchvision import datasets, transforms
 
 
+class TransformedSubset(torch.utils.data.Dataset):
+    """Subset with explicit transform (picklable by multiprocessing).
+
+    This mirrors `torch.utils.data.Subset` but applies `transform` on the fly
+    and stores indices as a plain list to ensure picklability.
+    """
+    def __init__(self, base_dataset, indices, transform):
+        self.base_dataset = base_dataset
+        # Ensure indices is a concrete list for pickling IPC
+        self.indices = list(indices)
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.indices)
+
+    def __getitem__(self, idx):
+        real_idx = self.indices[idx]
+        img, label = self.base_dataset[real_idx]
+        if self.transform:
+            img = self.transform(img)
+        return img, label
+
+
 def get_data_root() -> str:
     """Get data root directory from environment or use default."""
     return os.environ.get('DATA_ROOT', './data')
 
 
-def get_mnist_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optional[int] = None, val_split: Optional[float] = None) -> Tuple[DataLoader, ...]:
+def get_mnist_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optional[int] = None, val_split: Optional[float] = None, to_rgb: bool = False) -> Tuple[DataLoader, ...]:
     """
     Create train and test DataLoaders for MNIST.
     Normalization uses standard MNIST mean/std.
@@ -36,15 +59,32 @@ def get_mnist_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optiona
     import platform
     if platform.system() == 'Windows':
         num_workers = 0
-    transform_train = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,)),
-    ])
+    if to_rgb:
+        # Convert MNIST PIL image (L mode) to 3-channel by applying Grayscale with
+        # `num_output_channels=3` before ToTensor. This avoids using lambdas which are
+        # not picklable by multiprocessing workers.
+        transform_train = transforms.Compose([
+            transforms.Grayscale(num_output_channels=3),
+            transforms.ToTensor(),
+            transforms.Normalize((0.1307, 0.1307, 0.1307), (0.3081, 0.3081, 0.3081)),
+        ])
 
-    transform_test = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,)),
-    ])
+        transform_test = transforms.Compose([
+            transforms.Grayscale(num_output_channels=3),
+            transforms.ToTensor(),
+            transforms.Normalize((0.1307, 0.1307, 0.1307), (0.3081, 0.3081, 0.3081)),
+        ])
+    else:
+        # Default behavior: single-channel MNIST transforms
+        transform_train = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.1307,), (0.3081,)),
+        ])
+
+        transform_test = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.1307,), (0.3081,)),
+        ])
 
     data_root = get_data_root()
     full_train_dataset = datasets.MNIST(root=data_root, train=True, download=True, transform=transform_train)
@@ -94,24 +134,8 @@ def get_mnist_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optiona
         # Create base dataset without transform for index access
         base_train_dataset = datasets.MNIST(root=data_root, train=True, download=True, transform=None)
         
-        # Wrap with transforms AFTER split to prevent augmentation leakage
-        class TransformedSubset(torch.utils.data.Dataset):
-            """Subset with explicit transform (prevents augmentation leakage to validation)."""
-            def __init__(self, base_dataset, indices, transform):
-                self.base_dataset = base_dataset
-                self.indices = list(indices)
-                self.transform = transform
-            
-            def __len__(self):
-                return len(self.indices)
-            
-            def __getitem__(self, idx):
-                real_idx = self.indices[idx]
-                img, label = self.base_dataset[real_idx]
-                if self.transform:
-                    img = self.transform(img)
-                return img, label
-        
+        # Use top-level TransformedSubset (picklable) to avoid multiprocessing
+        # pickling errors when DataLoader uses worker processes.
         # Apply TRAINING transform to train split (with augmentation if any)
         train_dataset = TransformedSubset(base_train_dataset, train_idx_subset.indices, transform_train)
         
@@ -280,27 +304,11 @@ def get_cifar10_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optio
         # Create base dataset without transform for index access
         base_train_dataset = datasets.CIFAR10(root=data_root, train=True, download=True, transform=None)
         
-        # Wrap with transforms AFTER split to prevent augmentation leakage
-        class TransformedSubset(torch.utils.data.Dataset):
-            """Subset with explicit transform (prevents augmentation leakage to validation)."""
-            def __init__(self, base_dataset, indices, transform):
-                self.base_dataset = base_dataset
-                self.indices = list(indices)
-                self.transform = transform
-            
-            def __len__(self):
-                return len(self.indices)
-            
-            def __getitem__(self, idx):
-                real_idx = self.indices[idx]
-                img, label = self.base_dataset[real_idx]
-                if self.transform:
-                    img = self.transform(img)
-                return img, label
-        
+        # Use top-level TransformedSubset (picklable) to avoid multiprocessing
+        # pickling errors when DataLoader uses worker processes.
         # Apply TRAINING transform to train split (WITH RandomCrop and RandomFlip)
         train_dataset = TransformedSubset(base_train_dataset, train_idx_subset.indices, transform_train)
-        
+
         # Apply TEST transform to validation split (NO augmentation - clean deterministic data)
         # This ensures validation loss is stable and reflects true performance
         val_dataset = TransformedSubset(base_train_dataset, val_idx_subset.indices, transform_test)

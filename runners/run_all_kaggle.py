@@ -449,6 +449,7 @@ try:
     HAS_MLFLOW = True
 except ImportError:
     HAS_MLFLOW = False
+    mlflow = None  # type: ignore[assignment]
     mlflow_pytorch = None
     logging.warning("mlflow not available. Experiment tracking will be limited.")
 

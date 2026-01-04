@@ -17,7 +17,6 @@ def run_command(cmd, description):
     try:
         result = subprocess.run(
             cmd,
-            shell=True,
             capture_output=True,
             text=True,
             timeout=300

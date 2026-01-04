@@ -166,7 +166,7 @@ def oom_safe_train_step(
                 # Set attribute to help downstream checks and log a warning
                 try:
                     setattr(optimizer, 'requires_closure', True)
-            except (AttributeError, TypeError) as e3:
+                except (AttributeError, TypeError) as e3:
                     logging.debug("Could not set requires_closure attribute: %s", e3, exc_info=True)
                 logging.warning("Optimizer appears to be closure-based (LBFGS); setting 'requires_closure=True' for safety.")
 
@@ -177,12 +177,11 @@ def oom_safe_train_step(
                     is_closure_based = True
                     try:
                         setattr(optimizer, 'requires_closure', True)
-                    except (AttributeError, TypeError):
+                    except (AttributeError, TypeError) as e4:
                         logging.debug("Could not set requires_closure attribute for SAM-like optimizer: %s", e4, exc_info=True)
                     logging.warning("Detected SAM-like optimizer (%s): treating as closure-based and disabling OOM retry for safety.", optimizer.__class__.__name__)
-            except Exception:
-                # Non-fatal; continue
-                pass
+            except Exception as e5:
+                logging.debug("Name-based closure detection failed: %s", e5, exc_info=True)
     current_inputs = inputs
     current_targets = targets
     retries = 0

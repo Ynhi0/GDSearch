@@ -8,6 +8,10 @@ env/
 venv/
 ENV/
 .venv
+# Virtual environments (ensure all variants are blocked)
+**/venv/
+**/ENV/
+**/.venv/
 
 # Jupyter
 .ipynb_checkpoints

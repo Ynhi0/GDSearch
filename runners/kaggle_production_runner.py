@@ -377,7 +377,12 @@ def main():
     if args.full:
         logger.info("\nRunning full benchmark suite...")
         logger.info("This will execute run_all_kaggle.py with --ultra-quick flag")
-        os.system("python run_all_kaggle.py --ultra-quick --seeds 42,123 --no-mlflow")
+        result = subprocess.run(
+            [sys.executable, "run_all_kaggle.py", "--ultra-quick", "--seeds", "42,123", "--no-mlflow"],
+            check=False
+        )
+        if result.returncode != 0:
+            logger.error(f"Benchmark suite failed with exit code {result.returncode}")
 
 
 if __name__ == '__main__':

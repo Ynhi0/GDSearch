@@ -32,7 +32,7 @@ def import_optional_nlp_dependencies():
         try:
             import logging  # noqa: F811  # Reimport in exception handler is intentional for robustness
             logging.debug("Optional NLP dependencies unavailable: %s", e, exc_info=True)
-        except Exception:
+        except ImportError:
             print(f"DEBUG: Optional NLP dependencies unavailable: {e}")
         # Mark as unavailable; callers should handle None gracefully
         _optional_modules['transformers'] = None
@@ -85,7 +85,7 @@ from pathlib import Path
 def _int_if_possible(x: Any) -> int:
     try:
         return int(x)
-    except Exception:
+    except (ValueError, TypeError):
         return 0
 
 
@@ -102,7 +102,7 @@ def _safe_len(obj: object) -> int:
     if isinstance(obj, (str, bytes, list, tuple, dict, set, range)):
         try:
             return int(len(obj))
-        except Exception:
+        except (TypeError, AttributeError):
             return 0
 
     # numpy arrays
@@ -111,9 +111,9 @@ def _safe_len(obj: object) -> int:
         if isinstance(obj, _np.ndarray):
             try:
                 return int(obj.size)
-            except Exception:
+            except (TypeError, AttributeError):
                 return 0
-    except Exception:
+    except ImportError:
         pass
 
     # torch tensors
@@ -164,10 +164,10 @@ import random
 from tqdm import tqdm
 import argparse
 import logging
-
-# Configure basic logging for the module
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 import json
+
+# Module-level logger (configured in main())
+logger = logging.getLogger(__name__)
 import psutil
 from contextlib import contextmanager
 
@@ -323,10 +323,11 @@ def canonical_fetch_datasets(dataset_name: str, val_split: float = 0.1, seed: in
         return train_loader.dataset, val_loader.dataset, test_loader.dataset
     else:
         raise ValueError(f"Unsupported dataset for canonical_fetch_datasets: {dataset_name}")
-# -----------------------------------------------------------------------------
-    print(f"{'='*80}\n")
-    raise
 
+
+# -----------------------------------------------------------------------------
+# Training Utilities
+# -----------------------------------------------------------------------------
 
 def check_gradient_health_quick(model, epoch=None, threshold=1e3, context=""):
     """
@@ -481,6 +482,7 @@ try:
     HAS_MLFLOW = True
 except ImportError:
     HAS_MLFLOW = False
+    mlflow = None  # type: ignore[assignment]
     mlflow_pytorch = None
     logging.warning("mlflow not available. Experiment tracking will be limited.")
 
@@ -8003,6 +8005,9 @@ def get_kaggle_t4_config():
 
 def main():
     """Main execution orchestrator with CLI argument parsing"""
+    # Configure logging before any other operations
+    logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+    
     # INTEGRATION FIX (Issue #9): Add reproducibility setup BEFORE any experiments
     # This ensures GPU determinism across all experiment runs
     from src.utils.reproducibility import setup_experiment_reproducibility, warn_if_nondeterministic

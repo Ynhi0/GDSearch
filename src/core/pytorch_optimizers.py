@@ -98,7 +98,7 @@ class SGDWrapper(Optimizer):
                 try:
                     updated_tensor = torch.from_numpy(updated_param.reshape(original_shape))
                     p.data.copy_(updated_tensor.to(original_dtype).to(p.device))
-                except Exception as e:
+                except (RuntimeError, ValueError, TypeError) as e:
                     raise RuntimeError(
                         f"Failed to update parameter with shape {original_shape}, "
                         f"dtype {original_dtype}: {e}"
@@ -365,7 +365,7 @@ class SGDNesterovWrapper(Optimizer):
                 try:
                     updated_tensor = torch.from_numpy(updated_param.reshape(original_shape))
                     p.data.copy_(updated_tensor.to(original_dtype).to(p.device))
-                except Exception as e:
+                except (RuntimeError, ValueError, TypeError) as e:
                     raise RuntimeError(f"Failed to update parameter: {e}") from e
 
         return loss
@@ -466,7 +466,7 @@ class RMSPropWrapper(Optimizer):
                 try:
                     updated_tensor = torch.from_numpy(updated_param.reshape(original_shape))
                     p.data.copy_(updated_tensor.to(original_dtype).to(p.device))
-                except Exception as e:
+                except (RuntimeError, ValueError, TypeError) as e:
                     raise RuntimeError(f"Failed to update parameter: {e}") from e
         
         return loss
@@ -569,7 +569,7 @@ class AdamWWrapper(Optimizer):
                 try:
                     updated_tensor = torch.from_numpy(updated_param.reshape(original_shape))
                     p.data.copy_(updated_tensor.to(original_dtype).to(p.device))
-                except Exception as e:
+                except (RuntimeError, ValueError, TypeError) as e:
                     raise RuntimeError(f"Failed to update parameter: {e}") from e
 
         return loss

@@ -94,31 +94,98 @@ class SimpleMLP(nn.Module):
 
 class SimpleCNN(nn.Module):
     """
-    A simple CNN for CIFAR-10.
-    Architecture: Conv(32)->ReLU->MaxPool -> Conv(64)->ReLU->MaxPool -> FC(128)->ReLU -> FC(10)
+    A simple, configurable CNN compatible with MNIST/CIFAR.
+    Architecture: Conv(in_channels->32)->Act->MaxPool -> Conv(32->64)->Act->MaxPool -> FC(128)->Act -> FC(num_classes)
+
+    Configurable options:
+      - in_channels: number of input channels (1 for MNIST, 3 for CIFAR)
+      - activation: 'relu' | 'tanh' | 'leaky_relu'
+
+    Includes `apply_initialization()` helper used by tests to check initialization methods.
     """
 
-    def __init__(self, num_classes: int = 10):
+    def __init__(self, num_classes: int = 10, in_channels: int = 1, activation: str = 'relu'):
         super().__init__()
+        # Choose activation layer
+        if activation == 'relu':
+            act = nn.ReLU(inplace=True)
+        elif activation == 'tanh':
+            act = nn.Tanh()
+        elif activation == 'leaky_relu':
+            act = nn.LeakyReLU(inplace=True)
+        else:
+            raise ValueError(f"Unsupported activation: {activation}")
+
         self.features = nn.Sequential(
-            nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=2, stride=2),  # 32x16x16
+            nn.Conv2d(in_channels, 32, kernel_size=3, stride=1, padding=1),
+            act,
+            nn.MaxPool2d(kernel_size=2, stride=2),  # -> 32xH/2 xW/2
             nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=2, stride=2),  # 64x8x8
+            act,
+            nn.MaxPool2d(kernel_size=2, stride=2),  # -> 64xH/4 xW/4
         )
+
+        # Use AdaptiveAvgPool2d to make classifier resolution-agnostic
+        self.adaptive_pool = nn.AdaptiveAvgPool2d((1, 1))  # Always produces 64x1x1
         self.classifier = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(64 * 8 * 8, 128),
-            nn.ReLU(inplace=True),
+            nn.Linear(64, 128),
+            act,
             nn.Linear(128, num_classes),
         )
 
+        # Expose commonly referenced layer attributes for tests and initialization helpers
+        self.conv1 = self.features[0]
+        self.conv2 = self.features[3]
+        self.fc1 = self.classifier[1]
+        self.fc2 = self.classifier[3]
+        self.init_layers = [self.conv1, self.conv2, self.fc1]
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.features(x)
+        x = self.adaptive_pool(x)
         x = self.classifier(x)
         return x
+
+    def apply_initialization(self, method: str) -> None:
+        """Apply a named initialization method to Conv2d and Linear layers.
+
+        Supported methods:
+          - 'zero', 'uniform_small', 'normal_small', 'xavier_uniform',
+            'xavier_normal', 'kaiming_uniform', 'kaiming_normal'
+        """
+        for m in self.modules():
+            if isinstance(m, (nn.Conv2d, nn.Linear)):
+                if method == 'zero':
+                    nn.init.constant_(m.weight, 0.0)
+                    if m.bias is not None:
+                        nn.init.constant_(m.bias, 0.0)
+                elif method == 'uniform_small':
+                    nn.init.uniform_(m.weight, -0.01, 0.01)
+                    if m.bias is not None:
+                        nn.init.constant_(m.bias, 0.0)
+                elif method == 'normal_small':
+                    nn.init.normal_(m.weight, mean=0.0, std=0.01)
+                    if m.bias is not None:
+                        nn.init.constant_(m.bias, 0.0)
+                elif method == 'xavier_uniform':
+                    nn.init.xavier_uniform_(m.weight)
+                    if m.bias is not None:
+                        nn.init.constant_(m.bias, 0.0)
+                elif method == 'xavier_normal':
+                    nn.init.xavier_normal_(m.weight)
+                    if m.bias is not None:
+                        nn.init.constant_(m.bias, 0.0)
+                elif method == 'kaiming_uniform':
+                    nn.init.kaiming_uniform_(m.weight, nonlinearity='relu')
+                    if m.bias is not None:
+                        nn.init.constant_(m.bias, 0.0)
+                elif method == 'kaiming_normal':
+                    nn.init.kaiming_normal_(m.weight, nonlinearity='relu')
+                    if m.bias is not None:
+                        nn.init.constant_(m.bias, 0.0)
+                else:
+                    raise ValueError(f"Unknown initialization method: {method}")
 
 
 class ConvNet(nn.Module):
