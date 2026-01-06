@@ -27,20 +27,17 @@ from __future__ import annotations
 import os
 import time
 from pathlib import Path
-from typing import List, Tuple
+import logging
 
 import numpy as np
 import pandas as pd
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.utils.data import DataLoader
 import torchvision
 import torchvision.transforms as T
 import matplotlib
 matplotlib.use('Agg')  # Non-interactive backend
-import matplotlib.pyplot as plt
 from src.core.training_utils import set_seed
 from src.core.models import ResNet18  # ARCHITECTURE STANDARDIZATION
 
@@ -184,7 +181,13 @@ def run_single(optimizer_name: str, seed: int, lr: float, epochs: int, batch_siz
         # GAP 54 FIX: Added Nesterov Accelerated Gradient
         optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9, nesterov=True, weight_decay=weight_decay)
     elif optimizer_name == 'Adam':
-        optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+        # Use AdamW for decoupled weight decay when weight_decay > 0 (Loshchilov & Hutter 2019)
+        # Original Adam couples weight decay with adaptive LR, causing effective regularization
+        # to vary by ~100x across parameters (incorrect behavior)
+        if weight_decay > 0:
+            optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+        else:
+            optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=0)
     elif optimizer_name == 'AdamW':
         # AdamW uses decoupled weight decay (different from L2 in Adam)
         optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
@@ -204,7 +207,7 @@ def run_single(optimizer_name: str, seed: int, lr: float, epochs: int, batch_siz
         
         # GAP 52 FIX: Compute train_eval_loss (current model state, not running average)
         # This is mathematically correct for optimization analysis: f(θ_k)
-        train_eval_loss, train_eval_acc = evaluate(model, trainloader, device)
+        train_eval_loss, _ = evaluate(model, trainloader, device)  # train_eval_acc unused
         
         te_loss, te_acc = evaluate(model, testloader, device)
         
@@ -244,7 +247,7 @@ def create_cifar10_summary_plots(results_dir: Path, output_file: str = 'cifar10_
     GAP 55 FIX: Uses log-scale for loss plots to reveal convergence rate differences.
     On linear scale, O(1/k) and O(1/k²) look identical after first few epochs.
     """
-    import matplotlib.pyplot as plt
+    import matplotlib.pyplot as plt  # Import locally for function use
     import glob
     
     # Find all result CSVs
@@ -447,7 +450,7 @@ def main():
             try:
                 run_single(opt, seed, lr, epochs, batch_size, results_dir)
                 completed += 1
-            except Exception as e:
+            except (RuntimeError, ValueError, OSError) as e:
                 print('Error:', e)
 
     print(f"Completed {completed} runs")
@@ -456,7 +459,7 @@ def main():
     if completed > 0:
         try:
             create_cifar10_summary_plots(results_dir)
-        except Exception as e:
+        except (FileNotFoundError, ValueError, ImportError) as e:
             print(f"Failed to create summary plots: {e}")
 
 

@@ -3,7 +3,7 @@ Run neural network experiments on MNIST and CIFAR-10 with detailed logging.
 """
 import os
 import logging
-from typing import Dict, Any, Tuple, Optional, Union
+from typing import Dict, Any, Tuple, Optional
 import time
 import json
 import uuid
@@ -145,8 +145,13 @@ def build_optimizer(optimizer_name: str, model: torch.nn.Module, lr: float, weig
     elif name == 'ADAM':
         return AdamWrapper(model.parameters(), lr=lr)
     elif name in ('AMSGRAD', 'ADAM_AMSGRAD', 'ADAM_AMS'):
-        # Fallback to PyTorch for AMSGrad (not in custom impl)
-        return optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay, amsgrad=True)
+        # AMSGrad: Use AdamW with amsgrad=True for correct decoupled weight decay
+        # Original Adam couples weight decay with adaptive learning rate (buggy)
+        # AdamW implements correct decoupled weight decay (Loshchilov & Hutter 2019)
+        if weight_decay > 0:
+            return optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay, amsgrad=True)
+        else:
+            return optim.Adam(model.parameters(), lr=lr, weight_decay=0, amsgrad=True)
     elif name == 'ADAMW':
         return AdamWWrapper(model.parameters(), lr=lr, weight_decay=weight_decay)
     elif name == 'RMSPROP':
@@ -425,13 +430,14 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
     df = pd.DataFrame(history)
     # If convergence occurred, annotate once at the end as metadata rows
     if converged_at_step is not None:
-        df.loc[len(df)] = {
+        meta_row = pd.DataFrame([{
             'phase': 'meta',
             'epoch': None,
             'global_step': converged_at_step,
             'converged': True,
             'time_sec': converged_at_time,
-        }
+        }])
+        df = pd.concat([df, meta_row], ignore_index=True)
     return df
 
 

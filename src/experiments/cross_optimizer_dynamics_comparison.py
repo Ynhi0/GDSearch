@@ -101,7 +101,11 @@ def run_single_optimizer_with_dynamics(
             config['momentum'] = config.get('momentum', 0.9)
             optimizer = torch.optim.SGD(model.parameters(), **config)
         elif optimizer_name == 'Adam':
-            optimizer = torch.optim.Adam(model.parameters(), **optimizer_config)
+            # Use AdamW if weight_decay > 0 for correct decoupled weight decay
+            if optimizer_config.get('weight_decay', 0) > 0:
+                optimizer = torch.optim.AdamW(model.parameters(), **optimizer_config)
+            else:
+                optimizer = torch.optim.Adam(model.parameters(), **optimizer_config)
         elif optimizer_name == 'AdamW':
             optimizer = torch.optim.AdamW(model.parameters(), **optimizer_config)
         elif optimizer_name == 'RMSprop':

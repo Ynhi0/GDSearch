@@ -102,7 +102,7 @@ class NoisyLabelDataset(Dataset):
             incorrect_labels = [l for l in range(self.num_classes) if l != original_label]
             noisy_labels[idx] = rng.choice(incorrect_labels)
         
-        logger.info(f"Corrupted {num_corrupt}/{len(labels)} labels ({self.noise_rate*100:.1f}%)")
+        logger.info("Corrupted %d/%d labels (%.1f%%)", num_corrupt, len(labels), self.noise_rate*100)
         return noisy_labels
     
     def __len__(self) -> int:
@@ -314,19 +314,18 @@ def train_with_noisy_labels(
         
         if (epoch + 1) % 10 == 0:
             logger.info(
-                f"[{optimizer_name}] Noise={noise_rate:.1%} Seed={seed} "
-                f"Epoch {epoch+1}/{config.epochs}: "
-                f"Train Acc={train_acc:.2f}% Val Acc={val_acc:.2f}%"
+                "[%s] Noise=%.1f%% Seed=%d Epoch %d/%d: Train Acc=%.2f%% Val Acc=%.2f%%",
+                optimizer_name, noise_rate*100, seed, epoch+1, config.epochs, train_acc, val_acc
             )
     
     # Restore best model before final test evaluation
     # This gives the fairest comparison of optimizer robustness to noise
     if best_model_state is not None:
         model.load_state_dict(best_model_state)
-        logger.info(f"[{optimizer_name}] Restored best model from epoch {best_val_epoch} (val_acc={best_val_acc:.2f}%)")
+        logger.info("[%s] Restored best model from epoch %d (val_acc=%.2f%%)", optimizer_name, best_val_epoch, best_val_acc)
     
     # Final test evaluation (only after training completes - use test set only for final evaluation)
-    logger.info(f"[{optimizer_name}] Evaluating final performance on test set...")
+    logger.info("[%s] Evaluating final performance on test set...", optimizer_name)
     model.eval()
     test_loss = 0.0
     test_correct = 0
@@ -345,8 +344,8 @@ def train_with_noisy_labels(
     
     test_loss /= test_total
     test_acc = 100.0 * test_correct / test_total
-    logger.info(f"[{optimizer_name}] Final Test Performance: Loss={test_loss:.4f}, Acc={test_acc:.2f}%")
-    logger.info(f"[{optimizer_name}] Best Val Acc: {best_val_acc:.2f}% at epoch {best_val_epoch}")
+    logger.info("[%s] Final Test Performance: Loss=%.4f, Acc=%.2f%%", optimizer_name, test_loss, test_acc)
+    logger.info("[%s] Best Val Acc: %.2f%% at epoch %d", optimizer_name, best_val_acc, best_val_epoch)
     
     # Add both peak and final metrics for complete analysis
     # Peak metrics show robustness; final metrics show overfitting tendency
@@ -406,11 +405,11 @@ def run_label_noise_ablation(
     )
     experiment_count = 0
     
-    logger.info(f"Starting label noise ablation: {total_experiments} total experiments")
-    logger.info(f"Dataset: {dataset_name}, Model: {model_name}")
-    logger.info(f"Noise rates: {noise_rates}")
-    logger.info(f"Seeds: {seeds}")
-    logger.info(f"Optimizers: {list(optimizers_config.keys())}")
+    logger.info("Starting label noise ablation: %d total experiments", total_experiments)
+    logger.info("Dataset: %s, Model: %s", dataset_name, model_name)
+    logger.info("Noise rates: %s", noise_rates)
+    logger.info("Seeds: %s", seeds)
+    logger.info("Optimizers: %s", list(optimizers_config.keys()))
     
     for noise_rate in noise_rates:
         for seed in seeds:
@@ -422,8 +421,8 @@ def run_label_noise_ablation(
             for optimizer_name, opt_config in optimizers_config.items():
                 experiment_count += 1
                 logger.info(
-                    f"\n[{experiment_count}/{total_experiments}] "
-                    f"Running: {optimizer_name}, noise={noise_rate:.1%}, seed={seed}"
+                    "\n[%d/%d] Running: %s, noise=%.1f%%, seed=%d",
+                    experiment_count, total_experiments, optimizer_name, noise_rate*100, seed
                 )
                 
                 # Create fresh model
@@ -445,7 +444,7 @@ def run_label_noise_ablation(
                 try:
                     optimizer = create_optimizer_from_config(optimizer_config_dict, model.parameters())
                 except Exception as e:
-                    logger.warning(f"Registry creation failed, using fallback: {e}")
+                    logger.warning("Registry creation failed, using fallback: %s", e)
                     # Fallback to direct creation
                     if optimizer_name.lower() == 'sgd':
                         optimizer = torch.optim.SGD(
@@ -455,12 +454,23 @@ def run_label_noise_ablation(
                             weight_decay=opt_config.get('weight_decay', 0.0)
                         )
                     elif optimizer_name.lower() == 'adam':
-                        optimizer = torch.optim.Adam(
-                            model.parameters(),
-                            lr=opt_config.get('lr', 0.001),
-                            betas=(opt_config.get('beta1', 0.9), opt_config.get('beta2', 0.999)),
-                            weight_decay=opt_config.get('weight_decay', 0.0)
-                        )
+                        # Use AdamW for decoupled weight decay when weight_decay > 0
+                        # Original Adam couples weight decay with adaptive LR (Loshchilov & Hutter 2019)
+                        wd = opt_config.get('weight_decay', 0.0)
+                        if wd > 0:
+                            optimizer = torch.optim.AdamW(
+                                model.parameters(),
+                                lr=opt_config.get('lr', 0.001),
+                                betas=(opt_config.get('beta1', 0.9), opt_config.get('beta2', 0.999)),
+                                weight_decay=wd
+                            )
+                        else:
+                            optimizer = torch.optim.Adam(
+                                model.parameters(),
+                                lr=opt_config.get('lr', 0.001),
+                                betas=(opt_config.get('beta1', 0.9), opt_config.get('beta2', 0.999)),
+                                weight_decay=0.0
+                            )
                     elif optimizer_name.lower() == 'adamw':
                         optimizer = torch.optim.AdamW(
                             model.parameters(),
@@ -494,8 +504,8 @@ def run_label_noise_ablation(
                     index=False
                 )
     
-    logger.info(f"\nCompleted all {total_experiments} experiments!")
-    logger.info(f"Results saved to: {output_path}")
+    logger.info("\nCompleted all %d experiments!", total_experiments)
+    logger.info("Results saved to: %s", output_path)
     
     # Create summary statistics
     final_df = pd.concat(all_results, ignore_index=True)
@@ -557,7 +567,7 @@ def analyze_robustness_to_noise(summary_df: pd.DataFrame) -> pd.DataFrame:
         clean_data = opt_data[opt_data['noise_rate'] == 0.0]['test_acc_mean']
         # Protect against missing clean baseline
         if len(clean_data) == 0:
-            logging.warning(f"No clean baseline (noise_rate=0.0) found for {optimizer}, skipping robustness metrics")
+            logging.warning("No clean baseline (noise_rate=0.0) found for %s, skipping robustness metrics", optimizer)
             continue
         from src.utils.num_utils import safe_to_float
         clean_acc = safe_to_float(ensure_series(clean_data).iloc[0])

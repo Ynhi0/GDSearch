@@ -1,6 +1,15 @@
 # GDSearch - Optimizer Dynamics Research Platform
 
-A comprehensive Python framework for comparing gradient descent algorithms on 2D test functions and neural networks (MNIST/CIFAR-10/IMDB). Features systematic hyperparameter tuning, convergence analysis, curvature tracking, loss landscape visualization, **multi-seed experiments**, **statistical analysis**, and **NLP support**.
+A comprehensive Python framework for comparing **deterministic gradient descent** (on 2D convex/non-convex test functions) and **stochastic gradient descent variants** (SGD, Momentum, Adam, etc. on neural networks). This dual-regime design enables:
+
+1. **Theoretical Validation:** 2D deterministic experiments verify asymptotic convergence rates (O(1/k), O(1/√κ)) where theory applies exactly.
+2. **Practical Benchmarks:** Neural network experiments measure empirical performance of SGD variants under stochastic noise, early stopping, and non-convex landscapes where classical GD theory does not directly apply.
+
+**⚠️ CRITICAL DISTINCTION:** Results from 2D Rosenbrock (deterministic GD) and ResNet-18 CIFAR-10 (mini-batch SGD) **cannot be directly compared** using the same theoretical framework. See [docs/DIMENSIONALITY_DISCUSSION.md](docs/DIMENSIONALITY_DISCUSSION.md) for details.
+
+### Research Platform Features
+
+Full support for systematic hyperparameter tuning, convergence analysis, curvature tracking, loss landscape visualization, **multi-seed experiments**, **statistical analysis**, and **NLP benchmarks** (MNIST/CIFAR-10/IMDB).
 
 ### Core Capabilities
 

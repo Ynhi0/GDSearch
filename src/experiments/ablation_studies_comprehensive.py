@@ -293,10 +293,10 @@ def ablation_adaptive_lr(
             **{k: v for k, v in metrics_sgd.items() if not isinstance(v, list)}
         })
         
-        # Adam: adaptive learning rate
+        # Adam: adaptive learning rate (no weight decay)
         set_seed(seed)
         model_adam = SimpleCNN().to(device)
-        optimizer_adam = optim.Adam(model_adam.parameters(), lr=0.001)
+        optimizer_adam = optim.Adam(model_adam.parameters(), lr=0.001, weight_decay=0)
         metrics_adam = train_and_evaluate_model_with_loaders(
             model_adam, optimizer_adam, train_loader, test_loader, device, epochs
         )
@@ -385,7 +385,7 @@ def ablation_weight_decay(
         # Baseline: Adam (no weight decay)
         set_seed(seed)
         model_adam = SimpleCNN().to(device)
-        optimizer_adam = optim.Adam(model_adam.parameters(), lr=0.001)
+        optimizer_adam = optim.Adam(model_adam.parameters(), lr=0.001, weight_decay=0)
         metrics_adam = train_and_evaluate_model_with_loaders(
             model_adam, optimizer_adam, train_loader, test_loader, device, epochs
         )

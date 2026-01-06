@@ -39,7 +39,6 @@ Expected Findings:
 """
 
 import sys
-import os
 from pathlib import Path
 
 # Add parent directory to path
@@ -54,11 +53,10 @@ from torch.utils.data import DataLoader
 import numpy as np
 import pandas as pd
 import time
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List
 import logging
 import matplotlib
 matplotlib.use('Agg')  # Non-interactive backend
-import matplotlib.pyplot as plt
 
 # Import make_dataloader
 from src.core.dataloader_utils import make_dataloader
@@ -66,7 +64,7 @@ from src.core.dataloader_utils import make_dataloader
 try:
     from src.visualization.ablation_plots import generate_all_ablation_plots
 except ImportError:
-    import sys
+    # sys already imported at top of file
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     from src.visualization.ablation_plots import generate_all_ablation_plots
 
@@ -202,9 +200,7 @@ def run_single_experiment(
     test_loader: DataLoader,
     device: torch.device,
     epochs: int = 10,
-    lr: float = 0.001,
-    seed: int = 42,
-    activation: str = 'relu'
+    seed: int = 42
 ) -> Dict:
     """Run a single initialization-optimizer experiment"""
     set_seed(seed)
@@ -231,7 +227,8 @@ def run_single_experiment(
     elif optimizer_name == 'SGD_Momentum':
         optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
     elif optimizer_name == 'Adam':
-        optimizer = optim.Adam(model.parameters(), lr=0.001)  # Adam default
+        # Adam without weight decay (no regularization)
+        optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=0)
     elif optimizer_name == 'AdamW':
         optimizer = optim.AdamW(model.parameters(), lr=0.001, weight_decay=1e-4)
     else:
@@ -257,7 +254,7 @@ def run_single_experiment(
         
         # Check for divergence (NaN or very large loss)
         if np.isnan(train_loss) or train_loss > 100:
-            logging.warning(f"Training diverged at epoch {epoch+1}: {init_method} + {optimizer_name}")
+            logging.warning("Training diverged at epoch %d: %s + %s", epoch+1, init_method, optimizer_name)
             break
     
     training_time = time.time() - start_time
@@ -289,7 +286,7 @@ def run_single_experiment(
 
 def run_initialization_ablation(
     results_dir: str = "results/initialization_ablation",
-    seeds: List[int] = [1, 2, 3, 4, 5],
+    seeds: List[int] | None = None,
     epochs: int = 10,
     quick: bool = False
 ) -> pd.DataFrame:
@@ -308,6 +305,9 @@ def run_initialization_ablation(
     print("="*80)
     print("OPTIMIZER-INITIALIZATION INTERACTION ABLATION STUDY")
     print("="*80)
+    
+    if seeds is None:
+        seeds = [1, 2, 3, 4, 5]
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
@@ -406,7 +406,7 @@ def run_initialization_ablation(
     try:
         # Prepare data for visualization (pivot to get configuration column)
         viz_df = df.copy()
-        viz_df['configuration'] = viz_df['optimizer'] + ' + ' + viz_df['initialization']
+        viz_df['configuration'] = viz_df['optimizer'].astype(str) + ' + ' + viz_df['initialization'].astype(str)
         
         features = ['Xavier', 'Kaiming', 'Uniform', 'Normal']  # Initialization types
         generate_all_ablation_plots(
@@ -418,7 +418,7 @@ def run_initialization_ablation(
             baseline_name='SGD + Xavier',  # Use a reasonable baseline
             features=features
         )
-    except Exception as e:
+    except (ValueError, KeyError, ImportError) as e:
         print(f"Visualization generation failed: {e}")
     
     print(f"\n{'='*80}")

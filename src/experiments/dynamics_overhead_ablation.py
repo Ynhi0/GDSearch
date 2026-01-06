@@ -24,7 +24,7 @@ import numpy as np
 import time
 import os
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Optional
 from src.core.dataloader_utils import make_dataloader
 import psutil
 import matplotlib.pyplot as plt
@@ -104,12 +104,12 @@ def train_with_optional_tracking(
             
             # Track dynamics if enabled
             if tracker is not None:
-                    tracker.track_step(
-                        iteration=epoch * len(train_loader) + batch_idx,
-                        loss=loss.item(),
-                        model=model,
-                        optimizer=optimizer,
-                    )
+                tracker.track_step(
+                    iteration=epoch * len(train_loader) + batch_idx,
+                    loss=loss.item(),
+                    model=model,
+                    optimizer=optimizer,
+                )
     # Final evaluation
     model.eval()
     correct = 0
@@ -137,7 +137,7 @@ def train_with_optional_tracking(
             # Save CSV of dynamics and plots
             tracker.save_dynamics(str(out_dir / "dynamics.csv"))
             tracker.plot_dynamics(str(out_dir / "plots"), optimizer_name=optimizer.__class__.__name__)
-        except Exception as e:
+        except (OSError, ValueError, KeyError, AttributeError) as e:
             print(f"   Tracker save failed: {e}")
     
     return {
@@ -236,7 +236,8 @@ def run_dynamics_overhead_ablation(
         # Test 1: WITHOUT dynamics tracking (baseline)
         print("   Testing WITHOUT dynamics tracking (baseline)...")
         model_baseline = SimpleMLP().to(device)
-        optimizer_baseline = optim.Adam(model_baseline.parameters(), lr=1e-3)
+        # Adam without weight decay for fair overhead comparison
+        optimizer_baseline = optim.Adam(model_baseline.parameters(), lr=1e-3, weight_decay=0)
         
         metrics_baseline = train_with_optional_tracking(
             model=model_baseline,
@@ -251,7 +252,8 @@ def run_dynamics_overhead_ablation(
         # Test 2: WITH dynamics tracking
         print("   Testing WITH dynamics tracking...")
         model_tracked = SimpleMLP().to(device)
-        optimizer_tracked = optim.Adam(model_tracked.parameters(), lr=1e-3)
+        # Adam without weight decay for fair overhead comparison
+        optimizer_tracked = optim.Adam(model_tracked.parameters(), lr=1e-3, weight_decay=0)
         
         tracker_dir = os.path.join(results_dir, f"dynamics_seed{seed}")
         
@@ -346,12 +348,16 @@ def run_dynamics_overhead_ablation(
         time_ttest = stats.ttest_rel(merged['time_seconds_tracked'], merged['time_seconds_baseline'])
         acc_ttest = stats.ttest_rel(merged['accuracy_tracked'], merged['accuracy_baseline'])
     
-    print(f"\nStatistical Significance:")
+    print("\nStatistical Significance:")
     if time_ttest is not None and acc_ttest is not None:
-        print(f"  Time difference: p={time_ttest.pvalue:.4f} {'(significant)' if time_ttest.pvalue < 0.05 else '(not significant)'}")
-        print(f"  Accuracy difference: p={acc_ttest.pvalue:.4f} {'(significant)' if acc_ttest.pvalue < 0.05 else '(not significant)'}")
+        # Access p-value correctly (scipy.stats.ttest_rel returns TtestResult with pvalue attribute)
+        # Type checkers may not recognize the attribute, but it exists in scipy >= 1.6
+        time_pval: float = time_ttest.pvalue  # type: ignore[attr-defined]
+        acc_pval: float = acc_ttest.pvalue  # type: ignore[attr-defined]
+        print(f"  Time difference: p={time_pval:.4f} {'(significant)' if time_pval < 0.05 else '(not significant)'}")
+        print(f"  Accuracy difference: p={acc_pval:.4f} {'(significant)' if acc_pval < 0.05 else '(not significant)'}")
     else:
-        print(f"  Statistical tests skipped due to insufficient paired samples.")
+        print("  Statistical tests skipped due to insufficient paired samples.")
     
     # Generate visualization
     try:

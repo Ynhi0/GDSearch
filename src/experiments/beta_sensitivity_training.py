@@ -176,7 +176,8 @@ def train_with_beta(
     if optimizer_name.lower() == 'momentum':
         optimizer = optim.SGD(model.parameters(), lr=effective_lr, momentum=beta)
     elif optimizer_name.lower() == 'adam':
-        optimizer = optim.Adam(model.parameters(), lr=effective_lr, betas=(beta, 0.999))
+        # Adam without weight decay for beta sensitivity study
+        optimizer = optim.Adam(model.parameters(), lr=effective_lr, betas=(beta, 0.999), weight_decay=0)
     else:
         raise ValueError(f"Unknown optimizer: {optimizer_name}")
     
@@ -579,8 +580,8 @@ def run_adam_beta2_sensitivity(
             # Create model
             model = SimpleMLP().to(device)
             
-            # Adam with specific β1, β2
-            optimizer = optim.Adam(model.parameters(), lr=lr, betas=(beta1, beta2))
+            # Adam with specific β1, β2 (no weight decay for beta sensitivity study)
+            optimizer = optim.Adam(model.parameters(), lr=lr, betas=(beta1, beta2), weight_decay=0)
             criterion = nn.CrossEntropyLoss()
             
             # Initialize dynamics tracker (define at outer scope for pyright)
@@ -726,8 +727,8 @@ def run_adam_beta1_beta2_grid(
                 # Create model
                 model = SimpleMLP().to(device)
                 
-                # Adam with specific β1, β2
-                optimizer = optim.Adam(model.parameters(), lr=lr, betas=(beta1, beta2))
+                # Adam with specific β1, β2 (no weight decay for beta sensitivity study)
+                optimizer = optim.Adam(model.parameters(), lr=lr, betas=(beta1, beta2), weight_decay=0)
                 criterion = nn.CrossEntropyLoss()
                 
                 # Initialize dynamics tracker (define at outer scope for pyright)

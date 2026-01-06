@@ -141,7 +141,7 @@ def run_data_efficiency_ablation(
     if seeds is None:
         seeds = [42, 123, 456]
     
-    logging.info(f"Running data efficiency ablation: {optimizer_name} on {dataset_name}")
+    logging.info("Running data efficiency ablation: %s on %s", optimizer_name, dataset_name)
     
     results = []
     device_obj = torch.device(device if torch.cuda.is_available() else 'cpu')
@@ -189,8 +189,8 @@ def run_data_efficiency_ablation(
                 # Krizhevsky et al. ImageNet Classification 2012
                 optimizer = optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
             elif optimizer_name == 'Adam':
-                # Kingma & Ba Adam paper 2014
-                optimizer = optim.Adam(model.parameters(), lr=0.001)
+                # Kingma & Ba Adam paper 2014 (no weight decay)
+                optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=0)
             elif optimizer_name == 'AdamW':
                 # Loshchilov & Hutter AdamW paper 2017
                 optimizer = optim.AdamW(model.parameters(), lr=0.001, weight_decay=0.01)
@@ -216,7 +216,7 @@ def run_data_efficiency_ablation(
                     if not torch.isfinite(loss):
                         diverged = True
                         divergence_reason = f"Non-finite loss at epoch {epoch}"
-                        logging.warning(f"Training diverged: {divergence_reason}")
+                        logging.warning("Training diverged: %s", divergence_reason)
                         break
                     
                     loss.backward()
@@ -228,7 +228,7 @@ def run_data_efficiency_ablation(
                     if not torch.isfinite(grad_norm):
                         diverged = True
                         divergence_reason = f"Non-finite gradients at epoch {epoch}"
-                        logging.warning(f"Training diverged: {divergence_reason}")
+                        logging.warning("Training diverged: %s", divergence_reason)
                         break
                     
                     optimizer.step()
@@ -267,8 +267,8 @@ def run_data_efficiency_ablation(
             })
             
             logging.info(
-                f"  Fraction={fraction:.2f}, Seed={seed}, "
-                f"Samples={len(subset)}, Test Acc={test_acc:.2f}%"
+                "  Fraction=%.2f, Seed=%d, Samples=%d, Test Acc=%.2f%%",
+                fraction, seed, len(subset), test_acc
             )
     
     return pd.DataFrame(results)
@@ -307,7 +307,7 @@ def run_model_scaling_ablation(
     if seeds is None:
         seeds = [42, 123]
     
-    logging.info(f"Running model scaling ablation: {optimizer_name} on {dataset_name}")
+    logging.info("Running model scaling ablation: %s on %s", optimizer_name, dataset_name)
     
     results = []
     device_obj = torch.device(device if torch.cuda.is_available() else 'cpu')
@@ -345,8 +345,8 @@ def run_model_scaling_ablation(
                     # Krizhevsky et al. 2012
                     optimizer = optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
                 elif optimizer_name == 'Adam':
-                    # Kingma & Ba 2014
-                    optimizer = optim.Adam(model.parameters(), lr=0.001)
+                    # Kingma & Ba 2014 (no weight decay)
+                    optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=0)
                 elif optimizer_name == 'AdamW':
                     # Loshchilov & Hutter 2017
                     optimizer = optim.AdamW(model.parameters(), lr=0.001, weight_decay=0.01)
@@ -370,7 +370,7 @@ def run_model_scaling_ablation(
                         if not torch.isfinite(loss):
                             diverged = True
                             divergence_reason = f"Non-finite loss at epoch {epoch}"
-                            logging.warning(f"Training diverged: {divergence_reason}")
+                            logging.warning("Training diverged: %s", divergence_reason)
                             break
                         
                         loss.backward()
@@ -382,7 +382,7 @@ def run_model_scaling_ablation(
                         if not torch.isfinite(grad_norm):
                             diverged = True
                             divergence_reason = f"Non-finite gradients at epoch {epoch}"
-                            logging.warning(f"Training diverged: {divergence_reason}")
+                            logging.warning("Training diverged: %s", divergence_reason)
                             break
                         
                         optimizer.step()
@@ -417,8 +417,8 @@ def run_model_scaling_ablation(
                 })
                 
                 logging.info(
-                    f"  Width={width}, Depth={depth}, Params={n_params}, "
-                    f"Seed={seed}, Test Acc={test_acc:.2f}%"
+                    "  Width=%d, Depth=%d, Params=%d, Seed=%d, Test Acc=%.2f%%",
+                    width, depth, n_params, seed, test_acc
                 )
     
     return pd.DataFrame(results)
