@@ -90,6 +90,8 @@ def oom_safe_train_step(
     device: torch.device,
     max_retries: int = 3,
     min_batch_size: int = 1,
+    robust_grad_handler: Optional[Any] = None,  # NEW: Optional robust gradient handler
+    epoch: Optional[int] = None,  # NEW: Epoch number for logging
     # GAP #22 FIX: Removed allow_batchnorm_eval_fallback parameter
     # Switching model to eval() during training is SCIENTIFICALLY INVALID:
     # 1. BatchNorm uses wrong statistics (running mean/var instead of batch)
@@ -259,8 +261,22 @@ def oom_safe_train_step(
                     loss = criterion(outputs, current_targets)
                     loss.backward()
                     
-                    # Gradient clipping to prevent explosion
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                    # NEW: Apply robust gradient handling if enabled
+                    if robust_grad_handler is not None:
+                        try:
+                            grad_diagnostics = robust_grad_handler(model, epoch=epoch)
+                            # Log diagnostic information if heavy tails detected
+                            if grad_diagnostics.get('heavy_tail_detected', False):
+                                logging.debug(
+                                    f"Heavy-tailed gradients: norm={grad_diagnostics['grad_norm']:.3e}, "
+                                    f"clipped={grad_diagnostics['clipped']}, "
+                                    f"clip_ratio={grad_diagnostics['clip_ratio']:.3f}"
+                                )
+                        except Exception as e:
+                            logging.debug(f"Robust gradient handling failed: {e}", exc_info=True)
+                    else:
+                        # Fallback: Standard gradient clipping to prevent explosion
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                     
                     if getattr(optimizer, 'requires_closure', False):
                         def _closure_for_step():

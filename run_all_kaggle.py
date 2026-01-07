@@ -66,17 +66,38 @@ def safe_print(*args, **kwargs):
     Print with fallback for encoding errors (e.g., cp1252 can't handle Unicode checkmarks).
     Replaces Unicode symbols with ASCII equivalents for Windows compatibility.
     """
+    def sanitize_string(s):
+        """Replace Unicode symbols with ASCII equivalents."""
+        if not isinstance(s, str):
+            return s
+        # Unicode symbol replacements
+        replacements = {
+            '\u2713': '[OK]', '✓': '[OK]',
+            '\u2717': '[ERROR]', '✗': '[ERROR]',
+            '\u26a0': '[WARN]', '⚠': '[WARN]', '⚠️': '[WARN]',
+            '💾': '[SAVE]', '🔬': '[TEST]', '🎛️': '[CONFIG]',
+            '🔄': '[SYNC]', '🔧': '[FIX]', '🧹': '[CLEAN]',
+            '📚': '[DOCS]', '🎨': '[FORMAT]', '📦': '[PACKAGE]',
+            '💡': '[TIP]', '🐳': '[DOCKER]', '🏗️': '[BUILD]',
+            '🌌': '[SPACE]', '⏰': '[TIME]', '🔍': '[SEARCH]',
+        }
+        for unicode_char, ascii_replacement in replacements.items():
+            s = s.replace(unicode_char, ascii_replacement)
+        return s
+    
+    # Pre-sanitize all arguments to avoid encoding errors
+    safe_args = [sanitize_string(arg) for arg in args]
+    
     try:
-        print(*args, **kwargs)
-    except UnicodeEncodeError:
-        # Replace Unicode checkmarks with ASCII equivalents
-        safe_args = []
-        for arg in args:
-            if isinstance(arg, str):
-                arg = arg.replace('\u2713', '[OK]').replace('\u2717', '[ERROR]')
-                arg = arg.replace('✓', '[OK]').replace('✗', '[ERROR]')
-            safe_args.append(arg)
         print(*safe_args, **kwargs)
+    except UnicodeEncodeError:
+        # Last resort: encode as ASCII with replacement
+        ascii_args = []
+        for arg in safe_args:
+            if isinstance(arg, str):
+                arg = arg.encode('ascii', errors='replace').decode('ascii')
+            ascii_args.append(arg)
+        print(*ascii_args, **kwargs)
 
 
 # Import typing items at once for consistency
@@ -1241,41 +1262,61 @@ def get_system_info() -> Dict[str, Any]:
 
 
 def is_experiment_completed(results_dir: Union[str, Path], dataset: str, model_name: str, optimizer_name: str, seed: int) -> bool:
-    """Check if an experiment has already been completed by looking for result files.
-    
-    Args:
-        results_dir: Base results directory
-        dataset: Dataset name (e.g., 'MNIST', 'CIFAR10')
-        model_name: Model name (e.g., 'SimpleMLP', 'ResNet18')
-        optimizer_name: Optimizer name (e.g., 'SGD', 'Adam')
-        seed: Random seed
-    
-    Returns:
-        bool: True if the experiment result file exists and is valid
+    """Check if an experiment has already been completed by looking for result files or metadata.
+
+    This function is defensive about the `results_dir` argument because callers sometimes pass
+    the project-level results directory (e.g., `results/`) and sometimes a per-experiment
+    subdirectory (e.g., `results/experiments/mnist`). We handle both to avoid double-`experiments`
+    nesting issues that break resume detection.
     """
-    # Accept either str or Path for portability; coerce to Path immediately
     results_dir = Path(results_dir)
     try:
-        results_base = Path(results_dir) / "experiments" / dataset.lower()
+        # If caller passed a directory that already is the per-dataset dir (e.g., .../mnist), use it directly
+        if results_dir.name.lower() == dataset.lower():
+            results_base = results_dir
+        # If caller passed an `.../experiments/` directory, append dataset
+        elif "experiments" in [p.lower() for p in results_dir.parts]:
+            results_base = results_dir / dataset.lower()
+        # Otherwise assume caller passed the top-level results dir and add `experiments/{dataset}`
+        else:
+            results_base = Path(results_dir) / "experiments" / dataset.lower()
+
         file_stem = f"{dataset}_{model_name}_{optimizer_name}_seed{seed}"
         csv_path = results_base / f"{file_stem}.csv"
-        
-        # Check if file exists and is not empty
+        meta_path = results_base / f"{file_stem}.metadata.json"
+
+        # Prefer metadata file if present (metadata contains row count and optional completed flag)
+        if meta_path.exists():
+            try:
+                with open(meta_path, 'r', encoding='utf-8') as mf:
+                    meta = json.load(mf)
+                # Respect explicit completion flag when available
+                if meta.get('completed', False):
+                    logging.info("Found completed metadata: %s", meta_path.name)
+                    return True
+                # Otherwise consider any non-empty history as completed
+                if meta.get('rows', 0) >= 1:
+                    logging.info("Found existing result metadata (rows=%d): %s", meta.get('rows', 0), meta_path.name)
+                    return True
+            except Exception as e:
+                logging.debug("Could not read metadata %s: %s", meta_path.name, e)
+                # Fall back to CSV reading below
+
+        # Fall back to CSV presence check
         if csv_path.exists():
-            # Verify the file has content (at least header + 1 row)
             try:
                 df = pd.read_csv(csv_path)
-                # Check for reasonable completion (at least 2 rows for meaningful data)
-                if len(df) >= 2:
-                    logging.info("Found existing result: %s", csv_path.name)
+                # Accept even a single-row history as completed (handles quick tests / ultra-quick mode)
+                if len(df) >= 1:
+                    logging.info("Found existing result CSV: %s", csv_path.name)
                     return True
                 else:
                     logging.warning("Suspicious result file (too few rows=%d): %s, will re-run", len(df), csv_path.name)
                     return False
             except (OSError, pd.errors.ParserError) as e:
-                # File exists but is corrupted, need to re-run
                 logging.warning("Corrupted result file: %s, will re-run (error: %s)", csv_path.name, e)
                 return False
+
         return False
     except (OSError, ValueError) as e:
         logging.debug("Error checking experiment completion: %s", e)
@@ -1435,21 +1476,23 @@ def save_run_artifacts(base_results_dir: Union[str, Path], dataset: str, model_n
                        model: Optional[torch.nn.Module] = None, save_model: bool = True):
     """Save per-run CSV and metadata sidecar using a canonical filename.
 
-    Filename pattern: <dataset>_<model>_<optimizer>_seed<seed>.csv
-    Sidecar metadata: same name + .meta.json
+    This function is tolerant of callers passing either:
+      - the project-level results directory (e.g., `results/`) OR
+      - a per-experiment subdirectory (e.g., `results/experiments/mnist`).
 
-    Optionally save final model weights to results/models/
-
-    Args:
-        model: PyTorch model to save (optional)
-        save_model: Whether to save model weights (default: True)
-        exp_tracker: ExperimentTracker instance (renamed from 'tracker' to avoid shadowing global)
+    The function prefers to write into the logical `experiments/{dataset}` folder if needed,
+    but avoids creating duplicated `.../experiments/experiments/...` structures.
     """
-    # Accept str or Path for base_results_dir and coerce to Path for file ops
     base_results_dir = Path(base_results_dir)
     try:
-        # Organized directory structure: results/experiments/{dataset}/
-        results_base = Path(base_results_dir) / "experiments" / dataset.lower()
+        # Determine canonical results base path robustly
+        if base_results_dir.name.lower() == dataset.lower():
+            results_base = base_results_dir
+        elif "experiments" in [p.lower() for p in base_results_dir.parts]:
+            results_base = base_results_dir / dataset.lower()
+        else:
+            results_base = base_results_dir / "experiments" / dataset.lower()
+
         results_base.mkdir(parents=True, exist_ok=True)
 
         # Descriptive filename: DATASET_MODEL_OPTIMIZER_seed{N}.csv
@@ -1468,16 +1511,17 @@ def save_run_artifacts(base_results_dir: Union[str, Path], dataset: str, model_n
         # Save final model weights for loss landscape visualization
         model_path = None
         if save_model and model is not None:
-            models_dir = Path(base_results_dir) / "models"
+            # Keep models directory alongside the canonical results directory (one level up from per-dataset dir)
+            models_dir = results_base.parent / "models"
             models_dir.mkdir(parents=True, exist_ok=True)
             model_path = models_dir / f"{file_stem}_final.pt"
-            
+
             # Extract final metrics from history
             final_metrics = {}
             if isinstance(history, list) and len(history) > 0:
                 last_epoch = history[-1]
                 final_metrics = {k: v for k, v in last_epoch.items() if 'acc' in k or 'loss' in k}
-            
+
             torch_save_safe({
                 'model_state_dict': model.state_dict(),
                 'optimizer': optimizer_name,
@@ -1487,7 +1531,7 @@ def save_run_artifacts(base_results_dir: Union[str, Path], dataset: str, model_n
                 'final_metrics': final_metrics,
                 'params': params
             }, model_path)
-            
+
             logging.info(f"Saved model weights: {model_path}")
 
         # Metadata with provenance
@@ -1501,10 +1545,10 @@ def save_run_artifacts(base_results_dir: Union[str, Path], dataset: str, model_n
             'params': params,
             'model_path': str(model_path) if model_path else None,
             'system': get_system_info(),
-            'provenance': get_provenance_info()
+            'provenance': get_provenance_info(),
+            'completed': True
         }
         if device is not None:
-            # Record the device used for training to aid reproducibility
             try:
                 meta['device'] = str(device)
             except Exception:
@@ -1514,7 +1558,6 @@ def save_run_artifacts(base_results_dir: Union[str, Path], dataset: str, model_n
             json.dump(meta, f, indent=2)
 
         # Optional tracker artifact upload
-        # Use exp_tracker parameter (renamed to avoid shadowing global)
         if exp_tracker:
             try:
                 exp_tracker.log_artifact(str(csv_path), artifact_path=f"{dataset}/results")
@@ -1776,6 +1819,22 @@ def get_adaptive_batch_size(model, sample_input, device, base_batch_size=128):
 AUTO_LR_ENABLED = False
 ADAPTIVE_BATCH_ENABLED = False
 ULTRA_QUICK_MODE = False  # Ultra-quick mode for comprehensive fast testing: 2 epochs, all optimizers, all experiments
+
+# Global flags for advanced training features
+USE_AMP = False
+USE_EMA = False
+LABEL_SMOOTHING = 0.0
+
+# Global flags for robust gradient handling
+ROBUST_GRADIENTS_ENABLED = False
+GRADIENT_CLIP_NORM = None
+USE_AGC = False
+USE_ROBUST_LOSS = False
+USE_TRIMMED_MEAN = False
+MONITOR_HEAVY_TAILS = True
+
+# Global flags for visualization and analysis
+ENABLE_LOSS_LANDSCAPE = False
 
 
 # Global instances for enhanced functionality
@@ -3215,6 +3274,38 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                         train_acc = 0.0
                         test_loss = float('nan')
                         test_acc = 0.0
+                        
+                        # Initialize robust gradient handler if enabled
+                        robust_grad_handler = None
+                        robust_grad_stats = {}
+                        if ROBUST_GRADIENTS_ENABLED or GRADIENT_CLIP_NORM or USE_AGC:
+                            try:
+                                from src.core.robust_gradients import create_robust_gradient_handler
+                                
+                                robust_grad_config = {
+                                    'clip_norm': GRADIENT_CLIP_NORM,
+                                    'use_agc': USE_AGC,
+                                    'use_trimmed_mean': USE_TRIMMED_MEAN,
+                                    'monitor_heavy_tails': MONITOR_HEAVY_TAILS
+                                }
+                                
+                                robust_grad_handler = create_robust_gradient_handler(
+                                    enabled=True,
+                                    config=robust_grad_config
+                                )
+                                
+                                logging.info(f"[ROBUST GRADIENTS] Handler initialized for {opt_name}")
+                                if GRADIENT_CLIP_NORM:
+                                    logging.info(f"  - Global clipping: norm={GRADIENT_CLIP_NORM}")
+                                if USE_AGC:
+                                    logging.info(f"  - Adaptive Gradient Clipping (AGC) enabled")
+                                if USE_TRIMMED_MEAN:
+                                    logging.info(f"  - Trimmed-mean aggregation enabled")
+                                if MONITOR_HEAVY_TAILS:
+                                    logging.info(f"  - Heavy-tail monitoring enabled")
+                            except ImportError as e:
+                                logging.warning(f"Could not import robust gradient handler: {e}")
+                                robust_grad_handler = None
 
                         # Training with enhanced monitoring and OOM recovery
                         start_time = time.time()
@@ -3235,7 +3326,9 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                                             targets=targets,
                                             device=device,
                                             max_retries=3,
-                                            min_batch_size=1
+                                            min_batch_size=1,
+                                            robust_grad_handler=robust_grad_handler,  # NEW: Pass robust gradient handler
+                                            epoch=epoch  # NEW: Pass epoch for logging
                                         )
                                         
                                         # Track if any batch in this run was tainted
@@ -3333,6 +3426,8 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                                 # Include test metrics for schema consistency with integration tests
                                 # PROPOSAL REQUIREMENT: Include gradient_norm for convergence rate analysis
                                 # QA INTEGRATION (Issue #2): Include grad_noise_var for theoretical bounds validation
+                                # VISUALIZATION FIX: Include elapsed_seconds for timing plots
+                                elapsed_seconds = time.time() - training_start_time
                                 epoch_data = {
                                     'epoch': epoch,
                                     'train_loss': train_loss,
@@ -3343,7 +3438,9 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                                     'test_acc': val_acc,    # Use val_acc as proxy during training (true test eval at end)
                                     'grad_norm': grad_norm,  # Important for convergence analysis per proposal
                                     'effective_batch_size': effective_batch_size,
-                                    'original_batch_size': original_batch_size
+                                    'original_batch_size': original_batch_size,
+                                    'elapsed_seconds': elapsed_seconds,  # Wall-clock time for efficiency analysis
+                                    'learning_rate': current_lr  # Learning rate for scheduler analysis
                                 }
                                 if grad_noise_var is not None:
                                     epoch_data['grad_noise_var'] = grad_noise_var
@@ -3446,6 +3543,19 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                             'effective_batch_size': effective_batch_size,
                             'original_batch_size': original_batch_size
                         }
+                        
+                        # NEW: Add robust gradient statistics to metadata if available
+                        if robust_grad_handler is not None:
+                            try:
+                                robust_stats = robust_grad_handler.get_statistics()
+                                params['robust_gradient_stats'] = robust_stats
+                                logging.info(f"[ROBUST GRADIENTS] Statistics for {opt_name} seed {seed}:")
+                                logging.info(f"  - Mean gradient norm: {robust_stats['mean_grad_norm']:.3e}")
+                                logging.info(f"  - Max gradient norm: {robust_stats['max_grad_norm']:.3e}")
+                                logging.info(f"  - Clip fraction: {robust_stats['clip_fraction']:.2%}")
+                                logging.info(f"  - Heavy-tail fraction: {robust_stats['heavy_tail_fraction']:.2%}")
+                            except Exception as e:
+                                logging.debug(f"Could not retrieve robust gradient stats: {e}")
 
                         # Use exp_tracker parameter name (renamed to avoid shadowing global)
                         save_run_artifacts(results_dir, 'MNIST', 'SimpleMLP', opt_name,
@@ -3732,6 +3842,38 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
             effective_batch_size = 128  # Will be updated if OOM recovery occurs
             original_batch_size = 128
             
+            # Initialize robust gradient handler if enabled
+            robust_grad_handler = None
+            robust_grad_stats = {}
+            if ROBUST_GRADIENTS_ENABLED or GRADIENT_CLIP_NORM or USE_AGC:
+                try:
+                    from src.core.robust_gradients import create_robust_gradient_handler
+                    
+                    robust_grad_config = {
+                        'clip_norm': GRADIENT_CLIP_NORM,
+                        'use_agc': USE_AGC,
+                        'use_trimmed_mean': USE_TRIMMED_MEAN,
+                        'monitor_heavy_tails': MONITOR_HEAVY_TAILS
+                    }
+                    
+                    robust_grad_handler = create_robust_gradient_handler(
+                        enabled=True,
+                        config=robust_grad_config
+                    )
+                    
+                    logging.info(f"[ROBUST GRADIENTS] Handler initialized for CIFAR-10 {opt_name}")
+                    if GRADIENT_CLIP_NORM:
+                        logging.info(f"  - Global clipping: norm={GRADIENT_CLIP_NORM}")
+                    if USE_AGC:
+                        logging.info(f"  - Adaptive Gradient Clipping (AGC) enabled")
+                    if USE_TRIMMED_MEAN:
+                        logging.info(f"  - Trimmed-mean aggregation enabled")
+                    if MONITOR_HEAVY_TAILS:
+                        logging.info(f"  - Heavy-tail monitoring enabled")
+                except ImportError as e:
+                    logging.warning(f"Could not import robust gradient handler: {e}")
+                    robust_grad_handler = None
+            
             logging.info(f"Training CIFAR-10 with {opt_name} (seed={seed}, lr={lr})")
             
             training_start_time = time.time()  # Track total training time for metadata
@@ -3752,7 +3894,9 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
                                 targets=targets,
                                 device=device,
                                 max_retries=3,
-                                min_batch_size=1
+                                min_batch_size=1,
+                                robust_grad_handler=robust_grad_handler,  # NEW: Pass robust gradient handler
+                                epoch=epoch  # NEW: Pass epoch for logging
                             )
                             
                             # Track if any batch in this run was tainted
@@ -3914,6 +4058,29 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
             df_history = pd.DataFrame(history)
             csv_path = results_dir / f"CIFAR10_ResNet18_{opt_name}_seed{seed}.csv"
             df_history.to_csv(csv_path, index=False)
+            
+            # NEW: Add robust gradient statistics to metadata if available
+            params_metadata = {
+                'batch_size_train': original_batch_size,
+                'batch_size_test': 256,
+                'epochs': epochs,
+                'optimizer_name': opt_name,
+                'tainted': run_tainted,
+                'effective_batch_size': effective_batch_size,
+                'original_batch_size': original_batch_size
+            }
+            
+            if robust_grad_handler is not None:
+                try:
+                    robust_stats = robust_grad_handler.get_statistics()
+                    params_metadata['robust_gradient_stats'] = robust_stats
+                    logging.info(f"[ROBUST GRADIENTS] Statistics for CIFAR-10 {opt_name} seed {seed}:")
+                    logging.info(f"  - Mean gradient norm: {robust_stats['mean_grad_norm']:.3e}")
+                    logging.info(f"  - Max gradient norm: {robust_stats['max_grad_norm']:.3e}")
+                    logging.info(f"  - Clip fraction: {robust_stats['clip_fraction']:.2%}")
+                    logging.info(f"  - Heavy-tail fraction: {robust_stats['heavy_tail_fraction']:.2%}")
+                except Exception as e:
+                    logging.debug(f"Could not retrieve robust gradient stats: {e}")
             
             # Include tainted and effective_batch_size in results
             all_results.append({
@@ -4258,6 +4425,23 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
             patience = 5  # Shorter patience for transformers
             patience_counter = 0
 
+            # Initialize robust gradient handler for NLP
+            robust_grad_handler = None
+            if ROBUST_GRADIENTS_ENABLED:
+                from src.core.robust_gradients import create_robust_gradient_handler
+                robust_config = {
+                    'clip_norm': GRADIENT_CLIP_NORM,
+                    'use_agc': USE_AGC,
+                    'use_trimmed_mean': USE_TRIMMED_MEAN,
+                    'use_robust_loss': USE_ROBUST_LOSS,
+                    'monitor_heavy_tails': MONITOR_HEAVY_TAILS
+                }
+                robust_grad_handler = create_robust_gradient_handler(
+                    enabled=True,
+                    config=robust_config
+                )
+                logging.info(f"NLP: Robust gradient handling enabled for {opt_name}")
+
             # Resume logic with compatibility validation
             ckpt_file = f"IMDB_{model_name.replace('/', '_')}_{opt_name}_lr{lr}_seed{seed}.pt"
             start_epoch = 1
@@ -4320,8 +4504,12 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                         optimizer.zero_grad()
                         loss.backward()
                         
-                        # Gradient clipping for transformers
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                        # Apply robust gradient handling (if enabled)
+                        if robust_grad_handler is not None:
+                            grad_stats = robust_grad_handler(model, epoch=epoch)
+                        else:
+                            # Fallback: Standard gradient clipping for transformers
+                            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                         
                         # Check for gradient health (NaN/Inf/explosion)
                         check_gradient_health_quick(model, epoch, context=f"NLP_{opt_name}")
@@ -4484,6 +4672,12 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
 
             training_time = time.time() - start_time
 
+            # Collect robust gradient statistics (if enabled)
+            robust_stats = {}
+            if robust_grad_handler is not None:
+                robust_stats = robust_grad_handler.get_statistics()
+                logging.info(f"NLP {opt_name} Robust Gradient Stats: {robust_stats}")
+
             results.append({
                 'optimizer': opt_name,
                 'seed': seed,
@@ -4491,7 +4685,11 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                 'final_test_loss': test_loss,
                 'final_test_acc': test_acc,
                 'training_time': training_time,
-                'epochs_completed': len(history)
+                'epochs_completed': len(history),
+                'mean_grad_norm': robust_stats.get('mean_grad_norm', 0.0),
+                'max_grad_norm': robust_stats.get('max_grad_norm', 0.0),
+                'clip_fraction': robust_stats.get('clip_fraction', 0.0),
+                'heavy_tail_fraction': robust_stats.get('heavy_tail_fraction', 0.0)
             })
 
             # Save per-run artifacts for this optimizer/seed
@@ -5063,6 +5261,23 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
             patience = 10
             patience_counter = 0
 
+            # Initialize robust gradient handler for Medical
+            robust_grad_handler = None
+            if ROBUST_GRADIENTS_ENABLED:
+                from src.core.robust_gradients import create_robust_gradient_handler
+                robust_config = {
+                    'clip_norm': GRADIENT_CLIP_NORM,
+                    'use_agc': USE_AGC,
+                    'use_trimmed_mean': USE_TRIMMED_MEAN,
+                    'use_robust_loss': USE_ROBUST_LOSS,
+                    'monitor_heavy_tails': MONITOR_HEAVY_TAILS
+                }
+                robust_grad_handler = create_robust_gradient_handler(
+                    enabled=True,
+                    config=robust_config
+                )
+                logging.info(f"Medical: Robust gradient handling enabled for {opt_name}")
+
             # Resume logic with compatibility validation
             ckpt_file = f"Medical_UNet_{opt_name}_lr{lr}_seed{seed}.pt"
             start_epoch = 1
@@ -5133,8 +5348,12 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                         optimizer.zero_grad()
                         loss.backward()
                         
-                        # Gradient clipping
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                        # Apply robust gradient handling (if enabled)
+                        if robust_grad_handler is not None:
+                            grad_stats = robust_grad_handler(model, epoch=epoch)
+                        else:
+                            # Fallback: Standard gradient clipping
+                            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                         
                         # Check gradient health
                         check_gradient_health_quick(model, epoch, context=f"Medical_{opt_name}")
@@ -5273,6 +5492,12 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
 
             training_time = time.time() - start_time
 
+            # Collect robust gradient statistics (if enabled)
+            robust_stats = {}
+            if robust_grad_handler is not None:
+                robust_stats = robust_grad_handler.get_statistics()
+                logging.info(f"Medical {opt_name} Robust Gradient Stats: {robust_stats}")
+
             results.append({
                 'optimizer': opt_name,
                 'seed': seed,
@@ -5281,7 +5506,11 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                 'final_test_loss': test_loss,
                 'final_test_dice': test_dice,
                 'training_time': training_time,
-                'epochs_completed': len(history)
+                'epochs_completed': len(history),
+                'mean_grad_norm': robust_stats.get('mean_grad_norm', 0.0),
+                'max_grad_norm': robust_stats.get('max_grad_norm', 0.0),
+                'clip_fraction': robust_stats.get('clip_fraction', 0.0),
+                'heavy_tail_fraction': robust_stats.get('heavy_tail_fraction', 0.0)
             })
 
             # Save per-run artifacts for this optimizer/seed
@@ -6740,6 +6969,7 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, resume=False):
                     loss_value = func(x_np)
                     
                     # Manually set gradient using analytical gradient from function
+                    grad = None
                     if hasattr(func, 'gradient'):
                         grad = func.gradient(x_np)
                         x.grad = torch.tensor(grad, dtype=torch.float32)
@@ -6747,6 +6977,9 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, resume=False):
                         # Skip if no gradient available
                         logging.warning(f"Function {func_name} has no gradient method")
                         break
+
+                    # Compute gradient norm for convergence analysis
+                    grad_norm = float(np.linalg.norm(grad)) if grad is not None else 0.0
 
                     if opt_name.startswith('SAM'):
                         def closure():
@@ -6761,11 +6994,21 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, resume=False):
                     else:
                         optimizer.step()
 
-                    history.append({
+                    # Store full trajectory data for visualization and analysis
+                    # Proposal requirement: x, y coordinates, loss, gradient_norm
+                    history_entry = {
                         'iteration': i,
-                        'x': x.detach().numpy().copy(),
-                        'loss': loss_value
-                    })
+                        'loss': loss_value,
+                        'grad_norm': grad_norm
+                    }
+                    # Handle both 1D and 2D cases
+                    if len(x_np) >= 2:
+                        history_entry['x'] = float(x_np[0])
+                        history_entry['y'] = float(x_np[1])
+                    else:
+                        history_entry['x'] = float(x_np[0])
+                        history_entry['y'] = 0.0
+                    history.append(history_entry)
 
                     # Convergence check
                     if loss_value < 1e-6:
@@ -8543,6 +8786,24 @@ Examples:
     parser.add_argument('--with-theory-analysis', action='store_true',
                         help='Run comprehensive theory-practice validation: Hessian analysis, gradient noise, PL condition, saddle escape, dynamics theory, and advanced bounds')
     
+    # Robust gradient handling flags (scientifically sound stability improvements)
+    parser.add_argument('--robust-gradients', action='store_true',
+                        help='Enable robust gradient handling (AGC, trimmed-mean, heavy-tail detection)')
+    parser.add_argument('--gradient-clip-norm', type=float, default=None,
+                        help='Global gradient clipping threshold (default: None = disabled, typical: 1.0-5.0)')
+    parser.add_argument('--use-agc', action='store_true',
+                        help='Enable Adaptive Gradient Clipping (per-layer gradient scaling)')
+    parser.add_argument('--use-robust-loss', action='store_true',
+                        help='Use robust loss functions (Huber loss for regression, label smoothing for classification)')
+    parser.add_argument('--use-trimmed-mean', action='store_true',
+                        help='Use trimmed-mean gradient aggregation (robust to outliers)')
+    parser.add_argument('--monitor-heavy-tails', action='store_true', default=True,
+                        help='Monitor for heavy-tailed gradient distributions (default: enabled)')
+    
+    # Visualization and analysis flags
+    parser.add_argument('--loss-landscape', action='store_true',
+                        help='Generate loss landscape visualizations for trained models (requires scipy)')
+    
     args = parser.parse_args()
     
     # Load experiment configuration from JSON if provided
@@ -8608,8 +8869,17 @@ Examples:
                     validate_tuning_fairness(optimizers, tuning_configs, strict=True)
                     safe_print("   \u2713 Tuning fairness validated: All optimizers have equal budgets")
                 except Exception as fairness_err:
-                    print(f"   \u26a0 WARNING: Tuning fairness validation failed: {fairness_err}")
-                    print("   This may bias optimizer comparisons. Review your tuning configuration.")
+                    error_msg = f"Tuning fairness validation failed: {fairness_err}"
+                    if args.strict_config:
+                        # In strict mode, treat fairness violations as fatal errors
+                        safe_print(f"   \u2717 ERROR: {error_msg}")
+                        print("   STRICT MODE: Optimizer comparison requires fair hyperparameter budgets.")
+                        print("   Fix your configuration or remove --strict-config flag.")
+                        raise RuntimeError(f"Fairness validation failed: {fairness_err}") from fairness_err
+                    else:
+                        print(f"   \u26a0 WARNING: {error_msg}")
+                        print("   This may bias optimizer comparisons. Review your tuning configuration.")
+                        print("   Use --strict-config to treat this as an error.")
         except ImportError:
             print("   \u26a0 Could not import fairness validator. Skipping check.")
     
@@ -8705,6 +8975,9 @@ Examples:
     
     # Wire auto-tuning features to global flags
     global AUTO_LR_ENABLED, ADAPTIVE_BATCH_ENABLED, ULTRA_QUICK_MODE, USE_AMP, USE_EMA, LABEL_SMOOTHING
+    global ROBUST_GRADIENTS_ENABLED, GRADIENT_CLIP_NORM, USE_AGC, USE_ROBUST_LOSS, USE_TRIMMED_MEAN, MONITOR_HEAVY_TAILS
+    global ENABLE_LOSS_LANDSCAPE
+    
     AUTO_LR_ENABLED = args.auto_lr or args.auto_tune
     ADAPTIVE_BATCH_ENABLED = args.adaptive_batch or args.auto_tune
     ULTRA_QUICK_MODE = args.ultra_quick
@@ -8712,6 +8985,46 @@ Examples:
     # Wire advanced training features to global flags
     USE_AMP = args.use_amp or (args.kaggle_t4 if hasattr(args, 'kaggle_t4') else False)
     USE_EMA = args.use_ema
+    LABEL_SMOOTHING = args.label_smoothing
+    
+    # Wire robust gradient handling to global flags
+    ROBUST_GRADIENTS_ENABLED = args.robust_gradients
+    GRADIENT_CLIP_NORM = args.gradient_clip_norm
+    USE_AGC = args.use_agc or args.robust_gradients  # AGC is part of robust suite
+    USE_ROBUST_LOSS = args.use_robust_loss
+    USE_TRIMMED_MEAN = args.use_trimmed_mean
+    MONITOR_HEAVY_TAILS = args.monitor_heavy_tails
+    
+    # Wire visualization flags to global flags
+    ENABLE_LOSS_LANDSCAPE = args.loss_landscape and HAS_LANDSCAPE
+    
+    # Log robust gradient configuration
+    if ROBUST_GRADIENTS_ENABLED or GRADIENT_CLIP_NORM or USE_AGC:
+        safe_print("\n[*] Robust Gradient Handling Enabled:")
+        if ROBUST_GRADIENTS_ENABLED:
+            safe_print("   [OK] Full robust gradient suite active (AGC + trimmed-mean + monitoring)")
+        if GRADIENT_CLIP_NORM:
+            safe_print(f"   [OK] Global gradient clipping: norm threshold = {GRADIENT_CLIP_NORM}")
+        if USE_AGC:
+            safe_print("   [OK] Adaptive Gradient Clipping (AGC): per-layer scaling")
+        if USE_TRIMMED_MEAN:
+            safe_print("   [OK] Trimmed-mean gradient aggregation")
+        if USE_ROBUST_LOSS:
+            safe_print("   [OK] Robust loss functions enabled")
+        if MONITOR_HEAVY_TAILS:
+            safe_print("   [OK] Heavy-tail gradient monitoring active")
+        safe_print("   Scientific Justification: Heavy-tailed gradients violate SGD theory")
+        safe_print("   assumptions. Robust methods improve stability without suppressing signals.")
+    
+    # Log loss landscape visualization status
+    if ENABLE_LOSS_LANDSCAPE:
+        safe_print("\n[*] Loss Landscape Visualization Enabled:")
+        safe_print("   [OK] Will generate loss landscape plots for trained models")
+        safe_print("   [OK] Requires scipy - validated as available")
+    elif args.loss_landscape and not HAS_LANDSCAPE:
+        safe_print("\n[*] Loss Landscape Visualization Requested but Unavailable:")
+        safe_print("   [ERROR] scipy not installed - install with: pip install scipy")
+    
     LABEL_SMOOTHING = args.label_smoothing
     
     # In ultra-quick mode, force quick=True and skip tuning
