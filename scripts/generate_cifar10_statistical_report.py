@@ -15,6 +15,7 @@ from typing import Dict, List
 import numpy as np
 import pandas as pd
 from scipy import stats
+import logging
 
 
 PATTERNS = {
@@ -36,8 +37,8 @@ def _to_float(x: object) -> float:
     try:
         if isinstance(x, (int, float, np.integer, np.floating)):
             return float(x)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug("_to_float: type check failed for %r: %s", x, e, exc_info=True)
 
     try:
         import pandas as _pd
@@ -49,16 +50,16 @@ def _to_float(x: object) -> float:
             # take last non-NA element
             val = arr.ravel()[-1]
             return _to_float(val)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug("_to_float: pandas branch failed for %r: %s", x, e, exc_info=True)
 
     try:
         if isinstance(x, (tuple, list)):
             if len(x) == 0:
                 return float(np.nan)
             return _to_float(x[0])
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug("_to_float: tuple/list branch failed for %r: %s", x, e, exc_info=True)
 
     try:
         arr = np.asarray(x)
@@ -83,8 +84,8 @@ def _to_float(x: object) -> float:
             return _to_float(arr.ravel()[0])
         except Exception:
             return float(np.nan)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug("_to_float: numpy branch failed for %r: %s", x, e, exc_info=True)
 
     try:
         from src.utils.num_utils import safe_to_float
@@ -140,7 +141,8 @@ def _paired(valsA: np.ndarray, valsB: np.ndarray):
     pB = _to_float(stats.shapiro(valsB)[1]) if len(valsB) >= 3 else float(np.nan)
 
     if pA > 0.05 and pB > 0.05:
-        stat, p = stats.ttest_rel(valsA, valsB)
+        from src.analysis.statistical_analysis import safe_ttest_rel
+        stat, p = safe_ttest_rel(valsA, valsB)
         p = _to_float(p)
         effect_name = "Cohen's d"
         d = (valsA - valsB).mean() / (valsA - valsB).std(ddof=1)

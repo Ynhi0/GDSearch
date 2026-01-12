@@ -16,11 +16,11 @@ from typing import Optional, Callable
 class TorchSGDMomentum(Optimizer):
     """
     Native PyTorch SGD with Momentum implementation.
-    
+
     Uses pure tensor operations - no numpy conversions.
     Supports GPU acceleration with zero overhead.
     """
-    
+
     def __init__(self, params, lr=0.01, momentum=0.9, weight_decay=0.0):
         if lr < 0.0:
             raise ValueError(f"Invalid learning rate: {lr}")
@@ -28,21 +28,21 @@ class TorchSGDMomentum(Optimizer):
             raise ValueError(f"Invalid momentum value: {momentum}")
         if weight_decay < 0.0:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
-        
+
         defaults = dict(lr=lr, momentum=momentum, weight_decay=weight_decay)
         super(TorchSGDMomentum, self).__init__(params, defaults)
-    
+
     def __setstate__(self, state):
         super(TorchSGDMomentum, self).__setstate__(state)
-    
+
     @torch.no_grad()
     def step(self, closure: Optional[Callable] = None):
         """
         Performs a single optimization step.
-        
+
         Args:
             closure: A closure that reevaluates the model and returns the loss.
-        
+
         Returns:
             Optional loss value if closure is provided.
         """
@@ -50,22 +50,22 @@ class TorchSGDMomentum(Optimizer):
         if closure is not None:
             with torch.enable_grad():
                 loss = closure()
-        
+
         for group in self.param_groups:
             weight_decay = group['weight_decay']
             momentum = group['momentum']
             lr = group['lr']
-            
+
             for p in group['params']:
                 if p.grad is None:
                     continue
-                
+
                 d_p = p.grad
-                
+
                 # Apply weight decay (L2 regularization)
                 if weight_decay != 0:
                     d_p = d_p.add(p, alpha=weight_decay)
-                
+
                 # Apply momentum
                 param_state = self.state[p]
                 if 'momentum_buffer' not in param_state:
@@ -73,21 +73,21 @@ class TorchSGDMomentum(Optimizer):
                 else:
                     buf = param_state['momentum_buffer']
                     buf.mul_(momentum).add_(d_p)
-                
+
                 # Update parameters (in-place, zero-copy on GPU)
                 p.add_(buf, alpha=-lr)
-        
+
         return loss
 
 
 class TorchAdam(Optimizer):
     """
     Native PyTorch Adam implementation.
-    
+
     Implements Algorithm 1 from "Adam: A Method for Stochastic Optimization"
     (Kingma & Ba, 2015) with pure tensor operations.
     """
-    
+
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0.0):
         if lr < 0.0:
             raise ValueError(f"Invalid learning rate: {lr}")
@@ -99,13 +99,13 @@ class TorchAdam(Optimizer):
             raise ValueError(f"Invalid beta parameter at index 1: {betas[1]}")
         if weight_decay < 0.0:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
-        
+
         defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
         super(TorchAdam, self).__init__(params, defaults)
-    
+
     def __setstate__(self, state):
         super(TorchAdam, self).__setstate__(state)
-    
+
     @torch.no_grad()
     def step(self, closure: Optional[Callable] = None):
         """Performs a single optimization step."""
@@ -113,25 +113,25 @@ class TorchAdam(Optimizer):
         if closure is not None:
             with torch.enable_grad():
                 loss = closure()
-        
+
         for group in self.param_groups:
             beta1, beta2 = group['betas']
             lr = group['lr']
             eps = group['eps']
             weight_decay = group['weight_decay']
-            
+
             for p in group['params']:
                 if p.grad is None:
                     continue
-                
+
                 grad = p.grad
-                
+
                 # Apply weight decay (L2 regularization - coupled variant)
                 if weight_decay != 0:
                     grad = grad.add(p, alpha=weight_decay)
-                
+
                 state = self.state[p]
-                
+
                 # State initialization
                 if len(state) == 0:
                     state['step'] = 0
@@ -139,36 +139,36 @@ class TorchAdam(Optimizer):
                     state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                     # Exponential moving average of squared gradient values
                     state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                
+
                 exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
                 state['step'] += 1
-                
+
                 # Decay the first and second moment running average coefficient
                 exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
                 exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
-                
+
                 # Bias correction
                 bias_correction1 = 1 - beta1 ** state['step']
                 bias_correction2 = 1 - beta2 ** state['step']
-                
+
                 step_size = lr / bias_correction1
                 bias_correction2_sqrt = bias_correction2 ** 0.5
-                
+
                 # Update parameters (in-place)
                 denom = (exp_avg_sq.sqrt() / bias_correction2_sqrt).add_(eps)
                 p.addcdiv_(exp_avg, denom, value=-step_size)
-        
+
         return loss
 
 
 class TorchAdamW(Optimizer):
     """
     Native PyTorch AdamW implementation with decoupled weight decay.
-    
+
     Implements "Decoupled Weight Decay Regularization" (Loshchilov & Hutter, 2019)
     with pure tensor operations for maximum GPU performance.
     """
-    
+
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=1e-2):
         if lr < 0.0:
             raise ValueError(f"Invalid learning rate: {lr}")
@@ -180,13 +180,13 @@ class TorchAdamW(Optimizer):
             raise ValueError(f"Invalid beta parameter at index 1: {betas[1]}")
         if weight_decay < 0.0:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
-        
+
         defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
         super(TorchAdamW, self).__init__(params, defaults)
-    
+
     def __setstate__(self, state):
         super(TorchAdamW, self).__setstate__(state)
-    
+
     @torch.no_grad()
     def step(self, closure: Optional[Callable] = None):
         """Performs a single optimization step."""
@@ -194,64 +194,64 @@ class TorchAdamW(Optimizer):
         if closure is not None:
             with torch.enable_grad():
                 loss = closure()
-        
+
         for group in self.param_groups:
             beta1, beta2 = group['betas']
             lr = group['lr']
             eps = group['eps']
             weight_decay = group['weight_decay']
-            
+
             for p in group['params']:
                 if p.grad is None:
                     continue
-                
+
                 grad = p.grad
-                
+
                 state = self.state[p]
-                
+
                 # State initialization
                 if len(state) == 0:
                     state['step'] = 0
                     state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                     state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                
+
                 exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
                 state['step'] += 1
-                
+
                 # Decay the first and second moment running average coefficient
                 exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
                 exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
-                
+
                 # Bias correction
                 bias_correction1 = 1 - beta1 ** state['step']
                 bias_correction2 = 1 - beta2 ** state['step']
-                
+
                 step_size = lr / bias_correction1
                 bias_correction2_sqrt = bias_correction2 ** 0.5
-                
+
                 # AdamW: Decoupled weight decay (applied AFTER gradient update)
                 denom = (exp_avg_sq.sqrt() / bias_correction2_sqrt).add_(eps)
                 p.addcdiv_(exp_avg, denom, value=-step_size)
-                
+
                 # Apply weight decay directly to parameters
                 if weight_decay != 0:
                     p.mul_(1 - lr * weight_decay)
-        
+
         return loss
 
 
 class TorchSAM(Optimizer):
     """
     Sharpness-Aware Minimization (SAM) optimizer with native PyTorch operations.
-    
+
     Implements "Sharpness-Aware Minimization for Efficiently Improving Generalization"
     (Foret et al., 2021) without numpy overhead.
-    
+
     SAM performs two passes:
     1. Ascent step: move to worst-case perturbation
     2. Descent step: compute gradient at perturbed location and update
     """
-    
+
     def __init__(self, params, base_optimizer, rho=0.05, **kwargs):
         """
         Args:
@@ -262,13 +262,13 @@ class TorchSAM(Optimizer):
         """
         if rho < 0.0:
             raise ValueError(f"Invalid rho value: {rho}")
-        
+
         defaults = dict(rho=rho, **kwargs)
         super(TorchSAM, self).__init__(params, defaults)
-        
+
         self.base_optimizer = base_optimizer(self.param_groups, **kwargs)
         self.param_groups = self.base_optimizer.param_groups
-    
+
     @torch.no_grad()
     def first_step(self, zero_grad=False):
         """
@@ -304,7 +304,7 @@ class TorchSAM(Optimizer):
 
         if zero_grad:
             self.zero_grad()
-    
+
     @torch.no_grad()
     def second_step(self, zero_grad=False):
         """
@@ -341,7 +341,7 @@ class TorchSAM(Optimizer):
 
         if zero_grad:
             self.zero_grad()
-    
+
     def step(self, closure=None):
         """
         Single step combining both SAM phases.
@@ -373,7 +373,7 @@ class TorchSAM(Optimizer):
                         pass
 
         return loss
-    
+
     def _grad_norm(self):
         """Compute L2 norm of gradients."""
         norm = torch.norm(
@@ -391,11 +391,11 @@ class TorchSAM(Optimizer):
 class TorchLookahead(Optimizer):
     """
     Lookahead optimizer with native PyTorch operations.
-    
+
     Implements "Lookahead Optimizer: k steps forward, 1 step back"
     (Zhang et al., 2019) without numpy overhead.
     """
-    
+
     def __init__(self, base_optimizer, k=5, alpha=0.5):
         """
         Args:
@@ -407,20 +407,20 @@ class TorchLookahead(Optimizer):
             raise ValueError(f"Invalid alpha value: {alpha}")
         if k < 1:
             raise ValueError(f"Invalid k value: {k}")
-        
+
         self.base_optimizer = base_optimizer
         # Initialize parent with base optimizer's param_groups
         super(TorchLookahead, self).__init__(base_optimizer.param_groups, {})
         self.k = k
         self.alpha = alpha
         self.step_counter = 0
-        
+
         # Cache for slow weights
         self.slow_weights = {}
         for group in self.param_groups:
             for p in group['params']:
                 self.slow_weights[id(p)] = p.data.clone()
-    
+
     def __getstate__(self):
         return {
             'base_optimizer': self.base_optimizer,
@@ -430,27 +430,27 @@ class TorchLookahead(Optimizer):
             'step_counter': self.step_counter,
             'slow_weights': self.slow_weights,
         }
-    
+
     def __setstate__(self, state):
         self.__dict__.update(state)
-    
+
     @property
     def state(self):
         return self.base_optimizer.state
-    
+
     def state_dict(self):
         return self.base_optimizer.state_dict()
-    
+
     def load_state_dict(self, state_dict):
         self.base_optimizer.load_state_dict(state_dict)
-    
+
     @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step."""
         # Update fast weights
         loss = self.base_optimizer.step(closure)
         self.step_counter += 1
-        
+
         # Update slow weights every k steps
         if self.step_counter % self.k == 0:
             for group in self.param_groups:
@@ -461,9 +461,9 @@ class TorchLookahead(Optimizer):
                         self.slow_weights[p_id].add_(p.data - self.slow_weights[p_id], alpha=self.alpha)
                         # Copy slow weights to fast weights
                         p.data.copy_(self.slow_weights[p_id])
-        
+
         return loss
-    
+
     def zero_grad(self, set_to_none: bool = False):
         self.base_optimizer.zero_grad(set_to_none=set_to_none)
 

@@ -1,0 +1,171 @@
+name: Reproducibility CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run daily at 2am UTC to catch non-deterministic behavior
+    - cron: '0 2 * * *'
+
+jobs:
+  deterministic-tests:
+    name: Deterministic Ultra-Quick Tests
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+        seed: [42, 123, 456]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-timeout
+    
+    - name: Run deterministic experiment (seed ${{ matrix.seed }})
+      id: experiment
+      run: |
+        python run_all_kaggle.py \
+          --ultra-quick \
+          --seeds ${{ matrix.seed }} \
+          --no-mlflow \
+          --output results_ci_seed${{ matrix.seed }}
+      timeout-minutes: 15
+    
+    - name: Compute result hash
+      id: hash
+      run: |
+        # Hash all CSV results for determinism check
+        find results_ci_seed${{ matrix.seed }} -name "*.csv" -type f | sort | xargs cat | sha256sum > result_hash.txt
+        echo "hash=$(cat result_hash.txt | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+    
+    - name: Upload results artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: results-py${{ matrix.python-version }}-seed${{ matrix.seed }}
+        path: results_ci_seed${{ matrix.seed }}
+        retention-days: 7
+    
+    - name: Upload result hash
+      uses: actions/upload-artifact@v3
+      with:
+        name: hash-py${{ matrix.python-version }}-seed${{ matrix.seed }}
+        path: result_hash.txt
+        retention-days: 7
+  
+  verify-reproducibility:
+    name: Verify Reproducibility
+    needs: deterministic-tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Download all result hashes
+      uses: actions/download-artifact@v3
+      with:
+        path: hashes
+    
+    - name: Check determinism
+      run: |
+        echo "Checking that same seed produces same results..."
+        
+        for seed in 42 123 456; do
+          echo "=== Seed $seed ==="
+          
+          # Get all hashes for this seed across Python versions
+          hashes=$(find hashes -name "hash-*-seed${seed}" -exec cat {}/result_hash.txt \; | cut -d' ' -f1 | sort | uniq)
+          count=$(echo "$hashes" | wc -l)
+          
+          if [ $count -eq 1 ]; then
+            echo "✅ Seed $seed: Deterministic across Python versions"
+            echo "   Hash: $hashes"
+          else
+            echo "❌ Seed $seed: NON-DETERMINISTIC! Found $count different hashes:"
+            echo "$hashes"
+            exit 1
+          fi
+        done
+        
+        echo ""
+        echo "✅ All seeds produced deterministic results!"
+  
+  quick-validation:
+    name: Quick Validation Suite
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Run quick validation test
+      run: |
+        python scripts/quick_validation_test.py --verbose
+      timeout-minutes: 20
+    
+    - name: Run import safety tests
+      run: |
+        python -m pytest tests/test_import_safety.py -v
+    
+    - name: Run theory edge-case tests
+      run: |
+        python -m pytest tests/test_theory_edge_cases.py -v
+  
+  type-checking:
+    name: Static Type Checking
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyright
+    
+    - name: Run pyright
+      run: |
+        pyright src/ scripts/ --outputjson | tee pyright_results.json
+        
+        # Check for errors
+        errors=$(python -c "import json; data=json.load(open('pyright_results.json')); print(data['summary']['errorCount'])")
+        
+        if [ "$errors" -gt 0 ]; then
+          echo "❌ Found $errors type errors"
+          exit 1
+        else
+          echo "✅ No type errors found"
+        fi

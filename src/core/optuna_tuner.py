@@ -65,7 +65,7 @@ class OptunaHyperparameterTuner:
     ):
         """
         Initialize hyperparameter tuner.
-        
+
         Args:
             objective_fn: Function to optimize (takes trial, returns metric)
             direction: "maximize" or "minimize"
@@ -101,7 +101,7 @@ class OptunaHyperparameterTuner:
             self.sampler = TPESampler(seed=seed, n_startup_trials=n_startup_trials)
         else:
             raise ValueError(f"Unknown sampler: {sampler}")
-        
+
         # Create pruner
         if pruner == "median":
             self.pruner = MedianPruner(n_startup_trials=5, n_warmup_steps=3)
@@ -111,7 +111,7 @@ class OptunaHyperparameterTuner:
             self.pruner = None
         else:
             raise ValueError(f"Unknown pruner: {pruner}")
-        
+
         # Create study
         # Changed default to load_if_exists=False to prevent contamination
         # Users must explicitly set study_name with timestamp/UUID for shared storage
@@ -124,14 +124,14 @@ class OptunaHyperparameterTuner:
             storage=storage,
             load_if_exists=False  # Prevents accidental trial contamination
         )
-        
+
         if storage is not None:
             logging.warning(
                 f"Using shared storage with study_name='{study_name}'. "
                 f"To prevent trial contamination, ensure study_name is unique (include timestamp/UUID). "
                 f"If you want to resume an existing study, manually set load_if_exists=True in create_study() call."
             )
-        
+
     def optimize(
         self,
         n_trials: int = 100,
@@ -144,7 +144,7 @@ class OptunaHyperparameterTuner:
     ) -> Dict[str, Any]:
         """
         Run hyperparameter optimization.
-        
+
         Args:
             n_trials: Number of trials to run
             timeout: Time limit in seconds (optional)
@@ -153,10 +153,10 @@ class OptunaHyperparameterTuner:
             val_loader: Validation DataLoader (required for test-leakage checks when enforce_validation=True)
             test_dataset: Reference to test dataset for identity validation (RECOMMENDED)
             enforce_validation: If True, raises error if val_loader is None (default: True to enforce validation)
-            
+
         Returns:
             Dictionary with best parameters and statistics
-            
+
         Raises:
             ValueError: If enforce_validation=True and val_loader is None or lacks proper metadata
             RuntimeError: If validation loader fails test-leakage check
@@ -183,7 +183,7 @@ class OptunaHyperparameterTuner:
             # Enforce test-leakage prevention with stricter checks
             try:
                 from src.core.loader_validation import enforce_no_test_in_tuning, validate_loader_for_tuning
-                
+
                 # Use validate_loader_for_tuning with test_dataset for stronger checks
                 if test_dataset is not None:
                     validate_loader_for_tuning(val_loader, expected_split='validation', test_dataset=test_dataset)
@@ -192,7 +192,7 @@ class OptunaHyperparameterTuner:
                     # Fallback to metadata-only check, but require proper tagging
                     split_type = getattr(val_loader, '_split_type', None)
                     loader_name = getattr(val_loader, 'name', None)
-                    
+
                     if split_type != 'validation' and 'val' not in str(loader_name).lower():
                         raise ValueError(
                             "INTEGRITY ERROR: Validation loader lacks proper metadata. "
@@ -200,7 +200,7 @@ class OptunaHyperparameterTuner:
                             "Either: (1) provide test_dataset parameter for identity check, or (2) ensure loader has proper metadata tags. "
                             "This strict check prevents accidental test-set leakage during hyperparameter tuning."
                         )
-                    
+
                     enforce_no_test_in_tuning(val_loader)
                     logging.warning("PASSED: Validation loader test-leakage check (metadata-only; consider providing test_dataset for stronger verification)")
             except ImportError:
@@ -213,14 +213,14 @@ class OptunaHyperparameterTuner:
                     f"This indicates that the test set may be used during tuning, which would invalidate results. "
                     f"Error: {e}"
                 ) from e
-        
+
         print(f"Starting Optuna optimization: {self.study_name}")
         print(f"Direction: {self.direction}")
         print(f"Trials: {n_trials}")
         print(f"Sampler: {self.sampler.__class__.__name__ if self.sampler else 'None'}")
         print(f"Pruner: {self.pruner.__class__.__name__ if self.pruner else 'None'}")
         print("-" * 80)
-        
+
         # Run optimization
         self.study.optimize(
             self.objective_fn,
@@ -229,13 +229,13 @@ class OptunaHyperparameterTuner:
             show_progress_bar=show_progress_bar,
             callbacks=callbacks
         )
-        
+
         # Get best trial
         best_trial = self.study.best_trial  # type: ignore[union-attr]
-        
+
         if best_trial is None:
             raise RuntimeError("No trials completed successfully. Cannot determine best trial.")
-        
+
         results = {
             'best_value': best_trial.value,
             'best_params': best_trial.params,
@@ -245,7 +245,7 @@ class OptunaHyperparameterTuner:
             'n_complete': len([t for t in self.study.trials if t.state == optuna.trial.TrialState.COMPLETE]),  # type: ignore[union-attr]
             'study_name': self.study_name
         }
-        
+
         print("\n" + "=" * 80)
         print(f"Optimization Complete!")
         print(f"Best value: {results['best_value']:.6f}")
@@ -255,9 +255,9 @@ class OptunaHyperparameterTuner:
         for param, value in results['best_params'].items():
             print(f"  {param}: {value}")
         print("=" * 80)
-        
+
         return results
-    
+
     def get_importance(self) -> Dict[str, float]:
         """Get parameter importance scores."""
         try:
@@ -266,7 +266,7 @@ class OptunaHyperparameterTuner:
         except Exception as e:
             print(f"Could not compute importance: {e}")
             return {}
-    
+
     def save_results(self, filepath: str):
         """Save optimization results to JSON."""
         results = {
@@ -286,65 +286,65 @@ class OptunaHyperparameterTuner:
                 for t in self.study.trials
             ]
         }
-        
+
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(results, f, indent=2)
-        
+
         print(f"Saved results to {filepath}")
 
 
 def suggest_optimizer_params(trial: Any, optimizer_name: str) -> Dict[str, Any]:
     """
     Suggest hyperparameters for optimizers.
-    
+
     Args:
         trial: Optuna trial object
         optimizer_name: Name of optimizer ("sgd", "adam", "rmsprop", etc.)
-        
+
     Returns:
         Dictionary of suggested hyperparameters
     """
     params: Dict[str, Any] = {}
-    
+
     # Learning rate (universal)
     params['lr'] = trial.suggest_float('lr', 1e-5, 1e-1, log=True)
-    
+
     if optimizer_name.lower() in ['sgd', 'sgdmomentum']:
         if 'momentum' in optimizer_name.lower():
             params['momentum'] = trial.suggest_float('momentum', 0.0, 0.99)
-    
+
     elif optimizer_name.lower() == 'adam':
         params['beta1'] = trial.suggest_float('beta1', 0.8, 0.999)
         params['beta2'] = trial.suggest_float('beta2', 0.9, 0.9999)
         params['epsilon'] = trial.suggest_float('epsilon', 1e-10, 1e-6, log=True)
-    
+
     elif optimizer_name.lower() == 'adamw':
         params['beta1'] = trial.suggest_float('beta1', 0.8, 0.999)
         params['beta2'] = trial.suggest_float('beta2', 0.9, 0.9999)
         params['epsilon'] = trial.suggest_float('epsilon', 1e-10, 1e-6, log=True)
         params['weight_decay'] = trial.suggest_float('weight_decay', 1e-6, 1e-2, log=True)
-    
+
     elif optimizer_name.lower() == 'rmsprop':
         params['alpha'] = trial.suggest_float('alpha', 0.9, 0.999)
         params['epsilon'] = trial.suggest_float('epsilon', 1e-10, 1e-6, log=True)
-    
+
     return params
 
 
 def suggest_lr_scheduler_params(trial: Any, scheduler_name: str, max_epochs: int) -> Dict[str, Any]:
     """
     Suggest hyperparameters for LR schedulers.
-    
+
     Args:
         trial: Optuna trial object
         scheduler_name: Name of scheduler
         max_epochs: Maximum number of training epochs
-        
+
     Returns:
         Dictionary of suggested hyperparameters
     """
     params: Dict[str, Any] = {'scheduler': scheduler_name}
-    
+
     if scheduler_name == 'step':
         # Guard against invalid ranges when max_epochs is too small
         if max_epochs < 3:
@@ -356,7 +356,7 @@ def suggest_lr_scheduler_params(trial: Any, scheduler_name: str, max_epochs: int
             step_max = max(step_min + 1, max_epochs // 2)
             params['step_size'] = trial.suggest_int('step_size', step_min, step_max)
             params['gamma'] = trial.suggest_float('gamma', 0.05, 0.5)
-    
+
     elif scheduler_name == 'multistep':
         # Guard against invalid milestone ranges
         if max_epochs < 10:
@@ -375,40 +375,40 @@ def suggest_lr_scheduler_params(trial: Any, scheduler_name: str, max_epochs: int
             ])
             params['milestones'] = milestones
             params['gamma'] = trial.suggest_float('gamma', 0.05, 0.5)
-    
+
     elif scheduler_name == 'cosine':
         params['T_max'] = max_epochs
         params['eta_min'] = trial.suggest_float('eta_min', 1e-6, 1e-4, log=True)
-    
+
     elif scheduler_name == 'exponential':
         params['gamma'] = trial.suggest_float('gamma', 0.90, 0.99)
-    
+
     elif scheduler_name == 'onecycle':
         params['max_lr'] = trial.suggest_float('max_lr', 1e-3, 1e-1, log=True)
         params['total_steps'] = max_epochs
         params['pct_start'] = trial.suggest_float('pct_start', 0.2, 0.4)
-    
+
     # Optional warmup
     use_warmup = trial.suggest_categorical('use_warmup', [True, False])
     if use_warmup:
         params['warmup_epochs'] = trial.suggest_int('warmup_epochs', 3, min(10, max_epochs // 5))
-    
+
     return params
 
 
 def suggest_model_params(trial: Any, model_type: str) -> Dict[str, Any]:
     """
     Suggest hyperparameters for models.
-    
+
     Args:
         trial: Optuna trial object
         model_type: Type of model ("mlp", "cnn")
-        
+
     Returns:
         Dictionary of suggested hyperparameters
     """
     params: Dict[str, Any] = {}
-    
+
     if model_type == 'mlp':
         n_layers = trial.suggest_int('n_layers', 1, 4)
         hidden_sizes = []
@@ -417,7 +417,7 @@ def suggest_model_params(trial: Any, model_type: str) -> Dict[str, Any]:
             hidden_sizes.append(size)
         params['hidden_sizes'] = hidden_sizes
         params['dropout'] = trial.suggest_float('dropout', 0.0, 0.5)
-    
+
     elif model_type == 'cnn':
         n_conv_layers = trial.suggest_int('n_conv_layers', 2, 4)
         channels = []
@@ -427,7 +427,7 @@ def suggest_model_params(trial: Any, model_type: str) -> Dict[str, Any]:
         params['channels'] = channels
         params['dropout'] = trial.suggest_float('dropout', 0.0, 0.5)
         params['kernel_size'] = trial.suggest_categorical('kernel_size', [3, 5])
-    
+
     return params
 
 
@@ -582,10 +582,10 @@ def apply_best_params_to_config(config: Dict[str, Any], best_params: Dict[str, A
 def suggest_training_params(trial: Any) -> Dict[str, Any]:
     """
     Suggest training hyperparameters.
-    
+
     Args:
         trial: Optuna trial object
-        
+
     Returns:
         Dictionary of suggested hyperparameters
     """
@@ -593,7 +593,7 @@ def suggest_training_params(trial: Any) -> Dict[str, Any]:
         'batch_size': trial.suggest_categorical('batch_size', [32, 64, 128, 256]),
         'epochs': trial.suggest_int('epochs', 10, 50)
     }
-    
+
     return params
 
 
@@ -657,13 +657,13 @@ if __name__ == '__main__':
     print("="*80)
     print(" "*25 + "OPTUNA DEMO")
     print("="*80)
-    
+
     def simple_objective(trial):
         """Simple quadratic objective for testing."""
         x = trial.suggest_float('x', -10, 10)
         y = trial.suggest_float('y', -10, 10)
         return (x - 2)**2 + (y + 3)**2
-    
+
     # Create tuner
     tuner = OptunaHyperparameterTuner(
         objective_fn=simple_objective,
@@ -672,10 +672,10 @@ if __name__ == '__main__':
         sampler="tpe",
         pruner=None
     )
-    
+
     # Run optimization (demo mode: disable strict validation enforcement)
     results = tuner.optimize(n_trials=50, show_progress_bar=True, enforce_validation=False)
-    
+
     print("\nDemo complete!")
     print(f"Optimum found: x={results['best_params']['x']:.4f}, y={results['best_params']['y']:.4f}")
     print(f"Expected optimum: x=2.0, y=-3.0")

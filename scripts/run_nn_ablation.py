@@ -79,12 +79,12 @@ def build_summary(results_dir: str = 'results') -> pd.DataFrame:
             'test_loss_std': float(np.nanstd(loss, ddof=1)) if loss.size > 1 else np.nan,
         })
     df = pd.DataFrame(rows)
-    
+
     # [FIX] Kiểm tra nếu không có dữ liệu thì trả về DataFrame rỗng
     if df.empty or 'Optimizer' not in df.columns:
         logging.warning(f"No valid results found in {results_dir}")
         return pd.DataFrame()
-        
+
     df = df.sort_values('Optimizer')
     return df
 

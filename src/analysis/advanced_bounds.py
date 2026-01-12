@@ -32,17 +32,17 @@ def saddle_escape_time_bound(
 ) -> Dict[str, Any]:
     """
     Theoretical bound on time to escape saddle points.
-    
+
     Based on Jin et al. 2017: "How to Escape Saddle Points Efficiently"
-    
+
     Theory:
     - **Perturbed GD**: O(poly(d, 1/ε, 1/δ) × log(1/ε)) where d=dimension, δ=failure prob
     - **Momentum (Perturbed HB)**: O(poly(d, 1/ε) × √(ρ/|λ_min|)) - FASTER escape
     - **Noisy SGD**: O(1/(ε² × √|λ_min|)) - natural noise helps
-    
+
     Key Insight: Negative curvature (λ_min < 0) enables exponential escape.
     Momentum amplifies escape velocity.
-    
+
     Args:
         lambda_min: Minimum eigenvalue of Hessian (negative at saddle)
         L: Lipschitz constant of Hessian
@@ -50,7 +50,7 @@ def saddle_escape_time_bound(
         method: 'perturbed_gd', 'momentum', or 'noisy_sgd'
         momentum: Momentum coefficient (for momentum method)
         lr: Learning rate (if None, uses optimal)
-        
+
     Returns:
         dict with:
           - escape_time: Expected iterations to escape
@@ -68,17 +68,17 @@ def saddle_escape_time_bound(
             'method_advantage': 1.0,
             'regime': 'not_a_saddle'
         }
-    
+
     # Absolute value of negative eigenvalue
     chi = abs(lambda_min)  # "Negative curvature strength"
-    
+
     # Dimension-dependent constants (use d=1000 as typical NN parameter count)
     d = 1000
     log_factor = np.log(1.0 / epsilon)
-    
+
     if lr is None:
         lr = min(1.0 / L, 1.0 / chi)  # Adaptive to curvature
-    
+
     if method == 'perturbed_gd':
         # Jin et al. 2017 Theorem 6: O(ℓ(d,ε) × polylog(d,ε))
         # Polynomial in dimension, logarithmic in accuracy
@@ -88,7 +88,7 @@ def saddle_escape_time_bound(
         perturbation_radius = epsilon / (d ** 0.25)  # Required noise
         method_advantage = 1.0  # Baseline
         regime = 'polynomial_escape'
-        
+
     elif method == 'momentum':
         # Jin et al. 2017 Theorem 9: Momentum accelerates escape
         # O(√(ρ/χ)) where ρ is momentum perturbation strength
@@ -96,31 +96,31 @@ def saddle_escape_time_bound(
         rho = 0.01  # Typical perturbation strength
         base_time = np.sqrt(rho / chi) * (1.0 / epsilon)
         escape_time = base_time * log_factor
-        
+
         # Momentum amplifies escape velocity
         amplification = 1.0 / (1.0 - momentum) if momentum < 1 else 10.0
         escape_velocity = chi * lr * amplification
         perturbation_radius = np.sqrt(rho * epsilon)
-        
+
         # Advantage over vanilla GD
         vanilla_time = (d ** 1.5) * (1.0 / epsilon) ** 2 * log_factor
         method_advantage = vanilla_time / escape_time
         regime = 'momentum_accelerated'
-        
+
     elif method == 'noisy_sgd':
         # Natural stochastic noise enables escape without explicit perturbation
         # O(1/(ε² √χ)) from random walk + negative curvature drift
         escape_time = 1.0 / (epsilon ** 2 * np.sqrt(chi))
         escape_velocity = chi * lr  # Drift velocity
         perturbation_radius = 0.0  # No explicit perturbation needed
-        
+
         # Advantage: no need for algorithmic perturbation
         method_advantage = 2.0  # Approximately 2x faster than perturbed GD in practice
         regime = 'noise_driven'
-        
+
     else:
         raise ValueError(f"Unknown method: {method}. Use 'perturbed_gd', 'momentum', or 'noisy_sgd'")
-    
+
     return {
         'escape_time': float(escape_time),
         'escape_velocity': float(escape_velocity),
@@ -146,20 +146,20 @@ def adam_nonconvex_full_bound(
 ) -> Dict[str, Any]:
     """
     Complete Adam non-convex convergence bound (Reddi et al. 2018).
-    
+
     Implements the FULL bound from "On the Convergence of Adam and Beyond",
     not just the simplified regret bound.
-    
+
     Theorem 4 (Reddi et al. 2018):
     E[min_{t≤T} ||∇f(x_t)||²] ≤ 2Δ/(α(1-β₁)√T) + α²G²√(1-β₂ᵀ)/(1-β₂)(1-β₁)√T + ...
-    
+
     The bound has THREE terms:
     1. Initial suboptimality term: O(1/√T)
     2. Adaptive step size term: O(α²√T) - can DIVERGE if α too large!
     3. Bias correction term: O(1/√T) - vanishes as T → ∞
-    
+
     CRITICAL: Term 2 grows with T if α²√T > 1, explaining Adam's instability.
-    
+
     Args:
         L: Lipschitz constant of gradients
         T: Number of iterations
@@ -170,7 +170,7 @@ def adam_nonconvex_full_bound(
         sigma: Gradient noise level (stochastic case)
         Delta: Initial suboptimality f(x_0) - f*
         d: Problem dimension (for G_infinity bound)
-        
+
     Returns:
         dict with:
           - gradient_norm_bound: Main convergence bound E[||∇f||²]
@@ -183,41 +183,41 @@ def adam_nonconvex_full_bound(
     # Constants from theory
     G_infinity = L * np.sqrt(d)  # Bound on ||g_t||_∞ (dimension-dependent)
     G = L  # Bound on ||∇f||
-    
+
     # Term 1: Initial suboptimality (O(1/√T))
     term1 = (2 * Delta) / (alpha * (1 - beta1) * np.sqrt(T))
-    
+
     # Term 2: Adaptive step size term (CRITICAL - can grow!)
     # α²G_∞² √(1-β₂ᵀ) / [(1-β₂)(1-β₁)√T]
     # For large T: approximately α²G_∞² / [(1-β₂)(1-β₁)]
     beta2_power = beta2 ** T
     sqrt_factor = np.sqrt(1 - beta2_power)
     term2 = (alpha ** 2 * G_infinity ** 2 * sqrt_factor) / ((1 - beta2) * (1 - beta1) * np.sqrt(T))
-    
+
     # Term 3: Bias correction term (O(1/√T))
     # (β₁² / (1-β₁)²) × [G² / √T]
     term3 = (beta1 ** 2 / (1 - beta1) ** 2) * (G ** 2 / np.sqrt(T))
-    
+
     # Stochastic gradient noise contribution
     if sigma > 0:
         # Additional term: α σ² / √T (from variance)
         noise_term = alpha * sigma ** 2 / np.sqrt(T)
         term3 += noise_term
-    
+
     # Total bound
     gradient_norm_bound = term1 + term2 + term3
-    
+
     # Stability analysis
     # Adam is stable if term2 does not dominate (i.e., α²√T is bounded)
     stability_threshold = (1 - beta2) * (1 - beta1) / G_infinity ** 2
     actual_growth = alpha ** 2 * np.sqrt(T)
     is_stable = actual_growth < stability_threshold
     divergence_risk = min(100.0, (actual_growth / stability_threshold) * 100)
-    
+
     # Optimal step size (minimize bound)
     # Balancing term1 and term2: α_opt ≈ (2Δ(1-β₂)(1-β₁) / G_∞²)^(1/3) / T^(1/6)
     alpha_optimal = ((2 * Delta * (1 - beta2) * (1 - beta1)) / G_infinity ** 2) ** (1/3) / (T ** (1/6))
-    
+
     return {
         'gradient_norm_bound': float(gradient_norm_bound),
         'term1_suboptimality': float(term1),
@@ -242,25 +242,25 @@ def hessian_based_tighter_bound(
 ) -> Dict[str, Any]:
     """
     Tighter convergence bounds using Hessian spectral information.
-    
+
     Standard bounds use worst-case L (max eigenvalue). This function
     exploits the FULL spectrum for tighter, problem-specific bounds.
-    
+
     Theory:
     - **Spectral norm**: ||H|| = λ_max (standard bound)
     - **Trace norm**: tr(H) = Σλ_i (average curvature)
     - **Effective dimension**: d_eff = tr(H)²/||H||² (how many dimensions matter)
     - **Condition-aware bound**: Exploits eigenvalue distribution
-    
+
     For well-conditioned problems (small spread), bounds are MUCH tighter than worst-case.
-    
+
     Args:
         hessian_eigenvalues: Array of Hessian eigenvalues (from spectral decomposition)
         lr: Learning rate
         T: Number of iterations
         sigma: Gradient noise level
         use_spectral_norm: If True, use ||H|| (conservative). If False, use tr(H)/d (average)
-        
+
     Returns:
         dict with:
           - tighter_bound: Improved convergence bound
@@ -273,44 +273,44 @@ def hessian_based_tighter_bound(
     lambda_max = np.max(hessian_eigenvalues)
     lambda_min = np.min(hessian_eigenvalues)
     lambda_pos = hessian_eigenvalues[hessian_eigenvalues > 0]
-    
+
     if len(lambda_pos) == 0:
         logging.warning("hessian_based_tighter_bound: No positive eigenvalues. Using L=1.0 fallback.")
         lambda_max = 1.0
         lambda_min = 0.01
-    
+
     # Standard bound uses worst-case L = λ_max
     L_standard = lambda_max
     standard_bound = 2.0 / (lr * T) + L_standard * lr * sigma ** 2
-    
+
     if use_spectral_norm:
         # Use spectral norm (same as standard)
         L_effective = lambda_max
     else:
         # Use average curvature (tighter for many problems)
         L_effective = np.mean(lambda_pos) if len(lambda_pos) > 0 else lambda_max
-    
+
     # Tighter bound using effective Lipschitz constant
     tighter_bound = 2.0 / (lr * T) + L_effective * lr * sigma ** 2
-    
+
     # Effective dimension (d_eff = tr(H)² / ||H||_F²)
     trace = np.sum(lambda_pos)
     frobenius_norm_sq = np.sum(lambda_pos ** 2)
     effective_dimension = (trace ** 2) / frobenius_norm_sq if frobenius_norm_sq > 0 else len(lambda_pos)
-    
+
     # Condition number
     if lambda_min > 1e-12:
         condition_number = lambda_max / lambda_min
     else:
         condition_number = float('inf')
-    
+
     # Improvement factor
     tightness_improvement = standard_bound / tighter_bound if tighter_bound > 0 else 1.0
-    
+
     # Eigenvalue concentration (how much variance in spectrum)
     eigenvalue_std = np.std(lambda_pos) if len(lambda_pos) > 1 else 0.0
     eigenvalue_concentration = 1.0 / (1.0 + eigenvalue_std / np.mean(lambda_pos)) if len(lambda_pos) > 0 else 0.0
-    
+
     return {
         'tighter_bound': float(tighter_bound),
         'standard_bound': float(standard_bound),
@@ -335,18 +335,18 @@ def variance_reduction_bound(
 ) -> Dict[str, Any]:
     """
     Convergence bounds for variance-reduced methods (SVRG, SAGA, SAG).
-    
+
     Variance reduction dramatically improves convergence for finite-sum problems:
         f(x) = (1/n) Σ f_i(x)
     by using "memory" of past gradients to reduce stochastic noise.
-    
+
     Theory (Johnson & Zhang 2013):
     - **Standard SGD**: O(1/T) rate, variance σ² persists
     - **SVRG**: O((1-μ/Ln)ᵀ) rate - LINEAR convergence even with stochasticity!
     - **SAGA**: O((1-min{μ/Ln, 1/n})ᵀ) - even faster for large n
-    
+
     Key insight: Variance σ² → 0 as optimization progresses (not constant like SGD).
-    
+
     Args:
         L: Lipschitz constant (per-function)
         mu: Strong convexity parameter
@@ -354,7 +354,7 @@ def variance_reduction_bound(
         T: Number of iterations
         method: 'svrg', 'saga', or 'sag'
         m: Epoch length (for SVRG, default: 2n)
-        
+
     Returns:
         dict with:
           - convergence_rate: Linear rate ρ
@@ -373,23 +373,23 @@ def variance_reduction_bound(
             'memory_cost': 0,
             'regime': 'non_convex (no VR benefit)'
         }
-    
+
     if m is None:
         m = 2 * n  # Standard choice for SVRG
-    
+
     kappa = L / mu  # Condition number
-    
+
     if method == 'svrg':
         # SVRG linear rate (Johnson & Zhang 2013)
         # ρ = 1 - min{μ/(3Ln), 1/(3m)}
         rate_option1 = mu / (3 * L * n)
         rate_option2 = 1.0 / (3 * m)
         convergence_rate = 1.0 - min(rate_option1, rate_option2)
-        
+
         # Effective condition number
         kappa_eff = 3 * n * kappa
         variance_reduction_factor = n  # Reduces variance by factor of n
-        
+
     elif method == 'saga':
         # SAGA linear rate (Defazio et al. 2014)
         # ρ = 1 - min{μ/(Ln), 1/(2n)}
@@ -397,38 +397,38 @@ def variance_reduction_bound(
         rate_option1 = mu / (L * n)
         rate_option2 = 1.0 / (2 * n)
         convergence_rate = 1.0 - min(rate_option1, rate_option2)
-        
+
         kappa_eff = n * kappa
         variance_reduction_factor = n ** 0.75  # Slightly less than SVRG
-        
+
     elif method == 'sag':
         # SAG (older, similar to SAGA)
         # ρ = 1 - μ/(16Ln)
         convergence_rate = 1.0 - mu / (16 * L * n)
-        
+
         kappa_eff = 16 * n * kappa
         variance_reduction_factor = n / 2
-        
+
     else:
         raise ValueError(f"Unknown method: {method}. Use 'svrg', 'saga', or 'sag'")
-    
+
     # Iterations to ε-accuracy
     epsilon = 1e-6
     if convergence_rate < 1:
         iterations_to_eps = np.log(epsilon) / np.log(convergence_rate)
     else:
         iterations_to_eps = float('inf')
-    
+
     # Speedup vs SGD
     # SGD needs O(κ/ε) iterations for ε-accuracy
     # VR methods need O((n + κ)log(1/ε)) iterations
     sgd_iterations = kappa / epsilon
     vr_iterations = (n + kappa) * np.log(1.0 / epsilon)
     speedup_vs_sgd = sgd_iterations / vr_iterations if vr_iterations > 0 else 1.0
-    
+
     # Memory cost (need to store n gradients)
     memory_cost = n
-    
+
     return {
         'convergence_rate': float(convergence_rate),
         'iterations_to_eps': float(iterations_to_eps),
@@ -454,13 +454,13 @@ def comprehensive_bound_comparison(
 ) -> Dict[str, Dict]:
     """
     Compare all theoretical bounds for a given problem.
-    
+
     Generates a comprehensive report showing:
     - SGD, Momentum, Adam bounds
     - Saddle escape time
     - Hessian-based tighter bounds
     - Variance reduction potential
-    
+
     Args:
         L: Lipschitz constant
         mu: Strong convexity parameter
@@ -470,7 +470,7 @@ def comprehensive_bound_comparison(
         momentum: Momentum coefficient
         hessian_eigenvalues: Full spectrum (if available)
         n_datapoints: Dataset size (for variance reduction)
-        
+
     Returns:
         dict mapping method names to their bounds
     """
@@ -479,25 +479,25 @@ def comprehensive_bound_comparison(
         momentum_convergence_bound,
         adam_convergence_bound
     )
-    
+
     comparison = {}
-    
+
     # SGD bound
     comparison['sgd'] = sgd_convergence_bound(
         L=L, mu=mu, lr=lr, T=T, sigma=sigma,
         problem_type='strongly_convex' if mu > 1e-12 else 'non_convex'
     )
-    
+
     # Momentum bound
     comparison['momentum'] = momentum_convergence_bound(
         L=L, mu=mu, lr=lr, momentum=momentum, T=T, sigma=sigma
     )
-    
+
     # Adam bound (full)
     comparison['adam_full'] = adam_nonconvex_full_bound(
         L=L, T=T, alpha=lr, sigma=sigma
     )
-    
+
     # Saddle escape (if at saddle point)
     if hessian_eigenvalues is not None:
         lambda_min = np.min(hessian_eigenvalues)
@@ -506,14 +506,14 @@ def comprehensive_bound_comparison(
                 lambda_min=lambda_min, L=L, epsilon=1e-6,
                 method='momentum', momentum=momentum
             )
-    
+
     # Hessian-based tighter bound
     if hessian_eigenvalues is not None:
         comparison['hessian_tight'] = hessian_based_tighter_bound(
             hessian_eigenvalues=hessian_eigenvalues,
             lr=lr, T=T, sigma=sigma
         )
-    
+
     # Variance reduction (if applicable)
     if mu > 1e-12:
         comparison['svrg'] = variance_reduction_bound(
@@ -522,7 +522,7 @@ def comprehensive_bound_comparison(
         comparison['saga'] = variance_reduction_bound(
             L=L, mu=mu, n=n_datapoints, T=T, method='saga'
         )
-    
+
     return comparison
 
 
@@ -532,7 +532,7 @@ if __name__ == '__main__':
     print("ADVANCED THEORETICAL BOUNDS - EXAMPLES")
     print("="*80)
     print()
-    
+
     # Example 1: Saddle point escape
     print("1. SADDLE POINT ESCAPE")
     print("-"*80)
@@ -546,7 +546,7 @@ if __name__ == '__main__':
     print(f"Escape velocity: {escape_bound['escape_velocity']:.6f}")
     print(f"Advantage over GD: {escape_bound['method_advantage']:.2f}x")
     print()
-    
+
     # Example 2: Adam full bound
     print("2. ADAM NON-CONVEX (FULL BOUND)")
     print("-"*80)
@@ -561,7 +561,7 @@ if __name__ == '__main__':
     print(f"Divergence risk: {adam_bound['divergence_risk_pct']:.2f}%")
     print(f"Optimal α: {adam_bound['alpha_optimal']:.6f}")
     print()
-    
+
     # Example 3: Hessian-based tighter bound
     print("3. HESSIAN-BASED TIGHTER BOUND")
     print("-"*80)
@@ -579,7 +579,7 @@ if __name__ == '__main__':
     print(f"Effective dimension: {hess_bound['effective_dimension']:.1f}")
     print(f"Condition number: {hess_bound['condition_number']:.2f}")
     print()
-    
+
     # Example 4: Variance reduction
     print("4. VARIANCE REDUCTION (SVRG)")
     print("-"*80)
@@ -591,6 +591,6 @@ if __name__ == '__main__':
     print(f"Speedup vs SGD: {vr_bound['speedup_vs_sgd']:.2f}x")
     print(f"Variance reduction: {vr_bound['variance_reduction_factor']:.0f}x")
     print()
-    
+
     print("="*80)
     print("✓ All advanced bounds functional")

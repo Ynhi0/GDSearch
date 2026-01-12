@@ -29,32 +29,32 @@ def run_and_save(cfg: Dict[str, Any], tag: str) -> Tuple[str, pd.DataFrame]:
     df = train_and_evaluate(cfg)
     out = os.path.join(RESULTS_DIR, result_filename(cfg))
     df.to_csv(out, index=False)
-    
+
     # Save structured metadata alongside CSV to avoid brittle filename parsing
     meta_path = out.replace('.csv', '_meta.json')
     with open(meta_path, 'w') as f:
         # Save all config params as JSON for reliable reconstruction
         json.dump(cfg, f, indent=2)
-    
+
     return out, df
 
 
 def best_by_eval(csv_paths: List[str], prefer: str = 'accuracy') -> Tuple[Optional[str], float]:
     """
     Return best CSV path by final validation metric.
-    
+
     Use 'val' phase (validation set) instead of 'eval' phase (test set)
     to prevent test set leakage during hyperparameter tuning.
-    
+
     Rationale:
     Hyperparameter selection MUST use a held-out validation set carved from
     the training data. Using the test set for tuning constitutes adaptive
     overfitting and invalidates generalization claims.
-    
+
     Args:
         csv_paths: List of result CSV file paths
         prefer: 'accuracy' or 'loss' (min loss). Default accuracy.
-    
+
     Returns:
         Tuple of (best_path, best_score)
     """

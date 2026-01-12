@@ -23,21 +23,21 @@ from src.experiments.run_full_analysis import main as run_statistical_analysis
 def run_mnist_experiments(seeds=None, results_dir='results'):
     """
     Run MNIST experiments with multiple seeds.
-    
+
     Args:
         seeds: List of random seeds (default: [1-10])
         results_dir: Directory to save results
     """
     if seeds is None:
         seeds = list(range(1, 11))  # 10 seeds for benchmark
-    
+
     print("=" * 80)
     print("MNIST EXPERIMENTS - HIGH QUALITY")
     print("=" * 80)
     print(f"Number of seeds: {len(seeds)}")
     print(f"Seeds: {seeds}")
     print("=" * 80)
-    
+
     # Define optimizer configurations
     optimizer_configs = [
         {
@@ -73,7 +73,7 @@ def run_mnist_experiments(seeds=None, results_dir='results'):
             'tag': 'benchmark'
         }
     ]
-    
+
     # Generate all experiment configs
     all_configs = []
     for opt_config in optimizer_configs:
@@ -94,12 +94,12 @@ def run_mnist_experiments(seeds=None, results_dir='results'):
                 config['momentum'] = opt_config['momentum']
             if 'weight_decay' in opt_config:
                 config['weight_decay'] = opt_config['weight_decay']
-            
+
             all_configs.append(config)
-    
+
     print(f"\nTotal experiments to run: {len(all_configs)}")
     print(f"\nRunning experiments...")
-    
+
     # Run all experiments with progress bar
     results = []
     for config in tqdm(all_configs, desc="MNIST experiments"):
@@ -109,14 +109,14 @@ def run_mnist_experiments(seeds=None, results_dir='results'):
         except Exception as e:
             print(f"\nERROR in experiment {config['optimizer']} seed {config['seed']}: {e}")
             continue
-    
+
     print(f"\nCompleted {len(results)}/{len(all_configs)} experiments")
-    
+
     # Verify all files were created
     print("\n" + "=" * 80)
     print("VERIFYING RESULTS")
     print("=" * 80)
-    
+
     expected_files = []
     for opt_config in optimizer_configs:
         for seed in seeds:
@@ -124,7 +124,7 @@ def run_mnist_experiments(seeds=None, results_dir='results'):
             lr = opt_config['lr']
             filename = f"NN_SimpleMLP_MNIST_{opt_name}_lr{lr}_seed{seed}_benchmark.csv"
             expected_files.append(filename)
-    
+
     found_files = []
     missing_files = []
     for fname in expected_files:
@@ -133,7 +133,7 @@ def run_mnist_experiments(seeds=None, results_dir='results'):
             found_files.append(fname)
         else:
             missing_files.append(fname)
-    
+
     print(f"Found: {len(found_files)}/{len(expected_files)} result files")
     if missing_files:
         print(f"\nWARNING: Missing files:")
@@ -141,7 +141,7 @@ def run_mnist_experiments(seeds=None, results_dir='results'):
             print(f"   - {fname}")
         if len(missing_files) > 5:
             print(f"   ... and {len(missing_files) - 5} more")
-    
+
     return results
 
 
@@ -152,7 +152,7 @@ def run_statistical_comparison(results_dir='results'):
     print("\n" + "=" * 80)
     print("STATISTICAL ANALYSIS")
     print("=" * 80)
-    
+
     # Define optimizer pairs to compare
     comparisons = [
         ('Adam', 'SGD'),
@@ -164,32 +164,32 @@ def run_statistical_comparison(results_dir='results'):
         ('AMSGrad', 'AdamW'),
         ('SGD_Momentum', 'Adam'),
     ]
-    
+
     all_results = []
-    
+
     for opt_a, opt_b in comparisons:
         print(f"\nComparing {opt_a} vs {opt_b}...")
-        
+
         try:
             # Find result files
             import glob
             pattern_a = f"{results_dir}/NN_SimpleMLP_MNIST_{opt_a}_*_benchmark.csv"
             pattern_b = f"{results_dir}/NN_SimpleMLP_MNIST_{opt_b}_*_benchmark.csv"
-            
+
             files_a = glob.glob(pattern_a)
             files_b = glob.glob(pattern_b)
-            
+
             if not files_a or not files_b:
                 print(f"   ⚠️  Missing result files")
                 continue
-            
+
             # Load results and extract final metrics
             import re
-            
+
             def extract_seed(fname):
                 match = re.search(r'seed(\d+)', fname)
                 return int(match.group(1)) if match else None
-            
+
             # Build seed-matched datasets
             data_a = {}
             for f in files_a:
@@ -198,7 +198,7 @@ def run_statistical_comparison(results_dir='results'):
                     df = pd.read_csv(f)
                     final_row = df.iloc[-1]
                     data_a[seed] = final_row['test_loss']
-            
+
             data_b = {}
             for f in files_b:
                 seed = extract_seed(f)
@@ -206,38 +206,39 @@ def run_statistical_comparison(results_dir='results'):
                     df = pd.read_csv(f)
                     final_row = df.iloc[-1]
                     data_b[seed] = final_row['test_loss']
-            
+
             # Get common seeds
             common_seeds = sorted(set(data_a.keys()) & set(data_b.keys()))
-            
+
             if len(common_seeds) < 3:
                 print(f"   ⚠️  Insufficient common seeds: {len(common_seeds)}")
                 continue
-            
+
             # Extract matched values
             values_a = [data_a[s] for s in common_seeds]
             values_b = [data_b[s] for s in common_seeds]
-            
+
             # Compute statistics
             import numpy as np
             from scipy import stats
             from src.analysis.statistical_analysis import _to_scalar
-            
+
             mean_a = np.mean(values_a)
             std_a = np.std(values_a, ddof=1)
             mean_b = np.mean(values_b)
             std_b = np.std(values_b, ddof=1)
-            
+
             # Test for normality
             _, p_norm_a = stats.shapiro(values_a)
             _, p_norm_b = stats.shapiro(values_b)
-            
+
             # Choose test based on normality
             if p_norm_a > 0.05 and p_norm_b > 0.05:
                 # Paired t-test
-                stat, pval = stats.ttest_rel(values_a, values_b)
+                from src.analysis.statistical_analysis import safe_ttest_rel
+                stat, pval = safe_ttest_rel(values_a, values_b)
                 test_name = 'Paired t-test'
-                
+
                 # Cohen's d
                 diff = np.array(values_a) - np.array(values_b)
                 cohens_d = np.mean(diff) / np.std(diff, ddof=1)
@@ -245,7 +246,7 @@ def run_statistical_comparison(results_dir='results'):
                 # Wilcoxon signed-rank test
                 stat, pval = stats.wilcoxon(values_a, values_b)
                 test_name = 'Wilcoxon'
-                
+
                 # Rank-biserial correlation - normalize stat which may be tuple-like in some SciPy versions
                 n = len(values_a)
                 if isinstance(stat, (tuple, list, np.ndarray)):
@@ -278,53 +279,53 @@ def run_statistical_comparison(results_dir='results'):
                 'Observed power': float(power_report.get('achieved_power', float('nan'))),
                 'Required n (80%)': int(power_report.get('required_n', 0)) if power_report.get('required_n') not in (None, float('inf')) else float('inf')
             }
-            
+
             all_results.append(result)
-            
-            print(f"   {test_name}: p={pval:.4f}, d={cohens_d:.3f}, power={power_report.get('achieved_power', float('nan')):.2f}")            
+
+            print(f"   {test_name}: p={pval:.4f}, d={cohens_d:.3f}, power={power_report.get('achieved_power', float('nan')):.2f}")
         except Exception as e:
             print(f"   ❌ Error: {e}")
             continue
-    
+
     # Create DataFrame
     df = pd.DataFrame(all_results)
-    
+
     if len(df) == 0:
         print("\n⚠️  No statistical comparisons could be computed")
         return
-    
+
     # Apply Holm-Bonferroni correction
     from scipy.stats import false_discovery_control
     pvalues = np.asarray(df['p-value'].to_numpy(dtype=float))
-    
+
     # Holm-Bonferroni: sort p-values, compare to α/(m+1-k)
     n_tests = int(len(pvalues))
     sorted_indices = np.argsort(pvalues)
     corrected_sig = np.zeros(n_tests, dtype=bool)
-    
+
     for k, idx in enumerate(sorted_indices):
         alpha_corrected = 0.05 / (n_tests - k)
         if pvalues[idx] < alpha_corrected:
             corrected_sig[idx] = True
         else:
             break  # All remaining p-values are not significant
-    
+
     df['Significant (Holm-Bonferroni)'] = corrected_sig
-    
+
     # Save results
     output_path = f"{results_dir}/mnist_statistical_comparisons_benchmark.csv"
     df.to_csv(output_path, index=False)
-    
+
     print(f"\nStatistical analysis saved to: {output_path}")
     print(f"\nSignificant differences (after Holm-Bonferroni correction): {corrected_sig.sum()}/{n_tests}")
-    
+
     return df
 
 
 def main():
     """Main execution."""
     import argparse
-    
+
     parser = argparse.ArgumentParser(description='Run benchmark-quality MNIST experiments')
     parser.add_argument('--seeds', type=str, default='1,2,3,4,5,6,7,8,9,10',
                         help='Comma-separated list of seeds (default: 1-10)')
@@ -332,12 +333,12 @@ def main():
                         help='Directory to save results (default: results)')
     parser.add_argument('--stats-only', action='store_true',
                         help='Skip experiments, only run statistical analysis')
-    
+
     args = parser.parse_args()
-    
+
     # Parse seeds
     seeds = [int(s.strip()) for s in args.seeds.split(',')]
-    
+
     print("\n" + "=" * 80)
     print(" MNIST BENCHMARK EXPERIMENTS ")
     print("=" * 80)
@@ -345,14 +346,14 @@ def main():
     print(f"Results directory: {args.results_dir}")
     print(f"Total experiments: {len(seeds) * 5} (5 optimizers × {len(seeds)} seeds)")
     print("\n" + "=" * 80)
-    
+
     if not args.stats_only:
         # Run experiments
         run_mnist_experiments(seeds=seeds, results_dir=args.results_dir)
-    
+
     # Run statistical analysis
     run_statistical_comparison(results_dir=args.results_dir)
-    
+
     print("\n" + "=" * 80)
     print("MNIST BENCHMARK EXPERIMENTS COMPLETE")
     print("=" * 80)

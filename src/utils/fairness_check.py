@@ -13,7 +13,7 @@ Key Features:
 
 Usage:
     from src.utils.fairness_check import validate_tuning_fairness
-    
+
     optimizers = ['SGD', 'Adam', 'SAM_SGD', 'Lookahead_Adam']
     tuning_configs = {
         'SGD': {'n_trials': 15, 'epochs': 3},
@@ -44,7 +44,7 @@ class TuningConfig:
     batch_size: Optional[int] = None
     is_tuned: bool = True
     tuning_method: str = "optuna"  # 'optuna', 'grid', 'random', or 'default'
-    
+
     @property
     def total_budget(self) -> int:
         """Compute total computational budget (trials × epochs)."""
@@ -54,22 +54,22 @@ class TuningConfig:
 class TuningFairnessValidator:
     """
     Validates fairness of hyperparameter tuning across optimizers.
-    
+
     Ensures that:
     1. All compared optimizers receive equal tuning budgets (n_trials)
     2. Evaluation protocols are consistent (epochs, batch sizes)
     3. Advanced optimizers are not disadvantaged by using defaults
     """
-    
+
     def __init__(self, strict_mode: bool = True):
         """
         Args:
-            strict_mode: If True, raises exceptions on violations. 
+            strict_mode: If True, raises exceptions on violations.
                         If False, only logs warnings.
         """
         self.strict_mode = strict_mode
         self.violations: List[str] = []
-    
+
     def validate(
         self,
         optimizers: List[str],
@@ -77,31 +77,31 @@ class TuningFairnessValidator:
     ) -> bool:
         """
         Validate tuning fairness across optimizers.
-        
+
         Args:
             optimizers: List of optimizer names to compare
             tuning_configs: Dict mapping optimizer names to their tuning configs
-            
+
         Returns:
             True if fair, False otherwise (or raises in strict mode)
-            
+
         Raises:
             TuningFairnessError: If violations detected in strict mode
         """
         self.violations = []
-        
+
         # Check 1: All optimizers have tuning configs
         self._check_missing_configs(optimizers, tuning_configs)
-        
+
         # Check 2: Equal n_trials across all optimizers
         self._check_trial_parity(optimizers, tuning_configs)
-        
+
         # Check 3: Consistent evaluation protocols
         self._check_protocol_consistency(optimizers, tuning_configs)
-        
+
         # Check 4: No optimizers using defaults while others are tuned
         self._check_tuning_method_consistency(optimizers, tuning_configs)
-        
+
         # Report results
         if self.violations:
             error_msg = self._format_violation_report()
@@ -113,7 +113,7 @@ class TuningFairnessValidator:
         else:
             logger.info("✓ Tuning fairness validated: All optimizers have equal budgets")
             return True
-    
+
     def _check_missing_configs(
         self,
         optimizers: List[str],
@@ -126,7 +126,7 @@ class TuningFairnessValidator:
                 f"Missing tuning configs for {len(missing)} optimizer(s): {missing}. "
                 "All compared optimizers must have explicit tuning configurations."
             )
-    
+
     def _check_trial_parity(
         self,
         optimizers: List[str],
@@ -138,20 +138,20 @@ class TuningFairnessValidator:
             if opt in tuning_configs:
                 n_trials = tuning_configs[opt].n_trials
                 trials_map[n_trials].append(opt)
-        
+
         if len(trials_map) > 1:
             # Multiple different trial counts detected
             sorted_groups = sorted(trials_map.items(), key=lambda x: x[0], reverse=True)
             violation_details = []
             for n_trials, opts in sorted_groups:
                 violation_details.append(f"  - {n_trials} trials: {opts}")
-            
+
             self.violations.append(
                 f"Unequal tuning budgets detected:\n" +
                 "\n".join(violation_details) + "\n" +
                 "All optimizers must receive equal n_trials for fair comparison."
             )
-    
+
     def _check_protocol_consistency(
         self,
         optimizers: List[str],
@@ -160,14 +160,14 @@ class TuningFairnessValidator:
         """Check if evaluation protocols (epochs, batch sizes) are consistent."""
         epochs_map = defaultdict(list)
         batch_size_map = defaultdict(list)
-        
+
         for opt in optimizers:
             if opt in tuning_configs:
                 config = tuning_configs[opt]
                 epochs_map[config.epochs].append(opt)
                 if config.batch_size is not None:
                     batch_size_map[config.batch_size].append(opt)
-        
+
         # Check epoch consistency
         if len(epochs_map) > 1:
             details = [f"  - {ep} epochs: {opts}" for ep, opts in sorted(epochs_map.items())]
@@ -175,7 +175,7 @@ class TuningFairnessValidator:
                 f"Inconsistent evaluation epochs:\n" + "\n".join(details) + "\n" +
                 "All trials should use the same number of epochs."
             )
-        
+
         # Check batch size consistency (if specified)
         if len(batch_size_map) > 1:
             details = [f"  - batch_size={bs}: {opts}" for bs, opts in sorted(batch_size_map.items())]
@@ -183,18 +183,18 @@ class TuningFairnessValidator:
                 f"Inconsistent batch sizes:\n" + "\n".join(details) + "\n" +
                 "Different batch sizes affect gradient noise and may bias comparisons."
             )
-    
+
     def _check_tuning_method_consistency(
         self,
         optimizers: List[str],
         tuning_configs: Dict[str, TuningConfig]
     ):
         """Check if some optimizers use defaults while others are tuned."""
-        tuned_opts = [opt for opt in optimizers 
+        tuned_opts = [opt for opt in optimizers
                      if opt in tuning_configs and tuning_configs[opt].is_tuned]
-        default_opts = [opt for opt in optimizers 
+        default_opts = [opt for opt in optimizers
                        if opt in tuning_configs and not tuning_configs[opt].is_tuned]
-        
+
         if tuned_opts and default_opts:
             self.violations.append(
                 f"Mixed tuning approaches:\n"
@@ -202,7 +202,7 @@ class TuningFairnessValidator:
                 f"  - Default hyperparameters ({len(default_opts)}): {default_opts}\n"
                 "All compared optimizers must either be tuned or use defaults consistently."
             )
-    
+
     def _format_violation_report(self) -> str:
         """Format violations into a readable report."""
         header = "=" * 70
@@ -214,11 +214,11 @@ class TuningFairnessValidator:
             "The following issues compromise fair optimizer comparison:",
             ""
         ]
-        
+
         for i, violation in enumerate(self.violations, 1):
             report.append(f"{i}. {violation}")
             report.append("")
-        
+
         report.extend([
             "RECOMMENDED FIXES:",
             "1. Ensure all optimizers have equal n_trials in tuning configs",
@@ -228,7 +228,7 @@ class TuningFairnessValidator:
             "",
             header
         ])
-        
+
         return "\n".join(report)
 
 
@@ -244,19 +244,19 @@ def validate_tuning_fairness(
 ) -> bool:
     """
     Convenience function to validate tuning fairness.
-    
+
     Args:
         optimizers: List of optimizer names to compare
         tuning_configs: Dict with tuning parameters for each optimizer
             e.g., {'SGD': {'n_trials': 15, 'epochs': 3}, ...}
         strict: If True, raises on violations. If False, only warns.
-        
+
     Returns:
         True if fair, False otherwise
-        
+
     Raises:
         TuningFairnessError: If violations detected in strict mode
-        
+
     Example:
         >>> optimizers = ['SGD', 'Adam', 'SAM_SGD']
         >>> configs = {
@@ -276,7 +276,7 @@ def validate_tuning_fairness(
             is_tuned=config_dict.get('is_tuned', True),
             tuning_method=config_dict.get('tuning_method', 'optuna')
         )
-    
+
     validator = TuningFairnessValidator(strict_mode=strict)
     return validator.validate(optimizers, config_objects)
 
@@ -288,26 +288,26 @@ def check_tuning_parity_in_results(
 ) -> bool:
     """
     Post-hoc check for tuning parity from experiment results DataFrame.
-    
+
     Args:
         results_df: DataFrame with experiment results
         optimizer_col: Column name containing optimizer names
         trial_col: Column name with trial numbers (if available)
-        
+
     Returns:
         True if parity detected, False otherwise
     """
     if trial_col and trial_col in results_df.columns:
         # Count unique trials per optimizer
         trial_counts = results_df.groupby(optimizer_col)[trial_col].nunique()
-        
+
         if trial_counts.nunique() > 1:
             logger.warning(
                 f"Tuning parity violation detected in results:\n{trial_counts}\n"
                 "Different optimizers have different numbers of trials."
             )
             return False
-    
+
     logger.info("No tuning parity violations detected in results DataFrame")
     return True
 
@@ -320,16 +320,16 @@ def generate_fair_tuning_config(
 ) -> Dict[str, Dict[str, Any]]:
     """
     Generate a fair tuning configuration for multiple optimizers.
-    
+
     Args:
         optimizers: List of optimizer names
         n_trials: Number of tuning trials (same for all)
         epochs: Number of epochs per trial (same for all)
         batch_size: Batch size (if relevant)
-        
+
     Returns:
         Dict with identical configs for all optimizers
-        
+
     Example:
         >>> optimizers = ['SGD', 'Adam', 'SAM_SGD', 'Lookahead_Adam']
         >>> config = generate_fair_tuning_config(optimizers, n_trials=20, epochs=5)
@@ -350,7 +350,7 @@ def generate_fair_tuning_config(
 if __name__ == "__main__":
     # Example: Detecting unfair tuning
     optimizers = ['SGD', 'Adam', 'AdamW', 'SAM_SGD', 'Lookahead_Adam']
-    
+
     # UNFAIR configuration (SAM_SGD and Lookahead_Adam disadvantaged)
     unfair_config = {
         'SGD': {'n_trials': 15, 'epochs': 3, 'is_tuned': True},
@@ -359,16 +359,16 @@ if __name__ == "__main__":
         'SAM_SGD': {'n_trials': 0, 'epochs': 0, 'is_tuned': False},  # Using defaults!
         'Lookahead_Adam': {'n_trials': 0, 'epochs': 0, 'is_tuned': False}  # Using defaults!
     }
-    
+
     print("Testing UNFAIR configuration:")
     try:
         validate_tuning_fairness(optimizers, unfair_config, strict=True)
     except TuningFairnessError as e:
         print(f"✓ Correctly detected unfairness:\n{e}\n")
-    
+
     # FAIR configuration
     fair_config = generate_fair_tuning_config(optimizers, n_trials=15, epochs=3)
-    
+
     print("\nTesting FAIR configuration:")
     result = validate_tuning_fairness(optimizers, fair_config, strict=True)
     print(f"✓ Validation passed: {result}")

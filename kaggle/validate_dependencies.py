@@ -38,11 +38,11 @@ def check_version(package: str, constraints: tuple) -> Tuple[bool, str]:
     try:
         version = importlib.metadata.version(package)
         ver_tuple = parse_version(version)
-        
+
         i = 0
         while i < len(constraints):
             op = constraints[i]
-            
+
             if op == '==':
                 expected = constraints[i + 1]
                 if version != expected:
@@ -70,7 +70,7 @@ def check_version(package: str, constraints: tuple) -> Tuple[bool, str]:
                 i += 2
             else:
                 i += 1
-        
+
         return True, version
     except importlib.metadata.PackageNotFoundError:
         return False, "NOT INSTALLED"
@@ -81,32 +81,31 @@ def main():
     print("=" * 70)
     print("DEPENDENCY VALIDATION")
     print("=" * 70)
-    
+
     all_ok = True
-    
+
     for package, constraints in EXPECTED_VERSIONS.items():
         ok, message = check_version(package, constraints)
-        
+
         status = "✅" if ok else "❌"
         print(f"{status} {package:20s} {message}")
-        
+
         if not ok:
             all_ok = False
-    
+
     # Special handling for NumPy 2.x on hosted platforms (e.g., Kaggle)
     try:
         import numpy as _np
         _np_ver = parse_version(_np.__version__)
         if _np_ver[0] >= 2:
-            print("\n⚠️ NumPy >= 2.0 detected. This may cause binary incompatibilities with installed Pandas.")
-            print("   If you see 'numpy.dtype size changed' errors, consider running:")
-            print("     pip install --force-reinstall --no-cache-dir numpy==1.26.4 pandas==2.2.3")
-            print("   Or use the project's `kaggle/requirements_kaggle.txt` fallback which includes these pins.")
-    except Exception:
-        pass
+            logging.warning("NumPy >= 2.0 detected. This may cause binary incompatibilities with installed Pandas.")
+            logging.warning("If you see 'numpy.dtype size changed' errors, consider running: pip install --force-reinstall --no-cache-dir numpy==1.26.4 pandas==2.2.3")
+            logging.warning("Or use the project's `kaggle/requirements_kaggle.txt` fallback which includes these pins.")
+    except Exception as e:
+        logging.debug("Failed to check NumPy version: %s", e, exc_info=True)
 
     print("=" * 70)
-    
+
     # Check critical imports
     print("\nCRITICAL IMPORTS CHECK:")
     critical_imports = [
@@ -118,7 +117,7 @@ def main():
         ('mlflow', 'MLflow'),
         ('plotly', 'Plotly'),
     ]
-    
+
     for module_name, display_name in critical_imports:
         try:
             mod = __import__(module_name)
@@ -127,9 +126,9 @@ def main():
         except ImportError as e:
             print(f"❌ {display_name:30s} NOT INSTALLED")
             all_ok = False
-    
+
     print("=" * 70)
-    
+
     if all_ok:
         print("✅ ALL DEPENDENCIES OK")
         return 0

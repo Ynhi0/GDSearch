@@ -20,7 +20,7 @@ Experimental Design:
 
 2. Test with multiple optimizers:
    - SGD (sensitive to initialization)
-   - SGD+Momentum  
+   - SGD+Momentum
    - Adam (more robust to initialization)
    - AdamW
 
@@ -89,7 +89,7 @@ from src.core.models import SimpleCNN  # Import from central models.py
 
 def apply_custom_initialization(model: nn.Module, init_method: str):
     """Apply specified initialization to model layers.
-    
+
     This function replaces the previous SimpleCNN.apply_initialization() method.
     It works with any model by targeting Conv2d, Linear layers.
     """
@@ -101,49 +101,49 @@ def apply_custom_initialization(model: nn.Module, init_method: str):
                     nn.init.constant_(module.weight, 0.0)
                 if hasattr(module, 'bias') and module.bias is not None:
                     nn.init.constant_(module.bias, 0.0)
-            
+
             elif init_method == 'uniform_small':
                 # Uniform in [-0.1, 0.1]
                 if hasattr(module, 'weight'):
                     nn.init.uniform_(module.weight, -0.1, 0.1)
                 if hasattr(module, 'bias') and module.bias is not None:
                     nn.init.uniform_(module.bias, -0.1, 0.1)
-            
+
             elif init_method == 'normal_small':
                 # Normal with std=0.01
                 if hasattr(module, 'weight'):
                     nn.init.normal_(module.weight, mean=0.0, std=0.01)
                 if hasattr(module, 'bias') and module.bias is not None:
                     nn.init.normal_(module.bias, mean=0.0, std=0.01)
-            
+
             elif init_method == 'xavier_uniform':
                 # Xavier/Glorot uniform
                 if hasattr(module, 'weight'):
                     nn.init.xavier_uniform_(module.weight)
                 if hasattr(module, 'bias') and module.bias is not None:
                     nn.init.constant_(module.bias, 0.0)
-            
+
             elif init_method == 'xavier_normal':
                 # Xavier/Glorot normal
                 if hasattr(module, 'weight'):
                     nn.init.xavier_normal_(module.weight)
                 if hasattr(module, 'bias') and module.bias is not None:
                     nn.init.constant_(module.bias, 0.0)
-            
+
             elif init_method == 'kaiming_uniform':
                 # Kaiming/He uniform
                 if hasattr(module, 'weight'):
                     nn.init.kaiming_uniform_(module.weight, nonlinearity='relu')
                 if hasattr(module, 'bias') and module.bias is not None:
                     nn.init.constant_(module.bias, 0.0)
-            
+
             elif init_method == 'kaiming_normal':
                 # Kaiming/He normal
                 if hasattr(module, 'weight'):
                     nn.init.kaiming_normal_(module.weight, nonlinearity='relu')
                 if hasattr(module, 'bias') and module.bias is not None:
                     nn.init.constant_(module.bias, 0.0)
-            
+
             else:
                 raise ValueError(f"Unknown initialization method: {init_method}")
 
@@ -154,21 +154,21 @@ def train_epoch(model, loader, optimizer, criterion, device):
     total_loss = 0.0
     correct = 0
     total = 0
-    
+
     for inputs, targets in loader:
         inputs, targets = inputs.to(device), targets.to(device)
-        
+
         optimizer.zero_grad()
         outputs = model(inputs)
         loss = criterion(outputs, targets)
         loss.backward()
         optimizer.step()
-        
+
         total_loss += loss.item()
         _, predicted = outputs.max(1)
         total += targets.size(0)
         correct += predicted.eq(targets).sum().item()
-    
+
     return total_loss / max(1, len(loader)), 100.0 * correct / max(1, total)
 
 
@@ -178,18 +178,18 @@ def evaluate(model, loader, criterion, device):
     total_loss = 0.0
     correct = 0
     total = 0
-    
+
     with torch.no_grad():
         for inputs, targets in loader:
             inputs, targets = inputs.to(device), targets.to(device)
             outputs = model(inputs)
             loss = criterion(outputs, targets)
-            
+
             total_loss += loss.item()
             _, predicted = outputs.max(1)
             total += targets.size(0)
             correct += predicted.eq(targets).sum().item()
-    
+
     return total_loss / max(1, len(loader)), 100.0 * correct / max(1, total)
 
 
@@ -204,13 +204,13 @@ def run_single_experiment(
 ) -> Dict:
     """Run a single initialization-optimizer experiment"""
     set_seed(seed)
-    
+
     # Create model and apply initialization
     model = SimpleCNN(num_classes=10).to(device)
     apply_custom_initialization(model, init_method)
-    
+
     # FAIRNESS FIX: Optimizer-specific learning rates
-    # 
+    #
     # PROBLEM: Using lr=0.001 for all optimizers is UNFAIR to SGD.
     # On MNIST/ConvNets, SGD needs lr=0.01-0.1 to converge well,
     # while Adam works great at lr=0.001 due to adaptive scaling.
@@ -220,7 +220,7 @@ def run_single_experiment(
     #
     # SOLUTION: Use optimizer-preferred base LRs from published defaults.
     # This isolates the effect of INITIALIZATION from learning rate mismatch.
-    
+
     # Create optimizer with fair LR per optimizer type
     if optimizer_name == 'SGD':
         optimizer = optim.SGD(model.parameters(), lr=0.01)  # SGD needs 10x more
@@ -233,17 +233,17 @@ def run_single_experiment(
         optimizer = optim.AdamW(model.parameters(), lr=0.001, weight_decay=1e-4)
     else:
         raise ValueError(f"Unknown optimizer: {optimizer_name}")
-    
+
     criterion = nn.CrossEntropyLoss()
-    
+
     # Training loop
     history = []
     start_time = time.time()
-    
+
     for epoch in range(epochs):
         train_loss, train_acc = train_epoch(model, train_loader, optimizer, criterion, device)
         test_loss, test_acc = evaluate(model, test_loader, criterion, device)
-        
+
         history.append({
             'epoch': epoch + 1,
             'train_loss': train_loss,
@@ -251,18 +251,32 @@ def run_single_experiment(
             'test_loss': test_loss,
             'test_acc': test_acc
         })
-        
+
         # Check for divergence (NaN or very large loss)
         if np.isnan(train_loss) or train_loss > 100:
             logging.warning("Training diverged at epoch %d: %s + %s", epoch+1, init_method, optimizer_name)
             break
-    
+
     training_time = time.time() - start_time
-    
+
+    # Guard against empty history from early abort
+    if not history:
+        return {
+            'init_method': init_method,
+            'optimizer': optimizer_name,
+            'final_test_acc': float('nan'),
+            'best_test_acc': float('nan'),
+            'convergence_epoch': None,
+            'training_time': training_time,
+            'diverged': True,
+            'seed': seed,
+            'history': []
+        }
+
     # Analyze convergence
     final_test_acc = history[-1]['test_acc']
     best_test_acc = max(h['test_acc'] for h in history)
-    
+
     # Find epoch where accuracy reaches 90% of final (convergence speed)
     target_acc = 0.9 * final_test_acc
     convergence_epoch = None
@@ -270,7 +284,7 @@ def run_single_experiment(
         if h['test_acc'] >= target_acc:
             convergence_epoch = h['epoch']
             break
-    
+
     return {
         'init_method': init_method,
         'optimizer': optimizer_name,
@@ -292,54 +306,54 @@ def run_initialization_ablation(
 ) -> pd.DataFrame:
     """
     Run comprehensive initialization-optimizer ablation study.
-    
+
     Args:
         results_dir: Directory to save results
         seeds: List of random seeds
         epochs: Number of training epochs
         quick: If True, use fewer configurations for testing
-    
+
     Returns:
         DataFrame with aggregated results
     """
     print("="*80)
     print("OPTIMIZER-INITIALIZATION INTERACTION ABLATION STUDY")
     print("="*80)
-    
+
     if seeds is None:
         seeds = [1, 2, 3, 4, 5]
-    
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
     print(f"Seeds: {seeds}")
     print(f"Epochs: {epochs}")
-    
+
     # Setup data loaders
     transform_train = transforms.Compose([
         transforms.RandomCrop(28, padding=4),
         transforms.ToTensor(),
         transforms.Normalize((0.1307,), (0.3081,))
     ])
-    
+
     transform_test = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.1307,), (0.3081,))
     ])
-    
+
     train_dataset = torchvision.datasets.MNIST(
         './data', train=True, download=True, transform=transform_train
     )
     test_dataset = torchvision.datasets.MNIST(
         './data', train=False, download=True, transform=transform_test
     )
-    
+
     if quick:
         train_dataset = torch.utils.data.Subset(train_dataset, range(5000))
         test_dataset = torch.utils.data.Subset(test_dataset, range(1000))
-    
+
     train_loader = make_dataloader(train_dataset, batch_size=128, shuffle=True, seed=42, num_workers=2, pin_memory=True)
     test_loader = make_dataloader(test_dataset, batch_size=256, shuffle=False, num_workers=2, pin_memory=True)
-    
+
     # Define configurations
     if quick:
         init_methods = ['normal_small', 'xavier_normal', 'kaiming_normal']
@@ -354,18 +368,18 @@ def run_initialization_ablation(
             'kaiming_normal'
         ]
         optimizers = ['SGD', 'SGD_Momentum', 'Adam', 'AdamW']
-    
+
     # Run experiments
     all_results = []
-    
+
     for init_method in init_methods:
         for optimizer_name in optimizers:
             print(f"\n{'='*80}")
             print(f"Config: {init_method} + {optimizer_name}")
             print(f"{'='*80}")
-            
+
             config_results = []
-            
+
             for seed in seeds:
                 print(f"  Seed {seed}...", end=" ")
                 result = run_single_experiment(
@@ -375,12 +389,12 @@ def run_initialization_ablation(
                 )
                 config_results.append(result)
                 print(f"Acc: {result['final_test_acc']:.2f}%, Converged: {result['convergence_epoch']}")
-            
+
             # Aggregate results across seeds
             test_accs = [r['final_test_acc'] for r in config_results]
             conv_epochs = [r['convergence_epoch'] for r in config_results]
             diverged_count = sum(1 for r in config_results if r['diverged'])
-            
+
             all_results.append({
                 'initialization': init_method,
                 'optimizer': optimizer_name,
@@ -391,23 +405,23 @@ def run_initialization_ablation(
                 'divergence_rate': diverged_count / len(seeds),
                 'n_seeds': len(seeds)
             })
-            
-            print(f"  Summary: {np.mean(test_accs):.2f} ± {np.std(test_accs):.2f}%, " 
+
+            print(f"  Summary: {np.mean(test_accs):.2f} ± {np.std(test_accs):.2f}%, "
                   f"Converge: {np.mean(conv_epochs):.1f} epochs")
-    
+
     # Save results
     results_path = Path(results_dir)
     results_path.mkdir(parents=True, exist_ok=True)
-    
+
     df = pd.DataFrame(all_results)
     df.to_csv(results_path / "initialization_ablation_summary.csv", index=False)
-    
+
     # Generate visualizations
     try:
         # Prepare data for visualization (pivot to get configuration column)
         viz_df = df.copy()
         viz_df['configuration'] = viz_df['optimizer'].astype(str) + ' + ' + viz_df['initialization'].astype(str)
-        
+
         features = ['Xavier', 'Kaiming', 'Uniform', 'Normal']  # Initialization types
         generate_all_ablation_plots(
             df=viz_df,
@@ -420,32 +434,32 @@ def run_initialization_ablation(
         )
     except (ValueError, KeyError, ImportError) as e:
         print(f"Visualization generation failed: {e}")
-    
+
     print(f"\n{'='*80}")
     print("ABLATION STUDY COMPLETE")
     print(f"{'='*80}")
     print(f"\nResults saved to: {results_path / 'initialization_ablation_summary.csv'}")
     print(f"Visualizations saved to: {results_path / 'visualizations/'}")
-    
+
     # Analysis: Which optimizer is most robust to initialization?
     print(f"\n{'='*80}")
     print("ANALYSIS: Optimizer Robustness to Initialization")
     print(f"{'='*80}")
-    
+
     # Group by optimizer and compute variance across initializations
     robustness = df.groupby('optimizer').agg({
         'mean_test_acc': ['mean', 'std'],
         'std_test_acc': 'mean'
     }).round(2)
-    
+
     print("\nAverage performance across all initializations:")
     print(robustness)
-    
+
     # Find best initialization for each optimizer
     print(f"\n{'='*80}")
     print("BEST INITIALIZATION FOR EACH OPTIMIZER")
     print(f"{'='*80}")
-    
+
     from src.utils.type_guards import ensure_series, ensure_dataframe
     for opt in ensure_series(df['optimizer']).unique():
         opt_df = ensure_dataframe(df[df['optimizer'] == opt])
@@ -454,13 +468,13 @@ def run_initialization_ablation(
         print(f"  Best init: {best_init['initialization']}")
         print(f"  Accuracy: {best_init['mean_test_acc']:.2f} ± {best_init['std_test_acc']:.2f}%")
         print(f"  Convergence: {best_init['mean_convergence_epoch']:.1f} epochs")
-    
+
     return df
 
 
 def main():
     import argparse
-    
+
     parser = argparse.ArgumentParser(description='Optimizer-Initialization Ablation Study')
     parser.add_argument('--results-dir', type=str, default='results/initialization_ablation',
                         help='Directory to save results')
@@ -470,11 +484,11 @@ def main():
                         help='Number of training epochs')
     parser.add_argument('--quick', action='store_true',
                         help='Quick test run with fewer configurations')
-    
+
     args = parser.parse_args()
-    
+
     seeds = [int(s) for s in args.seeds.split(',')]
-    
+
     run_initialization_ablation(
         results_dir=args.results_dir,
         seeds=seeds,

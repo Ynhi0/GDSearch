@@ -31,18 +31,18 @@ from src.utils.plot_helpers import arr_to_numpy_float
 def _validate_dataframe(df: pd.DataFrame, required_columns: list, func_name: str):
     """
     Validate DataFrame has required columns before plotting.
-    
+
     Args:
         df: DataFrame to validate
         required_columns: List of column names that must exist
         func_name: Name of calling function for error messages
-    
+
     Raises:
         ValueError: If required columns missing or DataFrame empty
     """
     if df is None or df.empty:
         raise ValueError(f"{func_name}: DataFrame is empty or None")
-    
+
     missing_cols = [col for col in required_columns if col not in df.columns]
     if missing_cols:
         warnings.warn(
@@ -63,7 +63,7 @@ def plot_generalization_curves(df: Union[pd.DataFrame, ArrayLike, Sequence[dict]
 
     Expects df with rows labeled by 'phase' ('train' or 'eval'),
     and columns: 'epoch', 'train_loss' (train rows), 'test_loss', 'test_accuracy' (eval rows).
-    
+
     Added validation for empty/missing data.
     """
     # Coerce to DataFrame to satisfy static analysis and downstream indexing
@@ -216,7 +216,7 @@ def plot_layer_grad_norms(nn_df: Union[pd.DataFrame, ArrayLike], epochs: Optiona
 def plot_trajectory(df: Union[pd.DataFrame, ArrayLike], test_function: TwoDTestFunction, title: str, save_path: Optional[str] = None) -> None:
     """
     Plot optimization trajectory on 2D contour of test function.
-    
+
     Args:
         df: DataFrame containing optimization history (with columns 'x', 'y')
         test_function: Test function object (to compute function values)
@@ -227,48 +227,48 @@ def plot_trajectory(df: Union[pd.DataFrame, ArrayLike], test_function: TwoDTestF
     df = ensure_dataframe(df)
     # Get plot limits from test function
     (x_min, x_max), (y_min, y_max) = test_function.get_bounds()
-    
+
     # Create grid of points
     x_grid = np.linspace(x_min, x_max, 200)
     y_grid = np.linspace(y_min, y_max, 200)
     X, Y = np.meshgrid(x_grid, y_grid)
-    
+
     # Compute function values on grid
     Z = np.zeros_like(X)
     for i in range(X.shape[0]):
         for j in range(X.shape[1]):
             Z[i, j] = test_function.compute(X[i, j], Y[i, j])
-    
+
     # Create figure
     _fig, ax = plt.subplots(figsize=(10, 8))
-    
+
     # Draw contour lines with log scale
     levels = np.logspace(np.log10(Z.min() + 1e-10), np.log10(Z.max() + 1), 30)
     _contour = ax.contour(X, Y, Z, levels=levels, cmap='viridis', alpha=0.6, linewidths=0.5)
     contourf = ax.contourf(X, Y, Z, levels=levels, cmap='viridis', alpha=0.3)
-    
+
     # Add colorbar
     cbar = plt.colorbar(contourf, ax=ax)
     cbar.set_label('Function value', rotation=270, labelpad=20)
-    
+
     # Draw trajectory
     x_traj = arr_to_numpy_float(df['x'])
     y_traj = arr_to_numpy_float(df['y'])
-    
+
     if x_traj.size == 0 or y_traj.size == 0:
         logging.warning("Empty trajectory data, skipping plot")
-        return    
+        return
     # Draw trajectory line
     ax.plot(x_traj, y_traj, 'r-', linewidth=2, alpha=0.7, label='Trajectory')
-    
+
     # Mark start and end points (use scalar floats for markers)
     ax.plot(float(x_traj[0]), float(y_traj[0]), 'go', markersize=12, label='Start point', zorder=5)
     ax.plot(float(x_traj[-1]), float(y_traj[-1]), 'r*', markersize=15, label='End point', zorder=5)
     ax.legend(loc='best')
     ax.grid(True, alpha=0.3)
-    
+
     plt.tight_layout()
-    
+
     # Save or display
     if save_path:
         plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
@@ -650,7 +650,7 @@ def plot_metrics(df, title, save_path=None):
 def plot_comparison(list_of_dfs, labels, metric, title, save_path=None):
     """
     Plot comparison of a specific metric across multiple experiments.
-    
+
     Args:
         list_of_dfs: List of DataFrames containing optimization history
         labels: List of labels corresponding to each DataFrame
@@ -660,7 +660,7 @@ def plot_comparison(list_of_dfs, labels, metric, title, save_path=None):
     """
     # Create figure
     _fig, ax = plt.subplots(figsize=(12, 8))
-    
+
     # Define colors
     colors = plt.get_cmap('tab10')(np.linspace(0, 1, len(list_of_dfs)))
 
@@ -697,18 +697,18 @@ def plot_comparison(list_of_dfs, labels, metric, title, save_path=None):
     # Set up labels
     ax.set_xlabel(x_label, fontsize=12)
     ax.set_ylabel(y_label_map.get(metric, metric), fontsize=12)
-    
+
     # Title
     ax.set_title(title, fontsize=14, fontweight='bold')
-    
+
     # Legend
     ax.legend(loc='best', fontsize=10, framealpha=0.9)
-    
+
     # Grid
     ax.grid(True, alpha=0.3, which='both')
-    
+
     plt.tight_layout()
-    
+
     # Save or display
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
@@ -720,25 +720,25 @@ def plot_comparison(list_of_dfs, labels, metric, title, save_path=None):
 def load_results(results_dir='results'):
     """
     Load all result files from directory.
-    
+
     Args:
         results_dir: Path to directory containing results
-        
+
     Returns:
         Dictionary with filename as key and DataFrame as value
     """
     results = {}
-    
+
     if not os.path.exists(results_dir):
         print(f"Directory {results_dir} does not exist!")
         return results
-    
+
     for filename in os.listdir(results_dir):
         if filename.endswith('.csv'):
             filepath = os.path.join(results_dir, filename)
             df = pd.read_csv(filepath)
             results[filename] = df
-    
+
     return results
 
 
@@ -746,24 +746,24 @@ def main():
     """Main function to create plots from experiment results."""
     # Create directory to save plots
     os.makedirs('plots', exist_ok=True)
-    
+
     # Load all results
     print("Loading experiment results...")
     results = load_results('results')
-    
+
     if not results:
         print("No experiment results found!")
         print("Please run 'python run_experiment.py' first.")
         return
-    
+
     print(f"Loaded {len(results)} result files.")
-    
+
     # Example 1: Plot trajectories for specific experiments
     print("\nCreating trajectory plots...")
-    
+
     # Find files with same seed for comparison
     seed = 42
-    
+
     for filename, df in results.items():
         if f'seed{seed}' in filename:
             # Identify test function
@@ -775,33 +775,33 @@ def main():
                 test_func = SaddlePoint()
             else:
                 continue
-            
+
             # Create title
             title = filename.replace('.csv', '').replace('_', ' ')
-            
+
             # Create save path
             save_path = os.path.join('plots', filename.replace('.csv', '_trajectory.png'))
-            
+
             # Plot trajectory
             plot_trajectory(df, test_func, title, save_path)
-    
+
     # Example 2: Plot metrics for each experiment
     print("Creating metrics plots...")
-    
+
     for filename, df in results.items():
         if f'seed{seed}' in filename:
             # Create title
             title = filename.replace('.csv', '').replace('_', ' ')
-            
+
             # Create save path
             save_path = os.path.join('plots', filename.replace('.csv', '_metrics.png'))
-            
+
             # Plot metrics
             plot_metrics(df, title, save_path)
-    
+
     # Example 3: Compare optimizers on same function
     print("Creating comparison plots...")
-    
+
     # Compare on Rosenbrock function
     rosenbrock_results = {}
     for filename, df in results.items():
@@ -809,42 +809,42 @@ def main():
             # Get optimizer name
             opt_name = filename.split('_')[0]
             rosenbrock_results[opt_name] = df
-    
+
     if rosenbrock_results:
         dfs = list(rosenbrock_results.values())
         labels = list(rosenbrock_results.keys())
-        
+
         # Compare loss
         plot_comparison(
             dfs, labels, 'loss',
             f'Loss Comparison on Rosenbrock (lr=0.001, seed={seed})',
             os.path.join('plots', f'comparison_Rosenbrock_loss_seed{seed}.png')
         )
-        
+
         # Compare gradient norm
         plot_comparison(
             dfs, labels, 'grad_norm',
             f'Gradient Norm Comparison on Rosenbrock (lr=0.001, seed={seed})',
             os.path.join('plots', f'comparison_Rosenbrock_gradnorm_seed{seed}.png')
         )
-    
+
     # Compare on IllConditionedQuadratic function
     quad_results = {}
     for filename, df in results.items():
         if 'IllConditionedQuadratic' in filename and f'seed{seed}' in filename and 'lr0.001' in filename:
             opt_name = filename.split('_')[0]
             quad_results[opt_name] = df
-    
+
     if quad_results:
         dfs = list(quad_results.values())
         labels = list(quad_results.keys())
-        
+
         plot_comparison(
             dfs, labels, 'loss',
             f'Loss Comparison on IllConditionedQuadratic (lr=0.001, seed={seed})',
             os.path.join('plots', f'comparison_IllCondQuad_loss_seed{seed}.png')
         )
-    
+
     print("\nComplete! All plots saved in 'plots/' directory")
 
 
@@ -860,13 +860,13 @@ def plot_multiseed_comparison(
 ):
     """
     Plot comparison between optimizers with error bars from multiple seeds.
-    
+
     Args:
         results_dict: Dict mapping optimizer names to lists of DataFrames (one per seed)
         metric: Metric to plot ('test_accuracy', 'test_loss', 'train_loss', 'grad_norm', etc.)
         title: Plot title
         save_path: Path to save figure
-        
+
     Example:
         results = {
             'AdamW': [df_seed1, df_seed2, df_seed3],
@@ -876,16 +876,16 @@ def plot_multiseed_comparison(
     _fig, ax = plt.subplots(figsize=(12, 8))
     cmap = cm.get_cmap('tab10')
     colors = cmap(np.linspace(0, 1, len(results_dict)))
-    
+
     # Determine if this is an eval metric (per-epoch) or train metric (per-step)
     is_eval = metric in ('test_accuracy', 'test_loss')
     x_label = 'Epoch' if is_eval else 'Global Step'
-    
+
     for i, (opt_name, dfs) in enumerate(results_dict.items()):
         # Extract metric values from all seeds
         all_values = []
         x_values = None
-        
+
         # Optionally exclude tainted runs
         filtered_dfs = []
         for df in dfs:
@@ -907,31 +907,31 @@ def plot_multiseed_comparison(
             else:
                 x = arr_to_numpy_float(df['iteration'])
                 y = arr_to_numpy_float(df[metric])
-            
+
             if x_values is None:
                 x_values = x
             all_values.append(y)
-        
+
         # Convert to array (seeds x iterations)
         all_values = np.asarray(all_values)
-        
+
         # Compute mean and std and ensure ArrayLike numeric types for plotting
         x_values = np.asarray(x_values, dtype=float)
         mean_values = np.asarray(np.mean(all_values, axis=0), dtype=float)
         std_values = np.asarray(np.std(all_values, axis=0), dtype=float)
-        
+
         # Plot mean line
-        ax.plot(x_values, mean_values, linewidth=2.5, label=opt_name, 
+        ax.plot(x_values, mean_values, linewidth=2.5, label=opt_name,
                 color=colors[i], alpha=0.9)
-        
+
         # Plot confidence band (±1 std)
-        ax.fill_between(x_values, 
+        ax.fill_between(x_values,
                         mean_values - std_values,
                         mean_values + std_values,
                         alpha=0.2, color=colors[i])
-    
+
     ax.set_xlabel(x_label, fontsize=12)
-    
+
     # Y-axis label
     y_labels = {
         'test_accuracy': 'Test Accuracy',
@@ -941,18 +941,18 @@ def plot_multiseed_comparison(
         'update_norm': 'Update Norm'
     }
     ax.set_ylabel(y_labels.get(metric, metric), fontsize=12)
-    
+
     # Use log scale for loss/norm metrics
     if metric in ('train_loss', 'test_loss', 'grad_norm', 'update_norm', 'loss'):
         ax.set_yscale('log')
-    
-    ax.set_title(f'{title}\n(Solid line: mean, Shaded area: ±1 std)', 
+
+    ax.set_title(f'{title}\n(Solid line: mean, Shaded area: ±1 std)',
                  fontsize=14, fontweight='bold')
     ax.legend(loc='best', fontsize=11, framealpha=0.9)
     ax.grid(True, alpha=0.3, which='both')
-    
+
     plt.tight_layout()
-    
+
     if save_path:
         plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
         print(f"Multi-seed comparison plot saved to: {save_path}")
@@ -1049,7 +1049,7 @@ def plot_final_metric_comparison(
 ):
     """
     Bar plot comparing final metric values across optimizers with error bars.
-    
+
     Args:
         results_dict: Dict mapping optimizer names to lists of DataFrames (one per seed)
         metric: Metric to compare
@@ -1058,13 +1058,13 @@ def plot_final_metric_comparison(
     """
 
     _fig, ax = plt.subplots(figsize=(10, 6))
-    
+
     cmap = cm.get_cmap('tab10')
     opt_names = list(results_dict.keys())
     means = []
     stds = []
     individual_vals = []
-    
+
     # Extract final metric for each optimizer
     for opt_name, dfs in results_dict.items():
         finals = []
@@ -1093,33 +1093,33 @@ def plot_final_metric_comparison(
                 else:
                     logging.debug(f"No {metric} data for {opt_name}, skipping run")
                     continue
-        
+
         if not finals:
             logging.warning(f"No valid data for {opt_name}, skipping from plot")
             continue
-        
+
         means.append(float(np.mean(finals)))
         stds.append(float(np.std(finals)))
         individual_vals.append(finals)
-    
+
     # Bar plot (ensure numeric arrays)
     x = np.arange(len(opt_names))
     means = np.asarray(means, dtype=float)
     stds = np.asarray(stds, dtype=float)
-    _bars = ax.bar(x, means, yerr=stds, capsize=10, alpha=0.7, 
+    _bars = ax.bar(x, means, yerr=stds, capsize=10, alpha=0.7,
                    color=cmap(np.linspace(0, 1, len(opt_names))))
-    
+
     # Scatter individual points
     np.random.seed(42)
     for i, vals in enumerate(individual_vals):
         jitter = np.random.normal(0, 0.04, size=len(vals))
-        ax.scatter(x[i] + jitter, vals, alpha=0.7, s=60, 
+        ax.scatter(x[i] + jitter, vals, alpha=0.7, s=60,
                    color='black', zorder=3, edgecolors='white', linewidths=1)
-    
+
     # Labels
     ax.set_xticks(x)
     ax.set_xticklabels(opt_names, fontsize=11)
-    
+
     y_labels = {
         'test_accuracy': 'Final Test Accuracy',
         'test_loss': 'Final Test Loss',
@@ -1128,18 +1128,18 @@ def plot_final_metric_comparison(
         'loss': 'Final Loss'
     }
     ax.set_ylabel(y_labels.get(metric, f'Final {metric}'), fontsize=12)
-    ax.set_title(f'{title}\n(Bars: mean ± std, Dots: individual seeds)', 
+    ax.set_title(f'{title}\n(Bars: mean ± std, Dots: individual seeds)',
                  fontsize=14, fontweight='bold')
     ax.grid(True, alpha=0.3, axis='y')
-    
+
     # Annotate bars with mean±std
     for i, (m, s) in enumerate(zip(means, stds)):
-        ax.text(i, m + s + 0.01 * (max(means) - min(means)), 
-                f'{m:.4f}\n±{s:.4f}', 
+        ax.text(i, m + s + 0.01 * (max(means) - min(means)),
+                f'{m:.4f}\n±{s:.4f}',
                 ha='center', va='bottom', fontsize=9, fontweight='bold')
-    
+
     plt.tight_layout()
-    
+
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
         print(f"Final metric comparison plot saved to: {save_path}")

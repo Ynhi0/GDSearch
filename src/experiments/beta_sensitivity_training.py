@@ -3,7 +3,7 @@
 Beta Parameter Sensitivity Analysis on Real Neural Network Training
 
 This module addresses the Vietnamese research proposal requirement:
-"khảo sát hệ thống và trực quan hóa ảnh hưởng của các siêu tham số đặc trưng 
+"khảo sát hệ thống và trực quan hóa ảnh hưởng của các siêu tham số đặc trưng
 (β, β1, β2) lên các khía cạnh động học như quỹ đạo, tốc độ tức thời và độ ổn định"
 
 Unlike hyperparameter_sensitivity.py (which runs on 2D functions), this module
@@ -98,22 +98,22 @@ def load_mnist(batch_size=128, quick=False):
         transforms.ToTensor(),
         transforms.Normalize((0.1307,), (0.3081,))
     ])
-    
+
     train_dataset = torchvision.datasets.MNIST(
         root='./data', train=True, download=True, transform=transform
     )
     test_dataset = torchvision.datasets.MNIST(
         root='./data', train=False, download=True, transform=transform
     )
-    
+
     if quick:
         # Use subset for quick testing
         train_dataset = torch.utils.data.Subset(train_dataset, range(10000))
         test_dataset = torch.utils.data.Subset(test_dataset, range(2000))
-    
+
     train_loader = make_dataloader(train_dataset, batch_size=batch_size, shuffle=True, seed=42, num_workers=2, pin_memory=True)
     test_loader = make_dataloader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=True)
-    
+
     return train_loader, test_loader
 
 
@@ -130,20 +130,20 @@ def train_with_beta(
 ) -> Dict:
     """
     Train MNIST with specific β value and track comprehensive metrics
-    
+
     SCIENTIFIC NOTE - Beta vs. Learning Rate Coupling:
     By default (use_beta_scaled_lr=False), this function uses a FIXED learning rate
     for all β values. This is scientifically suboptimal because the "effective learning rate"
     in momentum-based optimizers scales approximately as lr/(1-β). As β→1, the effective
     step size increases dramatically.
-    
+
     When use_beta_scaled_lr=True, the learning rate is adjusted as: lr_effective = lr * (1 - beta)
     This compensates for the momentum accumulation and provides a fairer comparison across
     different β values.
-    
+
     LIMITATION: Even with beta-scaled LR, the "optimal" LR for each β may differ. A fully
     rigorous study would tune LR independently for each β value via grid search.
-    
+
     Args:
         beta: Momentum parameter (β for Momentum, β1 for Adam)
         optimizer_name: 'momentum' or 'adam'
@@ -154,24 +154,24 @@ def train_with_beta(
         quick: Use subset of data for quick testing
         seed: Random seed
         use_beta_scaled_lr: If True, scale LR by (1-beta) to compensate for momentum accumulation
-    
+
     Returns:
         Dictionary with training history and dynamics metrics
     """
     # Set seed
     torch.manual_seed(seed)
     np.random.seed(seed)
-    
+
     # Load data
     train_loader, test_loader = load_mnist(quick=quick)
-    
+
     # Create model
     model = SimpleMLP().to(device)
     criterion = nn.CrossEntropyLoss()
-    
+
     # Apply beta-scaled learning rate if requested (addresses beta-LR coupling issue)
     effective_lr = lr * (1.0 - beta) if use_beta_scaled_lr else lr
-    
+
     # Create optimizer with specific beta
     if optimizer_name.lower() == 'momentum':
         optimizer = optim.SGD(model.parameters(), lr=effective_lr, momentum=beta)
@@ -180,18 +180,18 @@ def train_with_beta(
         optimizer = optim.Adam(model.parameters(), lr=effective_lr, betas=(beta, 0.999), weight_decay=0)
     else:
         raise ValueError(f"Unknown optimizer: {optimizer_name}")
-    
+
     # Log the effective learning rate for transparency
     if use_beta_scaled_lr:
         logging.info(f"Beta-scaled LR: base={lr:.6f}, beta={beta:.4f}, effective={effective_lr:.6f}")
-    
+
     # Initialize dynamics tracker
     dynamics_tracker: Optional["TrainingDynamicsTracker"] = None
     if track_dynamics and HAS_DYNAMICS:
         dynamics_tracker = _create_dynamics_tracker()
         if dynamics_tracker is not None:
             dynamics_tracker.set_initial_params(model)
-    
+
     # Training history
     history: Dict[str, Any] = {
         'epoch': [],
@@ -203,10 +203,10 @@ def train_with_beta(
         'param_norm': [],
         'update_magnitude': []
     }
-    
+
     # Store parameter snapshots for trajectory analysis
     param_snapshots = []
-    
+
     for epoch in range(epochs):
         # Training phase
         model.train()
@@ -214,18 +214,18 @@ def train_with_beta(
         train_correct = 0
         train_total = 0
         grad_norms = []
-        
+
         for batch_idx, (data, target) in enumerate(train_loader):
             data, target = data.to(device), target.to(device)
-            
+
             # Store old params
             old_params = [p.clone().detach() for p in model.parameters()]
-            
+
             optimizer.zero_grad()
             output = model(data)
             loss = criterion(output, target)
             loss.backward()
-            
+
             # Compute gradient norm (tensor-safe, avoid Python-sum mixing scalar and tensor types)
             grad_squares = [ (p.grad.detach().norm() ** 2) for p in model.parameters() if p.grad is not None ]
             if grad_squares:
@@ -233,7 +233,7 @@ def train_with_beta(
             else:
                 grad_norm = torch.tensor(0.0, device=device)
             grad_norms.append(float(grad_norm.item()))
-            
+
             # Track dynamics BEFORE optimizer step
             if dynamics_tracker is not None:
                 dynamics_tracker.track_step(
@@ -242,26 +242,26 @@ def train_with_beta(
                     model=model,
                     optimizer=optimizer
                 )
-            
+
             optimizer.step()
             train_loss += loss.item()
             _, predicted = output.max(1)
             train_total += target.size(0)
             train_correct += predicted.eq(target).sum().item()
-        
+
         train_loss /= len(train_loader)
         train_acc = 100. * train_correct / train_total
-        
+
         # Compute param norm (tensor-safe)
         param_squares = [ (p.detach().norm() ** 2) for p in model.parameters() ]
         if param_squares:
             param_norm = torch.sqrt(torch.stack(param_squares).sum())
         else:
             param_norm = torch.tensor(0.0)
-        
+
         # Store snapshot
         param_snapshots.append(torch.cat([p.view(-1).clone().detach() for p in model.parameters()]).cpu().numpy())
-        
+
         # Record history (validation only during training - use validation set for monitoring)
         history['epoch'].append(epoch)
         history['train_loss'].append(train_loss)
@@ -273,14 +273,14 @@ def train_with_beta(
             history['update_magnitude'].append(update_mag)
         else:
             history['update_magnitude'].append(0.0)
-    
+
     # Final test evaluation (only after training completes - use test set only for final evaluation)
     logger.info("Evaluating final performance on test set...")
     model.eval()
     test_loss = 0.0
     test_correct = 0
     test_total = 0
-    
+
     with torch.no_grad():
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)
@@ -290,31 +290,31 @@ def train_with_beta(
             _, predicted = output.max(1)
             test_total += target.size(0)
             test_correct += predicted.eq(target).sum().item()
-    
+
     test_loss /= len(test_loader)
     final_test_acc = 100. * test_correct / test_total
     logger.info(f"Final Test Performance: Loss={test_loss:.4f}, Acc={final_test_acc:.2f}%")
-    
+
     # Add final test metrics to history
     history['final_test_loss'] = test_loss
     history['final_test_acc'] = final_test_acc
-    
+
     # Compute dynamics metrics
     dynamics_metrics = {}
-    
+
     if dynamics_tracker is not None and len(dynamics_tracker.iterations) > 0:
         # Compute derived metrics (modifies tracker state in-place, returns None)
         dynamics_tracker.compute_derived_metrics()
-        
+
         # Get summary
         dynamics_metrics['mean_grad_norm'] = np.mean(dynamics_tracker.grad_norms)
         dynamics_metrics['std_grad_norm'] = np.std(dynamics_tracker.grad_norms)
         dynamics_metrics['mean_update_mag'] = np.mean(dynamics_tracker.update_magnitudes)
         dynamics_metrics['final_param_distance'] = dynamics_tracker.param_distances[-1] if dynamics_tracker.param_distances else 0.0
-    
+
     if len(param_snapshots) >= 3:
         param_array = np.array(param_snapshots)
-        
+
         # Instantaneous speed
         speeds = []
         for i in range(1, len(param_array)):
@@ -322,19 +322,19 @@ def train_with_beta(
             speeds.append(speed)
         dynamics_metrics['mean_speed'] = np.mean(speeds)
         dynamics_metrics['std_speed'] = np.std(speeds)
-        
+
         # Smoothness (angle changes)
         if HAS_DYNAMICS and _compute_smoothness_index is not None:
             smoothness = _compute_smoothness_index(param_array)
             dynamics_metrics['smoothness'] = smoothness
-        
+
         # Loss oscillations
         losses = np.array(history['train_loss'])
         ema_loss = pd.Series(losses).ewm(span=5).mean().values
         oscillations = losses - ema_loss
         dynamics_metrics['oscillation_index'] = np.std(oscillations)
         dynamics_metrics['final_loss_std'] = np.std(losses[-5:])  # Stability at end
-    
+
     return {
         'beta': beta,
         'optimizer': optimizer_name,
@@ -360,19 +360,19 @@ def run_momentum_beta_sensitivity(
 ) -> pd.DataFrame:
     """
     Run β sensitivity analysis for Momentum optimizer on MNIST
-    
+
     This addresses the proposal requirement for β sensitivity on REAL training
-    
+
     **SCIENTIFIC LIMITATION - Beta vs. Learning Rate Coupling:**
     By default (use_beta_scaled_lr=False), this function uses a FIXED learning rate
     across all β values. This can lead to misleading results because:
     - Effective LR ≈ lr/(1-β), so high β values have much larger effective steps
     - Poor performance at β=0.99 may be due to LR being too high, not β being bad
     - A rigorous study would tune LR independently for each β
-    
+
     When use_beta_scaled_lr=True, LR is adjusted as lr*(1-β) to partially compensate.
     This is an approximation; full rigor requires per-β LR tuning via grid search.
-    
+
     Args:
         beta_values: List of β values to sweep (default: [0.0, 0.5, 0.7, 0.9, 0.95, 0.99])
         epochs: Training epochs
@@ -382,15 +382,15 @@ def run_momentum_beta_sensitivity(
         quick: Use data subset for faster testing
         output_dir: Directory for results
         use_beta_scaled_lr: If True, scale LR by (1-β) to address coupling issue
-    
+
     Returns:
         DataFrame with results across all β values and seeds
     """
     if beta_values is None:
         beta_values = [0.0, 0.5, 0.7, 0.9, 0.95, 0.99]
-    
+
     os.makedirs(output_dir, exist_ok=True)
-    
+
     print("=" * 80)
     print("🔬 MOMENTUM β SENSITIVITY ON MNIST TRAINING")
     print("=" * 80)
@@ -405,9 +405,9 @@ def run_momentum_beta_sensitivity(
         print("   Consider setting use_beta_scaled_lr=True for fairer comparison")
     print(f"Device: {device}")
     print("=" * 80)
-    
+
     results = []
-    
+
     for seed in seeds:
         print(f"\n📍 Seed {seed}")
         for beta in tqdm(beta_values, desc="  β sweep"):
@@ -424,7 +424,7 @@ def run_momentum_beta_sensitivity(
             )
             result['seed'] = seed
             results.append(result)
-    
+
     # Convert to DataFrame
     rows = []
     for r in results:
@@ -441,17 +441,17 @@ def run_momentum_beta_sensitivity(
         for k, v in r['dynamics_metrics'].items():
             row[k] = v
         rows.append(row)
-    
+
     df = pd.DataFrame(rows)
-    
+
     # Save results
     csv_path = os.path.join(output_dir, 'momentum_beta_sensitivity_mnist.csv')
     df.to_csv(csv_path, index=False)
     print(f"\nResults saved to {csv_path}")
-    
+
     # Create visualizations
     create_beta_sensitivity_plots(df, output_dir, optimizer='Momentum')
-    
+
     return df
 
 
@@ -467,14 +467,14 @@ def run_adam_beta_sensitivity(
 ) -> pd.DataFrame:
     """
     Run β1 sensitivity analysis for Adam optimizer on MNIST
-    
+
     This addresses the proposal requirement for β1,β2 sensitivity on REAL training
     """
     if beta1_values is None:
         beta1_values = [0.5, 0.7, 0.9, 0.95, 0.99]
-    
+
     os.makedirs(output_dir, exist_ok=True)
-    
+
     print("=" * 80)
     print("🔬 ADAM β1 SENSITIVITY ON MNIST TRAINING")
     print("=" * 80)
@@ -484,9 +484,9 @@ def run_adam_beta_sensitivity(
     print(f"Epochs: {epochs}")
     print(f"Device: {device}")
     print("=" * 80)
-    
+
     results = []
-    
+
     for seed in seeds:
         print(f"\n📍 Seed {seed}")
         for beta1 in tqdm(beta1_values, desc="  β1 sweep"):
@@ -504,7 +504,7 @@ def run_adam_beta_sensitivity(
             result['beta1'] = beta1
             result['beta2'] = beta2
             results.append(result)
-    
+
     # Convert to DataFrame
     rows = []
     for r in results:
@@ -522,17 +522,17 @@ def run_adam_beta_sensitivity(
         for k, v in r['dynamics_metrics'].items():
             row[k] = v
         rows.append(row)
-    
+
     df = pd.DataFrame(rows)
-    
+
     # Save results
     csv_path = os.path.join(output_dir, 'adam_beta_sensitivity_mnist.csv')
     df.to_csv(csv_path, index=False)
     print(f"\nResults saved to {csv_path}")
-    
+
     # Create visualizations
     create_beta_sensitivity_plots(df, output_dir, optimizer='Adam')
-    
+
     return df
 
 
@@ -548,14 +548,14 @@ def run_adam_beta2_sensitivity(
 ) -> pd.DataFrame:
     """
     Run β2 sensitivity analysis for Adam optimizer on MNIST
-    
+
     Addresses proposal requirement: full (β1, β2) hyperparameter analysis
     """
     if beta2_values is None:
         beta2_values = [0.9, 0.95, 0.99, 0.999, 0.9999]
-    
+
     os.makedirs(output_dir, exist_ok=True)
-    
+
     print("=" * 80)
     print("🔬 ADAM β2 SENSITIVITY ON MNIST TRAINING")
     print("=" * 80)
@@ -565,44 +565,44 @@ def run_adam_beta2_sensitivity(
     print(f"Epochs: {epochs}")
     print(f"Device: {device}")
     print("=" * 80)
-    
+
     results = []
-    
+
     for seed in seeds:
         print(f"\n📍 Seed {seed}")
         for beta2 in tqdm(beta2_values, desc="  β2 sweep"):
             torch.manual_seed(seed)
             np.random.seed(seed)
-            
+
             # Load data
             train_loader, test_loader = load_mnist(batch_size=128, quick=quick)
-            
+
             # Create model
             model = SimpleMLP().to(device)
-            
+
             # Adam with specific β1, β2 (no weight decay for beta sensitivity study)
             optimizer = optim.Adam(model.parameters(), lr=lr, betas=(beta1, beta2), weight_decay=0)
             criterion = nn.CrossEntropyLoss()
-            
+
             # Initialize dynamics tracker (define at outer scope for pyright)
             dynamics_tracker: Optional["TrainingDynamicsTracker"] = None
             if HAS_DYNAMICS:
                 dynamics_tracker = _create_dynamics_tracker()
                 if dynamics_tracker is not None:
                     dynamics_tracker.set_initial_params(model)
-            
+
             # Training
             for epoch in range(epochs):
                 model.train()
                 for batch_idx, (data, target) in enumerate(train_loader):
                     data, target = data.to(device), target.to(device)
-                    
+
                     optimizer.zero_grad()
                     output = model(data)
                     loss = criterion(output, target)
                     loss.backward()
                     optimizer.step()
-                    
+
                     # Track dynamics
                     if dynamics_tracker is not None and batch_idx % 10 == 0:
                         dynamics_tracker.track_step(
@@ -611,12 +611,12 @@ def run_adam_beta2_sensitivity(
                             model=model,
                             optimizer=optimizer
                         )
-            
+
             # Evaluate
             model.eval()
             train_acc, train_loss = evaluate(model, train_loader, criterion, device)
             test_acc, test_loss = evaluate(model, test_loader, criterion, device)
-            
+
             # Compute dynamics metrics (method modifies tracker state in-place)
             dynamics_metrics: Dict[str, float] = {}
             if dynamics_tracker is not None and len(dynamics_tracker.iterations) > 0:
@@ -629,7 +629,7 @@ def run_adam_beta2_sensitivity(
                     'mean_grad_norm': float(np.mean(grad_norms)) if grad_norms else 0.0,
                     'smoothness_index': float(smoothness_idx) if smoothness_idx else 0.0,
                 }
-            
+
             result = {
                 'seed': seed,
                 'beta1': beta1,
@@ -642,7 +642,7 @@ def run_adam_beta2_sensitivity(
                 'dynamics_metrics': dynamics_metrics
             }
             results.append(result)
-    
+
     # Convert to DataFrame
     rows = []
     for r in results:
@@ -660,17 +660,17 @@ def run_adam_beta2_sensitivity(
         for k, v in r['dynamics_metrics'].items():
             row[k] = v
         rows.append(row)
-    
+
     df = pd.DataFrame(rows)
-    
+
     # Save results
     csv_path = os.path.join(output_dir, 'adam_beta2_sensitivity_mnist.csv')
     df.to_csv(csv_path, index=False)
     print(f"\nResults saved to {csv_path}")
-    
+
     # Create visualizations (reuse with Beta2 column)
     create_beta2_sensitivity_plots(df, output_dir)
-    
+
     return df
 
 
@@ -686,16 +686,16 @@ def run_adam_beta1_beta2_grid(
 ) -> pd.DataFrame:
     """
     Run joint (β1, β2) grid search for Adam optimizer on MNIST
-    
+
     This provides comprehensive understanding of how β1 and β2 interact
     """
     if beta1_values is None:
         beta1_values = [0.7, 0.9, 0.99]
     if beta2_values is None:
         beta2_values = [0.9, 0.99, 0.999]
-    
+
     os.makedirs(output_dir, exist_ok=True)
-    
+
     print("=" * 80)
     print("🔬 ADAM (β1, β2) GRID SEARCH ON MNIST TRAINING")
     print("=" * 80)
@@ -706,50 +706,50 @@ def run_adam_beta1_beta2_grid(
     print(f"Epochs: {epochs}")
     print(f"Device: {device}")
     print("=" * 80)
-    
+
     results = []
     total_runs = len(beta1_values) * len(beta2_values) * len(seeds)
     run_count = 0
-    
+
     for seed in seeds:
         print(f"\n📍 Seed {seed}")
         for beta1 in beta1_values:
             for beta2 in beta2_values:
                 run_count += 1
                 print(f"  [{run_count}/{total_runs}] β1={beta1:.3f}, β2={beta2:.4f}")
-                
+
                 torch.manual_seed(seed)
                 np.random.seed(seed)
-                
+
                 # Load data
                 train_loader, test_loader = load_mnist(batch_size=128, quick=quick)
-                
+
                 # Create model
                 model = SimpleMLP().to(device)
-                
+
                 # Adam with specific β1, β2 (no weight decay for beta sensitivity study)
                 optimizer = optim.Adam(model.parameters(), lr=lr, betas=(beta1, beta2), weight_decay=0)
                 criterion = nn.CrossEntropyLoss()
-                
+
                 # Initialize dynamics tracker (define at outer scope for pyright)
                 dynamics_tracker: Optional["TrainingDynamicsTracker"] = None
                 if HAS_DYNAMICS:
                     dynamics_tracker = _create_dynamics_tracker()
                     if dynamics_tracker is not None:
                         dynamics_tracker.set_initial_params(model)
-                
+
                 # Training
                 for epoch in range(epochs):
                     model.train()
                     for batch_idx, (data, target) in enumerate(train_loader):
                         data, target = data.to(device), target.to(device)
-                        
+
                         optimizer.zero_grad()
                         output = model(data)
                         loss = criterion(output, target)
                         loss.backward()
                         optimizer.step()
-                        
+
                         # Track dynamics
                         if dynamics_tracker is not None and batch_idx % 10 == 0:
                             dynamics_tracker.track_step(
@@ -758,12 +758,12 @@ def run_adam_beta1_beta2_grid(
                                 model=model,
                                 optimizer=optimizer
                             )
-                
+
                 # Evaluate
                 model.eval()
                 train_acc, train_loss = evaluate(model, train_loader, criterion, device)
                 test_acc, test_loss = evaluate(model, test_loader, criterion, device)
-                
+
                 # Compute dynamics metrics (method modifies tracker state in-place)
                 dynamics_metrics: Dict[str, float] = {}
                 if dynamics_tracker is not None and len(dynamics_tracker.iterations) > 0:
@@ -776,7 +776,7 @@ def run_adam_beta1_beta2_grid(
                         'mean_grad_norm': float(np.mean(grad_norms)) if grad_norms else 0.0,
                         'smoothness_index': float(smoothness_idx) if smoothness_idx else 0.0,
                     }
-                
+
                 result = {
                     'seed': seed,
                     'beta1': beta1,
@@ -789,7 +789,7 @@ def run_adam_beta1_beta2_grid(
                     'dynamics_metrics': dynamics_metrics
                 }
                 results.append(result)
-    
+
     # Convert to DataFrame
     rows = []
     for r in results:
@@ -807,17 +807,17 @@ def run_adam_beta1_beta2_grid(
         for k, v in r['dynamics_metrics'].items():
             row[k] = v
         rows.append(row)
-    
+
     df = pd.DataFrame(rows)
-    
+
     # Save results
     csv_path = os.path.join(output_dir, 'adam_beta1_beta2_grid_mnist.csv')
     df.to_csv(csv_path, index=False)
     print(f"\nResults saved to {csv_path}")
-    
+
     # Create 2D heatmap visualizations
     create_beta_grid_plots(df, output_dir)
-    
+
     return df
 
 
@@ -826,7 +826,7 @@ def evaluate(model, loader, criterion, device):
     correct = 0
     total = 0
     total_loss = 0.0
-    
+
     with torch.no_grad():
         for data, target in loader:
             data, target = data.to(device), target.to(device)
@@ -836,7 +836,7 @@ def evaluate(model, loader, criterion, device):
             _, predicted = torch.max(output.data, 1)
             total += target.size(0)
             correct += (predicted == target).sum().item()
-    
+
     accuracy = 100.0 * correct / max(1, total)
     avg_loss = total_loss / max(1, len(loader))
     return accuracy, avg_loss
@@ -845,14 +845,14 @@ def evaluate(model, loader, criterion, device):
 def create_beta2_sensitivity_plots(df: pd.DataFrame, output_dir: str):
     """Create visualizations for β2 sensitivity"""
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-    fig.suptitle('Adam β2 Sensitivity on MNIST Training (Real Neural Network)', 
+    fig.suptitle('Adam β2 Sensitivity on MNIST Training (Real Neural Network)',
                  fontsize=16, fontweight='bold')
-    
+
     # 1. Test Accuracy vs β2
     ax = axes[0, 0]
     for seed in df['Seed'].unique():
         seed_data = df[df['Seed'] == seed]
-        ax.plot(arr_to_numpy_float(seed_data['Beta2']), arr_to_numpy_float(seed_data['Final_Test_Acc']), 
+        ax.plot(arr_to_numpy_float(seed_data['Beta2']), arr_to_numpy_float(seed_data['Final_Test_Acc']),
                 marker='o', label=f'Seed {seed}', alpha=0.7)
     ax.set_xlabel('β2', fontsize=12)
     ax.set_ylabel('Final Test Accuracy (%)', fontsize=12)
@@ -860,12 +860,12 @@ def create_beta2_sensitivity_plots(df: pd.DataFrame, output_dir: str):
     ax.legend()
     ax.grid(True, alpha=0.3)
     ax.set_xscale('log')
-    
+
     # 2. Train Loss vs β2
     ax = axes[0, 1]
     for seed in df['Seed'].unique():
         seed_data = df[df['Seed'] == seed]
-        ax.plot(arr_to_numpy_float(seed_data['Beta2']), arr_to_numpy_float(seed_data['Final_Train_Loss']), 
+        ax.plot(arr_to_numpy_float(seed_data['Beta2']), arr_to_numpy_float(seed_data['Final_Train_Loss']),
                 marker='o', label=f'Seed {seed}', alpha=0.7)
     ax.set_xlabel('β2', fontsize=12)
     ax.set_ylabel('Final Train Loss', fontsize=12)
@@ -873,13 +873,13 @@ def create_beta2_sensitivity_plots(df: pd.DataFrame, output_dir: str):
     ax.legend()
     ax.grid(True, alpha=0.3)
     ax.set_xscale('log')
-    
+
     # 3. Smoothness vs β2
     ax = axes[1, 0]
     if 'smoothness' in df.columns:
         for seed in df['Seed'].unique():
             seed_data = df[df['Seed'] == seed]
-            ax.plot(arr_to_numpy_float(seed_data['Beta2']), arr_to_numpy_float(seed_data['smoothness']), 
+            ax.plot(arr_to_numpy_float(seed_data['Beta2']), arr_to_numpy_float(seed_data['smoothness']),
                     marker='o', label=f'Seed {seed}', alpha=0.7)
         ax.set_xlabel('β2', fontsize=12)
         ax.set_ylabel('Smoothness Index', fontsize=12)
@@ -887,13 +887,13 @@ def create_beta2_sensitivity_plots(df: pd.DataFrame, output_dir: str):
         ax.legend()
         ax.grid(True, alpha=0.3)
         ax.set_xscale('log')
-    
+
     # 4. Oscillation vs β2
     ax = axes[1, 1]
     if 'oscillation_index' in df.columns:
         for seed in df['Seed'].unique():
             seed_data = df[df['Seed'] == seed]
-            ax.plot(arr_to_numpy_float(seed_data['Beta2']), arr_to_numpy_float(seed_data['oscillation_index']), 
+            ax.plot(arr_to_numpy_float(seed_data['Beta2']), arr_to_numpy_float(seed_data['oscillation_index']),
                     marker='o', label=f'Seed {seed}', alpha=0.7)
         ax.set_xlabel('β2', fontsize=12)
         ax.set_ylabel('Oscillation Index', fontsize=12)
@@ -901,18 +901,18 @@ def create_beta2_sensitivity_plots(df: pd.DataFrame, output_dir: str):
         ax.legend()
         ax.grid(True, alpha=0.3)
         ax.set_xscale('log')
-    
+
     plt.tight_layout()
     plot_path = os.path.join(output_dir, 'adam_beta2_sensitivity_analysis.png')
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
     plt.close()
-    
+
     print(f"β2 visualizations saved to {plot_path}")
 
 
 def create_beta_grid_plots(df: pd.DataFrame, output_dir: str):
     """Create 2D heatmap visualizations for (β1, β2) grid search"""
-    
+
     # Aggregate across seeds
     agg_df = df.groupby(['Beta1', 'Beta2']).agg({
         'Final_Test_Acc': 'mean',
@@ -920,11 +920,11 @@ def create_beta_grid_plots(df: pd.DataFrame, output_dir: str):
         'mean_speed': 'mean' if 'mean_speed' in df.columns else lambda x: 0,
         'oscillation_index': 'mean' if 'oscillation_index' in df.columns else lambda x: 0
     }).reset_index()
-    
+
     fig, axes = plt.subplots(2, 2, figsize=(14, 12))
-    fig.suptitle('Adam (β1, β2) Grid Search on MNIST Training', 
+    fig.suptitle('Adam (β1, β2) Grid Search on MNIST Training',
                  fontsize=16, fontweight='bold')
-    
+
     # 1. Test Accuracy Heatmap
     ax = axes[0, 0]
     pivot = agg_df.pivot(index='Beta2', columns='Beta1', values='Final_Test_Acc')
@@ -932,7 +932,7 @@ def create_beta_grid_plots(df: pd.DataFrame, output_dir: str):
     ax.set_title('Final Test Accuracy', fontweight='bold')
     ax.set_xlabel('β1')
     ax.set_ylabel('β2')
-    
+
     # 2. Train Loss Heatmap
     ax = axes[0, 1]
     pivot = agg_df.pivot(index='Beta2', columns='Beta1', values='Final_Train_Loss')
@@ -940,7 +940,7 @@ def create_beta_grid_plots(df: pd.DataFrame, output_dir: str):
     ax.set_title('Final Train Loss', fontweight='bold')
     ax.set_xlabel('β1')
     ax.set_ylabel('β2')
-    
+
     # 3. Mean Speed Heatmap
     ax = axes[1, 0]
     if 'mean_speed' in agg_df.columns and agg_df['mean_speed'].sum() > 0:
@@ -949,7 +949,7 @@ def create_beta_grid_plots(df: pd.DataFrame, output_dir: str):
         ax.set_title('Mean Update Speed', fontweight='bold')
         ax.set_xlabel('β1')
         ax.set_ylabel('β2')
-    
+
     # 4. Oscillation Heatmap
     ax = axes[1, 1]
     if 'oscillation_index' in agg_df.columns and agg_df['oscillation_index'].sum() > 0:
@@ -958,87 +958,87 @@ def create_beta_grid_plots(df: pd.DataFrame, output_dir: str):
         ax.set_title('Oscillation Index', fontweight='bold')
         ax.set_xlabel('β1')
         ax.set_ylabel('β2')
-    
+
     plt.tight_layout()
     plot_path = os.path.join(output_dir, 'adam_beta1_beta2_grid_heatmaps.png')
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
     plt.close()
-    
+
     print(f"Grid search heatmaps saved to {plot_path}")
 
 
 def create_beta_sensitivity_plots(df: pd.DataFrame, output_dir: str, optimizer: str):
     """Create comprehensive visualizations for β sensitivity"""
-    
+
     beta_col = 'Beta' if optimizer == 'Momentum' else 'Beta1'
-    
+
     fig, axes = plt.subplots(2, 3, figsize=(18, 10))
-    fig.suptitle(f'{optimizer} β Sensitivity on MNIST Training (Real Neural Network)', 
+    fig.suptitle(f'{optimizer} β Sensitivity on MNIST Training (Real Neural Network)',
                  fontsize=16, fontweight='bold')
-    
+
     # 1. Final Test Accuracy vs β
     ax = axes[0, 0]
     for seed in df['Seed'].unique():
         seed_data = df[df['Seed'] == seed]
-        ax.plot(arr_to_numpy_float(seed_data[beta_col]), arr_to_numpy_float(seed_data['Final_Test_Acc']), 
+        ax.plot(arr_to_numpy_float(seed_data[beta_col]), arr_to_numpy_float(seed_data['Final_Test_Acc']),
                 marker='o', label=f'Seed {seed}', alpha=0.7)
     ax.set_xlabel(f'{beta_col}', fontsize=12)
     ax.set_ylabel('Final Test Accuracy (%)', fontsize=12)
     ax.set_title('Test Accuracy vs β', fontweight='bold')
     ax.legend()
     ax.grid(True, alpha=0.3)
-    
+
     # 2. Final Train Loss vs β
     ax = axes[0, 1]
     for seed in df['Seed'].unique():
         seed_data = df[df['Seed'] == seed]
-        ax.plot(arr_to_numpy_float(seed_data[beta_col]), arr_to_numpy_float(seed_data['Final_Train_Loss']), 
+        ax.plot(arr_to_numpy_float(seed_data[beta_col]), arr_to_numpy_float(seed_data['Final_Train_Loss']),
                 marker='o', label=f'Seed {seed}', alpha=0.7)
     ax.set_xlabel(f'{beta_col}', fontsize=12)
     ax.set_ylabel('Final Train Loss', fontsize=12)
     ax.set_title('Train Loss vs β', fontweight='bold')
     ax.legend()
     ax.grid(True, alpha=0.3)
-    
+
     # 3. Mean Speed vs β (Dynamics)
     ax = axes[0, 2]
     if 'mean_speed' in df.columns:
         for seed in df['Seed'].unique():
             seed_data = df[df['Seed'] == seed]
-            ax.plot(arr_to_numpy_float(seed_data[beta_col]), arr_to_numpy_float(seed_data['mean_speed']), 
+            ax.plot(arr_to_numpy_float(seed_data[beta_col]), arr_to_numpy_float(seed_data['mean_speed']),
                     marker='o', label=f'Seed {seed}', alpha=0.7)
         ax.set_xlabel(f'{beta_col}', fontsize=12)
         ax.set_ylabel('Mean Update Speed', fontsize=12)
         ax.set_title('Dynamics: Speed vs β', fontweight='bold')
         ax.legend()
         ax.grid(True, alpha=0.3)
-    
+
     # 4. Smoothness vs β
     ax = axes[1, 0]
     if 'smoothness' in df.columns:
         for seed in df['Seed'].unique():
             seed_data = df[df['Seed'] == seed]
-            ax.plot(arr_to_numpy_float(seed_data[beta_col]), arr_to_numpy_float(seed_data['smoothness']), 
+            ax.plot(arr_to_numpy_float(seed_data[beta_col]), arr_to_numpy_float(seed_data['smoothness']),
                     marker='o', label=f'Seed {seed}', alpha=0.7)
         ax.set_xlabel(f'{beta_col}', fontsize=12)
         ax.set_ylabel('Smoothness Index', fontsize=12)
         ax.set_title('Dynamics: Smoothness vs β', fontweight='bold')
         ax.legend()
         ax.grid(True, alpha=0.3)
-    
+
     # 5. Oscillation Index vs β
     ax = axes[1, 1]
     if 'oscillation_index' in df.columns:
         for seed in df['Seed'].unique():
             seed_data = df[df['Seed'] == seed]
-            ax.plot(arr_to_numpy_float(seed_data[beta_col]), arr_to_numpy_float(seed_data['oscillation_index']), 
+            ax.plot(arr_to_numpy_float(seed_data[beta_col]), arr_to_numpy_float(seed_data['oscillation_index']),
                     marker='o', label=f'Seed {seed}', alpha=0.7)
         ax.set_xlabel(f'{beta_col}', fontsize=12)
         ax.set_ylabel('Oscillation Index', fontsize=12)
         ax.set_title('Dynamics: Oscillations vs β', fontweight='bold')
         ax.legend()
         ax.grid(True, alpha=0.3)
-    
+
     # 6. Summary Heatmap
     ax = axes[1, 2]
     if len(df[beta_col].unique()) > 1:
@@ -1049,12 +1049,12 @@ def create_beta_sensitivity_plots(df: pd.DataFrame, output_dir: str, optimizer: 
         sns.heatmap(agg_norm.T, annot=True, fmt='.3f', cmap='RdYlGn', ax=ax, cbar_kws={'label': 'Normalized Value'})
         ax.set_xlabel(f'{beta_col}', fontsize=12)
         ax.set_title('Normalized Metrics Heatmap', fontweight='bold')
-    
+
     plt.tight_layout()
     plot_path = os.path.join(output_dir, f'{optimizer.lower()}_beta_sensitivity_analysis.png')
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
     plt.close()
-    
+
     print(f"Visualizations saved to {plot_path}")
 
 
@@ -1062,7 +1062,7 @@ def main():
     """Main function for testing"""
     import argparse
     parser = argparse.ArgumentParser(description='β Sensitivity Analysis on Real Training')
-    parser.add_argument('--optimizer', type=str, default='momentum', 
+    parser.add_argument('--optimizer', type=str, default='momentum',
                        choices=['momentum', 'adam', 'adam_beta2', 'adam_grid'],
                        help='Optimizer to analyze')
     parser.add_argument('--epochs', type=int, default=10, help='Number of epochs')
@@ -1070,9 +1070,9 @@ def main():
     parser.add_argument('--device', type=str, default='cpu', help='Device (cpu/cuda)')
     parser.add_argument('--output', type=str, default='results/beta_sensitivity',
                        help='Output directory')
-    
+
     args = parser.parse_args()
-    
+
     if args.optimizer == 'momentum':
         df = run_momentum_beta_sensitivity(
             epochs=args.epochs,
@@ -1105,7 +1105,7 @@ def main():
             output_dir=args.output
         )
         beta_col = 'Beta1'
-    
+
     print("\n" + "=" * 80)
     print("SUMMARY STATISTICS")
     print("=" * 80)

@@ -39,26 +39,26 @@ except ImportError as e:
 print("\n[2/5] Testing NoisyLabelDataset...")
 try:
     from torch.utils.data import TensorDataset
-    
+
     # Create simple dataset
     data = torch.randn(100, 10)
     labels = torch.randint(0, 5, (100,))
     dataset = TensorDataset(data, labels)
-    
+
     # Test no noise
     noisy_dataset_0 = NoisyLabelDataset(dataset, noise_rate=0.0, num_classes=5, seed=42)
     assert noisy_dataset_0.get_clean_accuracy() == 1.0, "No noise should have 100% accuracy"
-    
+
     # Test 20% noise
     noisy_dataset_20 = NoisyLabelDataset(dataset, noise_rate=0.2, num_classes=5, seed=42)
     clean_acc = noisy_dataset_20.get_clean_accuracy()
     assert 0.79 < clean_acc < 0.81, f"20% noise should have ~80% clean accuracy, got {clean_acc}"
-    
+
     # Test reproducibility
     noisy_dataset_20b = NoisyLabelDataset(dataset, noise_rate=0.2, num_classes=5, seed=42)
     assert np.array_equal(noisy_dataset_20.noisy_labels, noisy_dataset_20b.noisy_labels), \
         "Same seed should produce identical noise"
-    
+
     print("   ✓ NoisyLabelDataset working correctly")
 except AssertionError as e:
     print(f"   ✗ Test failed: {e}")
@@ -91,25 +91,25 @@ try:
     fair_config = generate_fair_tuning_config(optimizers, n_trials=15, epochs=3)
     result = validate_tuning_fairness(optimizers, fair_config, strict=True)
     assert result == True, "Fair config should pass validation"
-    
+
     # Test unfair config (should fail)
     unfair_config = {
         'SGD': {'n_trials': 15, 'epochs': 3, 'is_tuned': True},
         'Adam': {'n_trials': 15, 'epochs': 3, 'is_tuned': True},
         'SAM_SGD': {'n_trials': 0, 'epochs': 0, 'is_tuned': False}
     }
-    
+
     try:
         validate_tuning_fairness(optimizers, unfair_config, strict=True)
         print("   ✗ Unfair config should have failed validation")
         sys.exit(1)
     except TuningFairnessError:
         pass  # Expected
-    
+
     # Test permissive mode (should not raise)
     result = validate_tuning_fairness(optimizers, unfair_config, strict=False)
     assert result == False, "Unfair config should return False in permissive mode"
-    
+
     print("   ✓ Fairness validation working correctly")
 except AssertionError as e:
     print(f"   ✗ Test failed: {e}")
@@ -122,14 +122,14 @@ except Exception as e:
 print("\n[5/5] Testing extended tuning integration...")
 try:
     from run_all_kaggle import quick_tune_optimizer, get_default_hyperparameters
-    
+
     # Check that advanced optimizers have default params
-    for opt_name in ['SAM_SGD', 'SAM_Adam', 'Lookahead_SGD', 'Lookahead_Adam', 
+    for opt_name in ['SAM_SGD', 'SAM_Adam', 'Lookahead_SGD', 'Lookahead_Adam',
                      'AdaBound', 'RAdam', 'LAMB']:
         params = get_default_hyperparameters(opt_name)
         assert params is not None, f"{opt_name} should have default hyperparameters"
         assert len(params) > 0, f"{opt_name} params should not be empty"
-    
+
     print("   ✓ Extended tuning integration working correctly")
 except Exception as e:
     print(f"   ✗ Test failed: {e}")

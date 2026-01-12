@@ -353,7 +353,8 @@ def compute_statistics(results_dir: str):
         _, pB = stats.shapiro(vals_B)
         if pA > 0.05 and pB > 0.05:
             stat_name = 'Paired t-test'
-            t, p = stats.ttest_rel(vals_A, vals_B)
+            from src.analysis.statistical_analysis import safe_ttest_rel
+            t, p = safe_ttest_rel(vals_A, vals_B)
             d = (vals_A - vals_B).mean() / (vals_A - vals_B).std(ddof=1)
         else:
             stat_name = 'Wilcoxon'

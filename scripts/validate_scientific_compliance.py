@@ -21,22 +21,22 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 def check_hessian_artifacts(results_dir: Path, experiment: str) -> dict:
     """Check if Hessian analysis artifacts exist and contain max_eigenvalue."""
     hessian_dir = results_dir / experiment / 'hessian_analysis'
-    
+
     if not hessian_dir.exists():
         return {'status': 'missing', 'message': f'Hessian analysis directory not found: {hessian_dir}'}
-    
+
     json_files = list(hessian_dir.glob('*.json'))
     if not json_files:
         return {'status': 'missing', 'message': f'No JSON files in {hessian_dir}'}
-    
+
     # Check first file
     try:
         with open(json_files[0], 'r') as f:
             data = json.load(f)
-        
+
         if 'max_eigenvalue' not in data:
             return {'status': 'invalid', 'message': 'JSON missing max_eigenvalue key', 'file': str(json_files[0])}
-        
+
         L = float(data['max_eigenvalue'])
         return {
             'status': 'valid',
@@ -52,22 +52,22 @@ def check_hessian_artifacts(results_dir: Path, experiment: str) -> dict:
 def check_gradient_noise_artifacts(results_dir: Path, experiment: str) -> dict:
     """Check if gradient noise analysis artifacts exist and contain sigma_squared."""
     noise_dir = results_dir / experiment / 'gradient_noise'
-    
+
     if not noise_dir.exists():
         return {'status': 'missing', 'message': f'Gradient noise directory not found: {noise_dir}'}
-    
+
     json_files = list(noise_dir.glob('*.json'))
     if not json_files:
         return {'status': 'missing', 'message': f'No JSON files in {noise_dir}'}
-    
+
     # Check first file
     try:
         with open(json_files[0], 'r') as f:
             data = json.load(f)
-        
+
         if 'sigma_squared' not in data and 'gradient_variance' not in data:
             return {'status': 'invalid', 'message': 'JSON missing sigma_squared/gradient_variance key', 'file': str(json_files[0])}
-        
+
         sigma = data.get('sigma_squared', data.get('gradient_variance', 0))
         return {
             'status': 'valid',
@@ -83,22 +83,22 @@ def check_gradient_noise_artifacts(results_dir: Path, experiment: str) -> dict:
 def check_pl_artifacts(results_dir: Path, experiment: str) -> dict:
     """Check if PL constant analysis artifacts exist."""
     pl_dir = results_dir / experiment / 'pl_analysis'
-    
+
     if not pl_dir.exists():
         return {'status': 'missing', 'message': f'PL analysis directory not found: {pl_dir}'}
-    
+
     json_files = list(pl_dir.glob('*.json'))
     if not json_files:
         return {'status': 'missing', 'message': f'No JSON files in {pl_dir}'}
-    
+
     # Check first file
     try:
         with open(json_files[0], 'r') as f:
             data = json.load(f)
-        
+
         if 'estimated_mu' not in data:
             return {'status': 'invalid', 'message': 'JSON missing estimated_mu key', 'file': str(json_files[0])}
-        
+
         mu_pl = float(data['estimated_mu'])
         return {
             'status': 'valid',
@@ -114,14 +114,14 @@ def check_pl_artifacts(results_dir: Path, experiment: str) -> dict:
 def check_theory_validation_code() -> dict:
     """Verify that theory_practice_validation.py has the compliance fixes."""
     validation_file = Path('src/experiments/theory_practice_validation.py')
-    
+
     if not validation_file.exists():
         return {'status': 'error', 'message': f'File not found: {validation_file}'}
-    
+
     try:
         with open(validation_file, 'r', encoding='utf-8') as f:
             content = f.read()
-        
+
         checks = {
             'loads_hessian': 'hessian_results_dir' in content and 'max_eigenvalue' in content,
             'loads_noise': 'noise_results_dir' in content and ('sigma_squared' in content or 'gradient_variance' in content),
@@ -130,9 +130,9 @@ def check_theory_validation_code() -> dict:
             'passes_pl': "pl_constant=pl_const_est" in content or "pl_const_est" in content,
             'has_warnings': '⚠' in content or 'WARNING' in content
         }
-        
+
         all_passed = all(checks.values())
-        
+
         return {
             'status': 'valid' if all_passed else 'incomplete',
             'message': '✓ All compliance checks found in code' if all_passed else '⚠ Some checks missing',
@@ -148,7 +148,7 @@ def main():
     print("SCIENTIFIC COMPLIANCE VALIDATION")
     print("="*80)
     print()
-    
+
     # Check 1: Code compliance
     print("Check 1: Verifying code has compliance fixes...")
     code_result = check_theory_validation_code()
@@ -162,51 +162,51 @@ def main():
                 status = '✓' if passed else '✗'
                 print(f"    {status} {check}")
     print()
-    
+
     # Check 2: Artifact availability
     print("Check 2: Checking for analysis artifacts...")
     results_dir = Path('results')
-    
+
     if not results_dir.exists():
         print("  ⚠ Results directory not found. Run experiments first.")
         print()
         return 1
-    
+
     # Look for experiment subdirectories
     experiments = [d for d in results_dir.iterdir() if d.is_dir() and not d.name.startswith('.')]
-    
+
     if not experiments:
         print("  ⚠ No experiment directories found. Run experiments first.")
         print()
         return 1
-    
+
     print(f"  Found {len(experiments)} experiment directories")
     print()
-    
+
     # Check each experiment
     artifact_summary = {'hessian': 0, 'noise': 0, 'pl': 0}
-    
+
     for exp_dir in experiments[:3]:  # Check first 3 experiments
         exp_name = exp_dir.name
         print(f"  Experiment: {exp_name}")
-        
+
         hessian_result = check_hessian_artifacts(results_dir, exp_name)
         print(f"    Hessian: {hessian_result['message']}")
         if hessian_result['status'] == 'valid':
             artifact_summary['hessian'] += 1
-        
+
         noise_result = check_gradient_noise_artifacts(results_dir, exp_name)
         print(f"    Gradient Noise: {noise_result['message']}")
         if noise_result['status'] == 'valid':
             artifact_summary['noise'] += 1
-        
+
         pl_result = check_pl_artifacts(results_dir, exp_name)
         print(f"    PL Constant: {pl_result['message']}")
         if pl_result['status'] == 'valid':
             artifact_summary['pl'] += 1
-        
+
         print()
-    
+
     # Summary
     print("="*80)
     print("VALIDATION SUMMARY")
@@ -216,7 +216,7 @@ def main():
     print(f"Gradient Noise Artifacts: {artifact_summary['noise']}/{len(experiments[:3])} experiments")
     print(f"PL Constant Artifacts: {artifact_summary['pl']}/{len(experiments[:3])} experiments")
     print()
-    
+
     if code_result['status'] == 'valid':
         print("✓ SCIENTIFIC COMPLIANCE: VERIFIED")
         print("  Theory-practice validation will use measured constants when available.")

@@ -5,7 +5,7 @@ DEMO/PROOF-OF-CONCEPT SCRIPT
 
 CRITICAL LIMITATION (REVIEW FLAG):
 This is a SCAFFOLD with PLACEHOLDER data paths.
-It is NOT a complete medical imaging experiment and should NOT be used for 
+It is NOT a complete medical imaging experiment and should NOT be used for
 cross-domain generalization claims without:
 - Real medical imaging dataset (e.g., BraTS, LIDC-IDRI)
 - Proper train/val/test splits with patient-level splitting
@@ -81,7 +81,7 @@ def medical_image_segmentation(
     val_data = data_dicts[-1:]
     train_ds = CacheDataset(data=train_data, transform=train_transforms)
     val_ds = CacheDataset(data=val_data, transform=train_transforms)
-    
+
     # Use make_dataloader for consistent settings
     from src.core.dataloader_utils import make_dataloader
     train_loader = make_dataloader(train_ds, batch_size=batch_size, shuffle=True, seed=42, num_workers=0, pin_memory=True)
@@ -90,15 +90,15 @@ def medical_image_segmentation(
     # Model & loss/metrics
     model = UNet(spatial_dims=3, in_channels=1, out_channels=1, channels=(16, 32, 64, 128, 256),
                  strides=(2, 2, 2, 2), num_res_units=2).to(device)
-    
+
     # Use config-driven optimizer creation instead of hardcoded Adam
     # This allows proper comparison across SGD, Adam, AdamW, etc.
     if optimizer_config is None:
         optimizer_config = {'name': 'Adam', 'lr': 1e-4}
-    
+
     from src.core.optimizer_registry import create_optimizer_from_config
     optimizer = create_optimizer_from_config(optimizer_config, model.parameters())
-    
+
     loss_function = DiceLoss(sigmoid=True)
     dice_metric = DiceMetric(include_background=False, reduction="mean")
 

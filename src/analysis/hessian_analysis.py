@@ -29,17 +29,17 @@ from pathlib import Path
 class HessianAnalyzer:
     """
     Compute and analyze Hessian spectrum for neural networks.
-    
+
     Provides evidence of:
     - Flatness of minima (better generalization)
     - Optimizer quality (SAM should find flatter minima than SGD)
     - Conditioning of optimization landscape
     """
-    
+
     def __init__(self, model: nn.Module, criterion: nn.Module, device: Optional[torch.device] = None):
         """
         Initialize Hessian analyzer.
-        
+
         Args:
             model: PyTorch model
             criterion: Loss function
@@ -51,7 +51,7 @@ class HessianAnalyzer:
         self.model.to(self.device)
         """
         Initialize Hessian analyzer.
-        
+
         Args:
             model: PyTorch model
             criterion: Loss function
@@ -61,8 +61,8 @@ class HessianAnalyzer:
         self.criterion = criterion
         self.device = device or torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.model.to(self.device)
-    
-    def compute_hessian_eigenvalues(self, 
+
+    def compute_hessian_eigenvalues(self,
                                     dataloader: DataLoader,
                                     num_batches: int = 10,
                                     top_k: int = 10) -> Dict[str, Any]:
@@ -73,7 +73,7 @@ class HessianAnalyzer:
             - 'trace_estimate' is RENAMED to 'sum_top_k_eigenvalues'
               because Trace = sum(ALL eigenvalues), not just top K.
               A ResNet has ~11M eigenvalues; sum(top_10) ≠ Trace.
-              
+
         GAP 61 FIX: RENAMED 'condition_number' to 'top_k_spectral_ratio'
             - True Condition Number κ = λ_max / λ_min (smallest of ALL eigenvalues)
             - eigs[-1] is the K-th largest, NOT the minimum
@@ -94,17 +94,17 @@ class HessianAnalyzer:
             - top_k_spectral_ratio: λ_1 / λ_k (NOT true condition number!)
         """
         logging.info(f"Computing top {top_k} Hessian eigenvalues...")
-        
+
         # Get model parameters as flat vector
         params = [p for p in self.model.parameters() if p.requires_grad]
         # Keep params as a Sequence of Parameter objects; use Sequence typing in helper
         num_params = sum(p.numel() for p in params)
-        
+
         logging.info(f"Total parameters: {num_params:,}")
-        
+
         if num_params > 100000:
             logging.warning(f"Large model ({num_params:,} params) - Hessian computation may be slow")
-        
+
         # Compute Hessian eigenvalues using power iteration
         eigenvalues = self._power_iteration_eigenvalues(dataloader, params, num_batches, top_k)
         # Convert eigenvalues to numpy array of floats for stable downstream usage
@@ -131,8 +131,8 @@ class HessianAnalyzer:
             'num_params': num_params,
             'top_k': top_k
         }
-    
-    def _power_iteration_eigenvalues(self, 
+
+    def _power_iteration_eigenvalues(self,
                                      dataloader: DataLoader,
                                      params: Sequence[torch.Tensor],
                                      num_batches: int,
@@ -140,9 +140,9 @@ class HessianAnalyzer:
         """Use Sequence[Tensor] for covariance-friendly typing for Parameter lists."""
         """
         Compute top eigenvalues using power iteration (Lanczos method).
-        
+
         This is much more efficient than computing full Hessian for large models.
-        
+
         CRITICAL FIX (GAP #3): Pre-load fixed batches BEFORE power iteration loop.
         Power iteration mathematically requires H to be a CONSTANT operator.
         Using different batches per iteration makes H stochastic, preventing convergence.
@@ -157,56 +157,56 @@ class HessianAnalyzer:
                 fixed_batches.append((inputs.to(self.device), targets.to(self.device)))
             except StopIteration:
                 break
-        
+
         if not fixed_batches:
             logging.warning("No batches available for Hessian computation")
             return torch.tensor([0.0], dtype=torch.float)
-        
+
         # Hessian-vector product function using FIXED batches
         def hvp(vector):
             """Compute Hessian-vector product H @ v on FIXED data"""
             # Zero gradients
             self.model.zero_grad()
-            
+
             # Accumulate over FIXED batches for stability
             hv = None
             for inputs, targets in fixed_batches:
-                
+
                 # Compute gradients (inputs/targets already on device)
                 outputs = self.model(inputs)
                 loss = self.criterion(outputs, targets)
-                
+
                 # Compute gradient
                 grads = torch.autograd.grad(loss, params, create_graph=True)
-                
+
                 # Compute directional derivative (g^T @ v)
                 grad_vector = torch.cat([g.view(-1) for g in grads])
                 dot = torch.dot(grad_vector, vector)
-                
+
                 # Compute Hessian-vector product
                 hv_batch = torch.autograd.grad(dot, params, retain_graph=False)
                 hv_batch = torch.cat([h.view(-1) for h in hv_batch])
-                
+
                 if hv is None:
                     hv = hv_batch
                 else:
                     hv = hv + hv_batch
-            
+
             if hv is None:
                 # No batches were processed (empty dataloader) -> return zero vector
                 return torch.zeros(num_params, device=self.device)
             return hv / num_batches
-        
+
         # Power iteration to find top eigenvalue/eigenvector
         num_params = sum(p.numel() for p in params)
-        
+
         # Initialize random vector
         v = torch.randn(num_params, device=self.device)
         v = v / torch.norm(v)
-        
+
         eigenvalues = []
         eigenvectors = []
-        
+
         # Compute top k eigenvalues using deflation (Gram-Schmidt orthogonalization)
         # IMPLEMENTATION NOTE: This IS proper deflation as claimed in README.
         # Each new eigenvector is orthogonalized against all previously found ones
@@ -216,82 +216,82 @@ class HessianAnalyzer:
             # Power iteration
             for iteration in range(30):  # Increased from 20 for better convergence
                 v_new = hvp(v)
-                
+
                 # Deflate: subtract projection onto previously found eigenvectors
                 # This ensures orthogonality and prevents re-finding same eigenvalue
                 for prev_eigenval, prev_eigenvec in zip(eigenvalues, eigenvectors):
                     projection = torch.dot(v_new, prev_eigenvec)
                     v_new = v_new - projection * prev_eigenvec
-                
+
                 # Normalize
                 norm = torch.norm(v_new)
                 if norm < 1e-10:
                     # Orthogonalization collapsed the vector - no more distinct eigenvalues
                     logging.warning(f"Eigenvalue computation stopped at k={k} due to numerical collapse")
                     break
-                
+
                 v = v_new / norm
             else:
                 # Converged successfully
                 v_normalized = v / torch.norm(v)
                 Hv = hvp(v_normalized)
                 eigenvalue = torch.dot(Hv, v_normalized)
-                
+
                 eigenvalues.append(eigenvalue.item())
                 eigenvectors.append(v_normalized.clone())
-                
+
                 logging.debug(f"Eigenvalue {k+1}: {eigenvalue.item():.6f}")
-        
+
         if len(eigenvalues) == 0:
             logging.warning("No eigenvalues computed - returning zero")
             return torch.tensor([0.0])
-        
+
         # Ensure we return a torch.Tensor of floats
         return torch.tensor(eigenvalues, dtype=torch.float)
-    
+
     def compute_sharpness(self, dataloader: DataLoader, rho: float = 0.05) -> float:
         """
         Compute SAM-style sharpness metric.
-        
+
         Sharpness = max_{||δ|| ≤ ρ} L(θ + δ) - L(θ)
-        
+
         This measures the maximum loss increase in a small neighborhood,
         which correlates with generalization performance.
-        
+
         GAP FIX: Now uses SAME data for base_loss and perturbed_loss.
         Previously, if dataloader had shuffle=True, base_loss and perturbed_loss
         were computed on DIFFERENT data samples. The difference was dominated by
         sampling variance, not the actual perturbation effect.
-        
+
         Args:
             dataloader: DataLoader for computing loss
             rho: Neighborhood radius (default: 0.05)
-            
+
         Returns:
             Sharpness value (lower is better)
         """
         logging.info(f"Computing sharpness (SAM metric with ρ={rho})...")
-        
+
         # GAP FIX: Cache a fixed batch for consistent base/perturbed comparison
         # This ensures we measure true sharpness, not data sampling variance
         batch_iter = iter(dataloader)
         fixed_inputs, fixed_targets = next(batch_iter)
         fixed_inputs = fixed_inputs.to(self.device)
         fixed_targets = fixed_targets.to(self.device)
-        
+
         # Compute base loss on FIXED batch
         self.model.eval()
         with torch.no_grad():
             base_outputs = self.model(fixed_inputs)
             base_loss = self.criterion(base_outputs, fixed_targets).item()
-        
+
         # Compute gradient for perturbation direction
         self.model.train()
         self.model.zero_grad()
         outputs = self.model(fixed_inputs)
         loss = self.criterion(outputs, fixed_targets)
         loss.backward()
-        
+
         # Compute adversarial perturbation
         with torch.no_grad():
             # Gradient norm: accumulate in a tensor to ensure consistent Tensor typing
@@ -304,98 +304,98 @@ class HessianAnalyzer:
             # Perturbation: ε = ρ * grad / ||grad||
             # Ensure scale is a Tensor compatible with parameter tensors
             scale = (rho / (grad_norm + 1e-12)).to(device=self.device)
-            
+
             # Apply perturbation
             for p in self.model.parameters():
                 if p.grad is not None:
                     p.data.add_(p.grad * scale)
-        
+
         # Compute perturbed loss on SAME FIXED batch
         self.model.eval()
         with torch.no_grad():
             perturbed_outputs = self.model(fixed_inputs)
             perturbed_loss = self.criterion(perturbed_outputs, fixed_targets).item()
-        
+
         # Restore original parameters
         with torch.no_grad():
             for p in self.model.parameters():
                 if p.grad is not None:
                     p.data.sub_(p.grad * scale)
-        
+
         self.model.train()
         sharpness = perturbed_loss - base_loss
         logging.info(f"Sharpness: {sharpness:.6f} (lower is better)")
-        
+
         return float(sharpness)
-    
+
     def _compute_loss(self, dataloader: DataLoader, num_batches: int = 10) -> float:
         """Compute average loss over dataloader."""
         self.model.eval()
         total_loss = 0.0
         count = 0
-        
+
         with torch.no_grad():
             for i, (inputs, targets) in enumerate(dataloader):
                 if i >= num_batches:
                     break
-                
+
                 inputs = inputs.to(self.device)
                 targets = targets.to(self.device)
-                
+
                 outputs = self.model(inputs)
                 loss = self.criterion(outputs, targets)
-                
+
                 total_loss += loss.item()
                 count += 1
-        
+
         self.model.train()
         return total_loss / count if count > 0 else 0.0
-    
-    def analyze_optimizer_quality(self, 
+
+    def analyze_optimizer_quality(self,
                                   dataloader: DataLoader,
                                   optimizer_name: str = "Optimizer") -> Dict[str, Any]:
         """
         Comprehensive analysis of optimizer quality.
-        
+
         Returns metrics that correlate with generalization:
         - Hessian spectrum (top eigenvalues)
         - Sharpness (SAM metric)
         - Conditioning (λ_max / λ_min)
-        
+
         Args:
             dataloader: DataLoader for analysis
             optimizer_name: Name for logging
-            
+
         Returns:
             Dictionary with all metrics
         """
         logging.info(f"\n{'='*70}")
         logging.info(f"Analyzing Optimizer Quality: {optimizer_name}")
         logging.info(f"{'='*70}")
-        
+
         results = {}
-        
+
         # 1. Hessian eigenvalues
         try:
             hessian_results = self.compute_hessian_eigenvalues(dataloader, num_batches=5, top_k=5)
             results.update(hessian_results)
-            
+
             logging.info(f"\nHessian Spectrum:")
             logging.info(f"  Max eigenvalue (λ_max): {hessian_results['max_eigenvalue']:.6f}")
             logging.info(f"  Min eigenvalue (λ_min): {hessian_results['min_eigenvalue']:.6f}")
             logging.info(f"  Condition number: {hessian_results['condition_number']:.2f}")
         except Exception as e:
             logging.warning(f"Failed to compute Hessian eigenvalues: {e}")
-        
+
         # 2. Sharpness
         try:
             sharpness = self.compute_sharpness(dataloader, rho=0.05)
             results['sharpness'] = sharpness
         except Exception as e:
             logging.warning(f"Failed to compute sharpness: {e}")
-        
+
         logging.info(f"{'='*70}\n")
-        
+
         return results
 
 
@@ -404,43 +404,43 @@ def plot_hessian_spectrum(eigenvalues: np.ndarray,
                           save_path: Optional[Path] = None):
     """
     Plot Hessian eigenvalue spectrum for multiple optimizers.
-    
+
     Args:
         eigenvalues: 2D array (n_optimizers, n_eigenvalues)
         optimizer_names: List of optimizer names
         save_path: Path to save figure
     """
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-    
+
     # Plot 1: Top eigenvalues
     ax = axes[0]
     for i, (eigs, name) in enumerate(zip(eigenvalues, optimizer_names)):
         ax.plot(range(1, len(eigs) + 1), eigs, 'o-', label=name, markersize=8)
-    
+
     ax.set_xlabel('Eigenvalue Rank', fontsize=12)
     ax.set_ylabel('Eigenvalue Magnitude', fontsize=12)
     ax.set_title('Top Hessian Eigenvalues', fontsize=14, weight='bold')
     ax.legend()
     ax.grid(alpha=0.3)
     ax.set_yscale('log')
-    
+
     # Plot 2: Max eigenvalue comparison (sharpness proxy)
     ax = axes[1]
     max_eigs = [eigs[0] for eigs in eigenvalues]
     colors = [f'C{i}' for i in range(len(optimizer_names))]
     ax.bar(optimizer_names, max_eigs, color=colors, alpha=0.7, edgecolor='black')
-    
+
     ax.set_ylabel('Max Eigenvalue (λ_max)', fontsize=12)
     ax.set_title('Sharpness Comparison (Lower is Better)', fontsize=14, weight='bold')
     ax.grid(axis='y', alpha=0.3)
     plt.xticks(rotation=45, ha='right')
-    
+
     plt.tight_layout()
-    
+
     if save_path:
         plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
         logging.info(f"Hessian spectrum plot saved to {save_path}")
-    
+
     plt.show()
     return fig
 
@@ -450,41 +450,41 @@ def plot_sharpness_comparison(sharpness_values: List[float],
                               save_path: Optional[Path] = None):
     """
     Plot SAM sharpness metric comparison.
-    
+
     Args:
         sharpness_values: List of sharpness values
         optimizer_names: List of optimizer names
         save_path: Path to save figure
     """
     fig, ax = plt.subplots(figsize=(10, 6))
-    
+
     colors = [f'C{i}' for i in range(len(optimizer_names))]
     bars = ax.bar(optimizer_names, sharpness_values, color=colors, alpha=0.7, edgecolor='black')
-    
+
     # Highlight best (lowest sharpness)
     best_idx = np.argmin(sharpness_values)
     bars[best_idx].set_color('green')
     bars[best_idx].set_alpha(0.9)
-    
+
     ax.set_ylabel('Sharpness (SAM metric)', fontsize=12)
     ax.set_title('Flatness of Minima (Lower is Better)', fontsize=14, weight='bold')
     ax.grid(axis='y', alpha=0.3)
     plt.xticks(rotation=45, ha='right')
-    
+
     # Annotate best
-    ax.annotate('Best (Flattest)', 
+    ax.annotate('Best (Flattest)',
                 xy=(float(best_idx), float(sharpness_values[best_idx])),
                 xytext=(float(best_idx), float(sharpness_values[best_idx]) * 1.2),
                 arrowprops=dict(arrowstyle='->', lw=2, color='green'),
                 fontsize=12, weight='bold', color='green',
                 ha='center')
-    
+
     plt.tight_layout()
-    
+
     if save_path:
         plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
         logging.info(f"Sharpness comparison plot saved to {save_path}")
-    
+
     plt.show()
     return fig
 
@@ -495,25 +495,25 @@ if __name__ == '__main__':
     import torch.nn as nn
     import torch.optim as optim
     from torch.utils.data import TensorDataset
-    
+
     # Create dummy model and data
     model = nn.Sequential(
         nn.Linear(10, 50),
         nn.ReLU(),
         nn.Linear(50, 2)
     )
-    
+
     X = torch.randn(100, 10)
     y = torch.randint(0, 2, (100,))
     dataset = TensorDataset(X, y)
     dataloader = DataLoader(dataset, batch_size=10)
-    
+
     criterion = nn.CrossEntropyLoss()
-    
+
     # Analyze
     analyzer = HessianAnalyzer(model, criterion)
     results = analyzer.analyze_optimizer_quality(dataloader, optimizer_name="SGD")
-    
+
     logging.info("\nResults:")
     for key, value in results.items():
         logging.info(f"  {key}: {value}")

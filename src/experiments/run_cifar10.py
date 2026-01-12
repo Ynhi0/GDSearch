@@ -11,11 +11,11 @@ ARCHITECTURE STANDARDIZATION (Dec 2025):
 GAP 43 NOTE - OPTIMIZER IMPLEMENTATION:
     This benchmark uses PyTorch's built-in optimizer implementations (torch.optim)
     for performance reasons. This is the "PyTorch Baseline" benchmark.
-    
+
     For experiments using custom GDSearch implementations:
         from src.core.pytorch_optimizers import SGDWrapper, AdamWrapper
         optimizer = AdamWrapper(model.parameters(), lr=0.001)
-    
+
     The custom implementations in src.core.optimizers.py are educational/prototype
     versions that are tested in tests/test_optimizers.py.
 
@@ -48,10 +48,10 @@ from src.core.models import ResNet18  # ARCHITECTURE STANDARDIZATION
 def get_loaders(batch_size: int = 128, seed: int = 42):
     """
     Get CIFAR-10 data loaders.
-    
+
     GAP 48 FIX: Now accepts seed parameter for proper randomization.
     Each experiment seed should produce different batch orderings.
-    
+
     Args:
         batch_size: Batch size for training
         seed: Random seed for dataloader shuffling (should match experiment seed)
@@ -83,10 +83,10 @@ def get_loaders(batch_size: int = 128, seed: int = 42):
 def train_one_epoch(model, loader, optimizer, device):
     """
     Train model for one epoch.
-    
+
     GAP 51 FIX: Now returns gradient norm for convergence analysis.
     GAP 52 FIX: Returns both running_avg_loss (historical) and train_eval_loss (current state).
-    
+
     Returns:
         Tuple of (avg_train_loss, train_accuracy, gradient_norm)
     """
@@ -94,18 +94,18 @@ def train_one_epoch(model, loader, optimizer, device):
     total_loss = 0.0
     correct = 0
     total = 0
-    
+
     # GAP 51 FIX: Track gradient norm for convergence analysis
     grad_norm_sum = 0.0
     grad_norm_count = 0
-    
+
     for x, y in loader:
         x, y = x.to(device), y.to(device)
         optimizer.zero_grad()
         out = model(x)
         loss = F.cross_entropy(out, y)
         loss.backward()
-        
+
         # GAP 51 FIX: Compute gradient norm BEFORE optimizer.step()
         # This is critical for convergence analysis (||∇f|| → 0 at stationary points)
         batch_grad_norm = 0.0
@@ -115,17 +115,17 @@ def train_one_epoch(model, loader, optimizer, device):
         batch_grad_norm = batch_grad_norm ** 0.5
         grad_norm_sum += batch_grad_norm
         grad_norm_count += 1
-        
+
         optimizer.step()
         total_loss += loss.item() * x.size(0)
         pred = out.argmax(1)
         correct += (pred == y).sum().item()
         total += x.size(0)
-    
+
     # Avoid division by zero
     if total == 0:
         return 0.0, 0.0, 0.0
-    
+
     avg_grad_norm = grad_norm_sum / grad_norm_count if grad_norm_count > 0 else 0.0
     return total_loss / total, correct / total, avg_grad_norm
 
@@ -153,7 +153,7 @@ def evaluate(model, loader, device):
 def run_single(optimizer_name: str, seed: int, lr: float, epochs: int, batch_size: int, results_dir: Path):
     """
     Run a single CIFAR-10 training experiment.
-    
+
     GAP 47 FIX: Standardized weight_decay across optimizers for fair comparison.
     GAP 48 FIX: Pass seed to dataloader for proper batch order randomization.
     GAP 51 FIX: Log gradient norms for convergence analysis.
@@ -163,7 +163,7 @@ def run_single(optimizer_name: str, seed: int, lr: float, epochs: int, batch_siz
     """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     set_seed(seed)
-    
+
     # GAP 48 FIX: Pass seed to get_loaders for proper variance analysis
     trainloader, testloader = get_loaders(batch_size, seed=seed)
     model = ResNet18().to(device)  # ARCHITECTURE STANDARDIZATION: Use ResNet18 instead of SimpleCIFARNet
@@ -171,7 +171,7 @@ def run_single(optimizer_name: str, seed: int, lr: float, epochs: int, batch_siz
     # GAP 47 FIX: Standardize weight_decay for fair optimizer comparison
     # All optimizers get same regularization to compare algorithms, not regularization strength
     weight_decay = 5e-4  # Standard for CIFAR-10 ResNet
-    
+
     if optimizer_name == 'SGD':
         # GAP 47 FIX: Add weight_decay for fair comparison with AdamW
         optimizer = optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay)
@@ -204,23 +204,23 @@ def run_single(optimizer_name: str, seed: int, lr: float, epochs: int, batch_siz
     for epoch in range(1, epochs + 1):
         # GAP 51 FIX: train_one_epoch now returns gradient norm
         tr_loss, tr_acc, grad_norm = train_one_epoch(model, trainloader, optimizer, device)
-        
+
         # GAP 52 FIX: Compute train_eval_loss (current model state, not running average)
         # This is mathematically correct for optimization analysis: f(θ_k)
         train_eval_loss, _ = evaluate(model, trainloader, device)  # train_eval_acc unused
-        
+
         te_loss, te_acc = evaluate(model, testloader, device)
-        
+
         # GAP 53 FIX: Log current learning rate
         current_lr = optimizer.param_groups[0]['lr']
-        
+
         hist.append({
-            'epoch': epoch, 
+            'epoch': epoch,
             'train_loss': tr_loss,  # Historical (running average during epoch)
             'train_eval_loss': train_eval_loss,  # GAP 52 FIX: Current state f(θ_k)
-            'train_acc': tr_acc, 
-            'test_loss': te_loss, 
-            'test_acc': te_acc,
+            'train_acc': tr_acc,
+            'test_loss': te_loss,
+            'test_accuracy': te_acc,  # AUDIT FIX: Renamed from test_acc for aggregator compatibility
             'grad_norm': grad_norm,  # GAP 51 FIX: For convergence analysis
             'learning_rate': current_lr  # GAP 53 FIX: Track LR changes
         })
@@ -233,6 +233,9 @@ def run_single(optimizer_name: str, seed: int, lr: float, epochs: int, batch_siz
     df['elapsed_seconds'] = elapsed
     df['peak_gpu_mb'] = peak_mb
 
+    # AUDIT FIX: Ensure results directory exists before writing
+    results_dir.mkdir(parents=True, exist_ok=True)
+
     # Updated naming: ResNet18 instead of SimpleCIFAR10
     out = results_dir / f"NN_ResNet18_CIFAR10_{optimizer_name}_lr{lr}_seed{seed}.csv"
     df.to_csv(out, index=False)
@@ -243,24 +246,24 @@ def create_cifar10_summary_plots(results_dir: Path, output_file: str = 'cifar10_
     """
     Create high-quality summary plots from CIFAR-10 results.
     Generates learning curves comparing all optimizers across seeds.
-    
+
     GAP 55 FIX: Uses log-scale for loss plots to reveal convergence rate differences.
     On linear scale, O(1/k) and O(1/k²) look identical after first few epochs.
     """
     import matplotlib.pyplot as plt  # Import locally for function use
     import glob
-    
+
     # Find all result CSVs
     # Support both legacy (SimpleCIFAR10) and new (ResNet18) naming
     csv_files = glob.glob(str(results_dir / "NN_ResNet18_CIFAR10_*.csv"))
     if not csv_files:
         # Fallback to legacy naming for old results
         csv_files = glob.glob(str(results_dir / "NN_SimpleCIFAR10_*.csv"))
-    
+
     if not csv_files:
         print("No CIFAR-10 results found for visualization")
         return
-    
+
     # Parse results
     results = {}
     for csv_file in csv_files:
@@ -270,7 +273,7 @@ def create_cifar10_summary_plots(results_dir: Path, output_file: str = 'cifar10_
         # Format: NN_ResNet18_CIFAR10_{optimizer}_lr{lr}_seed{seed}.csv
         # Legacy: NN_SimpleCIFAR10_{optimizer}_lr{lr}_seed{seed}.csv
         parts = basename.replace('.csv', '').split('_')
-        
+
         # Find optimizer name (after model architecture identifier, before lr)
         if 'ResNet18' in parts and 'CIFAR10' in parts:
             opt_start = parts.index('CIFAR10') + 1  # New format
@@ -279,29 +282,29 @@ def create_cifar10_summary_plots(results_dir: Path, output_file: str = 'cifar10_
         else:
             print(f"Skipping unrecognized format: {basename}")
             continue
-        
+
         opt_parts = []
         for i in range(opt_start, len(parts)):
             if parts[i].startswith('lr'):
                 break
             opt_parts.append(parts[i])
         optimizer = '_'.join(opt_parts)
-        
+
         # Find seed
         seed_part = [p for p in parts if p.startswith('seed')]
         seed = int(seed_part[0].replace('seed', '')) if seed_part else 0
-        
+
         if optimizer not in results:
             results[optimizer] = []
         results[optimizer].append((seed, df))
-    
+
     # Create 2x2 plot
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
     fig.suptitle('CIFAR-10 Training Results', fontsize=16, fontweight='bold')
-    
-    colors = {'SGD': '#FF6B6B', 'SGD_Momentum': '#4ECDC4', 'Adam': '#45B7D1', 
+
+    colors = {'SGD': '#FF6B6B', 'SGD_Momentum': '#4ECDC4', 'Adam': '#45B7D1',
               'AdamW': '#FFA07A', 'RMSProp': '#98D8C8'}
-    
+
     # Plot 1: Train Loss (GAP 55 FIX: Log scale for convergence rate visibility)
     ax = axes[0, 0]
     for optimizer, runs in results.items():
@@ -314,9 +317,9 @@ def create_cifar10_summary_plots(results_dir: Path, output_file: str = 'cifar10_
             epochs = runs[0][1]['epoch'].values
             losses = np.array([df['train_loss'].values for _, df in runs])
             mean_loss = losses.mean(axis=0)
-            ax.plot(epochs, mean_loss, color=colors.get(optimizer, '#999999'), 
+            ax.plot(epochs, mean_loss, color=colors.get(optimizer, '#999999'),
                    linewidth=2.5, label=optimizer)
-    
+
     ax.set_xlabel('Epoch', fontsize=12, fontweight='bold')
     ax.set_ylabel('Train Loss (log scale)', fontsize=12, fontweight='bold')
     ax.set_title('Training Loss (Log Scale)', fontsize=13, fontweight='bold')
@@ -325,7 +328,7 @@ def create_cifar10_summary_plots(results_dir: Path, output_file: str = 'cifar10_
     ax.set_yscale('log')
     ax.legend(fontsize=10)
     ax.grid(True, alpha=0.3)
-    
+
     # Plot 2: Test Accuracy
     ax = axes[0, 1]
     for optimizer, runs in results.items():
@@ -338,15 +341,15 @@ def create_cifar10_summary_plots(results_dir: Path, output_file: str = 'cifar10_
             epochs = runs[0][1]['epoch'].values
             accs = np.array([df['test_acc'].values for _, df in runs])
             mean_acc = accs.mean(axis=0)
-            ax.plot(epochs, mean_acc * 100, color=colors.get(optimizer, '#999999'), 
+            ax.plot(epochs, mean_acc * 100, color=colors.get(optimizer, '#999999'),
                    linewidth=2.5, label=optimizer)
-    
+
     ax.set_xlabel('Epoch', fontsize=12, fontweight='bold')
     ax.set_ylabel('Test Accuracy (%)', fontsize=12, fontweight='bold')
     ax.set_title('Test Accuracy', fontsize=13, fontweight='bold')
     ax.legend(fontsize=10)
     ax.grid(True, alpha=0.3)
-    
+
     # Plot 3: Final Test Accuracy (Bar plot)
     ax = axes[1, 0]
     final_accs = {}
@@ -355,27 +358,27 @@ def create_cifar10_summary_plots(results_dir: Path, output_file: str = 'cifar10_
         accs = [df['test_acc'].iloc[-1] * 100 for _, df in runs]
         final_accs[optimizer] = np.mean(accs)
         final_stds[optimizer] = np.std(accs) if len(accs) > 1 else 0
-    
+
     optimizers_sorted = sorted(final_accs.keys(), key=lambda x: final_accs[x], reverse=True)
     x_pos = np.arange(len(optimizers_sorted))
     bars = ax.bar(x_pos, [final_accs[opt] for opt in optimizers_sorted],
                   yerr=[final_stds[opt] for opt in optimizers_sorted],
                   color=[colors.get(opt, '#999999') for opt in optimizers_sorted],
                   alpha=0.7, capsize=5, edgecolor='black', linewidth=1.5)
-    
+
     ax.set_xticks(x_pos)
     ax.set_xticklabels(optimizers_sorted, rotation=45, ha='right', fontsize=10)
     ax.set_ylabel('Final Test Accuracy (%)', fontsize=12, fontweight='bold')
     ax.set_title('Final Performance Comparison', fontsize=13, fontweight='bold')
     ax.grid(axis='y', alpha=0.3)
-    
+
     # Add value labels on bars
     for i, (opt, bar) in enumerate(zip(optimizers_sorted, bars)):
         height = bar.get_height()
         ax.text(bar.get_x() + bar.get_width()/2., height,
                 f'{final_accs[opt]:.2f}%\n±{final_stds[opt]:.2f}',
                 ha='center', va='bottom', fontsize=9, fontweight='bold')
-    
+
     # Plot 4: Training Speed (samples/sec)
     ax = axes[1, 1]
     speeds = {}
@@ -391,7 +394,7 @@ def create_cifar10_summary_plots(results_dir: Path, output_file: str = 'cifar10_
                 run_speeds.append(samples_per_sec)
         if run_speeds:
             speeds[optimizer] = np.mean(run_speeds)
-    
+
     if speeds:
         optimizers_sorted = sorted(speeds.keys(), key=lambda x: speeds[x], reverse=True)
         x_pos = np.arange(len(optimizers_sorted))
@@ -404,15 +407,15 @@ def create_cifar10_summary_plots(results_dir: Path, output_file: str = 'cifar10_
         ax.set_title('Training Efficiency', fontsize=13, fontweight='bold')
         ax.grid(axis='y', alpha=0.3)
     else:
-        ax.text(0.5, 0.5, 'No timing data available', 
+        ax.text(0.5, 0.5, 'No timing data available',
                 ha='center', va='center', fontsize=12, transform=ax.transAxes)
-    
+
     plt.tight_layout()
     output_path = results_dir / output_file
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     print(f"CIFAR-10 summary plot saved: {output_path}")
     plt.close()
-    
+
     return output_path
 
 
@@ -436,11 +439,11 @@ def main():
         # GAP 54 FIX: Added SGD_Nesterov to optimizer config
     # GAP 47 FIX: Learning rates tuned for fair comparison with standardized weight_decay
     opt_config = [
-        ('SGD', 0.1), 
-        ('SGD_Momentum', 0.1), 
+        ('SGD', 0.1),
+        ('SGD_Momentum', 0.1),
         ('SGD_Nesterov', 0.1),  # GAP 54 FIX: Nesterov Accelerated Gradient
-        ('Adam', 1e-3), 
-        ('AdamW', 1e-3), 
+        ('Adam', 1e-3),
+        ('AdamW', 1e-3),
         ('RMSProp', 1e-3)
     ]
 
@@ -454,7 +457,7 @@ def main():
                 print('Error:', e)
 
     print(f"Completed {completed} runs")
-    
+
     # Generate summary visualization
     if completed > 0:
         try:

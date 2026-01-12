@@ -58,14 +58,14 @@ def yield_tokens(data_iter, tokenizer):
 def create_data_loaders(batch_size=64, device=None):
     """
     Create AG_NEWS data loaders with proper device handling.
-    
+
     Args:
         batch_size: Batch size for data loaders
         device: torch.device to move tensors to (defaults to CPU if None)
     """
     if device is None:
         device = torch.device("cpu")
-    
+
     print("📦 Downloading/Loading AG_NEWS dataset...")
     train_iter = list(AG_NEWS(root='./data', split='train'))
     tokenizer = get_tokenizer('basic_english')
@@ -159,7 +159,7 @@ def main():
     args = parser.parse_args()
 
     os.makedirs(args.results_dir, exist_ok=True)
-    
+
     # Define device before using it in create_data_loaders
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"NLP Benchmark using device: {device}")

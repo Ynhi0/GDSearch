@@ -51,7 +51,7 @@ print("\n5. Testing Statistical Analysis (Welch's t-test)...")
 try:
     from src.analysis.statistical_analysis import compare_optimizers_ttest
     import numpy as np
-    
+
     result = compare_optimizers_ttest(
         np.array([0.8, 0.82, 0.81, 0.79, 0.83]),
         np.array([0.75, 0.77, 0.76, 0.74, 0.78]),
@@ -60,7 +60,7 @@ try:
     # Use effect_size field which works for both parametric and non-parametric
     effect_size_val = result.get('effect_size', result.get('cohens_d', 0.0))
     effect_size_type = result.get('effect_size_type', 'unknown')
-    
+
     print(f"   ✓ Statistical test works")
     print(f"      p-value: {result['p_value']:.4f}")
     print(f"      Effect size ({effect_size_type}): {effect_size_val:.4f}")

@@ -33,38 +33,38 @@ def _get_params_vector(model: torch.nn.Module) -> torch.Tensor:
 def _random_direction_like(model: torch.nn.Module, seed: int = 0, filter_normalize: bool = True) -> torch.Tensor:
     """
     Generate a random direction for loss landscape visualization.
-    
+
     GAP 25 FIX: Filter-wise normalization for scale-invariant networks (Li et al., 2018).
-    
+
     For networks with Batch Normalization (like ResNet), weights are scale-invariant:
     multiplying layer i by α and layer i+1 by 1/α leaves f(x) unchanged.
-    
+
     Problem: Global normalization (v / ||v||) ignores this scale invariance.
     A unit-norm perturbation on a "large weight" layer has minimal effect,
     while the same perturbation on a "small weight" layer can destroy the function.
-    
+
     Solution: Normalize each filter/parameter tensor individually to have the
     same norm as the corresponding weight tensor:
         d_i ← (d_i / ||d_i||) * ||w_i||
-    
+
     This ensures perturbations are proportional to the actual weight magnitudes,
     producing accurate loss landscape visualizations.
-    
+
     Args:
         model: Neural network model
         seed: Random seed for reproducibility
         filter_normalize: If True, apply filter-wise normalization (recommended for BN networks)
                           If False, use global normalization (for toy functions)
-    
+
     Returns:
         Random direction tensor with proper normalization
-        
+
     Reference:
         Li et al. (2018), "Visualizing the Loss Landscape of Neural Nets", NeurIPS
     """
     g = torch.Generator(device='cpu')
     g.manual_seed(seed)
-    
+
     if filter_normalize:
         # GAP 25 FIX: Filter-wise normalization
         # Collect random directions with per-parameter normalization
@@ -72,19 +72,19 @@ def _random_direction_like(model: torch.nn.Module, seed: int = 0, filter_normali
         for param in model.parameters():
             # Generate random direction for this parameter
             d = torch.randn(param.shape, generator=g, dtype=param.dtype)
-            
+
             # Normalize each filter/parameter to have same norm as the weight
             # d_i ← (d_i / ||d_i||) * ||w_i||
             d_norm = d.norm()
             w_norm = param.data.norm()
-            
+
             if d_norm > 1e-12:
                 d = d * (w_norm / d_norm)
             else:
                 d = d * 0  # Zero direction if norm is too small
-            
+
             direction_parts.append(d.flatten())
-        
+
         v = torch.cat(direction_parts)
         # Final global normalization to unit norm for consistent scaling
         v = v / (v.norm() + 1e-12)
@@ -93,7 +93,7 @@ def _random_direction_like(model: torch.nn.Module, seed: int = 0, filter_normali
         vec = _get_params_vector(model).cpu()
         v = torch.randn(vec.shape, generator=g, dtype=vec.dtype)
         v /= (v.norm() + 1e-12)
-    
+
     return v
 
 

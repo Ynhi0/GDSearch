@@ -16,11 +16,11 @@ def get_default_hyperparameters(
 ) -> Dict:
     """
     Get default hyperparameters from tuned config file.
-    
+
     Args:
         optimizer_name: Name of optimizer (e.g., 'Adam', 'SGD', 'AdamW')
         experiment_type: Type of experiment (e.g., '2d_optimization', 'mnist', 'cifar10')
-        
+
     Returns:
         Dictionary of hyperparameters
     """
@@ -30,7 +30,7 @@ def get_default_hyperparameters(
         if config_path.exists():
             with open(config_path, 'r') as f:
                 config = json.load(f)
-            
+
             # Get hyperparameters for the specific experiment type
             exp_config = config.get("experiment_configs", {}).get(experiment_type, {})
             optimizers_cfg = exp_config.get("optimizers", {})
@@ -67,7 +67,7 @@ def get_default_hyperparameters(
             "Could not load hyperparameters from config: %s, using fallback defaults",
             e
         )
-    
+
     # Fallback defaults if config loading fails
     defaults = {
         'SGD': {'lr': 0.01},

@@ -34,19 +34,19 @@ def estimate_f_star_from_trajectory(
         method: Estimation method ('running_min', 'running_min_with_margin', 'windowed_min')
         margin: Safety margin as fraction of min loss (default 1% = 0.01)
         window_size: Window size for 'windowed_min' method
-        
+
     Returns:
         Estimated f_star value (always >= 0 for classification losses)
     """
     if len(losses) == 0:
         return 0.0
-    
+
     losses_finite = losses[np.isfinite(losses)]
     if len(losses_finite) == 0:
         return 0.0
-    
+
     min_loss = np.min(losses_finite)
-    
+
     if method == 'running_min':
         f_star_estimate = min_loss
     elif method == 'running_min_with_margin':
@@ -58,10 +58,10 @@ def estimate_f_star_from_trajectory(
         f_star_estimate = np.min(recent_losses) * (1.0 - margin)
     else:
         raise ValueError(f"Unknown f_star estimation method: {method}")
-    
+
     # For classification, loss should be non-negative
     f_star_estimate = max(0.0, f_star_estimate)
-    
+
     return float(f_star_estimate)
 
 
@@ -85,7 +85,7 @@ def pl_mu_estimate(
         f_star: Known global minimum (None for neural networks)
         losses_trajectory: Full loss history for f_star estimation (required if f_star=None)
         eps: Numerical tolerance for denominator
-        
+
     Returns:
         Estimated μ (np.nan if computation fails)
     """
@@ -97,19 +97,19 @@ def pl_mu_estimate(
                 "For neural networks, you must provide the loss trajectory to estimate f_star."
             )
         f_star = estimate_f_star_from_trajectory(losses_trajectory)
-    
+
     # Compute denominator with validation
     denom = 2.0 * (loss - f_star)
-    
+
     if denom <= eps:
         # Loss is at or below estimated minimum (common near convergence)
         return np.nan
-    
+
     if not np.isfinite(grad_norm_sq) or grad_norm_sq < 0:
         return np.nan
-    
+
     mu_hat = grad_norm_sq / denom
-    
+
     return float(mu_hat) if np.isfinite(mu_hat) else np.nan
 
 
@@ -131,7 +131,7 @@ def pl_holds_at_point(
         f_star: Known global minimum (None for neural networks)
         losses_trajectory: Full loss history for f_star estimation
         eps: Numerical tolerance
-        
+
     Returns:
         True if PL condition holds, False otherwise
     """
@@ -144,10 +144,10 @@ def pl_holds_at_point(
             f_star = 0.0
         else:
             f_star = estimate_f_star_from_trajectory(losses_trajectory)
-    
+
     lhs = grad_norm_sq
     rhs = 2.0 * mu * max(loss - f_star, eps)
-    
+
     return float(lhs) >= float(rhs)
 
 
@@ -169,7 +169,7 @@ def compute_pl_over_trajectory(
         f_star: Known global minimum (if None, will be estimated)
         mu_threshold: If provided, also return boolean array for PL condition check
         auto_estimate_f_star: If True and f_star=None, estimate from trajectory
-        
+
     Returns:
         Tuple of:
          - mu_hat_array: Array of estimated μ values per iteration
@@ -180,14 +180,14 @@ def compute_pl_over_trajectory(
     grad_norms = df[grad_norm_col].values
     grad_norms_array = np.asarray(grad_norms)
     grad_sq = grad_norms_array ** 2
-    
+
     # Estimate f_star if needed
     if f_star is None and auto_estimate_f_star:
         f_star = estimate_f_star_from_trajectory(losses_array)
     elif f_star is None:
         # No estimation requested - use 0.0 (legacy behavior)
         f_star = 0.0
-    
+
     # Compute mu_hat per iteration
     mu_hats = []
     for L, g2 in zip(losses_array, grad_sq):
@@ -197,9 +197,9 @@ def compute_pl_over_trajectory(
             mu_hats.append(mu_hat if np.isfinite(mu_hat) else np.nan)
         else:
             mu_hats.append(np.nan)
-    
+
     mu_hats = np.array(mu_hats)
-    
+
     # Check PL condition if threshold provided
     holds = None
     if mu_threshold is not None:
@@ -207,5 +207,5 @@ def compute_pl_over_trajectory(
             pl_holds_at_point(L, g2, mu_threshold, f_star=f_star)
             for L, g2 in zip(losses, grad_sq)
         ])
-    
+
     return mu_hats, holds

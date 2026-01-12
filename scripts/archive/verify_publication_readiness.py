@@ -22,91 +22,91 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 class ReadinessChecker:
     """Comprehensive readiness checker."""
-    
+
     def __init__(self):
         self.checks_passed = []
         self.checks_failed = []
         self.warnings = []
-        
+
     def log_pass(self, check_name):
         """Log a passed check."""
         self.checks_passed.append(check_name)
         logging.info(f"PASS: {check_name}")
-        
+
     def log_fail(self, check_name, reason):
         """Log a failed check."""
         self.checks_failed.append((check_name, reason))
         logging.error(f"FAIL: {check_name}: {reason}")
-        
+
     def log_warning(self, check_name, reason):
         """Log a warning."""
         self.warnings.append((check_name, reason))
         logging.warning(f"WARNING: {check_name}: {reason}")
-    
+
     def check_requirements_file(self):
         """Check requirements.txt exists and is valid."""
         logging.info("\n" + "="*80)
         logging.info("CHECK 1: Requirements File")
         logging.info("="*80)
-        
+
         req_path = Path('requirements.txt')
         if not req_path.exists():
             self.log_fail("requirements.txt", "File not found")
             return False
-        
+
         self.log_pass("requirements.txt exists")
-        
+
         # Check for critical packages
         with open(req_path, encoding='utf-8') as f:
             content = f.read()
-        
+
         critical_packages = ['torch', 'numpy', 'pandas', 'matplotlib', 'scipy']
         for pkg in critical_packages:
             if pkg in content.lower():
                 self.log_pass(f"  - {pkg} listed")
             else:
                 self.log_warning(f"  - {pkg}", "Not found in requirements")
-        
+
         # Check for conflict resolution
         if 'datasets>=2.14.0,<3.0.0' in content and 'pyarrow>=14.0.0,<20.0.0' in content:
             self.log_pass("  - Dependency conflict RESOLVED (datasets/pyarrow)")
         else:
             self.log_warning("  - Dependency versions", "Kaggle conflict may exist")
-        
+
         return True
-    
+
     def check_gpu_availability(self):
         """Check GPU availability."""
         logging.info("\n" + "="*80)
         logging.info("CHECK 2: GPU Availability")
         logging.info("="*80)
-        
+
         if torch.cuda.is_available():
             gpu_name = torch.cuda.get_device_name(0)
             gpu_count = torch.cuda.device_count()
             memory_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
-            
+
             self.log_pass(f"GPU available: {gpu_name}")
             self.log_pass(f"  - GPU count: {gpu_count}")
             self.log_pass(f"  - VRAM: {memory_gb:.2f} GB")
-            
+
             if memory_gb < 4:
                 self.log_warning("  - Low VRAM", "May need --adaptive-batch flag")
-            
+
             return True
         else:
             self.log_warning("GPU", "No GPU available - will run on CPU (slow)")
             return False
-    
+
     def check_results_directory(self):
         """Check results directory is writable."""
         logging.info("\n" + "="*80)
         logging.info("CHECK 3: Results Directory")
         logging.info("="*80)
-        
+
         results_dir = Path('results')
         results_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Test write
         test_file = results_dir / '.write_test'
         try:
@@ -118,15 +118,15 @@ class ReadinessChecker:
         except Exception as e:
             self.log_fail("results/ directory", f"Not writable: {e}")
             return False
-    
+
     def check_src_imports(self):
         """Check critical src modules can be imported."""
         logging.info("\n" + "="*80)
         logging.info("CHECK 4: Core Module Imports")
         logging.info("="*80)
-        
+
         sys.path.insert(0, str(Path.cwd()))
-        
+
         critical_modules = [
             ('src.core.optimizers', 'SGDOptimizer'),
             ('src.core.models', 'SimpleMLP'),
@@ -134,7 +134,7 @@ class ReadinessChecker:
             ('src.core.training_enhancements', 'MemoryAwareBatchSizer'),
             ('src.experiments.beta_sensitivity_training', 'run_momentum_beta_sensitivity'),
         ]
-        
+
         all_imported = True
         for module_name, obj_name in critical_modules:
             try:
@@ -144,19 +144,19 @@ class ReadinessChecker:
             except Exception as e:
                 self.log_fail(f"  - {module_name}.{obj_name}", str(e))
                 all_imported = False
-        
+
         return all_imported
-    
+
     def check_unit_tests(self):
         """Run unit tests."""
         logging.info("\n" + "="*80)
         logging.info("CHECK 5: Unit Tests")
         logging.info("="*80)
-        
+
         if not Path('tests').exists():
             self.log_warning("Unit tests", "tests/ directory not found")
             return False
-        
+
         try:
             result = subprocess.run(
                 ['pytest', 'tests/', '-v', '--tb=short', '-x'],
@@ -164,7 +164,7 @@ class ReadinessChecker:
                 text=True,
                 timeout=300
             )
-            
+
             if result.returncode == 0:
                 # Count passed tests
                 passed = result.stdout.count(' PASSED')
@@ -180,13 +180,13 @@ class ReadinessChecker:
         except subprocess.TimeoutExpired:
             self.log_fail("Unit tests", "Timeout (>5min)")
             return False
-    
+
     def run_dry_run_experiments(self):
         """Run 1-epoch dry run on ALL experiments."""
         logging.info("\n" + "="*80)
         logging.info("CHECK 6: Dry Run (1 epoch ALL experiments)")
         logging.info("="*80)
-        
+
         experiments = [
             'mnist',
             'cifar10',
@@ -195,13 +195,13 @@ class ReadinessChecker:
             'highdim',
             'beta_sensitivity_training'
         ]
-        
+
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        
+
         all_passed = True
         for exp_name in experiments:
             logging.info(f"\nDry run: {exp_name.upper()}")
-            
+
             try:
                 # Run 1 epoch with minimal config
                 cmd = [
@@ -213,43 +213,43 @@ class ReadinessChecker:
                     '--skip-tuning',
                     '--results-dir', 'results/.dry_run_test'
                 ]
-                
+
                 result = subprocess.run(
                     cmd,
                     capture_output=True,
                     text=True,
                     timeout=600  # 10 minutes max per experiment
                 )
-                
+
                 if result.returncode == 0:
                     self.log_pass(f"  - {exp_name}: dry run successful")
                 else:
                     self.log_fail(f"  - {exp_name}", "Dry run failed")
                     logging.error(f"    STDERR: {result.stderr[-200:]}")
                     all_passed = False
-                    
+
             except subprocess.TimeoutExpired:
                 self.log_fail(f"  - {exp_name}", "Timeout (>10min)")
                 all_passed = False
             except Exception as e:
                 self.log_fail(f"  - {exp_name}", str(e))
                 all_passed = False
-        
+
         # Cleanup dry run results
         import shutil
         dry_run_dir = Path('results/.dry_run_test')
         if dry_run_dir.exists():
             shutil.rmtree(dry_run_dir)
             logging.info("\nCleaned up dry run artifacts")
-        
+
         return all_passed
-    
+
     def check_golden_test(self):
         """Run --verify-resume golden test."""
         logging.info("\n" + "="*80)
         logging.info("CHECK 7: Golden Test (Resume Determinism)")
         logging.info("="*80)
-        
+
         try:
             result = subprocess.run(
                 [sys.executable, 'run_all_kaggle.py', '--verify-resume'],
@@ -257,7 +257,7 @@ class ReadinessChecker:
                 text=True,
                 timeout=60
             )
-            
+
             if 'GOLDEN TEST PASSED' in result.stdout:
                 self.log_pass("Golden test: Train(10) == Train(5)→Save→Load→Train(5)")
                 return True
@@ -267,67 +267,67 @@ class ReadinessChecker:
         except Exception as e:
             self.log_fail("Golden test", str(e))
             return False
-    
+
     def check_integrity_warnings(self):
         """Check OOM recovery warnings are present."""
         logging.info("\n" + "="*80)
         logging.info("CHECK 8: Integrity Warnings")
         logging.info("="*80)
-        
+
         run_all_path = Path('run_all_kaggle.py')
         with open(run_all_path, encoding='utf-8') as f:
             content = f.read()
-        
+
         # Check for OOM warnings
         warning_count = content.count('INTEGRITY: This run is INVALID')
-        
+
         if warning_count >= 3:
             self.log_pass(f"OOM recovery warnings present ({warning_count} locations)")
         else:
             self.log_fail("OOM warnings", f"Found {warning_count}, expected ≥3")
             return False
-        
+
         # Check SelfHealingTrainer docstring
         enhancements_path = Path('src/core/training_enhancements.py')
         if enhancements_path.exists():
             with open(enhancements_path, encoding='utf-8') as f:
                 enhancements_content = f.read()
-            
+
             if 'INTEGRITY WARNING' in enhancements_content:
                 self.log_pass("SelfHealingTrainer docstring warning present")
             else:
                 self.log_warning("SelfHealingTrainer", "Missing docstring warning")
-        
+
         return True
-    
+
     def generate_report(self):
         """Generate final report."""
         logging.info("\n" + "="*80)
         logging.info("READINESS REPORT")
         logging.info("="*80)
-        
+
         total_checks = len(self.checks_passed) + len(self.checks_failed)
         pass_rate = len(self.checks_passed) / total_checks * 100 if total_checks > 0 else 0
-        
+
         logging.info(f"\nChecks Passed: {len(self.checks_passed)}")
         logging.info(f"Checks Failed: {len(self.checks_failed)}")
         logging.info(f"Warnings: {len(self.warnings)}")
         logging.info(f"Pass Rate: {pass_rate:.1f}%")
-        
+
         if self.checks_failed:
             logging.info("\nFAILED CHECKS:")
             for check, reason in self.checks_failed:
                 logging.info(f"   - {check}: {reason}")
-        
+
         if self.warnings:
             logging.info("\nWARNINGS:")
             for check, reason in self.warnings:
                 logging.info(f"   - {check}: {reason}")
-        
+
         # Save report
         report_path = Path('results/readiness_report.json')
         report_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         report = {
             'timestamp': datetime.now().isoformat(),
             'passed': self.checks_passed,
@@ -336,12 +336,12 @@ class ReadinessChecker:
             'pass_rate': pass_rate,
             'verdict': 'READY' if len(self.checks_failed) == 0 else 'NOT READY'
         }
-        
+
         with open(report_path, 'w') as f:
             json.dump(report, f, indent=2)
-        
+
         logging.info(f"\nReport saved to {report_path}")
-        
+
         # Final verdict
         logging.info("\n" + "="*80)
         if len(self.checks_failed) == 0:
@@ -357,21 +357,21 @@ class ReadinessChecker:
             logging.info("="*80)
             logging.info(f"Fix {len(self.checks_failed)} critical issues before release")
         logging.info("="*80)
-        
+
         return len(self.checks_failed) == 0
 
 
 def main():
     """Main entry point."""
     checker = ReadinessChecker()
-    
+
     logging.info("="*80)
     logging.info("GDSEARCH READINESS VERIFICATION")
     logging.info("="*80)
     logging.info(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     logging.info(f"Working Directory: {Path.cwd()}")
     logging.info("="*80)
-    
+
     # Run all checks
     checker.check_requirements_file()
     checker.check_gpu_availability()
@@ -381,10 +381,10 @@ def main():
     checker.check_integrity_warnings()
     checker.check_golden_test()
     checker.run_dry_run_experiments()
-    
+
     # Generate final report
     ready = checker.generate_report()
-    
+
     sys.exit(0 if ready else 1)
 
 

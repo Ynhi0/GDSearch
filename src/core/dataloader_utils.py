@@ -40,17 +40,17 @@ def make_dataloader(
 ) -> DataLoader:
     """
     Create a DataLoader with deterministic worker seeding when `seed` is provided.
-    
+
     Added `full_batch` parameter for TRUE Gradient Descent (not mini-batch SGD).
     When full_batch=True, batch_size is set to len(dataset) and shuffle=False to ensure
     deterministic, full-batch gradient computation (required for theoretical GD analysis).
-    
-    - If `seed` is not None, a `torch.Generator` is created and `worker_init_fn` 
+
+    - If `seed` is not None, a `torch.Generator` is created and `worker_init_fn`
       seeds python, numpy and torch RNGs for each worker deterministically.
     - If `sampler` is provided, it will be used and `shuffle` will be ignored.
     - `persistent_workers` requires PyTorch >= 1.7.0 and num_workers > 0
     - If `full_batch` is True, overrides batch_size to len(dataset) and disables shuffle
-    
+
     Args:
         dataset: PyTorch Dataset
         batch_size: Batch size for DataLoader (ignored if full_batch=True)
@@ -64,10 +64,10 @@ def make_dataloader(
         drop_last: Drop last incomplete batch
         persistent_workers: Keep workers alive between epochs
         full_batch: If True, use full dataset as single batch (True GD)
-        
+
     Returns:
         DataLoader with configured settings
-        
+
     WINDOWS COMPATIBILITY: On Windows, num_workers is forced to 0 to prevent
     multiprocessing issues. This ensures testing works on Windows while still
     allowing full multiprocessing on Kaggle/Linux.
@@ -87,7 +87,7 @@ def make_dataloader(
             drop_last = False  # Must use entire dataset
             import logging
             logging.info(f"Full-Batch GD mode enabled: batch_size={batch_size} (entire dataset), shuffle=False")
-    
+
     # Force num_workers=0 on Windows to prevent hanging/crashes
     import platform
     import logging
@@ -96,7 +96,7 @@ def make_dataloader(
         num_workers = 0
         # persistent_workers requires num_workers > 0, so disable it
         persistent_workers = False
-    
+
     generator = None
     worker_init_fn = None
 
@@ -140,11 +140,11 @@ def make_dataloader(
             logging.debug("Failed to parse PyTorch version for persistent_workers: %s", e, exc_info=True)  # Skip if version parsing fails
 
     loader = DataLoader(dataset, **dl_kwargs)
-    
+
     # CRITICAL: Add metadata for tracking and test-leakage prevention
     loader.name = 'full_batch_gd' if full_batch else getattr(loader, 'name', 'unknown')
     loader.is_full_batch = full_batch
-    
+
     # Callers should override with more specific values if available
     if not hasattr(loader, '_split_type'):
         loader._split_type = 'unknown'
@@ -155,5 +155,5 @@ def make_dataloader(
             loader._dataset_uid = f'dataset_{len_sized(dataset)}'
         except Exception:
             loader._dataset_uid = 'dataset_unknown'
-    
+
     return loader

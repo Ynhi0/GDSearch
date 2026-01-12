@@ -43,7 +43,7 @@ except (ImportError, AttributeError) as e:
 class RobustCheckpointManager:
     """
     Robust checkpointing with backup, validation, and disk space awareness.
-    
+
     Features:
     - Atomic writes with temp file + fsync + rename
     - Rolling backups (configurable)
@@ -55,7 +55,7 @@ class RobustCheckpointManager:
     def __init__(self, base_dir: str, max_backups: int = 3, min_free_gb: float = 1.0, strict: bool = True):
         """
         Initialize checkpoint manager.
-        
+
         Args:
             base_dir: Base directory for checkpoints
             max_backups: Maximum number of backup files to keep
@@ -67,14 +67,14 @@ class RobustCheckpointManager:
         self.min_free_gb = min_free_gb
         self.strict = bool(strict)
         self.base_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Initialize disk space guardian if available
         self._disk_guardian = None
         try:
             from src.core.training_enhancements import DiskSpaceGuardian
             self._disk_guardian = DiskSpaceGuardian(
-                self.base_dir, 
-                min_free_gb=min_free_gb, 
+                self.base_dir,
+                min_free_gb=min_free_gb,
                 max_checkpoints=max_backups * 3
             )
         except (ImportError, AttributeError) as e:
@@ -88,12 +88,12 @@ class RobustCheckpointManager:
     ) -> bool:
         """
         Save checkpoint with backup, validation, and disk space check.
-        
+
         Args:
             checkpoint_data: Dictionary containing checkpoint data
             filename: Checkpoint filename
             experiment_name: Name of experiment (for logging)
-            
+
         Returns:
             True if save successful, False otherwise
         """
@@ -102,7 +102,7 @@ class RobustCheckpointManager:
             return False
 
         ckpt_path = self.base_dir / str(filename)
-        
+
         # Check disk space before saving
         if self._disk_guardian:
             if not self._disk_guardian.can_save_checkpoint(estimated_size_mb=500):
@@ -164,9 +164,9 @@ class RobustCheckpointManager:
                     with open(tmp_path, 'rb') as _f:
                         _f.flush()
                         os.fsync(_f.fileno())
-                except Exception:
+                except Exception as e:
                     # Non-fatal: if fsync not possible, continue (atomic replace will still occur)
-                    pass
+                    logging.debug("fsync failed (non-fatal): %s", e, exc_info=True)
 
                 # Atomically replace
                 os.replace(str(tmp_path), str(ckpt_path))
@@ -182,8 +182,8 @@ class RobustCheckpointManager:
                 try:
                     if tmp_path.exists():
                         tmp_path.unlink()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logging.debug("Failed to unlink temp checkpoint path during cleanup: %s", e, exc_info=True)
                 # Re-raise to be handled by outer except
                 raise
 
@@ -211,11 +211,11 @@ class RobustCheckpointManager:
     ) -> Optional[Dict]:
         """
         Load checkpoint with fallback to backup.
-        
+
         Args:
             filename: Checkpoint filename
             _experiment_name: Name of experiment (for logging, unused)
-            
+
         Returns:
             Checkpoint dictionary if successful, None otherwise
         """
@@ -305,10 +305,10 @@ class RobustCheckpointManager:
         """Create rolling backup - only if checkpoint exists."""
         if not ckpt_path.exists():
             return
-        
+
         # Create lock file for atomic backup operations
         lock_file = self.base_dir / f"{ckpt_path.name}.backup.lock"
-        
+
         try:
             # Try to acquire lock (with timeout)
             max_wait = 30  # seconds
@@ -316,14 +316,14 @@ class RobustCheckpointManager:
             while lock_file.exists() and wait_time < max_wait:
                 time.sleep(0.1)
                 wait_time += 0.1
-            
+
             if wait_time >= max_wait:
                 logging.warning("Backup lock timeout for %s", ckpt_path.name)
                 return
-            
+
             # Acquire lock
             lock_file.touch()
-            
+
             try:
                 # Roll backups: backup_2 -> backup_3, backup_1 -> backup_2, etc.
                 for i in range(self.max_backups - 1, 0, -1):
@@ -336,7 +336,7 @@ class RobustCheckpointManager:
                             old_backup.rename(new_backup)
                         except (OSError, PermissionError) as e:
                             logging.warning("Failed to roll backup %d: %s", i, e)
-                
+
                 # Copy current checkpoint to backup_0
                 backup_0 = self.base_dir / f"{ckpt_path.name}.backup_0"
                 try:
@@ -350,18 +350,18 @@ class RobustCheckpointManager:
                     lock_file.unlink()
                 except (OSError, PermissionError):
                     pass
-                    
+
         except Exception as e:
             logging.warning("Backup creation failed: %s", e)
 
     def _validate_checkpoint(self, ckpt_path: Path, original_data: Dict) -> bool:
         """
         Validate checkpoint by attempting to load it.
-        
+
         Args:
             ckpt_path: Path to checkpoint file
             original_data: Original checkpoint data (for comparison)
-            
+
         Returns:
             True if checkpoint is valid
         """

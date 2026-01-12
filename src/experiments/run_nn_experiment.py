@@ -20,6 +20,7 @@ from src.core.models import SimpleMLP, SimpleCNN, ConvNet
 from src.core.data_utils import get_mnist_loaders, get_cifar10_loaders
 from src.core.optimizer_wrappers import DelayedOptimizer
 from src.core.training_utils import set_seed, validate_pytorch_version
+from src.utils.file_safety import safe_to_csv  # AUDIT FIX: Safe file I/O
 from src.core.pytorch_optimizers import (
     SGDWrapper,
     SGDMomentumWrapper,
@@ -73,15 +74,15 @@ def _update_norm(model: torch.nn.Module, before: Tuple[torch.Tensor, ...]) -> fl
 
 
 def build_model_and_data(
-    dataset: str, 
-    model_name: str, 
-    batch_size: int, 
-    device: torch.device, 
-    seed: int, 
+    dataset: str,
+    model_name: str,
+    batch_size: int,
+    device: torch.device,
+    seed: int,
     val_split: Optional[float] = None
 ) -> Tuple[torch.nn.Module, torch.utils.data.DataLoader, Optional[torch.utils.data.DataLoader], torch.utils.data.DataLoader]:
     """Build model and data loaders with optional validation split.
-    
+
     Args:
         dataset: Dataset name (MNIST/CIFAR-10)
         model_name: Model architecture name
@@ -89,11 +90,11 @@ def build_model_and_data(
         device: Device to place model on
         seed: Random seed for reproducibility
         val_split: Optional validation split fraction (e.g., 0.1 for 10%)
-    
+
     Returns:
         If val_split is None: (model, train_loader, test_loader)
         If val_split is provided: (model, train_loader, val_loader, test_loader)
-    
+
     Note:
         Callers MUST handle both return patterns explicitly to avoid tuple unpacking errors.
         Recommended pattern:
@@ -120,7 +121,7 @@ def build_model_and_data(
         raise ValueError(f"Unsupported dataset '{dataset}'")
 
     model.to(device)
-    
+
     if val_split is not None:
         train_loader, val_loader, test_loader = loaders
         return model, train_loader, val_loader, test_loader
@@ -133,11 +134,11 @@ def build_model_and_data(
 
 def build_optimizer(optimizer_name: str, model: torch.nn.Module, lr: float, weight_decay: float = 0.0, momentum: float = 0.0):
     """Build optimizer using CUSTOM implementations.
-    
+
     Uses custom wrappers from pytorch_optimizers.py to test our implementations.
     """
     name = optimizer_name.upper().replace('-', '_')  # Normalize names
-    
+
     if name == 'SGD':
         return SGDWrapper(model.parameters(), lr=lr)
     elif name in ('SGD_MOMENTUM', 'SGDMOMENTUM', 'MOMENTUM'):
@@ -198,7 +199,7 @@ def evaluate(model: torch.nn.Module, loader: torch.utils.data.DataLoader, criter
     if total_samples == 0:
         logging.warning("evaluate(): No samples processed, returning NaN")
         return float('nan'), float('nan')
-    
+
     avg_loss = total_loss / total_samples
     acc = total_correct / total_samples
     return avg_loss, acc
@@ -238,7 +239,7 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
     model, train_loader, val_loader, test_loader = build_model_and_data(
         dataset, model_name, batch_size, device, seed, val_split=val_split
     )
-    
+
     criterion = nn.CrossEntropyLoss()
     optimizer = build_optimizer(
         optimizer_name=config['optimizer'],
@@ -258,11 +259,11 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
     capture_epochs = set(config.get('capture_layer_grad_epochs', []))
     named_params = list(model.named_parameters())
     start_time = time.time()
-    
+
     run_tainted = False
     original_batch_size = batch_size
     effective_batch_size = batch_size
-    
+
     # Meta row with environment info
     try:
         history.append({
@@ -295,10 +296,10 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
             if HAS_OOM_SAFE:
                 # grad norm before step (capture before OOM-safe call modifies gradients)
                 grad_norm = _flattened_grad_norm(model)
-                
+
                 # capture params before update
                 params_before = _params_clone(model)
-                
+
                 try:
                     loss_value, actual_batch_size, _outputs, batch_tainted = oom_safe_train_step(
                         model=model,
@@ -310,12 +311,12 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
                         max_retries=3,
                         min_batch_size=1
                     )
-                    
+
                     # Track if any batch was tainted
                     if batch_tainted:
                         run_tainted = True
                         effective_batch_size = actual_batch_size
-                    
+
                     update_norm = _update_norm(model, params_before)
                 except RuntimeError as e:
                     if 'out of memory' in str(e).lower():
@@ -352,6 +353,8 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
             global_step += 1
 
             elapsed = time.time() - start_time
+            # AUDIT FIX: Read current LR from optimizer state, not static config (handles schedulers correctly)
+            current_lr = optimizer.param_groups[0]['lr'] if hasattr(optimizer, 'param_groups') else float(config.get('lr', 1e-3))
             history.append({
                 'phase': 'train',
                 'epoch': epoch,
@@ -360,7 +363,7 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
                 'train_loss': loss_value,
                 'grad_norm': grad_norm,
                 'update_norm': update_norm,
-                'lr': float(config.get('lr', 1e-3)),
+                'lr': current_lr,
                 'time_sec': elapsed,
                 'tainted': run_tainted,
                 'effective_batch_size': effective_batch_size,
@@ -412,7 +415,7 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
                 'effective_batch_size': effective_batch_size,
                 'original_batch_size': original_batch_size
             })
-        
+
         # evaluation after each epoch (test set - only for final reporting)
         test_loss, test_acc = evaluate(model, test_loader, criterion, device)
         history.append({
@@ -532,7 +535,7 @@ def parse_experiments_from_config(cfg: dict):
 
 def main():
     validate_pytorch_version(expected_version="2.6.0", strict=False)
-    
+
     os.makedirs('results', exist_ok=True)
 
     # Load experiments from JSON config file
@@ -541,7 +544,7 @@ def main():
         print(f"Loading experiments from {config_path}")
         with open(config_path, 'r', encoding='utf-8') as f:
             config_data = json.load(f)
-        
+
         # Parse config into experiment list (backwards-compatible)
         experiments = parse_experiments_from_config(config_data)
 
@@ -577,7 +580,8 @@ def main():
         df = train_and_evaluate(cfg)
         fname = result_filename(cfg)
         out_path = os.path.join('results', fname)
-        df.to_csv(out_path, index=False)
+        # AUDIT FIX: Use safe_to_csv for automatic directory creation
+        safe_to_csv(df, out_path, index=False)
 
     print("Done. Results saved to 'results/'.")
 

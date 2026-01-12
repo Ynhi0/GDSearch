@@ -29,7 +29,7 @@ import subprocess
 def configure_windows_console_encoding():
     """
     Configure UTF-8 encoding for Windows console.
-    
+
     IMPORTANT: This must be called explicitly in main, NOT at import time.
     Import-time global stream mutations break test harnesses.
     """
@@ -82,30 +82,30 @@ def print_info(text):
 def test_imports():
     """Test that all critical modules can be imported"""
     print_header("IMPORT VALIDATION")
-    
+
     # Core imports
     import torch
     import numpy as np
     import pandas as pd
     print_success("Core dependencies (torch, numpy, pandas)")
-    
+
     # Optimizer imports
     from src.core.optimizers import SGD, Adam, AdamW
     print_success("Core optimizers (SGD, Adam, AdamW)")
-    
+
     # Experiment imports
     from src.experiments.beta_sensitivity_training import run_momentum_beta_sensitivity
     print_success("Beta sensitivity training module")
-    
+
     from src.experiments.hyperparameter_sensitivity import momentum_beta_sweep
     print_success("Hyperparameter sensitivity module")
-    
+
     from src.experiments.convergence_rate_validation import run_convergence_rate_comparison
     print_success("Convergence rate validation module")
-    
+
     from src.analysis.statistical_analysis import compare_two_optimizers
     print_success("Statistical analysis module")
-    
+
     print(f"\n{GREEN}All imports successful{RESET}")
     return True
 
@@ -117,25 +117,25 @@ def test_mnist_quick():
     if not success:
         raise AssertionError("MNIST quick test failed")
     return success
-        
-        
+
+
 
 
 def test_validation_script():
     """Test the comprehensive validation script"""
     print_header("RUNNING COMPREHENSIVE VALIDATION")
-    
+
     cmd = [
         sys.executable,
         str(project_root / "scripts" / "validate_all_experiments.py"),
         "--smoke-test"
     ]
-    
+
     env = os.environ.copy()
     # Force the child process to use UTF-8 I/O on Windows to avoid UnicodeEncodeError when printing emojis
     env['PYTHONIOENCODING'] = 'utf-8'
     env['PYTHONUTF8'] = '1'
-    
+
     try:
         result = subprocess.run(
             cmd,
@@ -149,9 +149,9 @@ def test_validation_script():
     except subprocess.TimeoutExpired as e:
         print_error("Validation script timed out")
         raise AssertionError("Validation script timed out after 5 minutes") from e
-    
+
     assert result.returncode == 0, f"Validation failed with return code {result.returncode}\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
-    
+
     print_success("Comprehensive validation PASSED")
     # Show summary
     return True
@@ -329,27 +329,27 @@ def main():
     parser.add_argument('--skip-nlp', action='store_true', help='Skip NLP test')
     parser.add_argument('--skip-medical', action='store_true', help='Skip Medical test')
     args = parser.parse_args()
-    
+
     print(f"\n{BLUE}{'='*70}{RESET}")
     print(f"{BLUE}GDSearch Quick Validation Test{RESET}")
     print(f"{BLUE}Verifies all 26 experiments are bug-free{RESET}")
     print(f"{BLUE}{'='*70}{RESET}")
-    
+
     results = {}
-    
+
     # Test 1: Imports
     results['imports'] = test_imports()
-    
+
     # Test 2: Comprehensive validation
     results['validation'] = test_validation_script()
-    
+
     # Test 3: MNIST quick test (most comprehensive)
     if not args.skip_mnist:
         results['mnist'] = test_mnist_quick()
     else:
         print_info("Skipping MNIST test (--skip-mnist flag)")
         results['mnist'] = None
-    
+
     # Run CIFAR-10 quick test
     if args.skip_cifar:
         print_info("Skipping CIFAR-10 test (--skip-cifar flag)")
@@ -375,10 +375,10 @@ def main():
     else:
         print_info("Running Medical quick test (ultra-quick)")
         results['medical'] = run_quick_experiment('medical', expected_min_optimizers=3, min_train_acc=30.0, min_test_acc=20.0)
-    
+
     # Final summary
     print_header("FINAL SUMMARY")
-    
+
     for test_name, passed in results.items():
         if passed is None:
             print_info(f"{test_name:20s} SKIPPED")
@@ -386,12 +386,12 @@ def main():
             print_success(f"{test_name:20s} PASSED")
         else:
             print_error(f"{test_name:20s} FAILED")
-    
+
     total_tests = sum(1 for v in results.values() if v is not None)
     passed_tests = sum(1 for v in results.values() if v is True)
-    
+
     print(f"\n{BLUE}Results: {passed_tests}/{total_tests} tests passed{RESET}\n")
-    
+
     if passed_tests == total_tests:
         print(f"{GREEN}ALL TESTS PASSED - Codebase is research-grade{RESET}")
         print(f"\n{BLUE}You can now run the full benchmark suite:{RESET}")
@@ -405,5 +405,5 @@ def main():
 if __name__ == '__main__':
     # Configure Windows console encoding before any output
     configure_windows_console_encoding()
-    
+
     sys.exit(main())

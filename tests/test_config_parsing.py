@@ -10,7 +10,7 @@ def test_nn_tuning_config_parses():
     tests_dir = os.path.dirname(os.path.abspath(__file__))
     repo_root = os.path.dirname(tests_dir)
     cfg_path = os.path.join(repo_root, 'configs', 'nn_tuning.json')
-    
+
     assert os.path.exists(cfg_path), f"Config file not found at {cfg_path}"
 
     with open(cfg_path, 'r', encoding='utf-8') as f:
@@ -19,7 +19,7 @@ def test_nn_tuning_config_parses():
     experiments = parse_experiments_from_config(cfg)
     assert isinstance(experiments, list), "Experiments should be a list"
     assert len(experiments) > 0, "Parsed zero experiments from configs/nn_tuning.json"
-    
+
     # Validate structure of experiments
     for exp in experiments:
         assert 'model' in exp, "Experiment missing 'model' key"

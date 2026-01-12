@@ -23,20 +23,20 @@ from src.utils.type_guards import ensure_dataframe, ensure_series
 def run_pytorch_baseline(config: Dict) -> pd.DataFrame:
     """
     Run experiment with PyTorch's built-in optimizer for comparison.
-    
+
     Args:
         config: Experiment configuration
-        
+
     Returns:
         DataFrame with training history
     """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    
+
     # Set seed
     seed = config.get('seed', 42)
     torch.manual_seed(seed)
     np.random.seed(seed)
-    
+
     # Build model and data
     ret = build_model_and_data(
         dataset=config['dataset'],
@@ -48,12 +48,12 @@ def run_pytorch_baseline(config: Dict) -> pd.DataFrame:
     # build_model_and_data returns a consistent 4-tuple: (model, train_loader, val_loader, test_loader)
     # If no validation split was requested, val_loader will be None.
     model, train_loader, _val_loader, test_loader = ret
-    
+
     # Build PyTorch optimizer
     optimizer_name = config['optimizer']
     lr = config.get('lr', 1e-3)
     weight_decay = config.get('weight_decay', 0.0)
-    
+
     if optimizer_name == 'Adam_PyTorch':
         optimizer = torch.optim.Adam(
             model.parameters(),
@@ -84,36 +84,36 @@ def run_pytorch_baseline(config: Dict) -> pd.DataFrame:
         )
     else:
         raise ValueError(f"Unknown PyTorch optimizer: {optimizer_name}")
-    
+
     criterion = nn.CrossEntropyLoss()
     epochs = config.get('epochs', 10)
-    
+
     # Training loop
     history = []
     global_step = 0
-    
+
     for epoch in range(1, epochs + 1):
         # Training phase
         model.train()
         for batch_idx, (data, target) in enumerate(train_loader):
             data, target = data.to(device), target.to(device)
-            
+
             optimizer.zero_grad()
             output = model(data)
             loss = criterion(output, target)
             loss.backward()
-            
+
             # Compute gradient norm
             grad_norm = 0.0
             for p in model.parameters():
                 if p.grad is not None:
                     grad_norm += p.grad.data.norm(2).item() ** 2
             grad_norm = np.sqrt(grad_norm)
-            
+
             optimizer.step()
-            
+
             global_step += 1
-            
+
             history.append({
                 'phase': 'train',
                 'epoch': epoch,
@@ -123,13 +123,13 @@ def run_pytorch_baseline(config: Dict) -> pd.DataFrame:
                 'grad_norm': grad_norm,
                 'update_norm': 0.0  # Not tracked for PyTorch baseline
             })
-        
+
         # Evaluation phase
         model.eval()
         test_loss = 0
         correct = 0
         total = 0
-        
+
         with torch.no_grad():
             for data, target in test_loader:
                 data, target = data.to(device), target.to(device)
@@ -138,10 +138,10 @@ def run_pytorch_baseline(config: Dict) -> pd.DataFrame:
                 pred = output.argmax(dim=1, keepdim=True)
                 correct += pred.eq(target.view_as(pred)).sum().item()
                 total += target.size(0)
-        
+
         test_loss /= max(1, len(test_loader))
         test_accuracy = 100.0 * correct / max(1, total)
-        
+
         history.append({
             'phase': 'eval',
             'epoch': epoch,
@@ -153,7 +153,7 @@ def run_pytorch_baseline(config: Dict) -> pd.DataFrame:
             'grad_norm': 0.0,
             'update_norm': 0.0
         })
-    
+
     return pd.DataFrame(history)
 
 
@@ -164,12 +164,12 @@ def run_baseline_comparison(
 ) -> Dict[str, Dict[str, List[pd.DataFrame]]]:
     """
     Run comparison between custom and PyTorch baseline optimizers.
-    
+
     Returns:
         Nested dict: {optimizer_type: {'custom': [dfs], 'pytorch': [dfs]}}
     """
     os.makedirs(results_dir, exist_ok=True)
-    
+
     print("="*70)
     logging.info("BASELINE COMPARISON: Custom vs PyTorch Optimizers")
     print("="*70)
@@ -177,7 +177,7 @@ def run_baseline_comparison(
     logging.info(f"Model: {base_config.get('model')}")
     logging.info(f"Seeds: {seeds}")
     print("="*70)
-    
+
     # Optimizers to compare
     optimizer_pairs = [
         ('Adam', 'Adam_PyTorch'),
@@ -185,24 +185,25 @@ def run_baseline_comparison(
         ('SGD_Momentum', 'SGD_PyTorch'),
         ('RMSProp', 'RMSprop_PyTorch')
     ]
-    
+
     results = {}
-    
+
     for custom_opt, pytorch_opt in optimizer_pairs:
         logging.info(f"\n{'='*70}")
         logging.info(f"Comparing: {custom_opt} vs {pytorch_opt}")
         logging.info(f"{'='*70}")
-        
+
         results[custom_opt] = {'custom': [], 'pytorch': []}
-        
+
         for seed in seeds:
             # Custom optimizer
             print(f"\n  [{custom_opt}] Seed {seed}... ", end='', flush=True)
-            
-            custom_config = base_config.copy()
+
+            import copy as copy_module
+            custom_config = copy_module.deepcopy(base_config)
             custom_config['optimizer'] = custom_opt
             custom_config['seed'] = seed
-            
+
             # Set optimizer-specific params
             if 'Adam' in custom_opt:
                 custom_config['beta1'] = 0.9
@@ -211,14 +212,14 @@ def run_baseline_comparison(
                 custom_config['momentum'] = 0.9
             elif 'RMSProp' in custom_opt:
                 custom_config['alpha'] = 0.99
-            
+
             df_custom = train_and_evaluate(custom_config)
             results[custom_opt]['custom'].append(df_custom)
-            
+
             # Save
             filename = f"{custom_opt}_custom_seed{seed}.csv"
             df_custom.to_csv(os.path.join(results_dir, filename), index=False)
-            
+
             eval_df = ensure_dataframe(df_custom[df_custom['phase'] == 'eval'])
             if not eval_df.empty:
                 ts = ensure_series(eval_df['test_accuracy'])
@@ -227,14 +228,15 @@ def run_baseline_comparison(
                     logging.info(f"Acc: {final_acc:.4f}")
             else:
                 logging.info("Done")
-            
+
             # PyTorch optimizer
             print(f"  [{pytorch_opt}] Seed {seed}... ", end='', flush=True)
-            
-            pytorch_config = base_config.copy()
+
+            import copy as copy_module
+            pytorch_config = copy_module.deepcopy(base_config)
             pytorch_config['optimizer'] = pytorch_opt
             pytorch_config['seed'] = seed
-            
+
             # Copy params
             if 'Adam' in pytorch_opt:
                 pytorch_config['beta1'] = 0.9
@@ -243,14 +245,14 @@ def run_baseline_comparison(
                 pytorch_config['momentum'] = 0.9
             elif 'RMSprop' in pytorch_opt:
                 pytorch_config['alpha'] = 0.99
-            
+
             df_pytorch = run_pytorch_baseline(pytorch_config)
             results[custom_opt]['pytorch'].append(df_pytorch)
-            
+
             # Save
             filename = f"{custom_opt}_pytorch_seed{seed}.csv"
             df_pytorch.to_csv(os.path.join(results_dir, filename), index=False)
-            
+
             eval_df = ensure_dataframe(df_pytorch[df_pytorch['phase'] == 'eval'])
             if not eval_df.empty:
                 ts = ensure_series(eval_df['test_accuracy'])
@@ -259,18 +261,18 @@ def run_baseline_comparison(
                     logging.info(f"Acc: {final_acc:.4f}")
             else:
                 logging.info("Done")
-    
+
     print("\n" + "="*70)
     logging.info("Baseline comparison completed!")
     print("="*70)
-    
+
     return results
 
 
 def analyze_baseline_comparison(results: Dict) -> pd.DataFrame:
     """Analyze baseline comparison results."""
     summary_data = []
-    
+
     for optimizer_name, impl_dict in results.items():
         for impl_type, dfs in impl_dict.items():
             # Extract final accuracies
@@ -281,7 +283,7 @@ def analyze_baseline_comparison(results: Dict) -> pd.DataFrame:
                     ts = ensure_series(eval_df['test_accuracy'])
                     if not ts.empty:
                         final_accs.append(float(ts.iloc[-1]))
-            
+
             if final_accs:
                 summary_data.append({
                     'Optimizer': optimizer_name,
@@ -290,7 +292,7 @@ def analyze_baseline_comparison(results: Dict) -> pd.DataFrame:
                     'Std Accuracy': np.std(final_accs),
                     'N Seeds': len(final_accs)
                 })
-    
+
     return pd.DataFrame(summary_data)
 
 
@@ -299,15 +301,15 @@ def print_baseline_summary(summary_df: pd.DataFrame):
     print("\n" + "="*70)
     logging.info("BASELINE COMPARISON RESULTS")
     print("="*70)
-    
+
     optimizers = summary_df['Optimizer'].unique()
-    
+
     for opt in optimizers:
         logging.info(f"\n{opt}:")
         print("─"*70)
-        
+
         opt_df = summary_df[summary_df['Optimizer'] == opt]
-        
+
         custom_slice = ensure_dataframe(opt_df[opt_df['Implementation'] == 'Custom'])
         pytorch_slice = ensure_dataframe(opt_df[opt_df['Implementation'] == 'Pytorch'])
         if custom_slice.empty or pytorch_slice.empty:
@@ -318,35 +320,35 @@ def print_baseline_summary(summary_df: pd.DataFrame):
 
         logging.info(f"  Custom:  {custom_row['Mean Accuracy']:.4f} ± {custom_row['Std Accuracy']:.4f}")
         logging.info(f"  PyTorch: {pytorch_row['Mean Accuracy']:.4f} ± {pytorch_row['Std Accuracy']:.4f}")
-        
+
         diff = float(custom_row['Mean Accuracy']) - float(pytorch_row['Mean Accuracy'])
         diff_pct = (diff / pytorch_row['Mean Accuracy']) * 100
-        
+
         if abs(diff) < 0.001:
             status = "EQUIVALENT"
         elif diff > 0:
             status = f"CUSTOM BETTER (+{diff:.4f}, {diff_pct:+.2f}%)"
         else:
             status = f"PYTORCH BETTER ({diff:.4f}, {diff_pct:+.2f}%)"
-        
+
         logging.info(f"  → {status}")
-    
+
     print("\n" + "="*70)
 
 
 def plot_baseline_comparison(summary_df: pd.DataFrame, save_path: Optional[str] = None):
     """Plot baseline comparison."""
     _fig, ax = plt.subplots(figsize=(12, 7))
-    
+
     optimizers = summary_df['Optimizer'].unique()
     x = np.arange(len(optimizers))
     width = 0.35
-    
+
     custom_means = []
     custom_stds = []
     pytorch_means = []
     pytorch_stds = []
-    
+
     for opt in optimizers:
         opt_df = ensure_dataframe(summary_df[summary_df['Optimizer'] == opt])
         if opt_df.empty:
@@ -378,7 +380,7 @@ def plot_baseline_comparison(summary_df: pd.DataFrame, save_path: Optional[str] 
                    label='Custom', capsize=8, alpha=0.8, color='#3498db')
     _bars2 = ax.bar(x + width/2, pytorch_means, width, yerr=pytorch_stds,
                    label='PyTorch', capsize=8, alpha=0.8, color='#e74c3c')
-    
+
     # Labels
     ax.set_xticks(x)
     ax.set_xticklabels(optimizers, fontsize=11)
@@ -387,9 +389,9 @@ def plot_baseline_comparison(summary_df: pd.DataFrame, save_path: Optional[str] 
                  fontsize=14, fontweight='bold')
     ax.legend(fontsize=11)
     ax.grid(True, alpha=0.3, axis='y')
-    
+
     plt.tight_layout()
-    
+
     if save_path:
         plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
         logging.info(f"Baseline comparison plot saved to: {save_path}")
@@ -403,11 +405,11 @@ def perform_statistical_tests(results: Dict):
     print("\n" + "="*70)
     logging.info("STATISTICAL TESTS (Custom vs PyTorch)")
     print("="*70)
-    
+
     for optimizer_name, impl_dict in results.items():
         custom_accs = []
         pytorch_accs = []
-        
+
         for df in impl_dict['custom']:
             # Skip tainted runs
             tainted_any = bool(df['tainted'].any()) if 'tainted' in df.columns else False
@@ -416,7 +418,7 @@ def perform_statistical_tests(results: Dict):
             eval_df = df[df['phase'] == 'eval']
             if not eval_df.empty:
                 custom_accs.append(eval_df['test_accuracy'].iloc[-1])
-        
+
         for df in impl_dict['pytorch']:
             # Skip tainted runs
             tainted_any = bool(df['tainted'].any()) if 'tainted' in df.columns else False
@@ -425,7 +427,7 @@ def perform_statistical_tests(results: Dict):
             eval_df = df[df['phase'] == 'eval']
             if not eval_df.empty:
                 pytorch_accs.append(eval_df['test_accuracy'].iloc[-1])
-        
+
         if custom_accs and pytorch_accs:
             result = compare_optimizers_ttest(
                 np.array(custom_accs),
@@ -434,13 +436,13 @@ def perform_statistical_tests(results: Dict):
                 name_B=f"{optimizer_name} (PyTorch)",
                 metric='test_accuracy'
             )
-            
+
             print_ttest_results(result)
 
 
 def main():
     """Run full baseline comparison."""
-    
+
     # Base configuration
     base_config = {
         'dataset': 'MNIST',
@@ -450,29 +452,29 @@ def main():
         'epochs': 10,
         'batch_size': 128
     }
-    
+
     seeds = [1, 2, 3]
-    
+
     # Run comparison
     results = run_baseline_comparison(base_config, seeds)
-    
+
     # Analyze
     summary_df = analyze_baseline_comparison(results)
-    
+
     # Print
     print_baseline_summary(summary_df)
-    
+
     # Save
     os.makedirs('results/baselines', exist_ok=True)
     summary_df.to_csv('results/baselines/baseline_comparison.csv', index=False)
-    
+
     # Plot
     os.makedirs('plots', exist_ok=True)
     plot_baseline_comparison(summary_df, save_path='plots/baseline_comparison.png')
-    
+
     # Statistical tests
     perform_statistical_tests(results)
-    
+
     print("\n" + "="*70)
     logging.info("BASELINE COMPARISON COMPLETE!")
     print("="*70)

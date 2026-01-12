@@ -16,7 +16,7 @@ from torch.utils.data import Dataset
 
 class SyntheticMedicalDataset(Dataset):
     """Synthetic medical imaging dataset for segmentation.
-    
+
     Generates synthetic medical-like images and binary masks for U-Net training.
     Used as fallback when real medical datasets are not available.
     """
@@ -58,16 +58,16 @@ class SyntheticMedicalDataset(Dataset):
         return image, mask
 
 
-def load_medmnist_dataset(dataset_name: str = 'pathmnist', split: str = 'train', 
+def load_medmnist_dataset(dataset_name: str = 'pathmnist', split: str = 'train',
                           download: bool = True, root: str = './data') -> Optional[Dataset]:
     """Load a MedMNIST dataset if the medmnist package is available.
-    
+
     Args:
         dataset_name: Name of MedMNIST dataset (e.g., 'pathmnist', 'chestmnist', 'organamnist')
         split: 'train', 'val', or 'test'
         download: Whether to download if not present
         root: Root directory for data storage
-        
+
     Returns:
         MedMNIST dataset instance or None if not available
     """
@@ -75,24 +75,24 @@ def load_medmnist_dataset(dataset_name: str = 'pathmnist', split: str = 'train',
         import medmnist
         from medmnist import INFO
         import torchvision.transforms as transforms
-        
+
         if dataset_name not in INFO:
             logging.warning(f"MedMNIST dataset '{dataset_name}' not found. Available: {list(INFO.keys())}")
             return None
-        
+
         # Dynamically get the dataset class
         DataClass = getattr(medmnist, INFO[dataset_name]['python_class'])
-        
+
         # Add transforms to ensure tensor output (prevents PIL.Image collate errors)
         transform = transforms.Compose([
             transforms.ToTensor(),  # Converts PIL Image to tensor and scales to [0,1]
         ])
-        
+
         # Load the dataset with transform
         dataset = DataClass(split=split, download=download, root=root, transform=transform)
         logging.info(f"Loaded MedMNIST dataset '{dataset_name}' ({split} split): {len(dataset)} samples")
         return dataset
-        
+
     except ImportError:
         logging.info("medmnist package not installed. Install with: pip install medmnist")
         return None
@@ -105,23 +105,23 @@ from pathlib import Path as _Path
 
 def load_kaggle_medical_dataset(dataset_path: str | _Path = './data/medical', img_size: int = 224, split_seed: int = 42) -> Optional[Tuple[Dataset, Dataset]]:
     """Load a medical dataset downloaded from Kaggle.
-    
+
     This is a placeholder/template function. Users should customize based on their
     specific Kaggle dataset structure.
-    
+
     Args:
         dataset_path: Path to the downloaded Kaggle medical dataset
-        
+
     Returns:
         Tuple of (train_dataset, test_dataset) or None if not available
     """
     dataset_path = _Path(dataset_path)
-    
+
     if not dataset_path.exists():
         logging.info(f"Kaggle medical dataset not found at {dataset_path}")
         logging.info("To download, run download_datasets.py with Kaggle credentials set")
         return None
-    
+
     # Best-practice loader: try common Kaggle dataset layouts and fallback to sensible defaults.
     # - If `train/` + `val/` or `train/` + `test/` exist, use ImageFolder on those directories.
     # - If only a top-level folder with class subfolders exists, use ImageFolder and random-split.
@@ -193,14 +193,14 @@ def load_kaggle_medical_dataset(dataset_path: str | _Path = './data/medical', im
         return None
 
 
-def get_medical_datasets(dataset_type: str = 'medmnist', 
-                        num_train: int = 500, 
+def get_medical_datasets(dataset_type: str = 'medmnist',
+                        num_train: int = 500,
                         num_test: int = 100,
                         img_size: int = 128,
                         seed: int = 42,
                         **kwargs) -> Tuple[Dataset, Dataset]:
     """Get medical datasets for training and testing.
-    
+
     Args:
         dataset_type: 'medmnist' (default), 'synthetic', or 'kaggle'
         num_train: Number of training samples (for synthetic fallback)
@@ -208,7 +208,7 @@ def get_medical_datasets(dataset_type: str = 'medmnist',
         img_size: Image size (for synthetic fallback)
         seed: Random seed
         **kwargs: Additional arguments (medmnist_name='pathmnist', kaggle_path, etc.)
-        
+
     Returns:
         Tuple of (train_dataset, test_dataset)
     """
@@ -216,7 +216,7 @@ def get_medical_datasets(dataset_type: str = 'medmnist',
         medmnist_name = kwargs.get('medmnist_name', 'pathmnist')
         train_ds = load_medmnist_dataset(medmnist_name, split='train')
         test_ds = load_medmnist_dataset(medmnist_name, split='test')
-        
+
         if train_ds is not None and test_ds is not None:
             logging.info(f"Using MedMNIST dataset: {medmnist_name}")
             return train_ds, test_ds
@@ -224,11 +224,11 @@ def get_medical_datasets(dataset_type: str = 'medmnist',
             logging.error(f"Failed to load MedMNIST '{medmnist_name}'. Install with: pip install medmnist")
             logging.warning("Falling back to synthetic data. This is NOT recommended for research.")
             dataset_type = 'synthetic'
-    
+
     elif dataset_type == 'kaggle':
         kaggle_path = kwargs.get('kaggle_path', './data/medical')
         result = load_kaggle_medical_dataset(kaggle_path)
-        
+
         if result is not None:
             train_ds, test_ds = result
             logging.info(f"Using Kaggle medical dataset from {kaggle_path}")
@@ -236,7 +236,7 @@ def get_medical_datasets(dataset_type: str = 'medmnist',
         else:
             logging.warning(f"Failed to load Kaggle dataset from {kaggle_path}, falling back to synthetic")
             dataset_type = 'synthetic'
-    
+
     # Fallback: synthetic dataset (NOT RECOMMENDED for research)
     if dataset_type == 'synthetic':
         logging.warning("Using synthetic medical dataset - NOT RECOMMENDED for research")
@@ -244,7 +244,7 @@ def get_medical_datasets(dataset_type: str = 'medmnist',
         train_ds = SyntheticMedicalDataset(num_samples=num_train, img_size=img_size, seed=seed)
         test_ds = SyntheticMedicalDataset(num_samples=num_test, img_size=img_size, seed=seed+1000)
         return train_ds, test_ds
-    
+
     # Fallback if unknown type
     logging.error(f"Unknown dataset_type '{dataset_type}', falling back to synthetic")
     logging.warning("Using synthetic medical dataset - NOT RECOMMENDED for research")

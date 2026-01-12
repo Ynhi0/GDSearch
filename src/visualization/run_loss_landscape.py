@@ -23,7 +23,7 @@ except ImportError:
         script_dir = Path(__file__).parent
         repo_root = script_dir.parent.parent
         sys.path.insert(0, str(repo_root))
-        
+
         from src.experiments.run_nn_experiment import build_model_and_data, build_optimizer
         from src.core.training_utils import set_seed
         from src.visualization.loss_landscape import _random_direction_like, probe_loss_1d, probe_loss_2d
@@ -32,7 +32,7 @@ except ImportError:
 def train_quick(config):
     """
     Train a model quickly for visualization (snapshot mode).
-    
+
     NOTE: This is a QUICK TRAINING SNAPSHOT for visualization purposes.
     For high-quality loss landscapes, use --load-checkpoint with a
     fully trained model checkpoint.
@@ -40,7 +40,7 @@ def train_quick(config):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     seed = config.get('seed', 42)
     set_seed(seed)
-    
+
     # Build model and data - handle potential val_split
     val_split = config.get('val_split', None)
     # build_model_and_data now returns a 4-tuple (model, train_loader, val_loader, test_loader)
@@ -83,17 +83,17 @@ def train_quick(config):
 def load_checkpoint_model(checkpoint_path, config):
     """
     Load a fully trained model from checkpoint.
-    
+
     Args:
         checkpoint_path: Path to checkpoint file
         config: Configuration dict
-    
+
     Returns:
         model, loader, criterion, device
     """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     seed = config.get('seed', 42)
-    
+
     # Build model architecture - handle potential val_split
     val_split = config.get('val_split', None)
     model, _train_loader, _val_loader, test_loader = build_model_and_data(
@@ -104,21 +104,21 @@ def load_checkpoint_model(checkpoint_path, config):
         seed=seed,
         val_split=val_split
     )
-    
+
     # Load checkpoint
     print(f"Loading checkpoint from {checkpoint_path}...")
     try:
         checkpoint = torch_load_safe(checkpoint_path, map_location=device, weights_only=False)
     except TypeError:
         checkpoint = torch_load_safe(checkpoint_path, map_location=device)
-    
+
     if 'model' in checkpoint:
         model.load_state_dict(checkpoint['model'])
     else:
         model.load_state_dict(checkpoint)
-    
+
     print(f"Loaded FINAL CHECKPOINT (epoch {checkpoint.get('epoch', 'unknown')})")
-    
+
     criterion = nn.CrossEntropyLoss()
     # Mirror the signature of train_quick: return all loaders + criterion + device
     return model, _train_loader, _val_loader, test_loader, criterion, device
@@ -136,11 +136,11 @@ def main():
                        help='Output directory for plots (default: plots)')
     parser.add_argument('--seed', type=int, default=123,
                        help='Random seed (default: 123)')
-    
+
     args = parser.parse_args()
-    
+
     os.makedirs(args.output_dir, exist_ok=True)
-    
+
     # Minimal MNIST MLP training to get a reasonable point
     config = {
         'dataset': args.dataset,

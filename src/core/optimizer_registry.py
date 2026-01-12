@@ -12,10 +12,10 @@ GAP 43 FIX - IMPLEMENTATION NOTE:
     For thesis claims about "our implementation," use:
     - src.core.pytorch_optimizers.SGDWrapper (wraps custom SGD)
     - src.core.pytorch_optimizers.AdamWrapper (wraps custom Adam)
-    
+
     The custom implementations in src.core.optimizers are educational/prototype.
     They are tested in tests/test_optimizers.py but NOT used in main benchmarks.
-    
+
     To use custom implementations in experiments:
         from src.core.pytorch_optimizers import SGDWrapper, AdamWrapper
         optimizer = AdamWrapper(model.parameters(), lr=0.001)
@@ -23,10 +23,10 @@ GAP 43 FIX - IMPLEMENTATION NOTE:
 Usage:
     # Register an optimizer
     registry.register('MyOptimizer', MyOptimizerClass, default_lr=0.01)
-    
+
     # Create optimizer from config
     optimizer = registry.create('Adam', model.parameters(), lr=0.001)
-    
+
     # Run experiments from config file
     for opt_config in config['optimizers']:
         opt = registry.create(**opt_config)
@@ -43,18 +43,18 @@ from pathlib import Path
 class OptimizerRegistry:
     """
     Central registry for all optimizers with metadata and default configurations.
-    
+
     This eliminates "Script Sprawl" by providing a single source of truth
     for optimizer definitions and hyperparameters.
     """
-    
+
     def __init__(self):
         self._registry: Dict[str, Dict[str, Any]] = {}
         self._initialize_standard_optimizers()
-    
+
     def _initialize_standard_optimizers(self):
         """Initialize registry with standard PyTorch and custom optimizers."""
-        
+
         # === Standard PyTorch Optimizers ===
         self.register(
             name='SGD',
@@ -63,7 +63,7 @@ class OptimizerRegistry:
             search_space={'lr': (1e-4, 1e-1, 'log')},
             description='Stochastic Gradient Descent'
         )
-        
+
         self.register(
             name='SGD_Momentum',
             optimizer_class=torch.optim.SGD,
@@ -74,7 +74,7 @@ class OptimizerRegistry:
             },
             description='SGD with Momentum'
         )
-        
+
         self.register(
             name='SGD_Nesterov',
             optimizer_class=torch.optim.SGD,
@@ -85,7 +85,7 @@ class OptimizerRegistry:
             },
             description='SGD with Nesterov Accelerated Gradient'
         )
-        
+
         self.register(
             name='Adam',
             optimizer_class=torch.optim.Adam,
@@ -97,7 +97,7 @@ class OptimizerRegistry:
             },
             description='Adam: Adaptive Moment Estimation'
         )
-        
+
         self.register(
             name='AdamW',
             optimizer_class=torch.optim.AdamW,
@@ -108,7 +108,7 @@ class OptimizerRegistry:
             },
             description='AdamW: Adam with Decoupled Weight Decay'
         )
-        
+
         self.register(
             name='RMSprop',
             optimizer_class=torch.optim.RMSprop,
@@ -119,7 +119,7 @@ class OptimizerRegistry:
             },
             description='RMSprop: Root Mean Square Propagation'
         )
-        
+
         self.register(
             name='Adagrad',
             optimizer_class=torch.optim.Adagrad,
@@ -127,14 +127,14 @@ class OptimizerRegistry:
             search_space={'lr': (1e-4, 1e-1, 'log')},
             description='Adagrad: Adaptive Gradient Algorithm'
         )
-        
+
         # === Advanced Optimizers (if available) ===
         try:
             # Torch native optimizers for reference
             from src.core.torch_native_optimizers import (
                 TorchSAM, TorchLookahead
             )
-            
+
             self.register(
                 name='SAM_SGD',
                 optimizer_class=TorchSAM,
@@ -145,7 +145,7 @@ class OptimizerRegistry:
                 },
                 description='SAM: Sharpness-Aware Minimization with SGD'
             )
-            
+
             self.register(
                 name='Lookahead_SGD',
                 optimizer_class=lambda params, **kwargs: TorchLookahead(
@@ -161,7 +161,7 @@ class OptimizerRegistry:
                 },
                 description='Lookahead: k steps forward, 1 step back (with SGD)'
             )
-            
+
             self.register(
                 name='Lookahead_Adam',
                 optimizer_class=lambda params, **kwargs: TorchLookahead(
@@ -177,10 +177,10 @@ class OptimizerRegistry:
                 },
                 description='Lookahead with Adam'
             )
-            
+
         except ImportError:
             logging.debug("Advanced optimizers not available")
-    
+
     def register(self,
                  name: str,
                  optimizer_class: Union[Type[Optimizer], Callable],
@@ -189,7 +189,7 @@ class OptimizerRegistry:
                  description: str = ""):
         """
         Register an optimizer with metadata.
-        
+
         Args:
             name: Unique optimizer name
             optimizer_class: Optimizer class or factory function
@@ -200,70 +200,70 @@ class OptimizerRegistry:
         """
         if name in self._registry:
             logging.warning("Overwriting existing optimizer: %s", name)
-        
+
         self._registry[name] = {
             'class': optimizer_class,
             'defaults': default_hyperparams,
             'search_space': search_space or {},
             'description': description
         }
-        
+
         logging.debug("Registered optimizer: %s", name)
-    
+
     def create(self, name: str, params, **override_hyperparams) -> Optimizer:
         """
         Create optimizer instance.
-        
+
         Args:
             name: Registered optimizer name
             params: Model parameters (from model.parameters())
             **override_hyperparams: Hyperparameter overrides
-            
+
         Returns:
             Optimizer instance
         """
         if name not in self._registry:
             raise ValueError(f"Unknown optimizer: {name}. Available: {self.list_optimizers()}")
-        
+
         config = self._registry[name]
-        
+
         # Merge defaults with overrides
         hyperparams = config['defaults'].copy()
         hyperparams.update(override_hyperparams)
-        
+
         # Create optimizer
         optimizer_class = config['class']
-        
+
         try:
             optimizer = optimizer_class(params, **hyperparams)
         except TypeError:
             # Handle callable factories
             optimizer = optimizer_class(params=params, **hyperparams)
-        
+
         logging.debug("Created optimizer %s with hyperparams: %s", name, hyperparams)
         return optimizer
-    
+
     def get_default_hyperparams(self, name: str) -> Dict[str, Any]:
         """Get default hyperparameters for an optimizer."""
         if name not in self._registry:
             raise ValueError(f"Unknown optimizer: {name}")
         return self._registry[name]['defaults'].copy()
-    
+
     def get_search_space(self, name: str) -> Dict[str, tuple]:
         """Get hyperparameter search space for an optimizer."""
         if name not in self._registry:
             raise ValueError(f"Unknown optimizer: {name}")
         return self._registry[name]['search_space'].copy()
-    
+
     def list_optimizers(self) -> List[str]:
         """List all registered optimizer names."""
         return sorted(self._registry.keys())
-    
+
     def get_info(self, name: str) -> Dict[str, Any]:
         """Get full information about an optimizer."""
         if name not in self._registry:
             raise ValueError(f"Unknown optimizer: {name}")
-        
+
         config = self._registry[name].copy()
         # Don't return the class object in info
         info = {
@@ -273,13 +273,13 @@ class OptimizerRegistry:
             'search_space': config['search_space']
         }
         return info
-    
+
     def print_registry(self):
         """Print all registered optimizers."""
         print("\n" + "="*70)
         print("REGISTERED OPTIMIZERS")
         print("="*70)
-        
+
         for name in self.list_optimizers():
             info = self.get_info(name)
             print(f"\n{name}")
@@ -287,13 +287,13 @@ class OptimizerRegistry:
             print(f"  Defaults: {info['default_hyperparams']}")
             if info['search_space']:
                 print(f"  Search space: {info['search_space']}")
-        
+
         print("\n" + "="*70)
-    
+
     def load_from_config(self, config_path: Union[str, Path]):
         """
         Load optimizer configurations from JSON file.
-        
+
         Config format:
         {
             "optimizers": [
@@ -306,24 +306,24 @@ class OptimizerRegistry:
         }
         """
         config_path = Path(config_path)
-        
+
         if not config_path.exists():
             raise FileNotFoundError(f"Config file not found: {config_path}")
-        
+
         with open(config_path, 'r', encoding='utf-8') as f:
             config = json.load(f)
-        
+
         for opt_config in config.get('optimizers', []):
             name = opt_config['name']
             base = opt_config.get('base')
             hyperparams = opt_config.get('hyperparams', {})
-            
+
             if base:
                 # Create variant of existing optimizer
                 base_config = self._registry[base]
                 new_defaults = base_config['defaults'].copy()
                 new_defaults.update(hyperparams)
-                
+
                 self.register(
                     name=name,
                     optimizer_class=base_config['class'],
@@ -331,26 +331,26 @@ class OptimizerRegistry:
                     search_space=base_config['search_space'],
                     description=f"Custom variant of {base}"
                 )
-        
+
         logging.info("Loaded %d optimizer configs from %s", len(config.get('optimizers', [])), config_path)
-    
+
     def save_to_config(self, config_path: Union[str, Path], optimizer_names: Optional[List[str]] = None):
         """
         Save optimizer configurations to JSON file.
-        
+
         Args:
             config_path: Path to save config
             optimizer_names: Specific optimizers to save (None = all)
         """
         config_path = Path(config_path)
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         optimizers_to_save = optimizer_names or self.list_optimizers()
-        
+
         config = {
             'optimizers': []
         }
-        
+
         for name in optimizers_to_save:
             info = self.get_info(name)
             config['optimizers'].append({
@@ -359,10 +359,10 @@ class OptimizerRegistry:
                 'default_hyperparams': info['default_hyperparams'],
                 'search_space': info['search_space']
             })
-        
+
         with open(config_path, 'w', encoding='utf-8') as f:
             json.dump(config, f, indent=2)
-        
+
         logging.info("Saved %d optimizer configs to %s", len(config['optimizers']), config_path)
 
 
@@ -373,11 +373,11 @@ registry = OptimizerRegistry()
 def create_optimizer_from_config(config: Dict, model_params) -> Optimizer:
     """
     Convenience function to create optimizer from config dict.
-    
+
     Args:
         config: Dict with 'name' and optional hyperparameter overrides
         model_params: Model parameters
-        
+
     Returns:
         Optimizer instance
     """
@@ -389,9 +389,9 @@ def create_optimizer_from_config(config: Dict, model_params) -> Optimizer:
 def load_experiment_config(config_path: Union[str, Path]) -> List[Dict]:
     """
     Load experiment configuration from JSON file.
-    
+
     Returns list of optimizer configurations for experiments.
-    
+
     Example config:
     {
         "experiment": "CIFAR10_ResNet18",
@@ -402,10 +402,10 @@ def load_experiment_config(config_path: Union[str, Path]) -> List[Dict]:
     }
     """
     config_path = Path(config_path)
-    
+
     with open(config_path, 'r', encoding='utf-8') as f:
         config = json.load(f)
-    
+
     return config.get('optimizers', [])
 
 

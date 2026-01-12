@@ -8,6 +8,8 @@ import numpy as np
 import pandas as pd
 
 from src.visualization.plot_results import plot_generalization_gap, plot_layer_grad_norms
+from src.utils.file_safety import safe_to_csv  # AUDIT FIX: Safe file I/O
+from src.utils.metric_normalization import extract_metric, normalize_dataframe_columns  # AUDIT FIX: Metric aliases
 
 
 RESULTS_DIR = 'results'
@@ -164,12 +166,12 @@ def generate_plots_for_nn(csv_path: str):
 def main():
     os.makedirs(PLOTS_DIR, exist_ok=True)
     qdf = summarize_quantitative()
-    qdf.to_csv(os.path.join(RESULTS_DIR, 'summary_quantitative.csv'), index=False)
+    safe_to_csv(qdf, os.path.join(RESULTS_DIR, 'summary_quantitative.csv'), index=False)  # AUDIT FIX
 
     nn_csvs = [p for p in _list_csvs('NN_')]
     if nn_csvs:
         qldf = summarize_qualitative(nn_csvs)
-        qldf.to_csv(os.path.join(RESULTS_DIR, 'summary_qualitative.csv'), index=False)
+        safe_to_csv(qldf, os.path.join(RESULTS_DIR, 'summary_qualitative.csv'), index=False)  # AUDIT FIX
         # also emit a markdown for readability
         qldf.to_markdown(os.path.join(RESULTS_DIR, 'summary_qualitative.md'), index=False)
         # Create plots for the first NN csv by default

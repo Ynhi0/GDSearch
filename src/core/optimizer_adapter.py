@@ -44,16 +44,16 @@ def build_optimizer_for_tuning(
 ) -> torch.optim.Optimizer:
     """
     Build optimizer instance for Optuna tuning.
-    
+
     Args:
         optimizer_name: Name of optimizer ('adam', 'sgd', 'sgdmomentum', etc.)
         model: PyTorch model
         params: Dictionary of hyperparameters (lr, beta1, beta2, momentum, etc.)
         use_custom_wrappers: If True, use custom wrappers; if False, use native PyTorch
-        
+
     Returns:
         Optimizer instance
-        
+
     Note:
         When use_custom_wrappers=False, this builds native PyTorch optimizers for tuning.
         When use_custom_wrappers=True, this builds custom wrappers for experiments.
@@ -61,7 +61,7 @@ def build_optimizer_for_tuning(
     """
     lr = params['lr']
     name_lower = optimizer_name.lower()
-    
+
     if use_custom_wrappers:
         # Use custom wrappers (for experiment runner)
         if name_lower == 'adam':
@@ -99,7 +99,7 @@ def build_optimizer_for_tuning(
             )
         else:
             raise ValueError(f"Unknown optimizer for custom wrappers: {optimizer_name}")
-    
+
     else:
         # Use native PyTorch optimizers (for tuning)
         if name_lower == 'adam':
@@ -145,10 +145,10 @@ def validate_optimizer_equivalence(
 ) -> bool:
     """
     Validate that native and custom optimizer implementations produce equivalent results.
-    
+
     This is a critical test to ensure that hyperparameters tuned with native PyTorch
     optimizers will transfer correctly to custom wrapper implementations.
-    
+
     Args:
         optimizer_name: Name of optimizer to test
         params: Hyperparameters to test
@@ -157,7 +157,7 @@ def validate_optimizer_equivalence(
         test_output_size: Size of output
         num_steps: Number of optimization steps to test
         tolerance: Maximum allowed difference in parameters
-        
+
     Returns:
         True if optimizers are equivalent within tolerance, False otherwise
     """
@@ -168,24 +168,24 @@ def validate_optimizer_equivalence(
         nn.ReLU(),
         nn.Linear(test_hidden_size, test_output_size)
     )
-    
+
     torch.manual_seed(42)
     model_custom = nn.Sequential(
         nn.Linear(test_input_size, test_hidden_size),
         nn.ReLU(),
         nn.Linear(test_hidden_size, test_output_size)
     )
-    
+
     # Build optimizers
     opt_native = build_optimizer_for_tuning(optimizer_name, model_native, params, use_custom_wrappers=False)
     opt_custom = build_optimizer_for_tuning(optimizer_name, model_custom, params, use_custom_wrappers=True)
-    
+
     # Create test data
     torch.manual_seed(123)
     test_input = torch.randn(32, test_input_size)
     test_target = torch.randint(0, test_output_size, (32,))
     criterion = nn.CrossEntropyLoss()
-    
+
     # Run optimization for num_steps
     for step in range(num_steps):
         # Native optimizer step
@@ -194,22 +194,22 @@ def validate_optimizer_equivalence(
         loss_native = criterion(output_native, test_target)
         loss_native.backward()
         opt_native.step()
-        
+
         # Custom optimizer step
         opt_custom.zero_grad()
         output_custom = model_custom(test_input)
         loss_custom = criterion(output_custom, test_target)
         loss_custom.backward()
         opt_custom.step()
-    
+
     # Compare final parameters
     max_diff = 0.0
     for p_native, p_custom in zip(model_native.parameters(), model_custom.parameters()):
         diff = torch.abs(p_native - p_custom).max().item()
         max_diff = max(max_diff, diff)
-    
+
     equivalent = max_diff < tolerance
-    
+
     if not equivalent:
         logging.warning(
             f"Optimizer equivalence check FAILED for {optimizer_name}: "
@@ -221,18 +221,18 @@ def validate_optimizer_equivalence(
             f"Optimizer equivalence check PASSED for {optimizer_name}: "
             f"max_diff={max_diff:.2e} <= tolerance={tolerance:.2e}"
         )
-    
+
     return equivalent
 
 
 if __name__ == '__main__':
     """Test optimizer equivalence for common configurations."""
     logging.basicConfig(level=logging.INFO)
-    
+
     print("=" * 80)
     print("OPTIMIZER EQUIVALENCE VALIDATION")
     print("=" * 80)
-    
+
     # Test configurations
     test_configs = [
         ('adam', {'lr': 0.001, 'beta1': 0.9, 'beta2': 0.999, 'epsilon': 1e-8}),
@@ -240,7 +240,7 @@ if __name__ == '__main__':
         ('sgdmomentum', {'lr': 0.01, 'momentum': 0.9}),
         ('sgdmomentum', {'lr': 0.1, 'momentum': 0.9}),
     ]
-    
+
     all_passed = True
     for opt_name, params in test_configs:
         print(f"\nTesting {opt_name} with params: {params}")
@@ -250,7 +250,7 @@ if __name__ == '__main__':
             print(f"  ✗ FAILED")
         else:
             print(f"  ✓ PASSED")
-    
+
     print("\n" + "=" * 80)
     if all_passed:
         print("ALL TESTS PASSED: Optimizers are equivalent")

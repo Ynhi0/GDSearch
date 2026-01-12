@@ -24,21 +24,21 @@ def test_quick_mnist_pipeline():
             "--results-dir", tmpdir,
             "--no-mlflow"
         ], capture_output=True, text=True, timeout=1200)  # 20 minutes for ultra-quick with all optimizers
-        
+
         # Check execution succeeded
         assert result.returncode == 0, f"Script failed with: {result.stderr}"
-        
+
         # Verify results directory structure - use recursive glob as results may be nested
         results_base = Path(tmpdir)
-        
+
         # Check for per-run CSV artifacts (canonical naming) - search recursively
         csv_files = list(results_base.rglob("MNIST_SimpleMLP_*_seed42.csv"))
         assert len(csv_files) > 0, f"No per-run CSV artifacts found in {results_base}"
-        
+
         # Check metadata files (now use .metadata.json suffix)
         meta_files = list(results_base.rglob("MNIST_SimpleMLP_*_seed42.metadata.json"))
         assert len(meta_files) > 0, f"No metadata files found in {results_base}"
-        
+
         # Validate CSV structure
         for csv_file in csv_files:
             df = pd.read_csv(csv_file)
@@ -59,13 +59,13 @@ def test_quick_2d_pipeline():
             "--results-dir", tmpdir,
             "--no-mlflow"
         ], capture_output=True, text=True, timeout=300)  # 5 minutes for 2D quick mode
-        
+
         assert result.returncode == 0, f"2D experiment failed: {result.stderr}"
-        
+
         # Results are stored in experiments/2d_optimization subdirectory
         results_dir = Path(tmpdir) / "experiments" / "2d_optimization"
         assert results_dir.exists(), f"2D results directory not created at {results_dir}"
-        
+
         # Check for per-run artifacts - save_run_artifacts creates a subdirectory
         # Check both top-level and subdirectories for CSV files
         csv_files = list(results_dir.rglob("2D_*_seed123.csv"))
@@ -84,13 +84,13 @@ def test_deterministic_flag():
             "--no-mlflow",
             "--deterministic"
         ], capture_output=True, text=True, timeout=300)  # 5 minutes for 2D deterministic
-        
+
         # Check for deterministic mode messages in output
         stdout_check = "deterministic mode" in result.stdout.lower() if result.stdout else False
         stderr_check = "deterministic" in result.stderr.lower() if result.stderr else False
         assert stdout_check or stderr_check, \
             "Deterministic mode not indicated in output"
-        
+
         assert result.returncode == 0, f"Deterministic run failed: {result.stderr or 'No stderr'}"
 
 
@@ -105,12 +105,12 @@ def test_multi_seed_consistency():
             "--results-dir", tmpdir,
             "--no-mlflow"
         ], capture_output=True, text=True, timeout=600)  # 10 minutes for 3 seeds
-        
+
         assert result.returncode == 0, f"Multi-seed run failed: {result.stderr}"
-        
+
         # Results are stored in experiments/2d_optimization subdirectory
         results_dir = Path(tmpdir) / "experiments" / "2d_optimization"
-        
+
         # Should have artifacts for each seed - check recursively
         for seed in [42, 123, 456]:
             seed_files = list(results_dir.rglob(f"*_seed{seed}.csv"))
@@ -129,9 +129,9 @@ def test_full_mnist_with_checkpoints():
             "--results-dir", tmpdir,
             "--no-mlflow"
         ], capture_output=True, text=True, timeout=1800)  # 30 minutes for ultra-quick with 2 seeds and all optimizers
-        
+
         assert result.returncode == 0, f"Full MNIST run failed: {result.stderr}"
-        
+
         # Check for checkpoint directory
         checkpoint_dir = Path(tmpdir) / "checkpoints"
         if checkpoint_dir.exists():

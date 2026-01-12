@@ -15,24 +15,24 @@ def test_medical_utils():
     print("\n" + "="*60)
     print("TEST 1: Medical Data Utilities")
     print("="*60)
-    
+
     from src.core.medical_data_utils import (
-        SyntheticMedicalDataset, 
+        SyntheticMedicalDataset,
         get_medical_datasets,
         load_medmnist_dataset,
         load_kaggle_medical_dataset
     )
-    
+
     # Test synthetic dataset
     print("\n1. Testing SyntheticMedicalDataset...")
     train_ds = SyntheticMedicalDataset(num_samples=10, img_size=64, seed=42)
     test_ds = SyntheticMedicalDataset(num_samples=5, img_size=64, seed=43)
-    
+
     img, mask = train_ds[0]
     assert img.shape == (1, 64, 64), f"Expected shape (1, 64, 64), got {img.shape}"
     assert mask.shape == (1, 64, 64), f"Expected shape (1, 64, 64), got {mask.shape}"
     print(f"  ✓ Synthetic dataset: {len_sized(train_ds)} train, {len_sized(test_ds)} test")
-    
+
     # Test get_medical_datasets with medmnist (default)
     print("\n2. Testing get_medical_datasets (medmnist as default)...")
     train_ds, test_ds = get_medical_datasets(
@@ -56,7 +56,7 @@ def test_medical_utils():
     assert len_sized(train_ds) >= 10
     assert len_sized(test_ds) >= 5
     print(f"  ✓ get_medical_datasets: {len_sized(train_ds)} train, {len_sized(test_ds)} test")
-    
+
     # Test MedMNIST (will gracefully fail if not installed)
     print("\n3. Testing load_medmnist_dataset...")
     medmnist_ds = load_medmnist_dataset('pathmnist', split='train', download=False)
@@ -71,7 +71,7 @@ def test_medical_utils():
         print("  ℹ Kaggle medical dataset not found (optional)")
     else:
         print(f"  ✓ Kaggle dataset loaded")
-    
+
     print("\n✓ All medical utility tests passed!")
 
 
@@ -80,7 +80,7 @@ def test_download_scripts():
     print("\n" + "="*60)
     print("TEST 2: Download Scripts")
     print("="*60)
-    
+
     print("\n1. Testing download_datasets.py imports...")
     try:
         import importlib.util
@@ -93,7 +93,7 @@ def test_download_scripts():
             print("  ⚠️ download_datasets.py not found or invalid")
     except Exception as e:
         print(f"  ✗ Failed to load download_datasets.py: {e}")
-    
+
     print("\n2. Testing download_datasets_kaggle.py imports...")
     try:
         spec = importlib.util.spec_from_file_location("download_datasets_kaggle", "download_datasets_kaggle.py")
@@ -104,7 +104,7 @@ def test_download_scripts():
             print("  ⚠️ download_datasets_kaggle.py not found or invalid")
     except Exception as e:
         print(f"  ✗ Failed to load download_datasets_kaggle.py: {e}")
-    
+
     print("\n✓ All download script tests passed!")
 
 
@@ -113,12 +113,12 @@ def test_integration():
     print("\n" + "="*60)
     print("TEST 3: Integration with GDSearch")
     print("="*60)
-    
+
     # Test that medical utilities can be imported from expected locations
     print("\n1. Testing imports from src.core...")
     from src.core.medical_data_utils import get_medical_datasets
     print("  ✓ Can import from src.core.medical_data_utils")
-    
+
     # Test that medical experiment functions are available
     print("\n2. Checking medical experiment availability...")
     # We can't easily test run_all_kaggle due to encoding issues, but we can verify
@@ -126,7 +126,7 @@ def test_integration():
     import os
     os.environ['MEDICAL_DATASET_TYPE'] = 'synthetic'
     os.environ['MEDMNIST_NAME'] = 'pathmnist'
-    
+
     train_ds, test_ds = get_medical_datasets(
         dataset_type=os.environ.get('MEDICAL_DATASET_TYPE', 'synthetic'),
         num_train=50,
@@ -135,7 +135,7 @@ def test_integration():
         medmnist_name=os.environ.get('MEDMNIST_NAME', 'pathmnist')
     )
     print(f"  ✓ Medical experiment can load datasets: {len_sized(train_ds)} train, {len_sized(test_ds)} test")
-    
+
     print("\n✓ All integration tests passed!")
 
 
@@ -144,13 +144,13 @@ def main():
     print("\n" + "="*60)
     print("MEDICAL DATASET INTEGRATION TEST SUITE")
     print("="*60)
-    
+
     try:
         success = True
         success = success and bool(test_medical_utils())
         success = success and bool(test_download_scripts())
         success = success and bool(test_integration())
-        
+
         if success:
             print("\n" + "="*60)
             print("✅ ALL TESTS PASSED")
@@ -171,7 +171,7 @@ def main():
         else:
             print("\n❌ SOME TESTS FAILED")
             return 1
-            
+
     except Exception as e:
         print(f"\n❌ TEST ERROR: {e}")
         import traceback

@@ -3,7 +3,6 @@ Multi-seed experiment runner for statistical analysis.
 """
 
 import os
-import sys
 import json
 import copy
 from typing import List, Dict, Any
@@ -14,65 +13,68 @@ from tqdm import tqdm
 
 from src.experiments.run_nn_experiment import train_and_evaluate, result_filename
 from src.utils.num_utils import safe_to_float
+from src.utils.file_safety import safe_to_csv  # AUDIT FIX: Safe file I/O
+from src.utils.metric_normalization import normalize_dataframe_columns
 
 
 def run_multi_seed_experiment(base_config: Dict[str, Any], seeds: List[int], results_dir: str = 'results') -> List[str]:
     """
     Run the same experiment with multiple seeds.
-    
+
     Args:
         base_config: Base configuration dictionary
         seeds: List of random seeds
         results_dir: Directory to save results
-        
+
     Returns:
         List of result file paths
     """
     os.makedirs(results_dir, exist_ok=True)
     result_files = []
-    
+
     logging.info('\n%s', '='*60)
     logging.info('Running Multi-Seed Experiment')
     logging.info('Seeds: %s', seeds)
     logging.info('Base config: %s/%s/%s', base_config['model'], base_config['dataset'], base_config['optimizer'])
     logging.info('%s\n', '='*60)
-    
+
     for seed in tqdm(seeds, desc="Seeds"):
         # Use deepcopy to prevent mutation of nested config structures
         config = copy.deepcopy(base_config)
         config['seed'] = seed
         config['tag'] = f'seed{seed}'
-        
+
         # Run experiment
         df = train_and_evaluate(config)
         # Coerce to DataFrame to satisfy type checker and ensure consistent API
         df = pd.DataFrame(df)
-        
+
         # Save result
         filename = result_filename(config)
         filepath = os.path.join(results_dir, filename)
-        df.to_csv(filepath, index=False)
+        # AUDIT FIX: Use safe_to_csv for automatic directory creation
+        safe_to_csv(df, filepath, index=False)
         result_files.append(filepath)
-        
+
         logging.info("Seed %s: %s", seed, filepath)
-    
+
     return result_files
 
 
 def aggregate_results(result_files: List[str], metric: str = 'test_accuracy', exclude_tainted: bool = True) -> Dict[str, Any]:
     """
     Aggregate results from multiple seeds.
-    
+
     Args:
         result_files: List of CSV file paths
         metric: Metric to aggregate ('test_accuracy', 'test_loss', etc.)
         exclude_tainted: If True, skip runs marked as tainted (OOM recovery)
-        
+
     Returns:
         Dictionary with mean, std, min, max, values
     """
     values = []
-    
+
     for filepath in result_files:
         df = pd.read_csv(filepath)
         # Robustly parse tainted column to bool, handling string values
@@ -82,8 +84,8 @@ def aggregate_results(result_files: List[str], metric: str = 'test_accuracy', ex
                 s = df['tainted'].astype(str).str.strip().str.lower()
                 # Map known true/false strings to bool
                 df['tainted'] = s.isin(['true', '1', 't', 'yes', 'y'])
-            except Exception as e:
-                logging.debug("Failed to parse tainted column in %s: %s", filepath, e, exc_info=True)
+            except (TypeError, ValueError, AttributeError) as e:
+                logging.exception("Failed to parse tainted column in %s: %s", filepath, e)
                 # If parsing fails, default to False (assume not tainted)
                 df['tainted'] = False
         # Skip tainted runs if requested
@@ -94,10 +96,12 @@ def aggregate_results(result_files: List[str], metric: str = 'test_accuracy', ex
         from src.utils.type_guards import ensure_dataframe, ensure_series
         eval_df = ensure_dataframe(df[df['phase'] == 'eval'])
         if not eval_df.empty:
-                final_value = safe_to_float(ensure_series(eval_df[metric]).iloc[-1])
-                values.append(final_value)
+            # AUDIT FIX: Apply metric aliasing normalization to handle test_acc/test_accuracy aliases
+            eval_df = normalize_dataframe_columns(eval_df)
+            final_value = safe_to_float(ensure_series(eval_df[metric]).iloc[-1])
+            values.append(final_value)
     values = np.array(values)
-    
+
     # Check for empty array before computing statistics
     # This can occur when all runs are tainted or no valid data exists
     if len(values) == 0:
@@ -109,7 +113,7 @@ def aggregate_results(result_files: List[str], metric: str = 'test_accuracy', ex
             'values': [],
             'n': 0
         }
-    
+
     return {
         'mean': values.mean(),
         'std': values.std(),
@@ -125,14 +129,14 @@ def print_aggregated_results(results: Dict[str, Any], metric_name: str = "Test A
     print(f"\n{'='*60}")
     print(f"Aggregated Results: {metric_name}")
     print(f"{'='*60}")
-    
+
     # Check for NaN results (all runs tainted or no data)
     if results['n'] == 0 or np.isnan(results['mean']):
         print("ERROR: No valid results to aggregate (all runs tainted or no data)")
         print(f"N: {results['n']}")
         print(f"{'='*60}\n")
         return
-    
+
     print(f"Mean:     {results['mean']:.4f}")
     print(f"Std:      {results['std']:.4f}")
     print(f"Min:      {results['min']:.4f}")
@@ -162,17 +166,17 @@ def main():
         'epochs': 5,
         'batch_size': 128,
     }
-    
+
     seeds = [1, 2, 3, 4, 5]
-    
+
     # Run experiments
     result_files = run_multi_seed_experiment(base_config, seeds)
-    
+
     # Aggregate test accuracy
     acc_results = aggregate_results(result_files, metric='test_accuracy')
     print_aggregated_results(acc_results, metric_name="Test Accuracy")
     save_aggregated_results(acc_results, 'results/multiseed_test_accuracy.json')
-    
+
     # Aggregate test loss
     loss_results = aggregate_results(result_files, metric='test_loss')
     print_aggregated_results(loss_results, metric_name="Test Loss")

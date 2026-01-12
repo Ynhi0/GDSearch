@@ -57,8 +57,8 @@ def _to_float(x: Any) -> float:
     try:
         if isinstance(x, (int, float, np.integer, np.floating)):
             return float(x)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug("_to_float: fast-path type check failed for %r: %s", x, e, exc_info=True)
 
     # Pandas scalars/Series handling
     try:
@@ -71,8 +71,8 @@ def _to_float(x: Any) -> float:
             # take last non-NA element
             val = arr.ravel()[-1]
             return _to_float(val)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug("_to_float: pandas branch failed for %r: %s", x, e, exc_info=True)
 
     # Unwrap common Python containers first
     try:
@@ -80,8 +80,8 @@ def _to_float(x: Any) -> float:
             if len(x) == 0:
                 return float(np.nan)
             return _to_float(x[0])
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug("_to_float: tuple/list branch failed for %r: %s", x, e, exc_info=True)
 
     # Numpy arrays and other array-likes
     try:
@@ -107,8 +107,8 @@ def _to_float(x: Any) -> float:
             return _to_float(arr.ravel()[0])
         except Exception:
             return float(np.nan)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug("_to_float: numpy branch failed for %r: %s", x, e, exc_info=True)
 
     # String or other fallback - only call float on types that support it
     try:
@@ -241,7 +241,8 @@ def _paired_compare(a_vals: np.ndarray, b_vals: np.ndarray, name_a: str, name_b:
         and not np.isnan(sh_a[1]) and not np.isnan(sh_b[1])
         and sh_a[1] > 0.05 and sh_b[1] > 0.05):
         # Paired t-test
-        t_stat, p_val = stats.ttest_rel(a_vals, b_vals)
+        from src.analysis.statistical_analysis import safe_ttest_rel
+        t_stat, p_val = safe_ttest_rel(a_vals, b_vals)
         diff = a_vals - b_vals
         eff = diff.mean() / (diff.std(ddof=1) + 1e-12)
         test = 'Paired t-test'

@@ -61,7 +61,7 @@ def train_with_optional_tracking(
 ) -> Dict[str, float]:
     """
     Train model with or without dynamics tracking.
-    
+
     Args:
         model: PyTorch model
         train_loader: Training data loader
@@ -71,37 +71,37 @@ def train_with_optional_tracking(
         epochs: Number of epochs
         use_dynamics_tracker: Whether to use DynamicsTracker
         output_dir: Directory for saving tracker outputs
-        
+
     Returns:
         Dictionary with metrics: time, memory, final accuracy
     """
     criterion = nn.CrossEntropyLoss()
-    
+
     # Initialize tracker if requested
     tracker = None
     if use_dynamics_tracker and HAS_DYNAMICS_TRACKER:
         tracker = TrainingDynamicsTracker()  # output paths handled at save time
-    
+
     # Memory tracking
     process = psutil.Process()
     mem_before_mb = process.memory_info().rss / (1024 ** 2)
     gpu_mem_before_mb = get_gpu_memory_usage()
-    
+
     # Time tracking
     start_time = time.time()
-    
+
     # Training loop
     for epoch in range(epochs):
         model.train()
         for batch_idx, (inputs, targets) in enumerate(train_loader):
             inputs, targets = inputs.to(device), targets.to(device)
-            
+
             optimizer.zero_grad()
             outputs = model(inputs)
             loss = criterion(outputs, targets)
             loss.backward()
             optimizer.step()
-            
+
             # Track dynamics if enabled
             if tracker is not None:
                 tracker.track_step(
@@ -121,14 +121,14 @@ def train_with_optional_tracking(
             _, predicted = outputs.max(1)
             correct += predicted.eq(targets).sum().item()
             total += targets.size(0)
-    
+
     final_accuracy = 100.0 * correct / max(1, total)
-    
+
     # Compute metrics
     elapsed_time = time.time() - start_time
     mem_after_mb = process.memory_info().rss / (1024 ** 2)
     gpu_mem_after_mb = get_gpu_memory_usage()
-    
+
     # Save tracker visualizations if enabled
     if tracker is not None:
         try:
@@ -139,7 +139,7 @@ def train_with_optional_tracking(
             tracker.plot_dynamics(str(out_dir / "plots"), optimizer_name=optimizer.__class__.__name__)
         except (OSError, ValueError, KeyError, AttributeError) as e:
             print(f"   Tracker save failed: {e}")
-    
+
     return {
         'time_seconds': elapsed_time,
         'memory_mb': mem_after_mb - mem_before_mb,
@@ -159,10 +159,10 @@ def run_dynamics_overhead_ablation(
 ) -> pd.DataFrame:
     """
     Run ablation study comparing training WITH vs WITHOUT dynamics tracking.
-    
+
     This study addresses the question: "Does DynamicsTracker add significant
     computational overhead?" Required for academic rigor.
-    
+
     Args:
         dataset: Dataset name (currently only MNIST supported)
         model_name: Model architecture
@@ -171,7 +171,7 @@ def run_dynamics_overhead_ablation(
         seeds: Random seeds for statistical significance
         results_dir: Output directory
         quick: Quick mode (fewer seeds)
-        
+
     Returns:
         DataFrame with ablation results
     """
@@ -184,45 +184,45 @@ def run_dynamics_overhead_ablation(
     print(f"Epochs: {epochs}")
     print(f"Seeds: {len(seeds)}")
     print()
-    
+
     if not HAS_DYNAMICS_TRACKER:
         print("TrainingDynamicsTracker not available - cannot run ablation")
         return pd.DataFrame()
-    
+
     # Create output directory
     os.makedirs(results_dir, exist_ok=True)
-    
+
     # Setup data
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.1307,), (0.3081,))
     ])
-    
+
     train_dataset = torchvision.datasets.MNIST(
         './data', train=True, download=True, transform=transform
     )
     test_dataset = torchvision.datasets.MNIST(
         './data', train=False, download=True, transform=transform
     )
-    
+
     # Use subset for quick mode
     if quick:
         train_dataset = torch.utils.data.Subset(train_dataset, range(10000))
         test_dataset = torch.utils.data.Subset(test_dataset, range(2000))
         seeds = seeds[:3]
-    
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
+
     results = []
-    
+
     # Run for each seed
     for seed_idx, seed in enumerate(seeds):
         print(f"\n[{seed_idx+1}/{len(seeds)}] Running seed {seed}...")
-        
+
         # Set seed
         torch.manual_seed(seed)
         np.random.seed(seed)
-        
+
         # Create dataloaders
         train_loader = make_dataloader(
             train_dataset, batch_size=128, shuffle=True, seed=seed,
@@ -232,13 +232,13 @@ def run_dynamics_overhead_ablation(
             test_dataset, batch_size=256, shuffle=False,
             num_workers=2, pin_memory=True if device.type == 'cuda' else False
         )
-        
+
         # Test 1: WITHOUT dynamics tracking (baseline)
         print("   Testing WITHOUT dynamics tracking (baseline)...")
         model_baseline = SimpleMLP().to(device)
         # Adam without weight decay for fair overhead comparison
         optimizer_baseline = optim.Adam(model_baseline.parameters(), lr=1e-3, weight_decay=0)
-        
+
         metrics_baseline = train_with_optional_tracking(
             model=model_baseline,
             train_loader=train_loader,
@@ -248,15 +248,15 @@ def run_dynamics_overhead_ablation(
             epochs=epochs,
             use_dynamics_tracker=False
         )
-        
+
         # Test 2: WITH dynamics tracking
         print("   Testing WITH dynamics tracking...")
         model_tracked = SimpleMLP().to(device)
         # Adam without weight decay for fair overhead comparison
         optimizer_tracked = optim.Adam(model_tracked.parameters(), lr=1e-3, weight_decay=0)
-        
+
         tracker_dir = os.path.join(results_dir, f"dynamics_seed{seed}")
-        
+
         metrics_tracked = train_with_optional_tracking(
             model=model_tracked,
             train_loader=train_loader,
@@ -267,7 +267,7 @@ def run_dynamics_overhead_ablation(
             use_dynamics_tracker=True,
             output_dir=tracker_dir
         )
-        
+
         # Compute overhead
         time_overhead_pct = (
             (metrics_tracked['time_seconds'] - metrics_baseline['time_seconds']) /
@@ -275,7 +275,7 @@ def run_dynamics_overhead_ablation(
         )
         mem_overhead_mb = metrics_tracked['memory_mb'] - metrics_baseline['memory_mb']
         acc_diff = metrics_tracked['final_accuracy'] - metrics_baseline['final_accuracy']
-        
+
         # Store results
         results.append({
             'seed': seed,
@@ -285,7 +285,7 @@ def run_dynamics_overhead_ablation(
             'gpu_memory_mb': metrics_baseline['gpu_memory_mb'],
             'accuracy': metrics_baseline['final_accuracy']
         })
-        
+
         results.append({
             'seed': seed,
             'condition': 'with_tracking',
@@ -294,38 +294,38 @@ def run_dynamics_overhead_ablation(
             'gpu_memory_mb': metrics_tracked['gpu_memory_mb'],
             'accuracy': metrics_tracked['final_accuracy']
         })
-        
+
         print(f"   ⏱️  Time overhead: {time_overhead_pct:+.2f}%")
         print(f"   💾 Memory overhead: {mem_overhead_mb:+.2f} MB")
         print(f"   🎯 Accuracy difference: {acc_diff:+.4f}%")
-    
+
     # Create DataFrame
     df = pd.DataFrame(results)
-    
+
     # Save results
     csv_path = os.path.join(results_dir, f"dynamics_overhead_ablation_{dataset}.csv")
     df.to_csv(csv_path, index=False)
     print(f"\nResults saved to {csv_path}")
-    
+
     # Generate summary statistics
     print("\n" + "="*80)
     print("ABLATION STUDY SUMMARY")
     print("="*80)
-    
+
     baseline_df = df[df['condition'] == 'baseline']
     tracked_df = df[df['condition'] == 'with_tracking']
-    
+
     time_overhead_mean = (
         (tracked_df['time_seconds'].mean() - baseline_df['time_seconds'].mean()) /
         baseline_df['time_seconds'].mean() * 100
     )
     mem_overhead_mean = tracked_df['memory_mb'].mean() - baseline_df['memory_mb'].mean()
     acc_diff_mean = tracked_df['accuracy'].mean() - baseline_df['accuracy'].mean()
-    
+
     print(f"Average Time Overhead: {time_overhead_mean:+.2f}%")
     print(f"Average Memory Overhead: {mem_overhead_mean:+.2f} MB")
     print(f"Average Accuracy Difference: {acc_diff_mean:+.4f}%")
-    
+
     # Statistical test with proper seed alignment
     from scipy import stats
     # Ensure DataFrame types and Merge on seed to ensure proper pairing for paired t-test
@@ -339,51 +339,53 @@ def run_dynamics_overhead_ablation(
         how='inner',
         suffixes=('_baseline', '_tracked')
     )
-    
+
     if len(merged) < 2:
         print(f"\nWarning: Insufficient paired samples (n={len(merged)}). Skipping statistical tests.")
         time_ttest = None
         acc_ttest = None
     else:
-        time_ttest = stats.ttest_rel(merged['time_seconds_tracked'], merged['time_seconds_baseline'])
-        acc_ttest = stats.ttest_rel(merged['accuracy_tracked'], merged['accuracy_baseline'])
-    
+        from src.analysis.statistical_analysis import safe_ttest_rel
+        time_t, time_p = safe_ttest_rel(merged['time_seconds_tracked'], merged['time_seconds_baseline'])
+        acc_t, acc_p = safe_ttest_rel(merged['accuracy_tracked'], merged['accuracy_baseline'])
+        time_ttest = (time_t, time_p)
+        acc_ttest = (acc_t, acc_p)
+
     print("\nStatistical Significance:")
     if time_ttest is not None and acc_ttest is not None:
-        # Access p-value correctly (scipy.stats.ttest_rel returns TtestResult with pvalue attribute)
-        # Type checkers may not recognize the attribute, but it exists in scipy >= 1.6
-        time_pval: float = time_ttest.pvalue  # type: ignore[attr-defined]
-        acc_pval: float = acc_ttest.pvalue  # type: ignore[attr-defined]
+        # time_ttest and acc_ttest are tuples (t_stat, p_value) now
+        time_pval: float = time_ttest[1]
+        acc_pval: float = acc_ttest[1]
         print(f"  Time difference: p={time_pval:.4f} {'(significant)' if time_pval < 0.05 else '(not significant)'}")
         print(f"  Accuracy difference: p={acc_pval:.4f} {'(significant)' if acc_pval < 0.05 else '(not significant)'}")
     else:
         print("  Statistical tests skipped due to insufficient paired samples.")
-    
+
     # Generate visualization
     try:
         create_ablation_visualization(df, results_dir)
     except Exception as e:
         print(f"Visualization failed: {e}")
-    
+
     return df
 
 
 def create_ablation_visualization(df: pd.DataFrame, output_dir: str):
     """Create high-quality visualization of ablation results"""
     fig, axes = plt.subplots(1, 3, figsize=(15, 4), dpi=300)
-    
+
     baseline_df = df[df['condition'] == 'baseline']
     tracked_df = df[df['condition'] == 'with_tracking']
-    
+
     # Plot 1: Training time comparison
-    axes[0].bar(['Baseline', 'With Tracking'], 
+    axes[0].bar(['Baseline', 'With Tracking'],
                 [baseline_df['time_seconds'].mean(), tracked_df['time_seconds'].mean()],
                 yerr=[baseline_df['time_seconds'].std(), tracked_df['time_seconds'].std()],
                 capsize=5, color=['#3498db', '#e74c3c'])
     axes[0].set_ylabel('Training Time (seconds)')
     axes[0].set_title('Training Time Overhead')
     axes[0].grid(axis='y', alpha=0.3)
-    
+
     # Plot 2: Memory overhead
     axes[1].bar(['Baseline', 'With Tracking'],
                 [baseline_df['memory_mb'].mean(), tracked_df['memory_mb'].mean()],
@@ -392,7 +394,7 @@ def create_ablation_visualization(df: pd.DataFrame, output_dir: str):
     axes[1].set_ylabel('Memory Usage (MB)')
     axes[1].set_title('Memory Overhead')
     axes[1].grid(axis='y', alpha=0.3)
-    
+
     # Plot 3: Final accuracy (should be identical)
     axes[2].bar(['Baseline', 'With Tracking'],
                 [baseline_df['accuracy'].mean(), tracked_df['accuracy'].mean()],
@@ -401,7 +403,7 @@ def create_ablation_visualization(df: pd.DataFrame, output_dir: str):
     axes[2].set_ylabel('Test Accuracy (%)')
     axes[2].set_title('Final Accuracy (Should be Equal)')
     axes[2].grid(axis='y', alpha=0.3)
-    
+
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, 'dynamics_overhead_ablation.png'), dpi=300, bbox_inches='tight')
     print(f"   Visualization saved to {output_dir}/dynamics_overhead_ablation.png")

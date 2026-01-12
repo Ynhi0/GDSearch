@@ -19,6 +19,7 @@ from scipy import stats
 from typing import List, Dict, Tuple, Optional, Any
 import matplotlib.pyplot as plt
 import warnings
+from src.utils.metric_normalization import normalize_dataframe_columns
 
 
 def _to_scalar(x) -> float:
@@ -30,21 +31,69 @@ def _to_scalar(x) -> float:
     return safe_to_float(x)
 
 
+def safe_ttest_rel(a, b, **kwargs) -> Tuple[float, float]:
+    """Run a paired t-test (scipy.stats.ttest_rel) and return (t_stat, p_value) as Python floats.
+
+    This helper normalizes return types across SciPy versions (tuple return vs TtestResult-like object)
+    and provides safe fallbacks (NaN) if the test fails or returns unexpected types.
+    """
+    try:
+        res = stats.ttest_rel(a, b, **kwargs)
+    except Exception as e:
+        logging.debug("ttest_rel failed: %s", e)
+        return float("nan"), float("nan")
+
+    t_raw: Any = None
+    p_raw: Any = None
+
+    if isinstance(res, (tuple, list)):
+        try:
+            t_raw, p_raw = res
+        except Exception:
+            pass
+    elif hasattr(res, "pvalue"):
+        t_raw = getattr(res, "statistic", None)
+        p_raw = getattr(res, "pvalue", None)
+    else:
+        # Fallback: try to unpack (covers some scipy/numpy edge cases)
+        try:
+            t_raw, p_raw = res
+        except Exception:
+            logging.debug("Could not unpack ttest result: %r", res)
+            return float("nan"), float("nan")
+
+    def _to_float(x: Any) -> float:
+        if x is None:
+            return float("nan")
+        try:
+            arr = np.asarray(x)
+            if arr.size == 1:
+                return float(arr.item())
+            return float(arr.flatten()[0])
+        except Exception:
+            try:
+                return float(x)
+            except Exception:
+                return float("nan")
+
+    return _to_float(t_raw), _to_float(p_raw)
+
+
 def safe_shapiro(data: np.ndarray, alpha: float = 0.05) -> Dict:
     """
     Safe Shapiro-Wilk test with zero-variance handling.
-    
+
     Prevents scipy warnings when data has zero variance.
-    
+
     Args:
         data: Array of data to test
         alpha: Significance level
-        
+
     Returns:
         Dictionary with test results
     """
     data_range = data.max() - data.min()
-    
+
     if data_range < 1e-10:
         # Zero variance: deterministic case, treat as non-normal
         return {
@@ -55,7 +104,7 @@ def safe_shapiro(data: np.ndarray, alpha: float = 0.05) -> Dict:
             'zero_variance': True,
             'interpretation': "Data has zero variance (constant values). Treated as non-normal."
         }
-    
+
     if len(data) < 3:
         # Shapiro-Wilk requires n >= 3
         return {
@@ -66,11 +115,11 @@ def safe_shapiro(data: np.ndarray, alpha: float = 0.05) -> Dict:
             'zero_variance': False,
             'interpretation': f"Sample size {len(data)} too small for Shapiro-Wilk (requires n >= 3)."
         }
-    
+
     statistic, p_value = stats.shapiro(data)
     normal = p_value > alpha
     interpretation = f"Data {'appears' if normal else 'does not appear'} normally distributed (W={statistic:.4f}, p={p_value:.4f})"
-    
+
     return {
         'method': 'shapiro',
         'statistic': statistic,
@@ -84,11 +133,11 @@ def safe_shapiro(data: np.ndarray, alpha: float = 0.05) -> Dict:
 def load_multiseed_results(pattern: str, results_dir: str = 'results') -> List[pd.DataFrame]:
     """
     Load results from multiple seed runs.
-    
+
     Args:
         pattern: File pattern (e.g., '*AdamW*seed*.csv')
         results_dir: Results directory
-        
+
     Returns:
         List of DataFrames
     """
@@ -110,7 +159,7 @@ def extract_final_metric(
 
     By default, this function does not exclude diverged runs to avoid survivor bias.
     Instead, assign them a failure penalty or report success rate separately.
-    
+
     Added options to use best value or average of last N epochs for robust statistics.
 
     Args:
@@ -122,19 +171,19 @@ def extract_final_metric(
                            (e.g., 0.0 for accuracy, np.inf for loss). Fixes Survivor Bias.
         use_best: If True, use best (max for accuracy, min for loss) instead of last value
         average_last_n: If set, average last N epochs for stability (reduces variance)
-        
+
     Note:
         **Survivor Bias Warning**: Setting exclude_diverged=True will BIAS your results.
         An optimizer that diverges 90% of the time but gets lucky once will appear
         better than a stable optimizer. Use divergence_penalty instead.
-        
+
         Expects tainted/diverged columns to be boolean type. If they are strings,
         will attempt to convert them, but proper boolean types are recommended.
     """
     values = []
     for df in dfs:
         is_diverged = False
-        
+
         # Check for divergence
         if 'diverged' in df.columns:
             try:
@@ -151,7 +200,7 @@ def extract_final_metric(
                     is_diverged = s in ('true', '1', 't', 'yes', 'y')
             except (ValueError, TypeError, AttributeError) as e:
                 logging.warning("Failed to parse diverged column: %s. Assuming not diverged.", e)
-        
+
         # Handle diverged runs
         if is_diverged:
             if exclude_diverged:
@@ -162,7 +211,7 @@ def extract_final_metric(
                 values.append(divergence_penalty)
                 continue
             # Otherwise, extract actual value (may be NaN/Inf)
-        
+
         # If requested, skip runs that are marked tainted (OOM recovery happened)
         if exclude_tainted and 'tainted' in df.columns:
             try:
@@ -187,8 +236,13 @@ def extract_final_metric(
 
         eval_df = df[df['phase'] == 'eval']
         if not eval_df.empty:
+            # AUDIT FIX: Apply metric aliasing normalization to handle test_acc/test_accuracy aliases
+            # Ensure eval_df is a DataFrame for the normalizer
+            if not isinstance(eval_df, pd.DataFrame):
+                eval_df = pd.DataFrame(eval_df)
+            eval_df = normalize_dataframe_columns(eval_df)
             series_or_arr = eval_df[metric]
-            
+
             # Extract value based on strategy
             val = None
             if use_best:
@@ -208,18 +262,21 @@ def extract_final_metric(
                 if iloc_attr is not None:
                     try:
                         val = iloc_attr[-1]
-                    except Exception:
+                    except (TypeError, ValueError, KeyError, IndexError) as e:
+                        logging.exception("Failed to extract value using iloc: %s", e)
                         val = None
                 if val is None:
                     try:
                         val = series_or_arr[-1]
-                    except Exception:
+                    except (TypeError, ValueError, KeyError, IndexError) as e:
+                        logging.exception("Failed to extract value using indexing: %s", e)
                         val = series_or_arr
-            
+
             try:
                 values.append(_to_scalar(val))
-            except Exception:
-                values.append(np.nan) 
+            except (TypeError, ValueError) as e:
+                logging.exception("Failed to convert value to scalar: %s", e)
+                values.append(np.nan)
     return np.array(values)
 
 
@@ -234,9 +291,9 @@ def compare_two_optimizers(
 ) -> Dict:
     """
     Compare two optimizers with statistical testing.
-    
+
     Simplified interface that wraps compare_optimizers_ttest for backward compatibility.
-    
+
     Args:
         results_A: Array of metric values for first optimizer
         results_B: Array of metric values for second optimizer
@@ -245,7 +302,7 @@ def compare_two_optimizers(
         alpha: Significance level (default: 0.05)
         metric: Metric name for display
         auto_select_test: If True, automatically select parametric vs non-parametric test
-        
+
     Returns:
         Dictionary with comparison results including:
         - mean_diff: Mean difference (A - B)
@@ -255,18 +312,18 @@ def compare_two_optimizers(
         - Additional fields from compare_optimizers_ttest
     """
     result = compare_optimizers_ttest(results_A, results_B, opt1_name, opt2_name, metric, auto_select_test)
-    
+
     # Add simplified fields for backward compatibility
     result['mean_diff'] = result['mean_A'] - result['mean_B']
     result['is_significant'] = result['p_value'] < alpha
     result['alpha'] = alpha
-    
+
     return result
 
 
 def compare_optimizers_ttest(
-    results_A: np.ndarray, 
-    results_B: np.ndarray, 
+    results_A: np.ndarray,
+    results_B: np.ndarray,
     name_A: str = "Optimizer A",
     name_B: str = "Optimizer B",
     metric: str = "test_accuracy",
@@ -274,18 +331,18 @@ def compare_optimizers_ttest(
 ) -> Dict:
     """
     Perform independent t-test between two optimizers.
-    
+
     Added automatic test selection based on normality.
     If auto_select_test=True, performs Shapiro-Wilk normality test and
     falls back to Mann-Whitney U test if normality is violated.
-    
+
     Args:
         results_A: Array of metric values for optimizer A
         results_B: Array of metric values for optimizer B
         name_A, name_B: Names for display
         metric: Metric name
         auto_select_test: If True, automatically select parametric vs non-parametric test
-        
+
     Returns:
         Dictionary with test results (includes 'test_used' field)
     """
@@ -294,7 +351,7 @@ def compare_optimizers_ttest(
     MAX_SAFE_VALUE = 1e100
     results_A = np.asarray(results_A)
     results_B = np.asarray(results_B)
-    
+
     # Clip extreme values to prevent overflow in variance computation
     if np.any(np.abs(results_A) > MAX_SAFE_VALUE):
         logging.warning("Clipping extreme values in results_A (max=%.2e) to prevent overflow", np.max(np.abs(results_A)))
@@ -302,26 +359,26 @@ def compare_optimizers_ttest(
     if np.any(np.abs(results_B) > MAX_SAFE_VALUE):
         logging.warning("Clipping extreme values in results_B (max=%.2e) to prevent overflow", np.max(np.abs(results_B)))
         results_B = np.clip(results_B, -MAX_SAFE_VALUE, MAX_SAFE_VALUE)
-    
+
     # Compute statistics
     mean_A = results_A.mean()
     std_A = results_A.std()
     n_A = len(results_A)
-    
+
     mean_B = results_B.mean()
     std_B = results_B.std()
     n_B = len(results_B)
-    
+
     test_used = "welch_t_test"
     normality_check = {}
-    
+
     if auto_select_test and n_A >= 3 and n_B >= 3:
         # Shapiro-Wilk test requires n >= 3
         try:
             # Use safe_shapiro to handle zero variance without warnings
             result_A = safe_shapiro(results_A)
             result_B = safe_shapiro(results_B)
-            
+
             normality_check = {
                 'shapiro_p_A': result_A['p_value'],
                 'shapiro_p_B': result_B['p_value'],
@@ -330,17 +387,17 @@ def compare_optimizers_ttest(
                 'zero_variance_A': result_A['zero_variance'],
                 'zero_variance_B': result_B['zero_variance']
             }
-            
+
             if result_A['zero_variance'] or result_B['zero_variance']:
                 logging.info(
                     f"Zero variance detected (A: {result_A['zero_variance']}, B: {result_B['zero_variance']}). "
                     f"Using specialized zero-variance handling."
                 )
-            
+
             # If either distribution fails normality, use non-parametric test
             p_A = result_A['p_value'] if result_A['p_value'] is not None else 1.0
             p_B = result_B['p_value'] if result_B['p_value'] is not None else 1.0
-            
+
             if p_A <= 0.05 or p_B <= 0.05:
                 test_used = "mann_whitney_u"
                 logging.info(
@@ -349,7 +406,7 @@ def compare_optimizers_ttest(
                 )
         except Exception as e:
             logging.warning(f"Normality test failed: {e}. Defaulting to Welch's t-test.")
-    
+
     if test_used == "mann_whitney_u":
         # Use Mann-Whitney U test (non-parametric alternative)
         try:
@@ -357,11 +414,11 @@ def compare_optimizers_ttest(
             # Normalize numeric types
             u_stat = _to_scalar(u_stat)
             p_value = _to_scalar(p_value)
-            
+
             # Effect size for Mann-Whitney: rank-biserial correlation
             # r = 1 - (2*U) / (n_A * n_B)
             rank_biserial = float(1 - (2 * u_stat) / (n_A * n_B))
-            
+
             # For Mann-Whitney, we don't have parametric CIs; use bootstrap or omit
             if n_A >= 2:
                 ci_A = stats.t.interval(0.95, n_A - 1, loc=mean_A, scale=stats.sem(results_A))
@@ -371,7 +428,7 @@ def compare_optimizers_ttest(
                 ci_B = stats.t.interval(0.95, n_B - 1, loc=mean_B, scale=stats.sem(results_B))
             else:
                 ci_B = (mean_B, mean_B)
-            
+
             result = {
                 'name_A': name_A,
                 'name_B': name_B,
@@ -398,7 +455,7 @@ def compare_optimizers_ttest(
         except Exception as e:
             logging.warning(f"Mann-Whitney U test failed: {e}. Falling back to Welch's t-test.")
             test_used = "welch_t_test"
-    
+
     # Check for zero variance cases (avoid scipy warnings)
     epsilon = 1e-10
     if std_A < epsilon and std_B < epsilon:
@@ -414,7 +471,7 @@ def compare_optimizers_ttest(
             t_stat = np.inf if mean_A > mean_B else -np.inf
             p_value = 0.0
             cohens_d = np.inf if mean_A > mean_B else -np.inf
-        
+
         # For zero variance, confidence intervals collapse to the mean
         ci_A = (mean_A, mean_A)
         ci_B = (mean_B, mean_B)
@@ -425,7 +482,7 @@ def compare_optimizers_ttest(
         # Normalize numeric types returned by scipy
         t_stat = _to_scalar(t_stat)
         p_value = _to_scalar(p_value)
-        
+
         # Effect size: Use pooled Cohen's d (standard approach)
         # Pooled std = sqrt(((n_A-1)*std_A^2 + (n_B-1)*std_B^2) / (n_A + n_B - 2))
         # This is the standard Cohen's d formula for independent groups
@@ -455,7 +512,7 @@ def compare_optimizers_ttest(
             cohens_d = (mean_A - mean_B) / std_B
         else:
             cohens_d = 0.0
-        
+
         # Confidence intervals (95%)
         # Check n >= 2 before computing CI to avoid invalid degrees of freedom
         if n_A >= 2:
@@ -463,13 +520,13 @@ def compare_optimizers_ttest(
         else:
             # Cannot compute CI with n < 2, set to mean
             ci_A = (mean_A, mean_A)
-        
+
         if n_B >= 2:
             ci_B = stats.t.interval(0.95, n_B - 1, loc=mean_B, scale=stats.sem(results_B))
         else:
             # Cannot compute CI with n < 2, set to mean
             ci_B = (mean_B, mean_B)
-    
+
     result = {
         'name_A': name_A,
         'name_B': name_B,
@@ -492,7 +549,7 @@ def compare_optimizers_ttest(
         'test_used': test_used,
         'normality_check': normality_check
     }
-    
+
     return result
 
 
@@ -502,19 +559,19 @@ def print_ttest_results(result: Dict):
     logging.info(f"Statistical Comparison: {result['name_A']} vs {result['name_B']}")
     logging.info(f"Metric: {result['metric']}")
     logging.info(f"{'='*70}")
-    
+
     logging.info(f"\n{result['name_A']}:")
     logging.info(f"  Mean: {result['mean_A']:.4f}")
     logging.info(f"  Std:  {result['std_A']:.4f}")
     logging.info(f"  N:    {result['n_A']}")
     logging.info(f"  95% CI: [{result['ci_A'][0]:.4f}, {result['ci_A'][1]:.4f}]")
-    
+
     logging.info(f"\n{result['name_B']}:")
     logging.info(f"  Mean: {result['mean_B']:.4f}")
     logging.info(f"  Std:  {result['std_B']:.4f}")
     logging.info(f"  N:    {result['n_B']}")
     logging.info(f"  95% CI: [{result['ci_B'][0]:.4f}, {result['ci_B'][1]:.4f}]")
-    
+
     logging.info(f"\n{'─'*70}")
     logging.info(f"Test Statistics:")
     if 'test_used' in result:
@@ -522,22 +579,22 @@ def print_ttest_results(result: Dict):
         if 'normality_check' in result and result['normality_check']:
             nc = result['normality_check']
             logging.info(f"  Normality (Shapiro-Wilk): A p={nc.get('shapiro_p_A', 'N/A'):.4f}, B p={nc.get('shapiro_p_B', 'N/A'):.4f}")
-    
+
     # Display appropriate test statistic based on test type
     if result.get('t_statistic') is not None:
         logging.info(f"  t-statistic: {result['t_statistic']:.4f}")
     if result.get('u_statistic') is not None:
         logging.info(f"  U-statistic: {result['u_statistic']:.4f}")
-    
+
     logging.info(f"  p-value:     {result['p_value']:.4f}")
     logging.info(f"  Significant: {'YES' if result['significant'] else 'NO'} (α=0.05)")
-    
+
     # Display effect size with appropriate label
     effect_size_val = result.get('effect_size', result.get('cohens_d', 0.0))
     effect_size_type = result.get('effect_size_type', 'cohens_d')
     if effect_size_val is not None:
         logging.info(f"  Effect size ({effect_size_type}): {effect_size_val:.4f}")
-        
+
         # Interpret effect size (same thresholds for Cohen's d and rank-biserial)
         d_abs = abs(effect_size_val)
         if d_abs < 0.2:
@@ -551,7 +608,7 @@ def print_ttest_results(result: Dict):
         logging.info(f"  Effect size interpretation: {effect_str}")
     else:
         effect_str = "N/A"
-    
+
     # Conclusion
     logging.info(f"\n{'─'*70}")
     diff = result['mean_A'] - result['mean_B']
@@ -562,7 +619,7 @@ def print_ttest_results(result: Dict):
     else:
         logging.info(f"CONCLUSION: No statistically significant difference")
         logging.info(f"   (p={result['p_value']:.4f} ≥ 0.05)")
-    
+
     logging.info(f"{'='*70}\n")
 
 
@@ -576,7 +633,7 @@ def plot_comparison_with_errorbars(
 ):
     """
     Plot comparison with error bars.
-    
+
     Args:
         results_A, results_B: Arrays of metric values
         name_A, name_B: Optimizer names
@@ -584,63 +641,63 @@ def plot_comparison_with_errorbars(
         save_path: Path to save plot
     """
     fig, ax = plt.subplots(figsize=(10, 6))
-    
+
     # Compute statistics
     mean_A, std_A = results_A.mean(), results_A.std()
     mean_B, std_B = results_B.mean(), results_B.std()
-    
+
     # Bar plot with error bars
     x = [0, 1]
     means = [mean_A, mean_B]
     stds = [std_A, std_B]
     names = [name_A, name_B]
-    
-    bars = ax.bar(x, means, yerr=stds, capsize=10, alpha=0.7, 
+
+    bars = ax.bar(x, means, yerr=stds, capsize=10, alpha=0.7,
                   color=['#1f77b4', '#ff7f0e'])
-    
+
     # Add individual data points
     np.random.seed(42)  # For reproducible jitter
     for i, (values, xpos) in enumerate([(results_A, 0), (results_B, 1)]):
         jitter = np.random.normal(0, 0.04, size=len(values))
         ax.scatter(xpos + jitter, values, alpha=0.6, s=50, color='black', zorder=3)
-    
+
     # Labels
     ax.set_xticks(x)
     ax.set_xticklabels(names)
     ax.set_ylabel(metric, fontsize=12)
-    ax.set_title(f'{metric} Comparison\n(Mean ± Std, Individual Runs Shown)', 
+    ax.set_title(f'{metric} Comparison\n(Mean ± Std, Individual Runs Shown)',
                  fontsize=14, fontweight='bold')
-    
+
     # Grid
     ax.grid(True, alpha=0.3, axis='y')
-    
+
     # Annotate means
     for i, (m, s) in enumerate(zip(means, stds)):
-        ax.text(i, m + s + 0.01, f'{m:.4f}±{s:.4f}', 
+        ax.text(i, m + s + 0.01, f'{m:.4f}±{s:.4f}',
                 ha='center', va='bottom', fontsize=10, fontweight='bold')
-    
+
     plt.tight_layout()
-    
+
     if save_path:
         plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
         logging.info(f"Plot saved to: {save_path}")
     else:
         plt.show()
-    
+
     plt.close()
 
 
 def wilcoxon_signed_rank_test(results_A: np.ndarray, results_B: np.ndarray) -> Dict:
     """
     Perform Wilcoxon signed-rank test (non-parametric alternative to paired t-test).
-    
+
     Use when data is paired (same initial conditions) and may not be normally distributed.
     """
     statistic, p_value = stats.wilcoxon(results_A, results_B, alternative='two-sided')
     # Normalize numeric types (scipy/stub ambiguity)
     statistic = _to_scalar(statistic)
     p_value = _to_scalar(p_value)
-    
+
     return {
         'statistic': statistic,
         'p_value': p_value,
@@ -661,24 +718,24 @@ def compute_power_analysis(
 ) -> float:
     """
     Compute statistical power for a t-test.
-    
+
     Power = probability of correctly rejecting null hypothesis when alternative is true.
-    
+
     Args:
         effect_size: Cohen's d (standardized effect size)
         n_samples: Sample size per group
         alpha: Significance level (default: 0.05)
         alternative: 'two-sided', 'greater', or 'less'
-        
+
     Returns:
         Statistical power (0 to 1)
     """
     # Degrees of freedom
     df = 2 * n_samples - 2
-    
+
     # Non-centrality parameter
     ncp = effect_size * np.sqrt(n_samples / 2)
-    
+
     # Critical value
     if alternative == 'two-sided':
         critical_t = stats.t.ppf(1 - alpha / 2, df)
@@ -686,7 +743,7 @@ def compute_power_analysis(
         critical_t = stats.t.ppf(1 - alpha, df)
     else:  # 'less'
         critical_t = stats.t.ppf(alpha, df)
-    
+
     # Power = P(reject H0 | H1 is true)
     # For two-sided test: power = P(|T| > critical_t | effect_size)
     if alternative == 'two-sided':
@@ -695,7 +752,7 @@ def compute_power_analysis(
         power = 1 - stats.nct.cdf(critical_t, df, ncp)
     else:  # 'less'
         power = stats.nct.cdf(critical_t, df, -ncp)
-    
+
     return float(power)
 
 
@@ -707,28 +764,28 @@ def compute_required_sample_size(
 ) -> int:
     """
     Compute required sample size to achieve desired power.
-    
+
     Args:
         effect_size: Cohen's d (expected effect size)
         power: Desired statistical power (default: 0.8 = 80%)
         alpha: Significance level (default: 0.05)
         alternative: 'two-sided', 'greater', or 'less'
-        
+
     Returns:
         Required sample size per group
     """
     # Binary search for required n
     n_min, n_max = 2, 1000
-    
+
     while n_max - n_min > 1:
         n_mid = (n_min + n_max) // 2
         current_power = compute_power_analysis(effect_size, n_mid, alpha, alternative)
-        
+
         if current_power < power:
             n_min = n_mid
         else:
             n_max = n_mid
-    
+
     return n_max
 
 
@@ -742,13 +799,13 @@ def power_analysis_report(
 ) -> Dict:
     """
     Generate comprehensive power analysis report.
-    
+
     Args:
         results_A, results_B: Arrays of metric values
         name_A, name_B: Optimizer names
         target_power: Desired power (default: 0.8)
         alpha: Significance level (default: 0.05)
-        
+
     Returns:
         Dictionary with power analysis results
     """
@@ -756,7 +813,7 @@ def power_analysis_report(
     MAX_SAFE_VALUE = 1e100
     results_A = np.asarray(results_A)
     results_B = np.asarray(results_B)
-    
+
     # Clip extreme values to prevent overflow in variance computation
     if np.any(np.abs(results_A) > MAX_SAFE_VALUE):
         logging.warning("Clipping extreme values in results_A (max=%.2e) to prevent overflow", np.max(np.abs(results_A)))
@@ -764,12 +821,12 @@ def power_analysis_report(
     if np.any(np.abs(results_B) > MAX_SAFE_VALUE):
         logging.warning("Clipping extreme values in results_B (max=%.2e) to prevent overflow", np.max(np.abs(results_B)))
         results_B = np.clip(results_B, -MAX_SAFE_VALUE, MAX_SAFE_VALUE)
-    
+
     # Compute observed effect size
     n_A, n_B = len(results_A), len(results_B)
     mean_A, mean_B = results_A.mean(), results_B.mean()
     std_A, std_B = results_A.std(), results_B.std()
-    
+
     # NUMERICAL STABILITY: Prevent overflow in variance computation
     try:
         var_A = std_A ** 2
@@ -784,24 +841,24 @@ def power_analysis_report(
             pooled_std = max(std_A, std_B)
     except (OverflowError, FloatingPointError):
         pooled_std = max(std_A, std_B)
-    
+
     observed_effect_size = abs(mean_A - mean_B) / pooled_std if pooled_std > 0 else 0.0
-    
+
     # Compute achieved power
     n_samples = min(n_A, n_B)
     achieved_power = compute_power_analysis(observed_effect_size, n_samples, alpha)
-    
+
     # Compute required sample size for target power
     if observed_effect_size > 0:
         required_n = compute_required_sample_size(observed_effect_size, target_power, alpha)
     else:
         required_n = float('inf')
-    
+
     # Power for different effect sizes (small, medium, large)
     power_small = compute_power_analysis(0.2, n_samples, alpha)
     power_medium = compute_power_analysis(0.5, n_samples, alpha)
     power_large = compute_power_analysis(0.8, n_samples, alpha)
-    
+
     return {
         'name_A': name_A,
         'name_B': name_B,
@@ -824,12 +881,12 @@ def print_power_analysis(report: Dict):
     logging.info(f"\n{'='*70}")
     logging.info(f"Power Analysis: {report['name_A']} vs {report['name_B']}")
     logging.info(f"{'='*70}")
-    
+
     logging.info(f"\nCurrent Study:")
     logging.info(f"  Sample size per group: {report['n_samples']}")
     logging.info(f"  Observed effect size (Cohen's d): {report['observed_effect_size']:.4f}")
     logging.info(f"  Achieved power: {report['achieved_power']:.4f} ({report['achieved_power']*100:.1f}%)")
-    
+
     logging.info(f"\nRecommendations:")
     if report['achieved_power'] >= report['target_power']:
         logging.info(f"  Study is adequately powered (power ≥ {report['target_power']})")
@@ -840,13 +897,13 @@ def print_power_analysis(report: Dict):
             additional_needed = report['required_n'] - report['n_samples']
             if additional_needed > 0:
                 logging.info(f"  Need {additional_needed} more samples per group")
-    
+
     logging.info(f"\nPower to Detect Different Effect Sizes:")
     logging.info(f"  (with n={report['n_samples']}, α={report['alpha']})")
     for effect_name, power_value in report['power_vs_effect_size'].items():
         status = "" if power_value >= 0.8 else "WARNING: "
         logging.info(f"  {status} {effect_name}: {power_value:.4f} ({power_value*100:.1f}%)")
-    
+
     logging.info(f"\n{'─'*70}")
     logging.info(f"Interpretation:")
     logging.info(f"  - Power = probability of detecting true effect")
@@ -858,22 +915,22 @@ def print_power_analysis(report: Dict):
 
 
 # ============================================================================
-# Friedman Test and Nemenyi Post-hoc 
+# Friedman Test and Nemenyi Post-hoc
 # ============================================================================
 
 
 def friedman_test(data: np.ndarray, optimizer_names: Optional[List[str]] = None) -> Dict:
     """
     Friedman test for comparing multiple optimizers across multiple datasets/seeds.
-    
+
     This is the MANDATORY omnibus test for ranking k > 2 algorithms across multiple
     datasets, as specified by Demšar (JMLR 2006).
-    
+
     Args:
         data: 2D array of shape (n_datasets, n_optimizers)
               Each row is a dataset/seed, each column is an optimizer
         optimizer_names: List of optimizer names (optional)
-        
+
     Returns:
         Dictionary with test results:
         - statistic: Friedman chi-squared statistic
@@ -884,29 +941,29 @@ def friedman_test(data: np.ndarray, optimizer_names: Optional[List[str]] = None)
     """
     if data.ndim != 2:
         raise ValueError("Data must be 2D array (n_datasets x n_optimizers)")
-    
+
     n_datasets, n_optimizers = data.shape
-    
+
     if n_datasets < 2:
         raise ValueError("Need at least 2 datasets/seeds for Friedman test")
     if n_optimizers < 2:
         raise ValueError("Need at least 2 optimizers for Friedman test")
-    
+
     # Perform Friedman test (non-parametric alternative to repeated-measures ANOVA)
     statistic, p_value = stats.friedmanchisquare(*[data[:, i] for i in range(n_optimizers)])
-    
+
     # Compute average ranks (rank within each dataset, then average across datasets)
     # Lower rank = better performance
     ranks = np.zeros_like(data)
     for i in range(n_datasets):
         # Rank in descending order (higher values = lower ranks = better)
         ranks[i, :] = stats.rankdata(-data[i, :])
-    
+
     mean_ranks = ranks.mean(axis=0)
-    
+
     if optimizer_names is None:
         optimizer_names = [f"Optimizer {i+1}" for i in range(n_optimizers)]
-    
+
     return {
         'statistic': statistic,
         'p_value': p_value,
@@ -921,15 +978,15 @@ def friedman_test(data: np.ndarray, optimizer_names: Optional[List[str]] = None)
 def nemenyi_test(data: np.ndarray, optimizer_names: Optional[List[str]] = None, alpha: float = 0.05) -> Dict:
     """
     Nemenyi post-hoc test for pairwise comparisons after Friedman test.
-    
+
     This is the standard post-hoc test for ranking algorithms, as specified by
     Demšar (JMLR 2006). It controls the Family-Wise Error Rate (FWER).
-    
+
     Args:
         data: 2D array of shape (n_datasets, n_optimizers)
         optimizer_names: List of optimizer names (optional)
         alpha: Significance level (default: 0.05)
-        
+
     Returns:
         Dictionary with:
         - critical_distance: Critical difference for significance
@@ -939,26 +996,26 @@ def nemenyi_test(data: np.ndarray, optimizer_names: Optional[List[str]] = None, 
     """
     if data.ndim != 2:
         raise ValueError("Data must be 2D array (n_datasets x n_optimizers)")
-    
+
     n_datasets, n_optimizers = data.shape
-    
+
     # Compute ranks
     ranks = np.zeros_like(data)
     for i in range(n_datasets):
         ranks[i, :] = stats.rankdata(-data[i, :])
-    
+
     mean_ranks = ranks.mean(axis=0)
-    
+
     # Critical difference for Nemenyi test
     # CD = q_α * sqrt(k(k+1) / (6N))
     # where q_α is the critical value from Studentized range distribution
     q_alpha = {
-        0.05: {2: 1.960, 3: 2.343, 4: 2.569, 5: 2.728, 6: 2.850, 
+        0.05: {2: 1.960, 3: 2.343, 4: 2.569, 5: 2.728, 6: 2.850,
                7: 2.949, 8: 3.031, 9: 3.102, 10: 3.164},
         0.10: {2: 1.645, 3: 2.052, 4: 2.291, 5: 2.459, 6: 2.589,
                7: 2.693, 8: 2.780, 9: 2.855, 10: 2.920}
     }
-    
+
     # Get q value (use linear interpolation if needed)
     if alpha in q_alpha and n_optimizers in q_alpha[alpha]:
         q = q_alpha[alpha][n_optimizers]
@@ -966,22 +1023,22 @@ def nemenyi_test(data: np.ndarray, optimizer_names: Optional[List[str]] = None, 
         # Fallback: use approximate formula
         # For α=0.05: q ≈ 1.96 + 0.37 * sqrt(k-2) (rough approximation)
         q = 1.96 + 0.37 * np.sqrt(max(0, n_optimizers - 2))
-    
+
     critical_distance = q * np.sqrt(n_optimizers * (n_optimizers + 1) / (6 * n_datasets))
-    
+
     # Pairwise comparisons
     pairwise_diffs = np.abs(mean_ranks[:, None] - mean_ranks[None, :])
-    
+
     significant_pairs = []
     for i in range(n_optimizers):
         for j in range(i + 1, n_optimizers):
             rank_diff = abs(mean_ranks[i] - mean_ranks[j])
             is_significant = rank_diff > critical_distance
             significant_pairs.append((i, j, rank_diff, is_significant))
-    
+
     if optimizer_names is None:
         optimizer_names = [f"Optimizer {i+1}" for i in range(n_optimizers)]
-    
+
     return {
         'critical_distance': critical_distance,
         'pairwise_differences': pairwise_diffs,
@@ -1001,12 +1058,12 @@ def print_friedman_results(results: Dict):
     logging.info(f"Number of optimizers: {results['n_optimizers']}")
     logging.info(f"Friedman χ² statistic: {results['statistic']:.4f}")
     logging.info(f"P-value: {results['p_value']:.6f}")
-    
+
     if results['significant']:
         logging.info(f"SIGNIFICANT: Optimizers differ significantly (p < 0.05)")
     else:
         logging.info(f"NOT SIGNIFICANT: No significant difference between optimizers")
-    
+
     logging.info(f"\nAverage Ranks (lower is better):")
     sorted_indices = np.argsort(results['mean_ranks'])
     for rank_order, idx in enumerate(sorted_indices, 1):
@@ -1025,27 +1082,27 @@ def print_nemenyi_results(results: Dict):
     logging.info(f"Significance level: α = {results['alpha']}")
     logging.info(f"\nPairwise Comparisons:")
     logging.info(f"{'─'*70}")
-    
+
     optimizer_names = results['optimizer_names']
     for i, j, rank_diff, is_sig in results['significant_pairs']:
         status = "SIGNIFICANT" if is_sig else "  Not significant"
         logging.info(f"{status}: {optimizer_names[i]} vs {optimizer_names[j]}")
         logging.info(f"           Rank difference: {rank_diff:.4f} (CD = {results['critical_distance']:.4f})")
-    
+
     logging.info(f"{'='*70}\n")
 
 
-def plot_critical_difference_diagram(mean_ranks: np.ndarray, 
+def plot_critical_difference_diagram(mean_ranks: np.ndarray,
                                      optimizer_names: List[str],
                                      critical_distance: float,
                                      title: str = "Critical Difference Diagram",
                                      save_path: Optional[str] = None):
     """
     Plot Critical Difference (CD) diagram for visualizing Nemenyi results.
-    
+
     This is the standard visualization for optimizer rankings, as used in
     Demšar (JMLR 2006) and countless ML papers.
-    
+
     Args:
         mean_ranks: Average ranks for each optimizer
         optimizer_names: List of optimizer names
@@ -1055,57 +1112,57 @@ def plot_critical_difference_diagram(mean_ranks: np.ndarray,
     """
     import matplotlib.pyplot as plt
     from matplotlib.patches import Rectangle
-    
+
     n_optimizers = len(mean_ranks)
     sorted_indices = np.argsort(mean_ranks)
     sorted_ranks = mean_ranks[sorted_indices]
     sorted_names = [optimizer_names[i] for i in sorted_indices]
-    
+
     fig, ax = plt.subplots(figsize=(12, 6))
-    
+
     # Plot horizontal line for ranks
     ax.plot([1, n_optimizers], [0, 0], 'k-', linewidth=2)
-    
+
     # Plot each optimizer
     y_offset = 0
     for i, (rank, name) in enumerate(zip(sorted_ranks, sorted_names)):
         # Alternate y positions for readability
         y_pos = y_offset + 0.2 * (i % 2)
-        
+
         # Plot point
         ax.plot(rank, y_pos, 'o', markersize=12, color=f'C{i}')
-        
+
         # Add label
         ax.text(rank, y_pos + 0.15, name, ha='center', va='bottom', fontsize=10)
-    
+
     # Draw critical difference bars
     for i in range(n_optimizers):
         for j in range(i + 1, n_optimizers):
             if abs(sorted_ranks[i] - sorted_ranks[j]) <= critical_distance:
                 # Not significantly different - draw connecting bar
                 y_bar = -0.3 - 0.1 * (i + j) % 3
-                ax.plot([sorted_ranks[i], sorted_ranks[j]], [y_bar, y_bar], 
+                ax.plot([sorted_ranks[i], sorted_ranks[j]], [y_bar, y_bar],
                        'k-', linewidth=3)
-    
+
     # Add CD annotation
     ax.annotate('', xy=(1, -0.6), xytext=(1 + critical_distance, -0.6),
                 arrowprops=dict(arrowstyle='<->', lw=2, color='red'))
     ax.text(1 + critical_distance/2, -0.75, f'CD = {critical_distance:.2f}',
             ha='center', fontsize=12, color='red', weight='bold')
-    
+
     ax.set_xlim(0.5, n_optimizers + 0.5)
     ax.set_ylim(-1, 0.8)
     ax.set_xlabel('Average Rank', fontsize=14)
     ax.set_title(title, fontsize=16, weight='bold')
     ax.set_yticks([])
     ax.grid(axis='x', alpha=0.3)
-    
+
     plt.tight_layout()
-    
+
     if save_path:
         plt.savefig(str(save_path), dpi=300, bbox_inches='tight')
         logging.info(f"Critical Difference diagram saved to {save_path}")
-    
+
     plt.show()
     return fig
 
@@ -1118,42 +1175,42 @@ def plot_critical_difference_diagram(mean_ranks: np.ndarray,
 def bonferroni_correction(p_values: List[float], alpha: float = 0.05) -> Tuple[List[bool], float]:
     """
     Apply Bonferroni correction for multiple comparisons.
-    
+
     Most conservative method: α_adjusted = α / n_comparisons
-    
+
     Args:
         p_values: List of p-values
         alpha: Family-wise error rate (default: 0.05)
-        
+
     Returns:
         Tuple of (significant_tests, adjusted_alpha)
     """
     n_comparisons = len(p_values)
     adjusted_alpha = alpha / n_comparisons
     significant = [p < adjusted_alpha for p in p_values]
-    
+
     return significant, adjusted_alpha
 
 
 def holm_bonferroni_correction(p_values: List[float], alpha: float = 0.05) -> List[bool]:
     """
     Apply Holm-Bonferroni correction (less conservative than Bonferroni).
-    
+
     Step-down procedure that adjusts alpha based on rank.
-    
+
     Args:
         p_values: List of p-values
         alpha: Family-wise error rate (default: 0.05)
-        
+
     Returns:
         List of booleans indicating significance
     """
     n = len(p_values)
-    
+
     # Sort p-values and keep track of original indices
     sorted_indices = np.argsort(p_values)
     sorted_p_values = np.array(p_values)[sorted_indices]
-    
+
     # Test each p-value
     significant = np.zeros(n, dtype=bool)
     for i, p in enumerate(sorted_p_values):
@@ -1163,29 +1220,29 @@ def holm_bonferroni_correction(p_values: List[float], alpha: float = 0.05) -> Li
         else:
             # Once we fail to reject, stop (step-down)
             break
-    
+
     return significant.tolist()
 
 
 def benjamini_hochberg_correction(p_values: List[float], alpha: float = 0.05) -> List[bool]:
     """
     Apply Benjamini-Hochberg correction (controls False Discovery Rate).
-    
+
     Less conservative than Bonferroni/Holm, good for exploratory analysis.
-    
+
     Args:
         p_values: List of p-values
         alpha: False discovery rate (default: 0.05)
-        
+
     Returns:
         List of booleans indicating significance
     """
     n = len(p_values)
-    
+
     # Sort p-values and keep track of original indices
     sorted_indices = np.argsort(p_values)
     sorted_p_values = np.array(p_values)[sorted_indices]
-    
+
     # Find largest i where p(i) <= (i/n) * alpha
     significant = np.zeros(n, dtype=bool)
     for i in range(n - 1, -1, -1):
@@ -1195,7 +1252,7 @@ def benjamini_hochberg_correction(p_values: List[float], alpha: float = 0.05) ->
             for j in range(i + 1):
                 significant[sorted_indices[j]] = True
             break
-    
+
     return significant.tolist()
 
 
@@ -1207,38 +1264,38 @@ def compare_multiple_optimizers(
 ) -> pd.DataFrame:
     """
     Perform pairwise comparisons with multiple testing correction.
-    
+
     Args:
         results_dict: Dictionary mapping optimizer names to result arrays
         correction_method: 'bonferroni', 'holm', 'bh' (Benjamini-Hochberg), or 'none'
         alpha: Significance level
         metric: Metric name
-        
+
     Returns:
         DataFrame with comparison results
     """
     optimizer_names = list(results_dict.keys())
     n_optimizers = len(optimizer_names)
-    
+
     # Perform all pairwise comparisons
     comparisons = []
     p_values = []
-    
+
     for i in range(n_optimizers):
         for j in range(i + 1, n_optimizers):
             name_A = optimizer_names[i]
             name_B = optimizer_names[j]
             results_A = results_dict[name_A]
             results_B = results_dict[name_B]
-            
+
             # T-test
             result = compare_optimizers_ttest(results_A, results_B, name_A, name_B, metric)
-            
+
             # Use effect_size field which works for both parametric and non-parametric
             effect_size_val = result.get('effect_size', result.get('cohens_d', 0.0))
             if effect_size_val is None:
                 effect_size_val = 0.0
-            
+
             comparisons.append({
                 'Optimizer A': name_A,
                 'Optimizer B': name_B,
@@ -1254,7 +1311,7 @@ def compare_multiple_optimizers(
                 'Cohen\'s d': result.get('cohens_d')  # Keep for backward compatibility
             })
             p_values.append(result['p_value'])
-    
+
     # Apply correction
     if correction_method == 'bonferroni':
         significant, adj_alpha = bonferroni_correction(p_values, alpha)
@@ -1268,14 +1325,14 @@ def compare_multiple_optimizers(
     else:  # 'none'
         significant = [p < alpha for p in p_values]
         correction_name = "None (uncorrected)"
-    
+
     # Add significance flags
     for i, comp in enumerate(comparisons):
         comp['Significant (raw)'] = comp['p-value'] < alpha
         comp['Significant (corrected)'] = significant[i]
-    
+
     df = pd.DataFrame(comparisons)
-    
+
     logging.info(f"\n{'='*80}")
     logging.info(f"Multiple Comparison Analysis ({len(optimizer_names)} optimizers, {len(comparisons)} comparisons)")
     logging.info(f"Correction method: {correction_name}")
@@ -1286,7 +1343,7 @@ def compare_multiple_optimizers(
     logging.info(f"  Significant (raw, α={alpha}): {sum(df['Significant (raw)'])}/{len(comparisons)}")
     logging.info(f"  Significant (corrected): {sum(df['Significant (corrected)'])}/{len(comparisons)}")
     logging.info(f"{'='*80}\n")
-    
+
     return df
 
 
@@ -1295,33 +1352,33 @@ def main():
     print("="*80)
     logging.info("Statistical Analysis Module - Complete Demo")
     print("="*80)
-    
+
     # ========================================================================
     # Example 1: Basic T-Test
     # ========================================================================
     logging.info("\n### EXAMPLE 1: Basic T-Test ###\n")
-    
+
     # Simulate results (replace with actual data loading)
     np.random.seed(42)
     adamw_results = np.random.normal(0.975, 0.005, size=10)  # Mean 97.5%, std 0.5%
     sgdm_results = np.random.normal(0.976, 0.003, size=10)   # Mean 97.6%, std 0.3%
-    
+
     # Perform t-test
     result = compare_optimizers_ttest(
-        adamw_results, 
+        adamw_results,
         sgdm_results,
         name_A="AdamW",
         name_B="SGD+Momentum",
         metric="test_accuracy"
     )
-    
+
     print_ttest_results(result)
-    
+
     # ========================================================================
     # Example 2: Power Analysis
     # ========================================================================
     logging.info("\n### EXAMPLE 2: Power Analysis ###\n")
-    
+
     power_report = power_analysis_report(
         adamw_results,
         sgdm_results,
@@ -1329,14 +1386,14 @@ def main():
         name_B="SGD+Momentum",
         target_power=0.8
     )
-    
+
     print_power_analysis(power_report)
-    
+
     # ========================================================================
     # Example 3: Multiple Comparisons
     # ========================================================================
     logging.info("\n### EXAMPLE 3: Multiple Comparisons ###\n")
-    
+
     # Simulate results for 4 optimizers
     np.random.seed(42)
     results_dict = {
@@ -1345,7 +1402,7 @@ def main():
         'RMSProp': np.random.normal(0.970, 0.005, size=10),
         'Adam': np.random.normal(0.975, 0.005, size=10)
     }
-    
+
     logging.info("\n--- Holm-Bonferroni Correction (Recommended) ---")
     df_holm = compare_multiple_optimizers(
         results_dict,
@@ -1353,7 +1410,7 @@ def main():
         alpha=0.05,
         metric='test_accuracy'
     )
-    
+
     logging.info("\n--- Bonferroni Correction (Most Conservative) ---")
     df_bonf = compare_multiple_optimizers(
         results_dict,
@@ -1361,7 +1418,7 @@ def main():
         alpha=0.05,
         metric='test_accuracy'
     )
-    
+
     logging.info("\n--- Benjamini-Hochberg Correction (Less Conservative) ---")
     df_bh = compare_multiple_optimizers(
         results_dict,
@@ -1369,24 +1426,24 @@ def main():
         alpha=0.05,
         metric='test_accuracy'
     )
-    
+
     # ========================================================================
     # Example 4: Sample Size Recommendations
     # ========================================================================
     logging.info("\n### EXAMPLE 4: Sample Size Recommendations ###\n")
-    
+
     effect_sizes = [0.2, 0.5, 0.8]
     effect_names = ['Small', 'Medium', 'Large']
-    
+
     logging.info("Required sample sizes for 80% power (α=0.05, two-sided):")
     cohens_d_label = "Cohen's d"
     logging.info("%-15s %-12s %-12s", 'Effect Size', cohens_d_label, 'Required n')
     print("-" * 40)
-    
+
     for name, d in zip(effect_names, effect_sizes):
         required_n = compute_required_sample_size(d, power=0.8, alpha=0.05)
         logging.info("%-15s %-12.1f %-12d", name, d, required_n)
-    
+
     print("\n" + "="*80)
     logging.info("Demo complete!")
     print("="*80)
@@ -1403,12 +1460,12 @@ def test_normality(
 ) -> Dict:
     """
     Test if data follows a normal distribution.
-    
+
     Args:
         data: Array of values to test
         method: Test method ('shapiro', 'anderson', 'kstest')
         alpha: Significance level
-        
+
     Returns:
         Dictionary with test results
     """
@@ -1421,13 +1478,13 @@ def test_normality(
             'normal': None,
             'warning': 'Sample size too small'
         }
-    
+
     if method == 'shapiro':
         # Shapiro-Wilk test (good for n < 5000)
         # Use safe_shapiro helper to prevent warnings
         result = safe_shapiro(data, alpha=alpha)
         return result
-        
+
     elif method == 'anderson':
         # Anderson-Darling test
         result = stats.anderson(data, dist='norm')
@@ -1438,7 +1495,7 @@ def test_normality(
             crit_idx = 4  # 1% significance
         else:
             crit_idx = 2  # default to 5%
-        
+
         # Use getattr guards for third-party return objects to satisfy static checking
         statistic = getattr(result, 'statistic', float('nan'))
         crit_vals = getattr(result, 'critical_values', None)
@@ -1446,7 +1503,7 @@ def test_normality(
         normal = statistic < critical_value
         p_value = None  # Anderson-Darling doesn't return p-value directly
         interpretation = f"Data {'appears' if normal else 'does not appear'} normally distributed (A²={statistic:.4f}, critical={critical_value:.4f})"
-        
+
     elif method == 'kstest':
         # Kolmogorov-Smirnov test
         # Fit normal distribution to data
@@ -1454,10 +1511,10 @@ def test_normality(
         statistic, p_value = stats.kstest(data, 'norm', args=(mu, sigma))
         normal = p_value > alpha
         interpretation = f"Data {'appears' if normal else 'does not appear'} normally distributed (D={statistic:.4f}, p={p_value:.4f})"
-        
+
     else:
         raise ValueError(f"Unknown method: {method}. Use 'shapiro', 'anderson', or 'kstest'")
-    
+
     return {
         'method': method,
         'statistic': statistic,
@@ -1479,40 +1536,40 @@ def compare_optimizers_mann_whitney(
 ) -> Dict:
     """
     Non-parametric comparison using Mann-Whitney U test (for independent samples).
-    
+
     Use when:
     - Data is not normally distributed
     - Sample sizes are small
     - Outliers are present
-    
+
     Args:
         results_A: Array of metric values for optimizer A
         results_B: Array of metric values for optimizer B
         name_A, name_B: Names for display
         alternative: 'two-sided', 'less', or 'greater'
         alpha: Significance level
-        
+
     Returns:
         Dictionary with test results
     """
     # Compute statistics
     median_A = np.median(results_A)
     median_B = np.median(results_B)
-    
+
     # Mann-Whitney U test
     statistic, p_value = stats.mannwhitneyu(
         results_A,
         results_B,
         alternative=alternative
     )
-    
+
     # Effect size (rank-biserial correlation)
     # r = 1 - (2U) / (n1 * n2)
     n_A, n_B = len(results_A), len(results_B)
     r = 1 - (2 * statistic) / (n_A * n_B)
-    
+
     significant = p_value < alpha
-    
+
     return {
         'name_A': name_A,
         'name_B': name_B,
@@ -1540,30 +1597,30 @@ def compare_optimizers_wilcoxon(
 ) -> Dict:
     """
     Non-parametric comparison using Wilcoxon signed-rank test (for paired samples).
-    
+
     Use when:
     - Comparing same optimizers on different problems
     - Data is paired/matched
     - Distribution is not normal
-    
+
     Args:
         results_A: Array of metric values for optimizer A
         results_B: Array of metric values for optimizer B
         name_A, name_B: Names for display
         alternative: 'two-sided', 'less', or 'greater'
         alpha: Significance level
-        
+
     Returns:
         Dictionary with test results
     """
     if len(results_A) != len(results_B):
         raise ValueError("Wilcoxon test requires paired samples of equal length")
-    
+
     # Compute statistics
     median_A = float(np.median(results_A))
     median_B = float(np.median(results_B))
     median_diff = float(np.median(results_A - results_B))
-    
+
     # Wilcoxon signed-rank test
     statistic, p_value = stats.wilcoxon(
         results_A,
@@ -1588,15 +1645,15 @@ def compare_optimizers_wilcoxon(
 
     statistic = _to_float_like(statistic)
     p_value = _to_float_like(p_value)
-    
+
     # Effect size (rank-biserial correlation for paired samples)
     # r = Z / sqrt(n)
     n = len(results_A)
     z_score = stats.norm.ppf(1 - p_value / 2) if p_value < 1 else 0.0
     r = float(z_score) / np.sqrt(n) if n > 0 else 0.0
-    
+
     significant = p_value < alpha
-    
+
     return {
         'name_A': name_A,
         'name_B': name_B,
@@ -1624,30 +1681,30 @@ def auto_select_test(
 ) -> Dict:
     """
     Automatically select appropriate statistical test based on normality.
-    
+
     Decision tree:
     1. Test normality of both samples
     2. If both normal: use t-test
     3. If not normal:
        - If paired: use Wilcoxon signed-rank
        - If independent: use Mann-Whitney U
-    
+
     Args:
         results_A: Array of metric values for optimizer A
         results_B: Array of metric values for optimizer B
         paired: Whether samples are paired
         alpha: Significance level
         name_A, name_B: Names for display
-        
+
     Returns:
         Dictionary with test results and normality info
     """
     # Test normality
     normality_A = test_normality(results_A, method='shapiro', alpha=alpha)
     normality_B = test_normality(results_B, method='shapiro', alpha=alpha)
-    
+
     both_normal = normality_A['normal'] and normality_B['normal']
-    
+
     # Select test
     if both_normal:
         # Parametric test
@@ -1669,7 +1726,7 @@ def auto_select_test(
                 alternative='two-sided', alpha=alpha
             )
             test_type = 'non-parametric (Mann-Whitney U)'
-    
+
     # Combine results
     result = {
         'test_type': test_type,
@@ -1677,7 +1734,7 @@ def auto_select_test(
         'normality_B': normality_B,
         'test_result': test_result
     }
-    
+
     return result
 
 
@@ -1696,13 +1753,13 @@ def print_nonparametric_results(result: Dict) -> None:
     logging.info(f"\n{result['test']} Results:")
     logging.info(f"  {result['name_A']}: median = {result['median_A']:.4f}, n = {result['n_A']}")
     logging.info(f"  {result['name_B']}: median = {result['median_B']:.4f}, n = {result['n_B']}")
-    
+
     if 'U_statistic' in result:
         logging.info(f"  U statistic: {result['U_statistic']:.2f}")
     elif 'W_statistic' in result:
         logging.info(f"  W statistic: {result['W_statistic']:.2f}")
         logging.info(f"  Median difference: {result['median_diff']:.4f}")
-    
+
     logging.info(f"  P-value: {result['p_value']:.4f}")
     logging.info(f"  Effect size (r): {result['effect_size_r']:.4f}")
     logging.info(f"  Significant (α={result['alpha']}): {result['significant']}")

@@ -273,14 +273,14 @@ def download_medmnist(dataset_name: str = 'pathmnist', strict: bool = False) -> 
 
     This is a lightweight, public collection of standardized medical image datasets
     suitable for experiments and does not require controlled-access credentials.
-    
+
     Args:
         dataset_name: Name of MedMNIST dataset to download
         strict: If True, raise error when MedMNIST is unavailable (for production runs)
-    
+
     Returns:
         True if successful, False otherwise
-    
+
     Raises:
         RuntimeError: If strict=True and medmnist is not available
     """

@@ -94,7 +94,7 @@ def evaluate(model: Any, loader: DataLoader, device: torch.device) -> Tuple[floa
 def run_single_imdb(optimizer_name: str, seed: int, lr: float, epochs: int, batch_size: int, results_dir: Path, resume: bool = False, full_data: bool = False, momentum: float = 0.9):
     """
     Run IMDB sentiment classification with BERT.
-    
+
     Args:
         optimizer_name: Name of optimizer (AdamW, SGD, SGD_Momentum)
         seed: Random seed
@@ -105,7 +105,7 @@ def run_single_imdb(optimizer_name: str, seed: int, lr: float, epochs: int, batc
         resume: Skip if results exist
         full_data: If True, use full IMDB dataset (25K train, 25K test). If False, use 2K/1K subset.
         momentum: Momentum coefficient for SGD-based optimizers
-    
+
     Added full_data parameter to avoid "Toy Benchmark" deception.
     For publication, MUST use full_data=True to ensure sufficient statistical power.
     """
@@ -127,11 +127,11 @@ def run_single_imdb(optimizer_name: str, seed: int, lr: float, epochs: int, batc
     # Set environment variables to avoid warnings
     import os
     os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-    
+
     # Suppress unnecessary transformers warnings
     import warnings
     warnings.filterwarnings('ignore', message='Some weights.*were not initialized')
-    
+
     import transformers
     transformers.logging.set_verbosity_error()
 
@@ -139,15 +139,20 @@ def run_single_imdb(optimizer_name: str, seed: int, lr: float, epochs: int, batc
     set_seed(seed)
 
     # Data - robust loading with fallback for environment compatibility
+    cache_dir = os.environ.get('HUGGINGFACE_CACHE_DIR', None)
+    if cache_dir is None:
+        import tempfile
+        cache_dir = str(Path(tempfile.gettempdir()) / 'hf_cache')
+
     try:
-        raw = load_dataset('imdb', cache_dir='/tmp/hf_cache')
+        raw = load_dataset('imdb', cache_dir=cache_dir)
     except (ValueError, Exception) as e:
-        print(f"Warning: Failed to load IMDB dataset: {e}")
-        print("Trying alternative loading method...")
+        logging.warning("Failed to load IMDB dataset using cache_dir=%s: %s", cache_dir, e)
+        logging.info("Trying alternative loading method...")
         try:
             raw = load_dataset('imdb', trust_remote_code=True)
         except Exception as e2:
-            print(f"Error: Could not load IMDB dataset: {e2}")
+            logging.error("Could not load IMDB dataset: %s", e2, exc_info=True)
             raise RuntimeError("Failed to load IMDB dataset. Check HuggingFace/fsspec versions.") from e2
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
 
@@ -185,7 +190,7 @@ def run_single_imdb(optimizer_name: str, seed: int, lr: float, epochs: int, batc
         train_size = 2000
         test_size = 1000
         logging.warning("[TOY MODE] Using LIMITED subset (2K/1K). NOT suitable for publication claims.")
-    
+
     if _HFDataset is not None and isinstance(train_ds, _HFDataset):
         try:
             train_dataset = train_ds.shuffle(seed=seed).select(range(min(train_size, len(train_ds))))
@@ -345,7 +350,7 @@ def run_single_imdb(optimizer_name: str, seed: int, lr: float, epochs: int, batc
     # Use optimizer registry for consistency
     # This ensures proper hyperparameter management across all experiments
     from src.core.optimizer_registry import create_optimizer_from_config
-    
+
     optimizer_config = {'name': optimizer_name, 'lr': lr}
     try:
         optimizer = create_optimizer_from_config(optimizer_config, model.parameters())
@@ -441,7 +446,7 @@ def main():
         lr = args.lr_adamw if opt.upper().startswith('ADAMW') else args.lr_sgd
         for seed in seeds:
             try:
-                run_single_imdb(opt, seed, lr, args.epochs, args.batch_size, Path('results'), 
+                run_single_imdb(opt, seed, lr, args.epochs, args.batch_size, Path('results'),
                               resume=args.resume, full_data=args.full_data, momentum=args.momentum)
             except RuntimeError as e:
                 print(str(e))

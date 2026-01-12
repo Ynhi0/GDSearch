@@ -57,8 +57,9 @@ def set_seed(seed: int):
     try:
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+        logging.debug("Could not set cudnn deterministic flags: %s", e, exc_info=True)
 
 
 class SegDataset(Dataset):
@@ -311,7 +312,8 @@ def compute_statistics(results_dir: str):
         _, pB = stats.shapiro(b)
         if pA > 0.05 and pB > 0.05:
             test = 'Paired t-test'
-            stat, p = stats.ttest_rel(a, b)
+            from src.analysis.statistical_analysis import safe_ttest_rel
+            stat, p = safe_ttest_rel(a, b)
             eff_name = "Cohen's d"
             eff = (a - b).mean() / (a - b).std(ddof=1)
         else:

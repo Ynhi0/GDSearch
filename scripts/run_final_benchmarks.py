@@ -36,21 +36,21 @@ from src.core.test_functions import Rosenbrock, IllConditionedQuadratic, SaddleP
 def run_mnist_experiments(seeds: Optional[List[int]] = None, results_dir: str = 'results'):
     """
     Run comprehensive MNIST experiments with multiple optimizers and seeds.
-    
+
     Args:
         seeds: Optional list of random seeds (default: 10 seeds from 1-10)
         results_dir: Output directory
     """
     if seeds is None:
         seeds = list(range(1, 11))  # Seeds 1-10 for statistical validity
-    
+
     print("="*80)
     print("MNIST EXPERIMENTS - HIGH QUALITY")
     print("="*80)
     print(f"Number of seeds: {len(seeds)}")
     print(f"Seeds: {seeds}")
     print("="*80)
-    
+
     # Define optimizer configurations for MNIST
     base_configs = [
         {
@@ -101,7 +101,7 @@ def run_mnist_experiments(seeds: Optional[List[int]] = None, results_dir: str = 
             'tag': 'final'
         }
     ]
-    
+
     # Generate configs for all seeds
     all_configs = []
     for base_config in base_configs:
@@ -109,13 +109,13 @@ def run_mnist_experiments(seeds: Optional[List[int]] = None, results_dir: str = 
             config = base_config.copy()
             config['seed'] = seed
             all_configs.append(config)
-    
+
     print(f"\nTotal experiments to run: {len(all_configs)}")
     print("\nRunning experiments...")
-    
+
     from tqdm import tqdm
     results_files = []
-    
+
     for config in tqdm(all_configs, desc="MNIST experiments"):
         try:
             df = train_and_evaluate(config)
@@ -126,7 +126,7 @@ def run_mnist_experiments(seeds: Optional[List[int]] = None, results_dir: str = 
         except Exception as e:
             print(f"\n⚠️  Error in experiment {config.get('optimizer')}_seed{config.get('seed')}: {e}")
             continue
-    
+
     print(f"\n✅ Completed {len(results_files)}/{len(all_configs)} experiments")
     return results_files
 
@@ -138,7 +138,7 @@ def run_statistical_analysis(results_dir: str = 'results', plots_dir: str = 'plo
     print("\n" + "="*80)
     print("STATISTICAL ANALYSIS")
     print("="*80)
-    
+
     # Define comparison pairs (all pairwise comparisons)
     comparison_pairs = [
         ('SGD', 'SGD_Momentum'),
@@ -152,19 +152,19 @@ def run_statistical_analysis(results_dir: str = 'results', plots_dir: str = 'plo
         ('Adam', 'AMSGrad'),
         ('AdamW', 'AMSGrad'),
     ]
-    
+
     # Create a minimal config for the analysis pipeline
     config = {
         'task': 'neural_network',
         'model': 'SimpleMLP',
         'dataset': 'MNIST',
     }
-    
+
     # Save temp config
     config_path = os.path.join(results_dir, 'temp_analysis_config.json')
     with open(config_path, 'w') as f:
         json.dump(config, f)
-    
+
     # Run analysis (without re-running experiments)
     from src.analysis.statistical_analysis import (
         load_multiseed_results,
@@ -173,25 +173,25 @@ def run_statistical_analysis(results_dir: str = 'results', plots_dir: str = 'plo
         holm_bonferroni_correction,
         power_analysis_report
     )
-    
+
     import glob
-    
+
     summary_rows = []
     p_values = []
-    
+
     for opt_A, opt_B in comparison_pairs:
         print(f"\nComparing {opt_A} vs {opt_B}...")
-        
+
         pattern_A = f"*{opt_A}*seed*final.csv"
         pattern_B = f"*{opt_B}*seed*final.csv"
-        
+
         files_A = glob.glob(os.path.join(results_dir, pattern_A))
         files_B = glob.glob(os.path.join(results_dir, pattern_B))
-        
+
         if not files_A or not files_B:
             print(f"  ⚠️  Missing results, skipping")
             continue
-        
+
         # Extract seeds and final accuracies
         def extract_seed_and_metric(fname):
             import re
@@ -204,39 +204,39 @@ def run_statistical_analysis(results_dir: str = 'results', plots_dir: str = 'plo
                 acc = safe_to_float(eval_df['test_accuracy'])
                 return seed, acc
             return None, None
-        
+
         map_A = {}
         map_B = {}
-        
+
         for f in files_A:
             s, acc = extract_seed_and_metric(f)
             if s is not None and acc is not None:
                 map_A[s] = acc
-        
+
         for f in files_B:
             s, acc = extract_seed_and_metric(f)
             if s is not None and acc is not None:
                 map_B[s] = acc
-        
+
         common_seeds = sorted(set(map_A) & set(map_B))
-        
+
         if len(common_seeds) < 3:
             print(f"  ⚠️  Insufficient common seeds ({len(common_seeds)}), skipping")
             continue
-        
+
         results_A = np.array([map_A[s] for s in common_seeds])
         results_B = np.array([map_B[s] for s in common_seeds])
-        
+
         # Statistical test
         auto = auto_select_test(results_A, results_B, paired=True, name_A=opt_A, name_B=opt_B)
         test_result = auto['test_result']
         test_type = auto.get('test_type', 'unknown')
         p_value = float(test_result.get('p_value', 1.0))
         p_values.append(p_value)
-        
+
         # Power analysis
         power_report = power_analysis_report(results_A, results_B, name_A=opt_A, name_B=opt_B)
-        
+
         # Build row
         row = {
             'Optimizer A': opt_A,
@@ -250,46 +250,46 @@ def run_statistical_analysis(results_dir: str = 'results', plots_dir: str = 'plo
             'p-value': p_value,
             'Significant (α=0.05)': p_value < 0.05,
         }
-        
+
         # Handle new field structure with proper None checks
         effect_size_val = test_result.get('effect_size', test_result.get('cohens_d'))
         if effect_size_val is not None:
             row['Effect size'] = effect_size_val
             row['Effect size type'] = test_result.get('effect_size_type', 'unknown')
-        
+
         # Backward compatibility
         if test_result.get('cohens_d') is not None:
             row['Cohen\'s d'] = test_result['cohens_d']
         if 'effect_size_r' in test_result:
             row['Effect size (r)'] = test_result['effect_size_r']
-        
+
         row['Observed power'] = power_report['achieved_power']
         row['Required n (80%)'] = power_report['required_n']
-        
+
         summary_rows.append(row)
-        
+
         print(f"  Test: {test_type}")
         print(f"  p-value: {p_value:.4f}")
         print(f"  Power: {power_report['achieved_power']:.3f}")
-    
+
     # Apply Holm-Bonferroni correction
     if p_values:
         corrected = holm_bonferroni_correction(p_values, alpha=0.05)
         for i, row in enumerate(summary_rows):
             row['Significant (Holm-Bonferroni)'] = corrected[i]
-    
+
     # Save results
     df_stats = pd.DataFrame(summary_rows)
     stats_path = os.path.join(results_dir, 'mnist_statistical_comparisons_benchmark.csv')
     df_stats.to_csv(stats_path, index=False)
-    
+
     print(f"\n✅ Statistical analysis saved to: {stats_path}")
     print("\n" + "="*80)
     print("STATISTICAL SUMMARY")
     print("="*80)
     print(df_stats.to_string(index=False))
     print("="*80)
-    
+
     return df_stats
 
 
@@ -300,12 +300,12 @@ def run_2d_experiments(results_dir: str = 'results'):
     print("\n" + "="*80)
     print("2D OPTIMIZATION EXPERIMENTS")
     print("="*80)
-    
+
     # Run standard experiments
     configs = create_experiment_configs()
-    
+
     print(f"Running {len(configs)} 2D experiments...")
-    
+
     from tqdm import tqdm
     for config in tqdm(configs, desc="2D experiments"):
         df = run_single_experiment(
@@ -315,11 +315,11 @@ def run_2d_experiments(results_dir: str = 'results'):
             num_iterations=config['num_iterations'],
             seed=config['seed']
         )
-        
+
         exp_id = config.get('experiment_id', 'unknown')
         filepath = os.path.join(results_dir, f"{exp_id}.csv")
         df.to_csv(filepath, index=False)
-    
+
     print(f"✅ Completed {len(configs)} 2D experiments")
 
 
@@ -330,14 +330,14 @@ def run_robustness_analysis(results_dir: str = 'results', plots_dir: str = 'plot
     print("\n" + "="*80)
     print("INITIAL CONDITION ROBUSTNESS ANALYSIS")
     print("="*80)
-    
+
     # Test on all three test functions
     test_functions = [
         {'type': 'Rosenbrock', 'params': {'a': 1, 'b': 100}, 'center': (-1.5, 2.0), 'radius': 2.5},
         {'type': 'IllConditionedQuadratic', 'params': {'kappa': 100}, 'center': (1.0, 1.0), 'radius': 2.0},
         {'type': 'SaddlePoint', 'params': {}, 'center': (0.5, 0.5), 'radius': 1.5},
     ]
-    
+
     optimizer_configs = [
         {'type': 'SGD', 'params': {'lr': 0.001}},
         {'type': 'SGDMomentum', 'params': {'lr': 0.01, 'beta': 0.9}},
@@ -347,17 +347,17 @@ def run_robustness_analysis(results_dir: str = 'results', plots_dir: str = 'plot
         {'type': 'AdamW', 'params': {'lr': 0.01, 'weight_decay': 0.01}},
         {'type': 'AMSGrad', 'params': {'lr': 0.01}},
     ]
-    
+
     for func_cfg in test_functions:
         print(f"\nTesting on {func_cfg['type']}...")
-        
+
         initial_points = generate_initial_points(
             center=func_cfg['center'],
             radius=func_cfg['radius'],
             num_points=30,  # 30 initial conditions for statistical validity
             seed=42
         )
-        
+
         df_agg = run_robustness_experiment(
             optimizer_configs=optimizer_configs,
             function_config=func_cfg,
@@ -367,7 +367,7 @@ def run_robustness_analysis(results_dir: str = 'results', plots_dir: str = 'plot
             results_dir=results_dir,
             plots_dir=plots_dir
         )
-    
+
     print("✅ Robustness analysis complete")
 
 
@@ -378,10 +378,10 @@ def run_ablation_study(results_dir: str = 'results', plots_dir: str = 'plots'):
     print("\n" + "="*80)
     print("OPTIMIZER ABLATION STUDY")
     print("="*80)
-    
+
     rosenbrock = Rosenbrock(a=1, b=100)
     initial_point = (-1.5, 2.0)
-    
+
     df_summary = run_optimizer_ablation(
         test_function=rosenbrock,
         initial_point=initial_point,
@@ -389,7 +389,7 @@ def run_ablation_study(results_dir: str = 'results', plots_dir: str = 'plots'):
         results_dir=results_dir,
         plots_dir=plots_dir
     )
-    
+
     print("✅ Ablation study complete")
 
 
@@ -408,48 +408,48 @@ def main():
     print("5. Optimizer ablation study")
     print("\nEstimated time: 15-20 minutes")
     print("="*80)
-    
+
     response = input("\nProceed with full experiment suite? (yes/no): ")
     if response.lower() not in ['yes', 'y']:
         print("Aborted.")
         return
-    
+
     results_dir = 'results'
     plots_dir = 'plots'
     os.makedirs(results_dir, exist_ok=True)
     os.makedirs(plots_dir, exist_ok=True)
-    
+
     # 1. MNIST experiments
     print("\n" + "="*80)
     print("PHASE 1: MNIST NEURAL NETWORK EXPERIMENTS")
     print("="*80)
     seeds = list(range(1, 11))  # 10 seeds for statistical validity (n≥10 recommended)
     run_mnist_experiments(seeds=seeds, results_dir=results_dir)
-    
+
     # 2. Statistical analysis
     print("\n" + "="*80)
     print("PHASE 2: STATISTICAL ANALYSIS")
     print("="*80)
     df_stats = run_statistical_analysis(results_dir=results_dir, plots_dir=plots_dir)
-    
+
     # 3. 2D experiments
     print("\n" + "="*80)
     print("PHASE 3: 2D OPTIMIZATION EXPERIMENTS")
     print("="*80)
     run_2d_experiments(results_dir=results_dir)
-    
+
     # 4. Robustness analysis
     print("\n" + "="*80)
     print("PHASE 4: ROBUSTNESS ANALYSIS")
     print("="*80)
     run_robustness_analysis(results_dir=results_dir, plots_dir=plots_dir)
-    
+
     # 5. Ablation study
     print("\n" + "="*80)
     print("PHASE 5: ABLATION STUDY")
     print("="*80)
     run_ablation_study(results_dir=results_dir, plots_dir=plots_dir)
-    
+
     # Final summary
     print("\n" + "="*80)
     print(" EXPERIMENT SUITE COMPLETE ")

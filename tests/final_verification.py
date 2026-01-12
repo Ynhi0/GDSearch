@@ -69,7 +69,7 @@ try:
         has_fstring = 'logging.warning(f"Malformed convergence' in content
         has_percent = 'logging.warning("Malformed convergence %s' in content or \
                      'logging.warning("Failed to parse convergence' in content
-        
+
         if not has_fstring and has_percent:
             print("  [PASS] Logging format updated to lazy % formatting")
             tests_passed += 1

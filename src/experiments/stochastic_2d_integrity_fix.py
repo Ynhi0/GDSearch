@@ -22,6 +22,9 @@ from src.core.test_functions import (
     Rosenbrock, Ackley2D, SaddlePoint, IllConditionedQuadratic
 )
 
+# AUDIT FIX: Import safe file I/O utilities
+from src.utils.file_safety import safe_to_csv
+
 # Import optimizers
 from src.core.optimizers import SGD, SGDMomentum, Adam, RMSProp, SAM  # Fixed: RMSProp not RMSprop
 
@@ -39,16 +42,16 @@ def run_stochastic_2d_experiments(
 ) -> pd.DataFrame:
     """
     Run 2D optimization experiments with PROPER stochastic gradient noise.
-    
+
     This fixes the "Fake SGD" problem: deterministic analytical gradients
     are not SGD. Real SGD has gradient noise from mini-batch sampling.
-    
+
     Academic rigor improvements:
     - Injects gradient noise to simulate mini-batch stochasticity
     - Tests multiple test function topologies (valleys, saddles, multi-modal)
     - Uses realistic condition numbers (kappa >= 1000)
     - Applies multiplicative noise (vanishes at stationary points, like real SGD)
-    
+
     Args:
         results_dir: Output directory
         seeds: List of random seeds for reproducibility
@@ -56,20 +59,23 @@ def run_stochastic_2d_experiments(
         noise_type: 'multiplicative' (realistic, default) or 'additive' (simple)
         max_iter: Maximum iterations
         resume: Skip if results already exist
-    
+
     Returns:
         DataFrame with convergence results
     """
-    print("\n" + "="*80)
-    print("🔬 STOCHASTIC 2D OPTIMIZATION EXPERIMENTS (Proper SGD)")
-    print("="*80)
-    print(f"   Gradient Noise: {noise_type} (std={noise_std})")
-    print(f"   Note: Without noise, this is Gradient Descent (GD), NOT SGD!")
-    print("="*80)
-    
+    # AUDIT FIX: Import set_seed utility for proper multi-source seeding
+    from src.core.training_utils import set_seed
+
+    logging.info("\n" + "="*80)
+    logging.info("🔬 STOCHASTIC 2D OPTIMIZATION EXPERIMENTS (Proper SGD)")
+    logging.info("="*80)
+    logging.info("   Gradient Noise: %s (std=%s)", noise_type, noise_std)
+    logging.info("   Note: Without noise, this is Gradient Descent (GD), NOT SGD!")
+    logging.info("="*80)
+
     if seeds is None:
         seeds = [42, 123, 456]
-    
+
     # Check resume
     if resume:
         result_file = Path(results_dir) / "stochastic_2d_results.csv"
@@ -79,9 +85,9 @@ def run_stochastic_2d_experiments(
                 if len(df) > 0:
                     logging.info(f"Skipping Stochastic 2D experiment (already completed)")
                     return df
-            except Exception:
-                pass
-    
+            except Exception as e:
+                logging.debug("Could not read stochastic_2d_results.csv: %s", e, exc_info=True)
+
     # Test function suite (addresses "One-Trick Pony" problem)
     test_functions = [
         ("Rosenbrock_Easy", Rosenbrock(a=1, b=100), (-1.5, 2.0)),
@@ -92,7 +98,7 @@ def run_stochastic_2d_experiments(
         ("IllConditioned_Realistic", IllConditionedQuadratic(kappa=1000), (1.0, 1.0)),  # Matches NN difficulty
         ("IllConditioned_Hard", IllConditionedQuadratic(kappa=10000), (1.0, 1.0)),  # Extreme conditioning
     ]
-    
+
     # Optimizer configurations (load from config with fallback)
     optimizers = []
     try:
@@ -106,7 +112,7 @@ def run_stochastic_2d_experiments(
             sam_opt = SAM(**sam_cfg)
         except (ConfigurationError, FileNotFoundError):
             sam_opt = SAM(lr=0.01, rho=0.05, base_optimizer='SGD')
-        
+
         optimizers = [
             ("SGD", SGD(**sgd_cfg)),
             ("SGD_Momentum", SGDMomentum(**sgdm_cfg)),
@@ -124,32 +130,32 @@ def run_stochastic_2d_experiments(
             ("RMSProp", RMSProp(lr=0.01)),
             ("SAM", SAM(lr=0.01, rho=0.05, base_optimizer='SGD')),
         ]
-    
+
     results = []
-    
+
     for func_name, func, start_point in test_functions:
         print(f"\n[FUNCTION] {func_name}")
         print("-" * 40)
-        
+
         for opt_name, optimizer in optimizers:
             for seed in seeds:
                 np.random.seed(seed)
-                
+
                 # Initialize position
                 x, y = start_point
                 history = []
-                
+
                 # Reset optimizer state
                 optimizer.reset()
-                
+
                 for iteration in range(max_iter):
                     # Compute loss
                     loss = func.compute(x, y)
                     history.append({'iteration': iteration, 'x': x, 'y': y, 'loss': loss})
-                    
+
                     # Compute STOCHASTIC gradient (this is the key fix!)
                     grad_x, grad_y = func.gradient(x, y, noise_std=noise_std, noise_type=noise_type)
-                    
+
                     # Update parameters (with SAM-specific handling)
                     if isinstance(optimizer, SAM):
                         # SAM requires adversarial gradients
@@ -169,24 +175,24 @@ def run_stochastic_2d_experiments(
                             adv_y = y + rho_value * grad_dir_y
                         else:
                             adv_x, adv_y = x, y
-                        
+
                         # Compute gradient at adversarial point (with same noise characteristics)
                         adv_grad_x, adv_grad_y = func.gradient(adv_x, adv_y, noise_std=noise_std, noise_type=noise_type)
                         adversarial_gradients = (adv_grad_x, adv_grad_y)
-                        
+
                         # SAM step with adversarial gradients
                         x, y = optimizer.step((x, y), (grad_x, grad_y), adversarial_gradients=adversarial_gradients)
                     else:
                         # Standard optimizer step
                         x, y = optimizer.step((x, y), (grad_x, grad_y))
-                    
+
                     # Convergence check
                     if loss < 1e-8:
                         break
-                
+
                 final_loss = history[-1]['loss'] if history else float('nan')
                 converged = final_loss < 1e-6
-                
+
                 results.append({
                     'function': func_name,
                     'optimizer': opt_name,
@@ -199,29 +205,28 @@ def run_stochastic_2d_experiments(
                     'iterations': len(history),
                     'converged': converged
                 })
-                
+
                 print(f"  {opt_name:15s} (seed {seed}): Loss={final_loss:.6e}, Iters={len(history):4d}, Converged={converged}")
-    
-    # Save results
-    Path(results_dir).mkdir(parents=True, exist_ok=True)
+
+    # AUDIT FIX: Use safe_to_csv for automatic directory creation
     df = pd.DataFrame(results)
-    df.to_csv(f"{results_dir}/stochastic_2d_results.csv", index=False)
-    
-    print(f"\n💾 Results saved to {results_dir}/stochastic_2d_results.csv")
-    
+    output_path = safe_to_csv(df, f"{results_dir}/stochastic_2d_results.csv", index=False)
+
+    print(f"\n💾 Results saved to {output_path}")
+
     # Generate summary statistics
     print("\n" + "="*80)
     print("SUMMARY: Convergence Rate by Function and Optimizer")
     print("="*80)
-    
+
     summary = df.groupby(['function', 'optimizer']).agg({
         'converged': 'mean',
         'iterations': 'mean',
         'final_loss': 'mean'
     }).round(4)
-    
+
     print(summary)
-    
+
     return df
 
 
@@ -231,11 +236,11 @@ def compare_deterministic_vs_stochastic(
 ) -> Dict[str, pd.DataFrame]:
     """
     Compare deterministic GD (noise_std=0) vs. stochastic SGD (noise_std>0).
-    
+
     This experiment demonstrates the critical difference between:
     - Gradient Descent (GD): deterministic, follows exact gradient
     - Stochastic Gradient Descent (SGD): noisy gradients, can escape local minima
-    
+
     Returns:
         Dictionary with 'deterministic' and 'stochastic' DataFrames
     """
@@ -244,10 +249,10 @@ def compare_deterministic_vs_stochastic(
     print("="*80)
     print("   This demonstrates why gradient noise matters!")
     print("="*80)
-    
+
     if seeds is None:
         seeds = [42, 123, 456]
-    
+
     # Run deterministic (FAKE SGD)
     print("\n[PHASE 1] Running DETERMINISTIC Gradient Descent (noise_std=0)")
     print("   WARNING: This is NOT SGD, despite being called 'SGD' in code!")
@@ -258,7 +263,7 @@ def compare_deterministic_vs_stochastic(
         max_iter=5000,
         resume=False
     )
-    
+
     # Run stochastic (REAL SGD)
     print("\n[PHASE 2] Running STOCHASTIC Gradient Descent (noise_std=0.1)")
     print("   This is PROPER SGD with gradient noise!")
@@ -270,18 +275,18 @@ def compare_deterministic_vs_stochastic(
         max_iter=5000,
         resume=False
     )
-    
+
     # Compare
     print("\n" + "="*80)
     print("COMPARISON: Deterministic GD vs. Stochastic SGD")
     print("="*80)
-    
+
     comparison = []
     for func in df_deterministic['function'].unique():
         for opt in df_deterministic['optimizer'].unique():
             det_subset = df_deterministic[(df_deterministic['function'] == func) & (df_deterministic['optimizer'] == opt)]
             stoch_subset = df_stochastic[(df_stochastic['function'] == func) & (df_stochastic['optimizer'] == opt)]
-            
+
             comparison.append({
                 'function': func,
                 'optimizer': opt,
@@ -292,13 +297,13 @@ def compare_deterministic_vs_stochastic(
                 'GD_final_loss': det_subset['final_loss'].mean(),
                 'SGD_final_loss': stoch_subset['final_loss'].mean(),
             })
-    
+
     df_comparison = pd.DataFrame(comparison)
     Path(results_dir).mkdir(parents=True, exist_ok=True)
     df_comparison.to_csv(f"{results_dir}/gd_vs_sgd_comparison.csv", index=False)
-    
+
     print(df_comparison)
-    
+
     return {
         'deterministic': df_deterministic,
         'stochastic': df_stochastic,
@@ -309,7 +314,7 @@ def compare_deterministic_vs_stochastic(
 if __name__ == "__main__":
     # Run the critical experiment
     results = compare_deterministic_vs_stochastic()
-    
+
     print("\n" + "="*80)
     print("✅ SCIENTIFIC INTEGRITY RESTORED")
     print("="*80)

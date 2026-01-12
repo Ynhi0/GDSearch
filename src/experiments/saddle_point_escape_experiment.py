@@ -31,32 +31,32 @@ def run_saddle_point_escape_experiment(
 ) -> Dict:
     """
     Run saddle point escape experiment with Hessian eigenvalue tracking.
-    
+
     SCIENTIFIC FIX:
     A true saddle point escape experiment MUST:
     1. Initialize AT or very close to the saddle point (0,0) where ∇f = 0
     2. Use SGD noise (noise_std > 0) because deterministic GD cannot escape strict saddles
-    
+
     The SaddlePoint function f(x,y) = 0.5*(x² - y²) has:
     - Saddle at (0,0) with ∇f = (0, 0)
     - Eigenvalues λ = [1, -1] (mixed signs → saddle)
     - Without noise: optimizer CANNOT move from (0,0) since gradient is zero
     - With noise: stochastic perturbation allows escape along negative curvature direction
-    
+
     Args:
         initial_point: Starting point AT or near saddle (default: (1e-6, 0))
         max_iters: Maximum iterations
         eigenvalue_check_interval: Compute eigenvalues every N iterations
         output_dir: Directory to save results
         noise_std: Gradient noise standard deviation (default 0.01 for SGD simulation)
-        
+
     Returns:
         Dictionary with results for each optimizer
     """
     Path(output_dir).mkdir(parents=True, exist_ok=True)
-    
+
     test_fn = SaddlePoint()
-    
+
     # Validate scientific setup
     if noise_std == 0.0:
         logging.warning(
@@ -64,13 +64,13 @@ def run_saddle_point_escape_experiment(
             "GD cannot escape strict saddle points where ∇f=0.\n"
             "Set noise_std > 0 for realistic SGD saddle escape analysis."
         )
-    
+
     optimizers = {
         'SGD': SGD(lr=0.01),
         'SGD+Momentum': SGDMomentum(lr=0.01, beta=0.9),
         'Adam': Adam(lr=0.01, beta1=0.9, beta2=0.999)
     }
-    
+
     print("\n" + "="*60)
     print("SADDLE POINT ESCAPE EXPERIMENT")
     print("="*60)
@@ -82,15 +82,15 @@ def run_saddle_point_escape_experiment(
     print("  - Time to escape (iterations until lambda_min > 0)")
     print("  - Trajectory")
     print("="*60 + "\n")
-    
+
     all_results = {}
-    
+
     for opt_name, optimizer in optimizers.items():
         print(f"Running {opt_name}...")
-        
+
         optimizer.reset()
         x, y = initial_point
-        
+
         history = {
             'iteration': [],
             'x': [],
@@ -100,23 +100,23 @@ def run_saddle_point_escape_experiment(
             'lambda_min': [],
             'lambda_max': []
         }
-        
+
         escaped_saddle = False
         escape_iteration = None
-        
+
         for i in range(max_iters):
             loss = test_fn.compute(x, y)
             # GAP FIX: Add noise_std for true SGD simulation
             # Without noise, deterministic GD cannot escape saddle points where ∇f=0
             grad_x, grad_y = test_fn.gradient(x, y, noise_std=noise_std)
             grad_norm = np.linalg.norm([grad_x, grad_y])
-            
+
             history['iteration'].append(i)
             history['x'].append(x)
             history['y'].append(y)
             history['loss'].append(loss)
             history['grad_norm'].append(grad_norm)
-            
+
             # Compute Hessian eigenvalues periodically
             if i % eigenvalue_check_interval == 0:
                 try:
@@ -126,35 +126,35 @@ def run_saddle_point_escape_experiment(
                     eigenvalues, _ = np.linalg.eig(hessian)
                     lambda_min = float(np.min(eigenvalues))
                     lambda_max = float(np.max(eigenvalues))
-                    
+
                     history['lambda_min'].append(lambda_min)
                     history['lambda_max'].append(lambda_max)
-                    
+
                     # Check if escaped saddle point
                     distance_from_saddle = np.sqrt(x**2 + y**2)
-                    
+
                     if not escaped_saddle and distance_from_saddle > 0.5 and abs(loss) > 0.1:
                         escaped_saddle = True
                         escape_iteration = i
                         print(f"  {opt_name}: Escaped saddle at iteration {i}")
-                
+
                 except Exception as e:
                     logging.warning(f"Eigenvalue computation failed: {e}")
                     history['lambda_min'].append(np.nan)
                     history['lambda_max'].append(np.nan)
-            
+
             # Update
             x, y = optimizer.step((x, y), (grad_x, grad_y))
-            
+
             # Divergence check
             if not np.isfinite(x) or not np.isfinite(y):
                 print(f"  {opt_name}: Diverged at iteration {i}")
                 break
-        
+
         # Store results
         df = pd.DataFrame(history)
         df.to_csv(Path(output_dir) / f'{opt_name.replace("+", "_")}_trajectory.csv', index=False)
-        
+
         all_results[opt_name] = {
             'escaped': escaped_saddle,
             'escape_iteration': escape_iteration if escaped_saddle else max_iters,
@@ -162,12 +162,12 @@ def run_saddle_point_escape_experiment(
             'final_loss': history['loss'][-1] if history['loss'] else np.nan,
             'history': history
         }
-        
+
         print(f"  {opt_name}: Escape time = {escape_iteration if escaped_saddle else 'N/A'} iterations")
-    
+
     # Generate comparison plot
     fig, axes = plt.subplots(2, 2, figsize=(14, 12))
-    
+
     # Plot 1: Trajectories
     ax1 = axes[0, 0]
     for opt_name, result in all_results.items():
@@ -179,7 +179,7 @@ def run_saddle_point_escape_experiment(
     ax1.set_title('Optimizer Trajectories Near Saddle Point')
     ax1.legend()
     ax1.grid(alpha=0.3)
-    
+
     # Plot 2: Loss over time
     ax2 = axes[0, 1]
     for opt_name, result in all_results.items():
@@ -190,7 +190,7 @@ def run_saddle_point_escape_experiment(
     ax2.set_title('Loss Magnitude over Time')
     ax2.legend()
     ax2.grid(alpha=0.3)
-    
+
     # Plot 3: Gradient norm
     ax3 = axes[1, 0]
     for opt_name, result in all_results.items():
@@ -201,7 +201,7 @@ def run_saddle_point_escape_experiment(
     ax3.set_title('Gradient Norm over Time')
     ax3.legend()
     ax3.grid(alpha=0.3)
-    
+
     # Plot 4: Escape time comparison
     ax4 = axes[1, 1]
     escape_times = [all_results[opt]['escape_iteration'] for opt in optimizers.keys()]
@@ -211,11 +211,11 @@ def run_saddle_point_escape_experiment(
     ax4.set_ylabel('Iterations to Escape')
     ax4.set_title('Saddle Point Escape Time Comparison')
     ax4.grid(alpha=0.3, axis='y')
-    
+
     plt.tight_layout()
     plt.savefig(Path(output_dir) / 'saddle_point_escape_comparison.png', dpi=300, bbox_inches='tight')
     plt.close()
-    
+
     print("\n" + "="*60)
     print("RESULTS SUMMARY")
     print("="*60)
@@ -226,10 +226,10 @@ def run_saddle_point_escape_experiment(
         print(f"  Final Position: ({result['final_position'][0]:.4f}, {result['final_position'][1]:.4f})")
         print(f"  Final Loss: {result['final_loss']:.6f}")
         print()
-    
+
     print(f"Results saved to {output_dir}/")
     print("="*60 + "\n")
-    
+
     # Save summary
     summary_df = pd.DataFrame([
         {
@@ -243,13 +243,13 @@ def run_saddle_point_escape_experiment(
         for opt_name, result in all_results.items()
     ])
     summary_df.to_csv(Path(output_dir) / 'saddle_escape_summary.csv', index=False)
-    
+
     return all_results
 
 
 if __name__ == '__main__':
     results = run_saddle_point_escape_experiment()
-    
+
     print("\nConclusion:")
     print("This experiment demonstrates that Momentum and Adam escape saddle points")
     print("faster than vanilla SGD, providing empirical evidence for the research proposal.")

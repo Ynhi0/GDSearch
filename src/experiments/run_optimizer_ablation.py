@@ -116,13 +116,13 @@ def run_optimizer_ablation(
 
     By default this function enforces per-optimizer fair learning rates. To run the legacy
     unfair mode (fixed lr=0.01 for every optimizer) set `use_legacy_unfair=True`.
-    
+
     **SCIENTIFIC CAVEAT - Learning Rate Selection for 2D Functions:**
     The \"fair\" default LRs (SGD=0.1, Adam=0.001) are derived from NEURAL NETWORK
     training conventions. They may NOT be optimal for 2D mathematical functions.
     Results should be interpreted as \"how well do NN-tuned defaults transfer to 2D\"
     rather than \"which optimizer is fundamentally better on this landscape.\"
-    
+
     For rigorous 2D benchmarks, consider implementing per-function LR tuning or
     reporting full (optimizer \u00d7 LR) heatmaps.
 
@@ -171,7 +171,7 @@ def run_optimizer_ablation(
 
     os.makedirs(results_dir, exist_ok=True)
     os.makedirs(plots_dir, exist_ok=True)
-    
+
     # Define optimizer sequence (progressive improvements)
     optimizers = [
         ('SGD', SGD(lr=lr_map.get('SGD', lr_map.get('default', 0.01)))),
@@ -185,17 +185,17 @@ def run_optimizer_ablation(
     # Optional: include SAM only if explicitly requested (preserves legacy test expectations)
     if 'SAM' in lr_map or use_legacy_unfair:
         optimizers.append(('SAM', SAM(lr=lr_map.get('SAM', lr_map.get('default', 0.01)), rho=0.05, base_optimizer='SGD')))
-    
+
     # Storage for trajectories
     trajectories: Dict[str, Any] = {}
     summary_metrics: List[Dict[str, Any]] = []
-    
+
     print(f"\n{'='*70}")
     print(f"Optimizer Ablation Study: {test_function.__class__.__name__}")
     print(f"Initial point: {initial_point}")
     print(f"Max iterations: {max_iterations}")
     print(f"{'='*70}\n")
-    
+
     from src.core.dynamics_tracker import TrainingDynamicsTracker
     from src.analysis.theoretical_bounds import (
         estimate_smoothness,
@@ -212,7 +212,7 @@ def run_optimizer_ablation(
         x: float
         y: float
         x, y = initial_point
-        
+
         # Extract learning rate once for consistent reference throughout loop
         opt_lr = optimizer.lr if hasattr(optimizer, 'lr') else 0.01
 
@@ -229,7 +229,7 @@ def run_optimizer_ablation(
             def forward(self, _x: torch.Tensor) -> torch.Tensor:
                 """Dummy forward pass (not used, but required for nn.Module)."""
                 return self.param
-            
+
             def update_position(self, new_x: float, new_y: float) -> None:
                 """Update parameter tensor to new position (for tracking accuracy)."""
                 self.param.data = torch.tensor([new_x, new_y], dtype=torch.float32)
@@ -238,12 +238,12 @@ def run_optimizer_ablation(
             def __init__(self, params: Any, lr: float) -> None:
                 defaults: Dict[str, Any] = {'lr': lr}
                 super().__init__(params, defaults)
-            
+
             @torch.no_grad()  # type: ignore[misc]
             def step(self, closure: Optional[Callable[[], float]] = None) -> float:  # type: ignore[override]
                 """
                 Dummy step method (not used, but required for Optimizer).
-                
+
                 Return type varies across PyTorch versions and type stubs.
                 Using type: ignore[override] to handle inconsistency while preserving
                 runtime compatibility. Returns 0.0 as dummy loss value.
@@ -262,7 +262,7 @@ def run_optimizer_ablation(
 
         diverged = False
         divergence_reason = None
-        
+
         # Set numpy to raise on warnings for proper exception handling
         old_settings = np.seterr(all='raise')
 
@@ -279,7 +279,7 @@ def run_optimizer_ablation(
                             optimizer.lr *= 0.99
                             if i % 1000 == 0:  # Log every 1000 iters
                                 logging.info(f"{opt_name} LR decayed from {old_lr:.6f} to {optimizer.lr:.6f} at iteration {i}")
-                    
+
                     loss = test_function.compute(x, y)
                     grad_x, grad_y = test_function.gradient(x, y)
 
@@ -291,11 +291,11 @@ def run_optimizer_ablation(
                     # Prevents "Gradient Explosion Vulnerability" on steep landscapes (Rosenbrock, etc.)
                     # This is a standard safeguard used in all production codebases
                     max_grad_norm = 10.0  # Clip threshold (prevents catastrophic divergence)
-                    
+
                     # NUMERICAL STABILITY FIX: Use np.hypot to avoid overflow in x**2 + y**2
                     # np.hypot computes sqrt(x^2 + y^2) without intermediate overflow
                     grad_norm_raw = np.hypot(grad_x, grad_y)
-                    
+
                     # Apply gradient clipping if needed
                     if grad_norm_raw > max_grad_norm:
                         clip_factor = max_grad_norm / grad_norm_raw
@@ -343,18 +343,18 @@ def run_optimizer_ablation(
                             adv_y = y + rho_value * grad_dir_y
                         else:
                             adv_x, adv_y = x, y
-                        
+
                         # 2. Compute gradient at adversarial point
                         adv_grad_x, adv_grad_y = test_function.gradient(adv_x, adv_y)
                         adversarial_gradients = (adv_grad_x, adv_grad_y)
-                        
+
                         # 3. Take step using adversarial gradient (SAM-specific signature)
-                        step_result = optimizer.step((x, y), (grad_x, grad_y), 
+                        step_result = optimizer.step((x, y), (grad_x, grad_y),
                                                     adversarial_gradients=adversarial_gradients)
                     else:
                         # Standard optimizer step
                         step_result = optimizer.step((x, y), (grad_x, grad_y))
-                    
+
                     if isinstance(step_result, tuple) and len(step_result) == 2:
                         x_new, y_new = step_result
                         x = float(x_new)
@@ -365,7 +365,7 @@ def run_optimizer_ablation(
                     # Check if step produced non-finite values
                     if not np.isfinite(x) or not np.isfinite(y):
                         raise OverflowError("Non-finite parameters after step")
-                    
+
                     # Update numeric model to new position for accurate distance tracking
                     numeric_model.update_position(x, y)
 
@@ -381,9 +381,9 @@ def run_optimizer_ablation(
 
         # Store tracker for later comparative plots
         trajectories.setdefault('trackers', {})[opt_name] = tracker
-        
 
-        
+
+
 
 
         # Save dynamics and plots
@@ -410,7 +410,7 @@ def run_optimizer_ablation(
         # to avoid circular reasoning (AUDIT FIX: provide independent estimates)
         analytical_L = None
         analytical_mu = None
-        
+
         # Get analytical values if available from test function
         # Note: These methods are optional extensions not defined in base TestFunction class
         try:
@@ -418,7 +418,7 @@ def run_optimizer_ablation(
                 analytical_L = test_function.get_smoothness_constant()  # type: ignore[attr-defined]
             if hasattr(test_function, 'get_strong_convexity_constant'):
                 analytical_mu = test_function.get_strong_convexity_constant()  # type: ignore[attr-defined]
-            
+
             # Fallback: known analytical values for standard test functions
             func_name = test_function.__class__.__name__
             if func_name == 'IllConditionedQuadratic' and hasattr(test_function, 'kappa'):
@@ -431,11 +431,11 @@ def run_optimizer_ablation(
         except (AttributeError, TypeError) as e:
             # Test function doesn't expose analytical constants - will fall back to trajectory estimation
             logging.debug(f"No analytical constants available for {test_function.__class__.__name__}: {e}")
-        
+
         est_L = 0.0
         est_mu = 0.0
         theory_curve = None
-        
+
         # Extract learning rate once for consistent use
         current_lr = optimizer.lr if hasattr(optimizer, 'lr') else 0.01
 
@@ -449,7 +449,7 @@ def run_optimizer_ablation(
             min_loss = min(finite_losses) if finite_losses else np.inf
             converged_iter = next((i for i, l in enumerate(tracker.losses) if np.isfinite(l) and l < 1e-3), None)
             precise_converged_iter = next((i for i, g in enumerate(tracker.grad_norms) if np.isfinite(g) and g < 1e-6), None)
-            
+
             # SCIENTIFIC VALIDITY NOTE: Prefer analytical constants when available
             # ======================================================================
             # FIXED: Use analytical L/mu when available from test function properties.
@@ -462,7 +462,7 @@ def run_optimizer_ablation(
             # Analytical approach (now prioritized): Get L/mu from function definition.
             # Fallback approach: Estimate from trajectory (useful for unknown functions).
             # ======================================================================
-            
+
             # Use analytical constants if available, otherwise estimate from trajectory
             if analytical_L is not None and analytical_mu is not None:
                 est_L = analytical_L
@@ -484,9 +484,9 @@ def run_optimizer_ablation(
                 # Ensure we have valid losses to work with
                 if len(tracker.losses) == 0:
                     raise ValueError("No losses tracked")
-                    
+
                 init_loss = tracker.losses[0] if np.isfinite(tracker.losses[0]) else 1.0
-                
+
                 # Use appropriate theoretical bounds per optimizer type
                 if 'Adam' in opt_name or 'AdamW' in opt_name or 'AMSGrad' in opt_name:
                     # Compute bounds for validation (not used in curve, but good for logging)
@@ -497,7 +497,7 @@ def run_optimizer_ablation(
                     )
                     # Adam theoretical decay ~ O(1/sqrt(t)). Scale by initial loss for visualization.
                     theory_curve = init_loss / np.sqrt(np.maximum(1, theory_iters + 1))
-                
+
                 elif 'Momentum' in opt_name:
                     # Use momentum-specific bounds with acceleration
                     momentum_beta = 0.9  # Default momentum coefficient
@@ -511,7 +511,7 @@ def run_optimizer_ablation(
                     )
                     conv_rate = momentum_stats.get('convergence_rate', 1.0)
                     final_bound = momentum_stats.get('final_bound', 0.0)
-                    
+
                     # Accelerated decay: ρ = 1 - sqrt(μ/L) vs vanilla SGD's 1 - μ/L
                     if 0 < conv_rate < 1:
                         log_decay = theory_iters * np.log(conv_rate)
@@ -519,7 +519,7 @@ def run_optimizer_ablation(
                         theory_curve = init_loss * np.exp(log_decay) + final_bound
                     else:
                         theory_curve = np.full_like(theory_iters, init_loss, dtype=float)
-                
+
                 else:
                     # Vanilla SGD, RMSProp, SAM (use SGD bounds)
                     sgd_stats = sgd_convergence_bound(
@@ -567,7 +567,7 @@ def run_optimizer_ablation(
 
         print(f"{opt_name:20s} | Final Loss: {final_loss:12.6e} | "
               f"Converged (loss<1e-3): {'YES' if converged_iter is not None else 'NO':3s} at iter {converged_iter if converged_iter is not None else ('DIV' if np.isinf(final_loss) else '>10k')}")
-    
+
     # Save summary CSV
     df_summary = pd.DataFrame(summary_metrics)
     summary_path = os.path.join(results_dir, 'optimizer_ablation_summary.csv')
@@ -580,13 +580,13 @@ def run_optimizer_ablation(
         compare_multiple_dynamics(trajectories.get('trackers', {}), os.path.join(plots_dir, 'dynamics_compare'))
     except Exception as e:
         logging.debug(f"Failed to create comparative dynamics plots: {e}")
-    
+
     # Create figure with subplots
     _fig, axes = plt.subplots(2, 2, figsize=(14, 10))  # type: ignore[misc]
-    
+
     # Define color map for consistent coloring
     colors = plt.get_cmap('viridis')(np.linspace(0, 0.9, len(optimizers)))  # type: ignore[misc]
-    
+
     # Plot 1: Loss curves (log scale)
     ax = axes[0, 0]
     for (opt_name, _), color in zip(optimizers, colors):
@@ -612,14 +612,14 @@ def run_optimizer_ablation(
         except (ValueError, IndexError) as e:
             # Theory curve interpolation failed (likely dimension mismatch) - skip theory overlay
             logging.debug(f"Theory curve plotting failed for {opt_name}: {e}")
-    
+
     ax.set_xlabel('Iteration', fontsize=11)
     ax.set_ylabel('Loss (log scale)', fontsize=11)
     ax.set_yscale('log')
     ax.set_title('Loss Convergence (Ablation Study)', fontsize=12, fontweight='bold')
     ax.legend(loc='upper right', fontsize=9)
     ax.grid(True, alpha=0.3)
-    
+
     # Plot 2: Gradient norm (log scale)
     ax = axes[0, 1]
     for (opt_name, _), color in zip(optimizers, colors):
@@ -634,14 +634,14 @@ def run_optimizer_ablation(
                 sample_grad.append(grads[idx])
         if sample_grad:
             ax.plot(sample_iters, sample_grad, label=opt_name, linewidth=2, color=color, alpha=0.8)
-    
+
     ax.set_xlabel('Iteration', fontsize=11)
     ax.set_ylabel('Gradient Norm (log scale)', fontsize=11)
     ax.set_yscale('log')
     ax.set_title('Gradient Norm Convergence', fontsize=12, fontweight='bold')
     ax.legend(loc='upper right', fontsize=9)
     ax.grid(True, alpha=0.3)
-    
+
     # Plot 3: Bar chart of final loss
     ax = axes[1, 0]
     opt_names = [m['Optimizer'] for m in summary_metrics]
@@ -655,12 +655,12 @@ def run_optimizer_ablation(
     ax.set_yscale('log')
     ax.set_title('Final Loss Comparison', fontsize=12, fontweight='bold')
     ax.grid(axis='y', alpha=0.3)
-    
+
     # Annotate bars
     for i, (_name, loss, loss_plot) in enumerate(zip(opt_names, final_losses, final_losses_plot)):
         label = f'{loss:.2e}' if np.isfinite(loss) else 'DIV'
         ax.text(i, loss_plot * 1.5, label, ha='center', va='bottom', fontsize=8, rotation=0)
-    
+
     # Plot 4: Convergence speed (iterations to loss < 1e-3)
     ax = axes[1, 1]
     iters_to_converge = [m['Iterations to Loss<1e-3'] for m in summary_metrics]
@@ -671,29 +671,29 @@ def run_optimizer_ablation(
     ax.set_title('Convergence Speed', fontsize=12, fontweight='bold')
     ax.grid(axis='y', alpha=0.3)
     ax.set_ylim((0.0, float(max_iterations) * 1.1))
-    
+
     # Annotate bars
     for i, (_name, it) in enumerate(zip(opt_names, iters_to_converge)):
         label = f'{it}' if it < max_iterations else '>10k'
         ax.text(i, it + max_iterations * 0.02, label, ha='center', va='bottom', fontsize=8)
-    
+
     plt.suptitle(f'Optimizer Ablation: {test_function.__class__.__name__}\n'
                  f'Initial point: {initial_point}',
                  fontsize=14, fontweight='bold', y=0.995)
     plt.tight_layout()
-    
+
     plot_path = os.path.join(plots_dir, 'optimizer_ablation_study.png')
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
     print(f"Plot saved to: {plot_path}")
     plt.close()
-    
+
     # Print summary table
     print(f"\n{'='*70}")
     print("Ablation Summary:")
     print(f"{'='*70}")
     print(df_summary.to_string(index=False))
     print(f"{'='*70}\n")
-    
+
     return df_summary
 
 

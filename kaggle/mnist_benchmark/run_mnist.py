@@ -89,25 +89,25 @@ class SimpleMLP(nn.Module):
 
 class SAMSGD(optim.Optimizer):
     """SAM (Sharpness-Aware Minimization) with SGD base optimizer."""
-    
+
     def __init__(self, params, lr=0.01, rho=0.05, momentum=0.0, weight_decay=0.0):
         defaults = dict(lr=lr, rho=rho, momentum=momentum, weight_decay=weight_decay)
         super().__init__(params, defaults)
         self.automatic_optimization = False  # Disable automatic optimization
-        
+
     def step(self, closure=None):
         if closure is None:
             raise ValueError("SAM requires closure (loss function)")
-        
+
         # Store original parameters
         original_params = []
         for group in self.param_groups:
             for p in group['params']:
                 original_params.append(p.data.clone())
-        
+
         # First forward-backward pass to get gradients
         loss = closure()
-        
+
         # Compute adversarial step for each parameter
         idx = 0
         for group in self.param_groups:
@@ -115,50 +115,50 @@ class SAMSGD(optim.Optimizer):
                 if p.grad is None:
                     idx += 1
                     continue
-                
+
                 # Compute perturbation: ρ * (g / ||g||)
                 grad_norm = torch.norm(p.grad)
                 if grad_norm > 1e-12:
                     perturbation = group['rho'] * (p.grad / grad_norm)
                     p.data.add_(perturbation)
                 idx += 1
-        
+
         # Second forward-backward pass at adversarial point
         closure()
-        
+
         # Restore original parameters
         idx = 0
         for group in self.param_groups:
             for p in group['params']:
                 p.data.copy_(original_params[idx])
                 idx += 1
-        
+
         # Apply SGD update with adversarial gradients
         for group in self.param_groups:
             for p in group['params']:
                 if p.grad is None:
                     continue
-                
+
                 # Apply weight decay
                 if group['weight_decay'] != 0:
                     p.grad.add_(p.data, alpha=group['weight_decay'])
-                
+
                 # SGD update
                 p.data.add_(p.grad, alpha=-group['lr'])
-                
+
                 # Clear gradients
                 p.grad.zero_()
-        
+
         return loss
 
 
 class SAMAdam(optim.Optimizer):
     """SAM (Sharpness-Aware Minimization) with Adam base optimizer."""
-    
+
     def __init__(self, params, lr=0.001, rho=0.05, betas=(0.9, 0.999), eps=1e-8, weight_decay=0.0):
         defaults = dict(lr=lr, rho=rho, betas=betas, eps=eps, weight_decay=weight_decay)
         super().__init__(params, defaults)
-        
+
         # Initialize Adam state
         for group in self.param_groups:
             for p in group['params']:
@@ -166,20 +166,20 @@ class SAMAdam(optim.Optimizer):
                 state['step'] = 0
                 state['exp_avg'] = torch.zeros_like(p.data)
                 state['exp_avg_sq'] = torch.zeros_like(p.data)
-    
+
     def step(self, closure=None):
         if closure is None:
             raise ValueError("SAM requires closure (loss function)")
-        
+
         # Store original parameters
         original_params = []
         for group in self.param_groups:
             for p in group['params']:
                 original_params.append(p.data.clone())
-        
+
         # First forward-backward pass to get gradients
         loss = closure()
-        
+
         # Compute adversarial step for each parameter
         idx = 0
         for group in self.param_groups:
@@ -187,56 +187,56 @@ class SAMAdam(optim.Optimizer):
                 if p.grad is None:
                     idx += 1
                     continue
-                
+
                 # Compute perturbation: ρ * (g / ||g||)
                 grad_norm = torch.norm(p.grad)
                 if grad_norm > 1e-12:
                     perturbation = group['rho'] * (p.grad / grad_norm)
                     p.data.add_(perturbation)
                 idx += 1
-        
+
         # Second forward-backward pass at adversarial point
         closure()
-        
+
         # Restore original parameters
         idx = 0
         for group in self.param_groups:
             for p in group['params']:
                 p.data.copy_(original_params[idx])
                 idx += 1
-        
+
         # Apply Adam update with adversarial gradients
         for group in self.param_groups:
             for p in group['params']:
                 if p.grad is None:
                     continue
-                
+
                 grad = p.grad
                 state = self.state[p]
-                
+
                 # Apply weight decay
                 if group['weight_decay'] != 0:
                     grad = grad.add(p.data, alpha=group['weight_decay'])
-                
+
                 # Adam update
                 exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
                 beta1, beta2 = group['betas']
-                
+
                 state['step'] += 1
                 bias_correction1 = 1 - beta1 ** state['step']
                 bias_correction2 = 1 - beta2 ** state['step']
-                
+
                 exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
                 exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
-                
+
                 denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(group['eps'])
                 step_size = group['lr'] / bias_correction1
-                
+
                 p.data.addcdiv_(exp_avg, denom, value=-step_size)
-                
+
                 # Clear gradients
                 p.grad.zero_()
-        
+
         return loss
 
 
@@ -266,10 +266,10 @@ def train_one_epoch(model, loader, optimizer, device):
 
     for data, target in loader:
         data, target = data.to(device), target.to(device)
-        
+
         # Check if optimizer is SAM (requires closure)
         is_sam = isinstance(optimizer, (SAMSGD, SAMAdam))
-        
+
         if is_sam:
             # SAM requires closure for adversarial gradient computation
             def closure():
@@ -278,10 +278,10 @@ def train_one_epoch(model, loader, optimizer, device):
                 loss = F.cross_entropy(output, target)
                 loss.backward()
                 return loss
-            
+
             # SAM handles zero_grad internally in step()
             loss = optimizer.step(closure)
-            
+
             # Re-compute output for accuracy (since SAM modifies parameters during step)
             with torch.no_grad():
                 output = model(data)
@@ -291,10 +291,10 @@ def train_one_epoch(model, loader, optimizer, device):
             output = model(data)
             loss = F.cross_entropy(output, target)
             loss.backward()
-            
+
             # Check gradient health
             check_gradient_health(model, context="MNIST")
-            
+
             optimizer.step()
 
         total_loss += loss.item() * data.size(0)
@@ -335,7 +335,7 @@ def _ckpt_path(ckpt_dir: Path, optimizer_name: str, seed: int, lr: float) -> Pat
 
 
 def run_single_experiment(optimizer_name: str, seed: int, lr: float, epochs: int, batch_size: int, results_dir: Path, *, resume: bool = False, ckpt_dir: Path | None = None):
-    
+
     # [FIX] Thêm đoạn code này ngay đầu hàm
     # ---------------------------------------------------------
     out_name = f"NN_SimpleMLP_MNIST_{optimizer_name}_lr{lr}_seed{seed}_benchmark.csv"
@@ -398,12 +398,12 @@ def run_single_experiment(optimizer_name: str, seed: int, lr: float, epochs: int
     start = time.time()
     for epoch in range(start_epoch, epochs + 1):
         epoch_start_time = time.time()  # Record epoch start time
-        
+
         train_loss, train_acc = train_one_epoch(model, train_loader, optimizer, device)
         test_loss, test_acc = evaluate(model, test_loader, device)
-        
+
         epoch_duration = time.time() - epoch_start_time  # Calculate epoch duration
-        
+
         history.append({
             'epoch': epoch,
             'train_loss': train_loss,
@@ -460,7 +460,7 @@ def run_suite(seeds, epochs, batch_size, results_dir: Union[str, Path], *, resum
         ('SAM_SGD', 0.01),
         ('SAM_Adam', 0.001),
     ]
-    
+
     # Filter optimizers if specified
     if optimizer_filter:
         optimizers = [(name, lr) for name, lr in all_optimizers if name in optimizer_filter]
@@ -546,7 +546,8 @@ def compute_statistics(results_dir: str):
         _, pB = stats.shapiro(vals_B)
         if pA > 0.05 and pB > 0.05:
             stat_name = 'Paired t-test'
-            t, p = stats.ttest_rel(vals_A, vals_B)
+            from src.analysis.statistical_analysis import safe_ttest_rel
+            t, p = safe_ttest_rel(vals_A, vals_B)
             d = (vals_A - vals_B).mean() / (vals_A - vals_B).std(ddof=1)
         else:
             stat_name = 'Wilcoxon'
@@ -593,7 +594,7 @@ def main():
     parser.add_argument('--seeds', type=str, default='1,2,3,4,5,6,7,8,9,10', help='comma-separated seeds')
     parser.add_argument('--epochs', type=int, default=20)
     parser.add_argument('--batch-size', type=int, default=128)
-    parser.add_argument('--batch-size-sweep', type=str, default=None, 
+    parser.add_argument('--batch-size-sweep', type=str, default=None,
                        help='Comma-separated batch sizes for scalability study (e.g., "64,256,1024")')
     parser.add_argument('--optimizer-filter', type=str, default=None,
                        help='Comma-separated optimizers to run (e.g., "Adam,SAM_Adam")')
@@ -617,7 +618,7 @@ def main():
         print(f"🔬 Batch Size Scalability Study: Testing batch sizes {batch_sizes}")
     else:
         batch_sizes = [args.batch_size]
-    
+
     # Parse optimizer filter
     if args.optimizer_filter:
         optimizer_filter = [opt.strip() for opt in args.optimizer_filter.split(',') if opt.strip()]
@@ -647,18 +648,18 @@ def main():
     for batch_size in batch_sizes:
         print(f"\n🔬 Testing Batch Size: {batch_size}")
         print("=" * 50)
-        
+
         batch_results_dir = f"{results_dir}_bs{batch_size}"
-        run_suite(seeds, epochs, batch_size, batch_results_dir, 
-                 resume=args.resume, ckpt_dir=args.ckpt_dir, 
+        run_suite(seeds, epochs, batch_size, batch_results_dir,
+                 resume=args.resume, ckpt_dir=args.ckpt_dir,
                  optimizer_filter=optimizer_filter)
-        
+
         # Store results for summary
         all_results.append({
             'batch_size': batch_size,
             'results_dir': batch_results_dir
         })
-    
+
     # Print scalability summary if multiple batch sizes
     if len(batch_sizes) > 1:
         print("\n" + "=" * 80)
@@ -666,7 +667,7 @@ def main():
         print("=" * 80)
         print("Batch Size | Generalization Gap | Notes")
         print("-----------|-------------------|-------")
-        
+
         for result in all_results:
             bs = result['batch_size']
             # Try to read the statistical comparison file
@@ -677,7 +678,7 @@ def main():
                     # Calculate average generalization gap (test_loss - train_loss)
                     adam_rows = df[df['optimizer_1'] == 'Adam']
                     sam_rows = df[df['optimizer_1'] == 'SAM_Adam']
-                    
+
                     if not adam_rows.empty:
                         adam_gap = adam_rows['mean_diff'].mean()
                         print(f"{bs:>4d} | {adam_gap:.3f} | Adam gap calculated")
@@ -687,7 +688,7 @@ def main():
                     print(f"{bs:>4d} | Error | {str(e)[:20]}...")
             else:
                 print(f"{bs:>4d} | N/A | Stats file missing")
-        
+
         print("\n💾 Individual results saved in respective directories")
         print("   Use analyze_batch_scalability.py to generate detailed plots")
 

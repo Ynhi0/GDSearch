@@ -6,58 +6,61 @@ Tests imports, functionality, and code quality.
 
 import sys
 import re
+import logging
 
-print("=" * 80)
-print("COMPREHENSIVE VERIFICATION TEST")
-print("=" * 80)
-print()
+logging.basicConfig(level=logging.INFO, format='%(message)s')
+
+logging.info("=" * 80)
+logging.info("COMPREHENSIVE VERIFICATION TEST")
+logging.info("=" * 80)
+logging.info("")
 
 # ============================================================================
 # TEST 1: Import all critical modules
 # ============================================================================
-print("[TEST 1] Import Verification")
-print("-" * 40)
+logging.info("[TEST 1] Import Verification")
+logging.info("-" * 40)
 
 try:
     from src.core.optimizers import Adam, AdamW, SGD, RMSProp, AMSGrad
-    print("✅ Core optimizers imported")
+    logging.info("✅ Core optimizers imported")
 except Exception as e:
-    print(f"❌ Core optimizers import failed: {e}")
+    logging.error(f"❌ Core optimizers import failed: {e}")
     sys.exit(1)
 
 try:
     from src.core.test_functions import Rosenbrock, Ackley2D, SaddlePoint, IllConditionedQuadratic
-    print("✅ Test functions imported")
+    logging.info("✅ Test functions imported")
 except Exception as e:
-    print(f"❌ Test functions import failed: {e}")
+    logging.error(f"❌ Test functions import failed: {e}")
     sys.exit(1)
 
 try:
     from src.experiments.stochastic_2d_integrity_fix import run_stochastic_2d_experiments
-    print("✅ Stochastic 2D integrity fix imported")
+    logging.info("✅ Stochastic 2D integrity fix imported")
 except Exception as e:
-    print(f"❌ Stochastic 2D integrity fix import failed: {e}")
+    logging.error(f"❌ Stochastic 2D integrity fix import failed: {e}")
     sys.exit(1)
 
 try:
     from src.experiments.adam_adamw_comparison import run_adam_vs_adamw_comparison
-    print("✅ Adam vs AdamW comparison imported")
+    logging.info("✅ Adam vs AdamW comparison imported")
 except Exception as e:
-    print(f"❌ Adam vs AdamW comparison import failed: {e}")
+    logging.error(f"❌ Adam vs AdamW comparison import failed: {e}")
     sys.exit(1)
 
 try:
     from src.experiments.saddle_point_escape_experiment import run_saddle_point_escape_experiment
-    print("✅ Saddle point escape imported")
+    logging.info("✅ Saddle point escape imported")
 except Exception as e:
-    print(f"❌ Saddle point escape import failed: {e}")
+    logging.error(f"❌ Saddle point escape import failed: {e}")
     sys.exit(1)
 
 try:
     from src.experiments.hyperparameter_heatmap_generator import run_momentum_beta_heatmap, run_adam_beta_heatmap
-    print("✅ Hyperparameter heatmaps imported")
+    logging.info("✅ Hyperparameter heatmaps imported")
 except Exception as e:
-    print(f"❌ Hyperparameter heatmaps import failed: {e}")
+    logging.error(f"❌ Hyperparameter heatmaps import failed: {e}")
     sys.exit(1)
 
 print()
@@ -71,10 +74,10 @@ print("-" * 40)
 try:
     adam_l2 = Adam(lr=0.01, weight_decay=0.01)
     adamw = AdamW(lr=0.01, weight_decay=0.01)
-    
+
     print(f"Adam L2:  {adam_l2.name}")
     print(f"AdamW:    {adamw.name}")
-    
+
     if hasattr(adam_l2, 'weight_decay'):
         print("✅ Adam L2 regularization support: WORKING")
     else:
@@ -92,16 +95,20 @@ print()
 print("[TEST 3] Learning Rate Scheduler Support")
 print("-" * 40)
 
+# AUDIT FIX: Import numpy for isclose() comparison
+import numpy as np
+
 try:
     adam = Adam(lr=0.01)
     initial_lr = adam.get_lr()
     print(f"Initial LR: {initial_lr}")
-    
+
     adam.set_lr(0.001)
     new_lr = adam.get_lr()
     print(f"After set_lr(0.001): {new_lr}")
-    
-    if new_lr == 0.001:
+
+    # AUDIT FIX: Use np.isclose() instead of exact float equality for numerical stability
+    if np.isclose(new_lr, 0.001, rtol=1e-9, atol=1e-12):
         print("✅ LR scheduler support (set_lr/get_lr): WORKING")
     else:
         print(f"❌ LR scheduler support: FAILED (expected 0.001, got {new_lr})")
@@ -120,24 +127,24 @@ print("-" * 40)
 
 try:
     import numpy as np
-    
+
     ros = Rosenbrock()
-    
+
     # Test without noise
     grad_clean = ros.gradient(1.0, 1.0, noise_std=0.0)
     print(f"Clean gradient: {grad_clean}")
-    
+
     # Test with noise
     grad_noisy = ros.gradient(1.0, 1.0, noise_std=0.1, noise_type='multiplicative')
     print(f"Noisy gradient: {grad_noisy}")
-    
+
     # Verify noise was applied (gradients should be different)
     if not np.allclose(grad_clean, grad_noisy):
         print("✅ Gradient noise injection: WORKING")
     else:
         print("⚠️  Warning: Gradients identical (may be due to random seed)")
         print("✅ Gradient noise injection: INTERFACE WORKING")
-        
+
 except Exception as e:
     print(f"❌ Gradient noise test failed: {e}")
     sys.exit(1)
@@ -153,10 +160,10 @@ print("-" * 40)
 try:
     with open('runners/run_all_kaggle.py', 'r', encoding='utf-8') as f:
         content = f.read()
-    
+
     # Find all closure definitions
     closures = re.findall(r'def closure\(\):.*?return [^\n]+', content, re.DOTALL)
-    
+
     # Check for problematic patterns (loss = ... without _inner or _c suffix)
     problematic = []
     for i, closure in enumerate(closures):
@@ -166,10 +173,10 @@ try:
             # Check if it's using loss_inner or loss_c (safe patterns)
             if 'loss_inner' not in closure and 'loss_c' not in closure:
                 problematic.append((i, closure[:100]))
-    
+
     print(f"Total closures found: {len(closures)}")
     print(f"Closures with potential bugs: {len(problematic)}")
-    
+
     if len(problematic) == 0:
         print("✅ All closure variable scoping bugs: FIXED")
     else:
@@ -177,7 +184,7 @@ try:
         for idx, snippet in problematic[:3]:  # Show first 3
             print(f"  Closure #{idx}: {snippet}...")
         print("Note: Some may be false positives (e.g., loss_c patterns)")
-        
+
 except Exception as e:
     print(f"❌ Closure bug check failed: {e}")
     sys.exit(1)

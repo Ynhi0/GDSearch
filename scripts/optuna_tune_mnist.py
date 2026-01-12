@@ -43,40 +43,40 @@ def create_objective_function(optimizer_name: str = 'Adam', epochs: int = 10, de
     """
     """
     Create objective function for Optuna optimization.
-    
+
     Args:
         optimizer_name: Name of optimizer to tune
         epochs: Number of training epochs per trial
         device: Device to train on
         seed: Random seed for reproducibility
-        
+
     Returns:
         Objective function for Optuna
     """
-    
+
     def objective(trial, seed=seed):
         """Objective function: train model and return validation accuracy."""
-        
+
         # Suggest hyperparameters
         params = suggest_optimizer_params(trial, optimizer_name)
-        
+
         # Get data loaders with validation split (NO TEST SET ACCESS)
         # Using 10% of training data for validation to prevent data leakage
         train_loader, val_loader, test_loader = get_mnist_loaders(
-            batch_size=128, 
+            batch_size=128,
             num_workers=2,
             seed=seed,  # Use seed parameter passed to objective
             val_split=0.1  # 10% validation split
         )
-        
+
         # CRITICAL: Enforce that we're using validation (not test) for tuning
         # This prevents test set leakage which would invalidate generalization claims
         val_loader.name = 'validation'
         enforce_no_test_in_tuning(val_loader)
-        
+
         # Create model with correct parameter name: num_classes (not output_size)
         model = SimpleMLP(input_size=784, hidden_size=256, num_classes=10).to(device)
-        
+
         # Use optimizer adapter to ensure consistency between tuning and experiments
         # NOTE: use_custom_wrappers=False for faster tuning with native PyTorch optimizers
         # The adapter ensures hyperparameters will transfer correctly to custom wrappers
@@ -86,9 +86,9 @@ def create_objective_function(optimizer_name: str = 'Adam', epochs: int = 10, de
             params=params,
             use_custom_wrappers=False  # Use native PyTorch for speed during tuning
         )
-        
+
         criterion = nn.CrossEntropyLoss()
-        
+
         # Training loop
         model.train()
         for epoch in range(epochs):
@@ -96,28 +96,28 @@ def create_objective_function(optimizer_name: str = 'Adam', epochs: int = 10, de
             for batch_idx, (data, target) in enumerate(train_loader):
                 data, target = data.to(device), target.to(device)
                 data = data.view(data.size(0), -1)
-                
+
                 # Forward pass
                 output = model(data)
                 loss = criterion(output, target)
-                
+
                 # Backward pass
                 optimizer.zero_grad()
                 loss.backward()
-                
+
                 # Update weights using PyTorch optimizer
                 optimizer.step()
-                
+
                 epoch_loss += loss.item()
-            
+
             # Report intermediate value for pruning
             avg_loss = epoch_loss / len(train_loader)
             trial.report(avg_loss, epoch)
-            
+
             # Handle pruning
             if trial.should_prune():
                 raise optuna.exceptions.TrialPruned()
-        
+
         # Evaluate on VALIDATION set (NOT TEST SET)
         # The test set must remain untouched during hyperparameter optimization
         model.eval()
@@ -131,17 +131,17 @@ def create_objective_function(optimizer_name: str = 'Adam', epochs: int = 10, de
                 _, predicted = torch.max(output.data, 1)
                 total += target.size(0)
                 correct += (predicted == target).sum().item()
-        
+
         val_accuracy = 100.0 * correct / max(1, total)
-        
+
         return val_accuracy
-    
+
     return objective
 
 
 def main():
     parser = argparse.ArgumentParser(description='Optuna hyperparameter tuning for MNIST')
-    parser.add_argument('--optimizer', type=str, default='Adam', 
+    parser.add_argument('--optimizer', type=str, default='Adam',
                        choices=['Adam', 'SGDMomentum'],
                        help='Optimizer to tune')
     parser.add_argument('--n-trials', type=int, default=50,
@@ -160,15 +160,15 @@ def main():
                        help='Random seed')
     parser.add_argument('--save-results', type=str, default='results/optuna_results.json',
                        help='Path to save results')
-    
+
     args = parser.parse_args()
-    
+
     # Set device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    logging.info(f"Using device: {device}")    
+    logging.info(f"Using device: {device}")
     # Set random seeds for full reproducibility
     set_seed(args.seed)
-    
+
     # Prepare data loaders and create objective function
     # Create validation loader upfront and pass to tuner for strict checking
     from src.core.data_utils import get_mnist_loaders
@@ -206,11 +206,11 @@ def main():
         test_dataset=getattr(test_loader_template, 'dataset', None),
         enforce_validation=True
     )
-    
+
     # Save results
     os.makedirs(os.path.dirname(args.save_results), exist_ok=True)
     tuner.save_results(args.save_results)
-    
+
     # Print parameter importance
     logging.info("\n" + "="*80)
     logging.info("Parameter Importance:")
@@ -218,7 +218,7 @@ def main():
     importance = tuner.get_importance()
     for param, score in sorted(importance.items(), key=lambda x: x[1], reverse=True):
         logging.info(f"{param:20s}: {score:.4f}")
-    
+
     logging.info("\n" + "="*80)
     logging.info("Best Configuration:")
     logging.info("="*80)
@@ -229,7 +229,7 @@ def main():
     logging.info("="*80)
     logging.info("\nNOTE: This is VALIDATION accuracy (used for tuning).")
     logging.info("Proceeding to retrain with best params on TRAIN+VAL for final test...")
-    
+
     # Automated retrain on train+val, then evaluate on test
     logging.info("\n" + "="*80)
     logging.info("RETRAINING WITH BEST HYPERPARAMETERS ON TRAIN+VAL")
@@ -245,35 +245,35 @@ def main():
     )
 
     # SCIENTIFIC FIX: Combine train + val datasets with CONSISTENT transforms
-    # PROBLEM: ConcatDataset([train.dataset, val.dataset]) mixes augmented (train) 
+    # PROBLEM: ConcatDataset([train.dataset, val.dataset]) mixes augmented (train)
     # with non-augmented (val) data, creating a heterogeneous distribution.
     # SOLUTION: Get the underlying base dataset and create a combined subset with
     # training transforms applied to ALL samples.
     from torch.utils.data import Subset, DataLoader
     import torchvision.transforms as transforms
-    
+
     # Get the base MNIST dataset (before splitting)
     from torchvision.datasets import MNIST
     train_transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.1307,), (0.3081,))
     ])
-    
+
     # Load full training set with consistent transforms
     full_train_dataset = MNIST(root='./data', train=True, download=True, transform=train_transform)
-    
+
     # Get the indices from train and val loaders
     train_indices = train_loader_final.dataset.indices if hasattr(train_loader_final.dataset, 'indices') else range(len(train_loader_final.dataset))
     val_indices = val_loader_final.dataset.indices if hasattr(val_loader_final.dataset, 'indices') else range(len(val_loader_final.dataset))
-    
+
     # Combine indices
     combined_indices = list(train_indices) + list(val_indices)
-    
+
     # Create combined dataset with training transforms applied to ALL samples
     combined_dataset = Subset(full_train_dataset, combined_indices)
     train_val_loader = DataLoader(combined_dataset, batch_size=128, shuffle=True, num_workers=2)
     test_loader = test_loader_final
-    
+
     logging.info(f"Combined dataset size: {len(combined_dataset)} (train: {len(train_indices)}, val: {len(val_indices)})")
     logging.info("All samples use training transforms for consistency.")
 
@@ -308,7 +308,7 @@ def main():
             loss = criterion(output, target)
             loss.backward()
             final_optimizer.step()
-    
+
     # Evaluate on test set (NEVER SEEN DURING TUNING)
     final_model.eval()
     test_loss = 0
@@ -320,7 +320,7 @@ def main():
             test_loss += criterion(output, target).item()
             pred = output.argmax(dim=1, keepdim=True)
             correct += pred.eq(target.view_as(pred)).sum().item()
-    
+
     # Defensive dataset length retrieval: some dataset objects don't have a static stub for __len__
     dataset_obj = getattr(test_loader, 'dataset', None)
     try:

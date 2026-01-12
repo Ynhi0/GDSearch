@@ -25,11 +25,11 @@ class SoWhatAnalyzer:
     """
     Analyzes research findings using the SO WHAT methodology.
     """
-    
+
     def __init__(self):
         self.findings = []
-    
-    def add_finding(self, 
+
+    def add_finding(self,
                    observation: str,
                    so_what_1: str,
                    so_what_2: str,
@@ -37,14 +37,14 @@ class SoWhatAnalyzer:
                    keywords: List[str]) -> Finding:
         """
         Add a finding with complete SO WHAT chain.
-        
+
         Args:
             observation: Raw observation from experiments
             so_what_1: First-level insight (mechanistic understanding)
             so_what_2: Practical implication (actionable guidance)
             evidence: List of supporting evidence
             keywords: Tags for categorization
-        
+
         Returns:
             Finding object
         """
@@ -57,7 +57,7 @@ class SoWhatAnalyzer:
         )
         self.findings.append(finding)
         return finding
-    
+
     def generate_report(self, output_path: str = 'SO_WHAT_ANALYSIS.md'):
         """Generate complete SO WHAT analysis report."""
         with open(output_path, 'w') as f:
@@ -67,26 +67,26 @@ class SoWhatAnalyzer:
             f.write("2. **SO WHAT? (Level 1):** Why this happens (mechanistic insight)\n")
             f.write("3. **SO WHAT? (Level 2):** How practitioners should act (practical implication)\n\n")
             f.write("---\n\n")
-            
+
             for i, finding in enumerate(self.findings, 1):
                 f.write(f"## Finding {i}: {', '.join(finding.keywords)}\n\n")
-                
+
                 f.write("### Observation\n\n")
                 f.write(f"{finding.observation}\n\n")
-                
+
                 f.write("### SO WHAT? (Level 1: Mechanistic Insight)\n\n")
                 f.write(f"{finding.so_what_1}\n\n")
-                
+
                 f.write("### SO WHAT? (Level 2: Practical Implication)\n\n")
                 f.write(f"{finding.so_what_2}\n\n")
-                
+
                 f.write("### 📚 Evidence\n\n")
                 for evidence in finding.evidence:
                     f.write(f"- {evidence}\n")
                 f.write("\n")
-                
+
                 f.write("---\n\n")
-        
+
         print(f"✅ SO WHAT analysis generated: {output_path}")
 
 
@@ -95,7 +95,7 @@ def create_gdsearch_findings() -> SoWhatAnalyzer:
     Create SO WHAT analysis for key GDSearch findings.
     """
     analyzer = SoWhatAnalyzer()
-    
+
     # Finding 1: Adam's Speed
     analyzer.add_finding(
         observation="Adam converges faster than SGD+Momentum on Rosenbrock function and MNIST in early epochs.",
@@ -108,7 +108,7 @@ def create_gdsearch_findings() -> SoWhatAnalyzer:
         ],
         keywords=["Adam", "Convergence Speed", "Adaptive Methods"]
     )
-    
+
     # Finding 2: Generalization Gap
     analyzer.add_finding(
         observation="SGD+Momentum achieves slightly lower test accuracy initially but has significantly smaller generalization gap (0.08 vs 0.15 for AdamW) by epoch 20.",
@@ -121,7 +121,7 @@ def create_gdsearch_findings() -> SoWhatAnalyzer:
         ],
         keywords=["Generalization", "Sharp Minima", "Flat Minima", "SGD+Momentum"]
     )
-    
+
     # Finding 3: Momentum Instability
     analyzer.add_finding(
         observation="High momentum (β=0.99) with high learning rate (lr=0.01) causes divergence on Rosenbrock function.",
@@ -134,7 +134,7 @@ def create_gdsearch_findings() -> SoWhatAnalyzer:
         ],
         keywords=["Momentum", "Instability", "Learning Rate", "Ill-Conditioning"]
     )
-    
+
     # Finding 4: Per-Layer Gradients
     analyzer.add_finding(
         observation="AdamW maintains uniform gradient distribution across layers throughout training. SGD+Momentum shows layer imbalance early (emphasizing later layers) that equalizes over time.",
@@ -147,7 +147,7 @@ def create_gdsearch_findings() -> SoWhatAnalyzer:
         ],
         keywords=["Per-Layer Gradients", "Adaptive Scaling", "Layer Imbalance"]
     )
-    
+
     # Finding 5: Saddle Escape
     analyzer.add_finding(
         observation="On SaddlePoint function, optimizers spend 15-30% of iterations near saddle regions (λ_min × λ_max < 0). Adam escapes faster than SGD.",
@@ -160,7 +160,7 @@ def create_gdsearch_findings() -> SoWhatAnalyzer:
         ],
         keywords=["Saddle Points", "Eigenvalues", "Escape Dynamics"]
     )
-    
+
     # Finding 6: Loss Landscape Curvature
     analyzer.add_finding(
         observation="1D and 2D loss landscape slices around trained weights show flatter neighborhoods for SGD+Momentum compared to AdamW.",
@@ -173,7 +173,7 @@ def create_gdsearch_findings() -> SoWhatAnalyzer:
         ],
         keywords=["Loss Landscape", "Flat Minima", "Curvature", "Generalization"]
     )
-    
+
     return analyzer
 
 
@@ -182,20 +182,20 @@ def main():
     print("=" * 60)
     print("SO WHAT? Analysis Generator")
     print("=" * 60)
-    
+
     analyzer = create_gdsearch_findings()
     analyzer.generate_report()
-    
+
     print(f"\nAnalysis Statistics:")
     print(f"  Total findings: {len(analyzer.findings)}")
     print(f"  Observation → Insight → Implication chains: {len(analyzer.findings)}")
-    
+
     print(f"\nThis analysis demonstrates:")
     print(f"  Systematic progression from observation to insight")
     print(f"  Clear practical implications")
     print(f"  ✅ Evidence-backed conclusions")
     print(f"  ✅ Actionable guidance for practitioners")
-    
+
     print(f"\n📖 Use this in:")
     print(f"  - Discussion section of paper")
     print(f"  - Presentation slides")

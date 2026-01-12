@@ -119,7 +119,9 @@ def train_one_epoch(model, loader, optimizer, device):
         optimizer.step()
         total_loss += float(loss.item()) * input_ids.size(0)
         total += input_ids.size(0)
-    return total_loss / max(1, total)
+    # Note: We don't return accuracy here, only loss. If needed, it should be percent.
+    # Return average training loss per sample (float)
+    return float(total_loss / max(1, total))
 
 
 def evaluate(model, loader, device):
@@ -139,7 +141,8 @@ def evaluate(model, loader, device):
             preds = torch.argmax(logits, dim=1)
             correct += (preds == labels).sum().item()
             total += input_ids.size(0)
-    return total_loss / max(1, total), correct / max(1, total)
+    # Return accuracy as percentage (0-100) to match other modules
+    return total_loss / max(1, total), 100.0 * correct / max(1, total)
 
 
 def _ckpt_path(ckpt_dir: Path, opt_name: str, seed: int, lr: float, model_name: str) -> Path:
@@ -150,36 +153,41 @@ def _ckpt_path(ckpt_dir: Path, opt_name: str, seed: int, lr: float, model_name: 
 def run_single(opt_name: str, seed: int, lr: float, epochs: int, batch_size: int, model_name: str, results_dir: Path, train_size: int, test_size: int, resume: bool, ckpt_dir: Path):
     AutoTokenizer, AutoModel, load_dataset = _try_import_hf()
     set_seed(seed)
-    
+
     # Set environment variables to avoid warnings
     os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-    
+
     # Suppress unnecessary transformers warnings
     warnings.filterwarnings('ignore', message='Some weights.*were not initialized')
-    
+
     import transformers
     transformers.logging.set_verbosity_error()
-    
+
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # Check Python version for compatibility warnings
     import sys
     if sys.version_info >= (3, 13):
-        print("WARNING: Python 3.13 has known IMDB loading issues (fsspec glob patterns)")
-        print("This will likely fail. For production: Use Python 3.10-3.12 or Kaggle environment")
+        logging.warning("Python 3.13 has known IMDB loading issues (fsspec glob patterns)")
+        logging.warning("This will likely fail. For production: Use Python 3.10-3.12 or Kaggle environment")
 
     # Robust dataset loading with fallback for environment compatibility
     use_synthetic = False
+    cache_dir = os.environ.get('HUGGINGFACE_CACHE_DIR', None)
+    if cache_dir is None:
+        import tempfile
+        cache_dir = str(Path(tempfile.gettempdir()) / 'hf_cache')
+
     try:
-        raw = load_dataset('imdb', cache_dir='/tmp/hf_cache')
+        raw = load_dataset('imdb', cache_dir=cache_dir)
     except (ValueError, Exception) as e:
-        print(f"Warning: Failed to load IMDB dataset: {e}")
-        print("Trying alternative loading method...")
+        logging.warning("Failed to load IMDB dataset using cache_dir=%s: %s", cache_dir, e)
+        logging.info("Trying alternative loading method...")
         try:
             raw = load_dataset('imdb', trust_remote_code=True)
         except Exception as e2:
-            print(f"Error: Could not load IMDB dataset: {e2}")
-            print("Falling back to SYNTHETIC sentiment data for compatibility")
+            logging.error("Could not load IMDB dataset: %s", e2, exc_info=True)
+            logging.info("Falling back to SYNTHETIC sentiment data for compatibility")
             use_synthetic = True
             # Generate synthetic sentiment data
             np.random.seed(seed)
@@ -223,7 +231,7 @@ def run_single(opt_name: str, seed: int, lr: float, epochs: int, batch_size: int
         val_labels = train_labels[:val_size]
         train_texts = train_texts[val_size:]
         train_labels = train_labels[val_size:]
-        
+
         train_encodings = tokenizer(train_texts, truncation=True, padding=False, max_length=256)
         val_encodings = tokenizer(val_texts, truncation=True, padding=False, max_length=256)
         test_encodings = tokenizer(test_texts, truncation=True, padding=False, max_length=256)
@@ -334,7 +342,7 @@ def run_single(opt_name: str, seed: int, lr: float, epochs: int, batch_size: int
         train_size_actual = min(train_size, len(full_train))
         val_size = max(int(train_size_actual * 0.15), 100)
         train_size_actual = train_size_actual - val_size
-        
+
         train_ds = full_train.select(range(train_size_actual))
         val_ds = full_train.select(range(train_size_actual, train_size_actual + val_size))
         test_split = tokenized['test']
@@ -479,7 +487,8 @@ def compute_statistics(results_dir: Union[str, Path]):
         _, pB = stats.shapiro(b)
         if pA > 0.05 and pB > 0.05:
             test = 'Paired t-test'
-            _, p = stats.ttest_rel(a, b)
+            from src.analysis.statistical_analysis import safe_ttest_rel
+            _, p = safe_ttest_rel(a, b)
             eff_name = "Cohen's d"
             eff = (a - b).mean() / (a - b).std(ddof=1)
         else:

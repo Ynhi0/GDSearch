@@ -59,11 +59,11 @@ class DelayedOptimizer:
     def step(self, closure=None):
         # Enqueue current grads
         current_grads = self._capture_current_grads()
-        
+
         # Validate gradient shapes
         if len(current_grads) != len(self.params):
             raise ValueError(f"Gradient count mismatch: {len(current_grads)} vs {len(self.params)}")
-        
+
         self.grad_queue.append(current_grads)
 
         if len(self.grad_queue) < self.delay_steps:
@@ -85,11 +85,11 @@ class DelayedOptimizer:
     @property
     def param_groups(self):
         return self.optimizer.param_groups
-    
+
     def state_dict(self):
         """
         Save complete wrapper state for checkpoint persistence.
-        
+
         Returns dict containing:
         - optimizer: base optimizer state
         - delay_steps: delay configuration
@@ -106,30 +106,30 @@ class DelayedOptimizer:
                 else:
                     snapshot_list.append(g.cpu().tolist())
             serialized_queue.append(snapshot_list)
-        
+
         return {
             'optimizer': self.optimizer.state_dict(),
             'delay_steps': self.delay_steps,
             'grad_queue': serialized_queue,
             'param_count': len(self.params),
         }
-    
+
     def load_state_dict(self, state_dict):
         """
         Restore complete wrapper state from checkpoint.
-        
+
         Validates param_count matches and reconstructs grad_queue as tensors.
         """
         self.optimizer.load_state_dict(state_dict['optimizer'])
         self.delay_steps = state_dict['delay_steps']
-        
+
         # Validate parameter count
         if state_dict['param_count'] != len(self.params):
             raise ValueError(
                 f"Parameter count mismatch: checkpoint has {state_dict['param_count']} "
                 f"but model has {len(self.params)} parameters"
             )
-        
+
         # Reconstruct grad_queue from serialized lists
         self.grad_queue.clear()
         for snapshot_list in state_dict['grad_queue']:

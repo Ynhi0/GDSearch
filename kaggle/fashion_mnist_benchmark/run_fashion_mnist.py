@@ -120,17 +120,17 @@ class SAMSGD(torch.optim.Optimizer):
     def step(self, closure=None):
         """SAM requires closure for adversarial gradient computation."""
         assert closure is not None, "SAM requires closure for gradient computation."
-        
+
         # First forward-backward pass
         with torch.enable_grad():
             loss = closure()
         self.first_step(zero_grad=True)
-        
+
         # Second forward-backward pass
         with torch.enable_grad():
             loss = closure()
         self.second_step(zero_grad=True)
-        
+
         return loss
 
     def _grad_norm(self):
@@ -210,15 +210,15 @@ class SAMAdam(torch.optim.Optimizer):
     def step(self, closure=None):
         """SAM requires closure for gradient computation."""
         assert closure is not None, "SAM requires closure."
-        
+
         with torch.enable_grad():
             loss = closure()
         self.first_step(zero_grad=True)
-        
+
         with torch.enable_grad():
             loss = closure()
         self.second_step(zero_grad=True)
-        
+
         return loss
 
     def _grad_norm(self):
@@ -263,10 +263,10 @@ def train_one_epoch(model, loader, optimizer, device):
 
     for data, target in loader:
         data, target = data.to(device), target.to(device)
-        
+
         # Check if optimizer is SAM (requires closure)
         is_sam = isinstance(optimizer, (SAMSGD, SAMAdam))
-        
+
         if is_sam:
             # SAM requires closure for adversarial gradient computation
             def closure():
@@ -275,10 +275,10 @@ def train_one_epoch(model, loader, optimizer, device):
                 loss = F.cross_entropy(output, target)
                 loss.backward()
                 return loss
-            
+
             # SAM handles zero_grad internally in step()
             loss = optimizer.step(closure)
-            
+
             # Re-compute output for accuracy (since SAM modifies parameters during step)
             with torch.no_grad():
                 output = model(data)
@@ -288,10 +288,10 @@ def train_one_epoch(model, loader, optimizer, device):
             output = model(data)
             loss = F.cross_entropy(output, target)
             loss.backward()
-            
+
             # Check gradient health
             check_gradient_health(model, context="Fashion-MNIST")
-            
+
             optimizer.step()
 
         total_loss += loss.item() * data.size(0)

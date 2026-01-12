@@ -43,7 +43,7 @@ def run_optimizer_2d(
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Run optimizer on 2D function and collect trajectory.
-    
+
     Returns:
         trajectory: Array of shape (n_steps, 2) with (x, y) positions
         losses: Array of function values
@@ -51,17 +51,17 @@ def run_optimizer_2d(
     from typing import List
     trajectory: List[np.ndarray] = [x0.copy()]
     losses: List[float] = [float(func(*x0))]
-    
+
     params = np.array(x0, dtype=float)
-    
+
     for _ in range(max_iters):
         grad_raw = grad_func(float(params[0]), float(params[1]))
         grad = np.asarray(grad_raw, dtype=float)
         grad_norm = float(np.linalg.norm(grad))
-        
+
         if grad_norm < tol:
             break
-        
+
         params = optimizer.step(params, grad)  # type: ignore[attr-defined]
         # Safety guard: if params diverge to non-finite or extremely large values, stop early
         if not np.all(np.isfinite(params)) or np.any(np.abs(params) > 1e6):
@@ -69,7 +69,7 @@ def run_optimizer_2d(
             break
         trajectory.append(params.copy())
         losses.append(float(func(float(params[0]), float(params[1]))))
-    
+
     return np.asarray(trajectory, dtype=float), np.asarray(losses, dtype=float)
 
 
@@ -87,7 +87,7 @@ def plot_contour_with_trajectories(
 ):
     """
     Create contour plot with multiple optimizer trajectories.
-    
+
     Args:
         func: 2D test function
         optimizers_config: List of (name, optimizer) tuples
@@ -102,43 +102,43 @@ def plot_contour_with_trajectories(
     y = np.linspace(ylim[0], ylim[1], 200)
     X, Y = np.meshgrid(x, y)
     Z = np.zeros_like(X)
-    
+
     for i in range(X.shape[0]):
         for j in range(X.shape[1]):
             ii = int(i); jj = int(j)
             Z[ii, jj] = float(func(float(X[ii, jj]), float(Y[ii, jj])))
-    
+
     # Create figure
     _, ax = plt.subplots(figsize=(10, 8))
-    
+
     # Plot contours
     contour = ax.contour(X, Y, Z, levels=num_contours, cmap='gray', alpha=0.4, linewidths=0.5)
     ax.clabel(contour, inline=True, fontsize=8, fmt='%.1f')
-    
+
     # Plot filled contours for better visualization
     _ = ax.contourf(X, Y, Z, levels=num_contours, cmap='viridis', alpha=0.3)
-    
+
     # Colors for different optimizers
     colors = ['red', 'blue', 'green', 'orange', 'purple', 'brown']
-    
+
     # Plot trajectories
     for idx, (opt_name, optimizer, grad_func) in enumerate(optimizers_config):
         trajectory, _ = run_optimizer_2d(optimizer, func, grad_func, x0)
-        
+
         color = colors[idx % len(colors)]
-        
+
         # Plot trajectory line
-        ax.plot(trajectory[:, 0], trajectory[:, 1], 
+        ax.plot(trajectory[:, 0], trajectory[:, 1],
                color=color, linewidth=2, alpha=0.7, label=opt_name)
-        
+
         # Plot start point
-        ax.plot(x0[0], x0[1], 'o', color=color, markersize=10, 
+        ax.plot(x0[0], x0[1], 'o', color=color, markersize=10,
                markeredgecolor='black', markeredgewidth=1.5)
-        
+
         # Plot end point
-        ax.plot(trajectory[-1, 0], trajectory[-1, 1], '*', 
+        ax.plot(trajectory[-1, 0], trajectory[-1, 1], '*',
                color=color, markersize=15, markeredgecolor='black', markeredgewidth=1.5)
-        
+
         # Add arrow annotations to show direction every N steps
         arrow_interval = max(1, len(trajectory) // 10)
         for i in range(arrow_interval, len(trajectory), arrow_interval):
@@ -146,7 +146,7 @@ def plot_contour_with_trajectories(
             dy = trajectory[i, 1] - trajectory[i-1, 1]
             ax.arrow(trajectory[i-1, 0], trajectory[i-1, 1], dx, dy,
                     head_width=0.1, head_length=0.15, fc=color, ec=color, alpha=0.5)
-    
+
     ax.set_xlim(xlim)
     ax.set_ylim(ylim)
     ax.set_xlabel('x', fontsize=14)
@@ -154,11 +154,11 @@ def plot_contour_with_trajectories(
     ax.set_title(title, fontsize=16, fontweight='bold')
     ax.legend(fontsize=11, loc='best')
     ax.grid(True, alpha=0.3)
-    
+
     plt.tight_layout()
     plt.savefig(output_path, dpi=150, bbox_inches='tight')
     plt.close()
-    
+
     logging.info("Saved trajectory plot: %s", output_path)
 
 
@@ -260,7 +260,7 @@ def compare_momentum_beta_trajectories(
 
     Notes:
         Accepts either `save_dir` or `output_dir` for backward compatibility with callers.
-    
+
     Key research question: How does β shape the trajectory smoothness?
     """
     # Allow callers to pass `output_dir=` (used elsewhere in the codebase)
@@ -269,9 +269,9 @@ def compare_momentum_beta_trajectories(
 
     if beta_values is None:
         beta_values = [0.0, 0.5, 0.9, 0.99]
-    
+
     Path(save_dir).mkdir(parents=True, exist_ok=True)
-    
+
     # Select test function
     if test_function == 'rosenbrock':
         test_fn = Rosenbrock()
@@ -294,7 +294,7 @@ def compare_momentum_beta_trajectories(
         x0 = np.array([-1.5, 2.0])
         xlim, ylim = (-2, 2), (-2, 2)
         title = 'Ill-Conditioned Quadratic: Momentum β Effect'
-    
+
     # Build optimizer configs
     optimizers_config = []
     for beta in beta_values:
@@ -305,9 +305,9 @@ def compare_momentum_beta_trajectories(
             opt_name = f'Momentum β={beta}'
             optimizer = SGDMomentum(lr=0.01, beta=beta)
         optimizers_config.append((opt_name, optimizer, grad_func))
-    
+
     output_path = Path(save_dir) / f'momentum_beta_trajectories_{test_function}.png'
-    
+
     plot_contour_with_trajectories(
         func, optimizers_config, x0, xlim, ylim, title, output_path
     )
@@ -333,9 +333,9 @@ def compare_adam_beta_trajectories(
 
     if beta_configs is None:
         beta_configs = [(0.9, 0.999), (0.5, 0.99), (0.95, 0.9999)]
-    
+
     Path(save_dir).mkdir(parents=True, exist_ok=True)
-    
+
     # Select test function
     if test_function == 'rosenbrock':
         test_fn = Rosenbrock()
@@ -351,16 +351,16 @@ def compare_adam_beta_trajectories(
         x0 = np.array([2.0, 2.5])
         xlim, ylim = (-5, 5), (-5, 5)
         title = 'Ackley Function: Adam β1,β2 Effect on Trajectory'
-    
+
     # Build optimizer configs
     optimizers_config = []
     for beta1, beta2 in beta_configs:
         opt_name = f'Adam β1={beta1}, β2={beta2}'
         optimizer = Adam(lr=0.01, beta1=beta1, beta2=beta2)
         optimizers_config.append((opt_name, optimizer, grad_func))
-    
+
     output_path = Path(save_dir) / f'adam_beta_trajectories_{test_function}.png'
-    
+
     plot_contour_with_trajectories(
         func, optimizers_config, x0, xlim, ylim, title, output_path
     )
@@ -384,7 +384,7 @@ def compare_optimizer_families(
         save_dir = output_dir
 
     Path(save_dir).mkdir(parents=True, exist_ok=True)
-    
+
     # Select test function
     if test_function == 'rosenbrock':
         test_fn = Rosenbrock()
@@ -407,7 +407,7 @@ def compare_optimizer_families(
         x0 = np.array([-1.5, 2.0])
         xlim, ylim = (-2, 2), (-2, 2)
         title = 'Ill-Conditioned Quadratic: Optimizer Comparison'
-    
+
     # Build optimizer configs
     optimizers_config = [
         ('SGD', SGD(lr=0.01), grad_func),
@@ -415,9 +415,9 @@ def compare_optimizer_families(
         ('Nesterov', SGDNesterov(lr=0.01, beta=0.9), grad_func),
         ('Adam', Adam(lr=0.01), grad_func)
     ]
-    
+
     output_path = Path(save_dir) / f'optimizer_comparison_{test_function}.png'
-    
+
     plot_contour_with_trajectories(
         func, optimizers_config, x0, xlim, ylim, title, output_path
     )
@@ -425,29 +425,29 @@ def compare_optimizer_families(
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
-    
+
     print("="*60)
     print("2D Trajectory Visualization")
     print("="*60)
-    
+
     viz_output_dir = 'results/trajectory_visualization'
-    
+
     # Study 1: Momentum β effect
     print("\n1. Generating Momentum β trajectories...")
     compare_momentum_beta_trajectories('rosenbrock', save_dir=viz_output_dir)
     compare_momentum_beta_trajectories('ackley', save_dir=viz_output_dir)
-    
+
     # Study 2: Adam β1, β2 effect
     print("\n2. Generating Adam β1,β2 trajectories...")
     compare_adam_beta_trajectories('rosenbrock', save_dir=viz_output_dir)
     compare_adam_beta_trajectories('ackley', save_dir=viz_output_dir)
-    
+
     # Study 3: Optimizer family comparison
     print("\n3. Generating optimizer family comparisons...")
     compare_optimizer_families('rosenbrock', save_dir=viz_output_dir)
     compare_optimizer_families('saddle', save_dir=viz_output_dir)
     compare_optimizer_families('ill_conditioned', save_dir=viz_output_dir)
-    
+
     print(f"\nAll visualizations saved to {viz_output_dir}/")
     print("\nGenerated plots show:")
     print("  - Trajectory smoothness differences")

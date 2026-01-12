@@ -15,7 +15,7 @@ class OOMModelAlways(nn.Module):
 
 class OOMModelSizeSensitive(nn.Module):
     """Model that raises OOM when batch size > 2, succeeds on batch size <= 2.
-    
+
     NOTE: Does NOT use BatchNorm so that batch_size=2 reduction can succeed.
     This tests the OOM recovery mechanism without BatchNorm constraints.
     """
@@ -33,7 +33,7 @@ class OOMModelSizeSensitive(nn.Module):
 
 def test_eval_fallback_disabled_raises():
     """Test that OOM with BatchNorm model at min batch size raises error.
-    
+
     GAP #22: The allow_batchnorm_eval_fallback parameter was REMOVED because
     switching to eval() mode during training is scientifically invalid.
     Now the function always raises if batch size becomes too small for BatchNorm.
@@ -52,10 +52,10 @@ def test_eval_fallback_disabled_raises():
 
 def test_oom_recovery_reduces_batch_size():
     """Test that OOM-safe handler successfully reduces batch size.
-    
+
     GAP #22: The eval fallback is no longer supported - only batch size reduction.
     This test verifies that batch size reduction still works correctly.
-    
+
     Uses a model WITHOUT BatchNorm so batch size reduction to 2 can succeed.
     """
     model = OOMModelSizeSensitive()

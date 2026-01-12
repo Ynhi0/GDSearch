@@ -45,15 +45,15 @@ def main():
 Examples:
     # Full sweep (publication quality)
     python run_condition_number_sweep.py --kappas 1,5,10,50,100,500,1000 --seeds 1,2,3,4,5
-    
+
     # Quick test (3 condition numbers)
     python run_condition_number_sweep.py --quick
-    
+
     # Ultra-quick (1 seed, 3 κ values)
     python run_condition_number_sweep.py --ultra-quick
         """
     )
-    
+
     parser.add_argument('--kappas', type=str, default='1,10,100,1000',
                        help='Comma-separated condition numbers (default: 1,10,100,1000)')
     parser.add_argument('--seeds', type=str, default='1,2,3',
@@ -70,9 +70,9 @@ Examples:
                        help='Quick mode: κ ∈ {1,10,100}, 3 seeds')
     parser.add_argument('--ultra-quick', action='store_true',
                        help='Ultra-quick mode: κ ∈ {1,10,100}, 1 seed')
-    
+
     args = parser.parse_args()
-    
+
     # Parse condition numbers and seeds
     if args.ultra_quick:
         kappas = [1, 10, 100]
@@ -86,10 +86,10 @@ Examples:
         kappas = [float(k) for k in args.kappas.split(',')]
         seeds = [int(s) for s in args.seeds.split(',')]
         max_iters = args.max_iters
-    
+
     results_dir = Path(args.results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
-    
+
     logging.info("="*70)
     logging.info("CONDITION NUMBER SWEEP EXPERIMENT")
     logging.info("="*70)
@@ -99,13 +99,13 @@ Examples:
     logging.info(f"Max iterations: {max_iters}")
     logging.info(f"Tolerance: {args.tol}")
     logging.info(f"Results directory: {results_dir}")
-    
+
     # Run sweep experiment
     results = []
-    
+
     for kappa in kappas:
         logging.info(f"\n--- Testing κ = {kappa} ---")
-        
+
         # Create quadratic function with this condition number
         obj_fn, grad_fn, metadata = quadratic_with_condition_number(
             kappa=kappa,
@@ -113,25 +113,25 @@ Examples:
             random_rotation=True,  # Random rotation for non-axis-aligned geometry
             seed=42
         )
-        
+
         for seed in seeds:
             setup_experiment_reproducibility(seed=seed)
-            
+
             # Test SGD
             logging.info(f"  Seed {seed}: Testing SGD...")
             sgd = SGD(lr=0.1)  # Will need tuning per κ
             x0 = np.random.randn(args.dim) * 10  # Random initialization
-            
+
             x_sgd = x0.copy()
             iters_sgd = 0
             for i in range(max_iters):
                 grad = grad_fn(x_sgd)
                 x_sgd = sgd.step(x_sgd, grad)
                 iters_sgd += 1
-                
+
                 if obj_fn(x_sgd) < args.tol:
                     break
-            
+
             # Test Momentum
             logging.info(f"  Seed {seed}: Testing Momentum...")
             momentum = Momentum(lr=0.1, beta=0.9)
@@ -141,10 +141,10 @@ Examples:
                 grad = grad_fn(x_momentum)
                 x_momentum = momentum.step(x_momentum, grad)
                 iters_momentum += 1
-                
+
                 if obj_fn(x_momentum) < args.tol:
                     break
-            
+
             # Record results
             results.append({
                 'kappa': kappa,
@@ -154,7 +154,7 @@ Examples:
                 'final_loss': obj_fn(x_sgd),
                 'converged': obj_fn(x_sgd) < args.tol
             })
-            
+
             results.append({
                 'kappa': kappa,
                 'seed': seed,
@@ -163,42 +163,42 @@ Examples:
                 'final_loss': obj_fn(x_momentum),
                 'converged': obj_fn(x_momentum) < args.tol
             })
-            
+
             logging.info(f"    SGD: {iters_sgd} iters (loss={obj_fn(x_sgd):.2e})")
             logging.info(f"    Momentum: {iters_momentum} iters (loss={obj_fn(x_momentum):.2e})")
-            
+
             # Speedup factor
             if iters_sgd > 0 and iters_momentum > 0:
                 speedup = iters_sgd / iters_momentum
                 logging.info(f"    Speedup: {speedup:.2f}x")
-    
+
     # Save results
     df = pd.DataFrame(results)
     csv_path = results_dir / 'condition_number_sweep_results.csv'
     df.to_csv(csv_path, index=False)
     logging.info(f"\n✓ Results saved to {csv_path}")
-    
+
     # Compute summary statistics
     summary = df.groupby(['kappa', 'optimizer']).agg({
         'iterations': ['mean', 'std'],
         'converged': 'mean'
     }).reset_index()
-    
+
     summary_path = results_dir / 'condition_number_sweep_summary.csv'
     summary.to_csv(summary_path, index=False)
     logging.info(f"✓ Summary saved to {summary_path}")
-    
+
     # Visualize results
     logging.info("\nGenerating plots...")
     visualize_condition_number_sweep(df, output_path=str(results_dir / 'condition_number_sweep.png'))
-    
+
     # Additional plot: Speedup vs κ
     fig, ax = plt.subplots(figsize=(10, 6))
-    
+
     sgd_mean = df[df['optimizer'] == 'SGD'].groupby('kappa')['iterations'].mean()
     momentum_mean = df[df['optimizer'] == 'Momentum'].groupby('kappa')['iterations'].mean()
     speedup = sgd_mean / momentum_mean
-    
+
     ax.plot(kappas, speedup.values, 'o-', linewidth=2, markersize=8, label='Observed Speedup')
     ax.plot(kappas, np.sqrt(kappas), '--', linewidth=2, label='Theoretical √κ', alpha=0.7)
     ax.set_xlabel('Condition Number κ', fontsize=12)
@@ -208,13 +208,13 @@ Examples:
     ax.set_yscale('log')
     ax.grid(True, alpha=0.3)
     ax.legend(fontsize=10)
-    
+
     speedup_path = results_dir / 'momentum_speedup_vs_kappa.png'
     plt.savefig(speedup_path, dpi=300, bbox_inches='tight')
     plt.close()
-    
+
     logging.info(f"✓ Speedup plot saved to {speedup_path}")
-    
+
     # Print final summary
     logging.info("\n" + "="*70)
     logging.info("FINAL SUMMARY")
@@ -227,10 +227,10 @@ Examples:
         mom_iters = df[(df['kappa'] == kappa) & (df['optimizer'] == 'Momentum')]['iterations'].mean()
         speedup_val = sgd_iters / mom_iters if mom_iters > 0 else 0
         logging.info(f"  κ = {kappa:6.0f}: SGD = {sgd_iters:6.1f}, Momentum = {mom_iters:6.1f}, Speedup = {speedup_val:.2f}x")
-    
+
     logging.info("✓ Condition number sweep complete!")
     logging.info(f"✓ Results: {results_dir}")
-    
+
     return 0
 
 

@@ -40,7 +40,7 @@ def check_imports() -> Tuple[bool, str]:
         from src.analysis.statistical_analysis import load_multiseed_results
         from src.visualization.plot_results import plot_trajectory
         # Prevent unused import warnings
-        _ = (torch, np, pd, SGD, Adam, AdamW, SimpleMLP, ResNet18, 
+        _ = (torch, np, pd, SGD, Adam, AdamW, SimpleMLP, ResNet18,
              run_multi_seed_experiment, load_multiseed_results, plot_trajectory)
         return True, "All imports successful"
     except Exception as e:
@@ -52,18 +52,18 @@ def check_configs() -> Tuple[bool, str]:
     try:
         import json
         config_dir = Path(__file__).parent.parent / "configs"
-        
+
         if not config_dir.exists():
             return False, f"Config directory not found: {config_dir}"
-        
+
         config_files = list(config_dir.glob("*.json"))
         if not config_files:
             return False, "No config files found"
-        
+
         for config_file in config_files:
             with open(config_file, 'r', encoding='utf-8') as f:
                 json.load(f)  # Will raise if invalid JSON
-        
+
         return True, f"All {len(config_files)} config files valid"
     except Exception as e:
         return False, f"Config validation failed: {e}"
@@ -88,7 +88,7 @@ def run_quick_mnist_test() -> Tuple[bool, str]:
             timeout=600,  # 10 minutes max
             check=False
         )
-        
+
         # Check for success indicators
         if "MNIST" in result.stdout and "passed" in result.stdout.lower():
             return True, "MNIST test passed"
@@ -110,7 +110,7 @@ def run_analysis_pipeline_test() -> Tuple[bool, str]:
         temp_dir = Path(tempfile.mkdtemp())
         results_dir = temp_dir / "experiments" / "test"
         results_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Create minimal test data
         df = pd.DataFrame({
             'epoch': [1, 2, 3],
@@ -120,12 +120,12 @@ def run_analysis_pipeline_test() -> Tuple[bool, str]:
             'seed': [42, 42, 42]
         })
         df.to_csv(results_dir / "test_SGD_seed42.csv", index=False)
-        
+
         # Try to load results (basic functionality test)
         from src.analysis.statistical_analysis import load_multiseed_results
         pattern = str(results_dir / "test_*.csv")
         results = load_multiseed_results(pattern, str(results_dir))
-        
+
         if len(results) > 0:
             return True, "Analysis pipeline functional"
         else:
@@ -140,26 +140,26 @@ def main():
     parser.add_argument("--quick", action="store_true", help="Skip long-running tests")
     parser.add_argument("--smoke-test", action="store_true", help="Alias for --quick")
     args = parser.parse_args()
-    
+
     # Handle both --quick and --smoke-test flags
     skip_long_tests = args.quick or args.smoke_test
-    
+
     print("=" * 80)
     print("GDSearch Platform Comprehensive Validation")
     print("=" * 80)
     print()
-    
+
     tests: List[Tuple[str, Callable[[], Tuple[bool, str]]]] = [
         ("Import Validation", check_imports),
         ("Configuration Validation", check_configs),
         ("Analysis Pipeline Test", run_analysis_pipeline_test),
     ]
-    
+
     if not skip_long_tests:
         tests.append(("MNIST Quick Test", run_quick_mnist_test))
-    
+
     results: Dict[str, bool] = {}
-    
+
     for test_name, test_func in tests:
         print(f"Running: {test_name}...", end=" ", flush=True)
         try:
@@ -170,22 +170,22 @@ def main():
         except Exception as e:
             results[test_name] = False
             print(f"✗ FAIL - Unexpected error: {e}")
-    
+
     print()
     print("=" * 80)
     print("VALIDATION SUMMARY")
     print("=" * 80)
-    
+
     passed = sum(results.values())
     total = len(results)
-    
+
     for test_name, success in results.items():
         status = "✓" if success else "✗"
         print(f"{status} {test_name}")
-    
+
     print()
     print(f"Results: {passed}/{total} tests passed")
-    
+
     if passed == total:
         print("\n✓ ALL VALIDATIONS PASSED - Platform ready for production")
         return 0

@@ -29,18 +29,18 @@ def theoretical_velocity_magnitude(
 ) -> Dict[str, Any]:
     """
     Predict expected velocity (step size) magnitude.
-    
+
     Theory:
     - SGD (momentum=0): E[||Δx_t||] ≈ η * E[||∇f||] ≈ η√L for normalized gradients
     - Momentum: E[||Δx_t||] ≈ η/(1-β) * E[||∇f||] (amplification by 1/(1-β))
     - Stochastic: Add noise contribution √(η²σ²)
-    
+
     Args:
         lr: Learning rate (η)
         L: Lipschitz smoothness constant
         momentum: Momentum coefficient (β)
         sigma: Gradient noise level
-        
+
     Returns:
         dict with:
           - expected_velocity: Predicted ||Δx_t||
@@ -51,21 +51,21 @@ def theoretical_velocity_magnitude(
     # Deterministic component: step size * typical gradient magnitude
     # Assume typical gradient norm ≈ √L (based on smoothness)
     grad_magnitude = np.sqrt(L)
-    
+
     # Momentum amplification
     if momentum > 0 and momentum < 1:
         amplification = 1.0 / (1.0 - momentum)
     else:
         amplification = 1.0
-    
+
     deterministic_vel = lr * amplification * grad_magnitude
-    
+
     # Stochastic component (noise adds to velocity)
     stochastic_vel = lr * sigma
-    
+
     # Total expected velocity (RMS combination)
     expected_velocity = np.sqrt(deterministic_vel**2 + stochastic_vel**2)
-    
+
     return {
         'expected_velocity': float(expected_velocity),
         'deterministic_component': float(deterministic_vel),
@@ -84,21 +84,21 @@ def theoretical_oscillation_amplitude(
 ) -> Dict[str, Any]:
     """
     Predict oscillation amplitude for momentum-based methods.
-    
+
     Theory (from Polyak 1964 heavy ball analysis):
     - Underdamped regime (β > β_critical): Oscillations with amplitude A ∝ 1/√μ
     - Overdamped regime (β < β_critical): Exponential decay, no oscillations
     - Critical damping: β_critical = (√κ - 1)/(√κ + 1) where κ = L/μ
-    
+
     For stochastic case, noise adds random oscillations ∝ σ.
-    
+
     Args:
         lr: Learning rate
         L: Lipschitz constant
         mu: Strong convexity parameter (use PL constant for non-convex)
         momentum: Momentum coefficient (β)
         sigma: Gradient noise level
-        
+
     Returns:
         dict with:
           - expected_amplitude: Predicted oscillation amplitude
@@ -115,14 +115,14 @@ def theoretical_oscillation_amplitude(
             'frequency': None,
             'theory_source': 'No curvature-based theory; noise-driven'
         }
-    
+
     # Condition number
     kappa = L / mu
     sqrt_kappa = np.sqrt(kappa)
-    
+
     # Critical momentum (Polyak optimal)
     beta_critical = (sqrt_kappa - 1) / (sqrt_kappa + 1)
-    
+
     # Determine regime
     if abs(momentum - beta_critical) < 0.05:
         regime = 'critically_damped'
@@ -138,18 +138,18 @@ def theoretical_oscillation_amplitude(
         regime = 'overdamped'
         # Overdamped: slow exponential decay, no oscillations
         amplitude = lr * np.sqrt(L) * 0.5  # Reduced by slow approach
-    
+
     # Add stochastic contribution
     noise_amplitude = sigma * lr
     total_amplitude = np.sqrt(amplitude**2 + noise_amplitude**2)
-    
+
     # Oscillation frequency (for underdamped)
     if regime == 'underdamped':
         # Natural frequency ω ≈ √(μL) / (1 + momentum)
         frequency = np.sqrt(mu * L) / (1 + momentum)
     else:
         frequency = None
-    
+
     return {
         'expected_amplitude': float(total_amplitude),
         'deterministic_amplitude': float(amplitude),
@@ -169,18 +169,18 @@ def theoretical_smoothness_index(
 ) -> Dict[str, Any]:
     """
     Predict trajectory smoothness (angle changes between steps).
-    
+
     Theory:
     - Pure SGD: Random walk → angle ≈ 90° (π/2 rad) on average
     - Momentum: Correlation between steps → smaller angles
       Expected angle ≈ arccos(β) (momentum preserves direction)
     - Noise: Adds random deviation ∝ σ/||v||
-    
+
     Args:
         lr: Learning rate
         momentum: Momentum coefficient (β)
         sigma: Gradient noise level
-        
+
     Returns:
         dict with:
           - expected_angle: Mean angle change (radians)
@@ -199,16 +199,16 @@ def theoretical_smoothness_index(
         # E[cos(θ)] ≈ β (momentum preserves direction)
         # E[θ] ≈ arccos(β)
         expected_angle = np.arccos(momentum)
-        
+
         # Noise adds random deviation
         # Approximate: angle_std ∝ (1 - β) * noise_factor
         noise_factor = sigma / (1e-3 + lr)  # Normalized noise
         angle_std = (1 - momentum) * np.pi / 4.0 + noise_factor * 0.1
-        
+
         # Smoothness improvement vs. vanilla SGD
         # (π/2) / arccos(β) ≈ how much smoother
         smoothness_improvement = (np.pi / 2.0) / expected_angle
-    
+
     return {
         'expected_angle': float(expected_angle),
         'expected_angle_degrees': float(np.degrees(expected_angle)),
@@ -228,19 +228,19 @@ def theoretical_path_efficiency(
 ) -> Dict[str, Any]:
     """
     Predict path efficiency (ratio of direct distance to path length).
-    
+
     Theory:
     - Optimal path: Straight line from x_0 to x* (efficiency = 1.0)
     - SGD: Random walk → efficiency ≈ 1/√T (diffusion scaling)
     - Momentum: Reduces zigzagging → efficiency ≈ √(1-β)
-    
+
     Args:
         lr: Learning rate
         L: Lipschitz constant
         mu: Strong convexity parameter
         momentum: Momentum coefficient
         T: Number of iterations
-        
+
     Returns:
         dict with:
           - expected_efficiency: Path efficiency [0, 1]
@@ -248,7 +248,7 @@ def theoretical_path_efficiency(
           - theoretical_displacement: Expected direct distance
     """
     # Approximate analysis based on random walk vs ballistic motion
-    
+
     if mu <= 1e-12:
         # Non-convex: harder to predict, use empirical heuristics
         efficiency_base = 0.5  # Midpoint estimate
@@ -260,19 +260,19 @@ def theoretical_path_efficiency(
             efficiency_base = 1.0 / np.sqrt(T)
         else:
             efficiency_base = np.sqrt(1 - momentum)
-    
+
     # Learning rate and smoothness affect straightness
     # Smaller η → smaller steps → straighter (less overshoot)
     lr_factor = min(1.0, 1.0 / (lr * L))
-    
+
     expected_efficiency = efficiency_base * lr_factor
     expected_efficiency = np.clip(expected_efficiency, 0.0, 1.0)
-    
+
     # Approximate path length and displacement
     # Assume initial error ||x_0 - x*|| = 1 (normalized)
     theoretical_displacement = 1.0  # Direct distance
     theoretical_path_length = theoretical_displacement / (expected_efficiency + 1e-10)
-    
+
     return {
         'expected_efficiency': float(expected_efficiency),
         'theoretical_path_length': float(theoretical_path_length),
@@ -294,7 +294,7 @@ def compare_dynamics_theory_practice(
 ) -> Dict[str, Dict]:
     """
     Compare measured dynamics with theoretical predictions.
-    
+
     Args:
         measured_velocity: Observed mean velocity ||Δx_t||
         measured_oscillation: Observed oscillation amplitude
@@ -304,7 +304,7 @@ def compare_dynamics_theory_practice(
         momentum: Momentum coefficient
         mu: Strong convexity / PL constant (if available)
         sigma: Gradient noise (measured)
-        
+
     Returns:
         dict with theory-practice comparison for each metric:
           - velocity: {theory, practice, error, error_pct}
@@ -315,7 +315,7 @@ def compare_dynamics_theory_practice(
     vel_theory = theoretical_velocity_magnitude(lr, L, momentum, sigma)
     vel_error = abs(measured_velocity - vel_theory['expected_velocity'])
     vel_error_pct = (vel_error / (measured_velocity + 1e-10)) * 100
-    
+
     # Predict oscillation (requires curvature)
     if mu is not None and mu > 1e-12:
         osc_theory = theoretical_oscillation_amplitude(lr, L, mu, momentum, sigma)
@@ -325,12 +325,12 @@ def compare_dynamics_theory_practice(
         osc_theory = {'expected_amplitude': None, 'regime': 'non_convex'}
         osc_error = None
         osc_error_pct = None
-    
+
     # Predict smoothness
     smooth_theory = theoretical_smoothness_index(lr, momentum, sigma)
     smooth_error = abs(measured_smoothness - smooth_theory['expected_angle'])
     smooth_error_pct = (smooth_error / (measured_smoothness + 1e-10)) * 100
-    
+
     return {
         'velocity': {
             'measured': float(measured_velocity),
@@ -359,10 +359,10 @@ def compare_dynamics_theory_practice(
 def generate_dynamics_theory_report(comparison: Dict) -> str:
     """
     Generate human-readable report for dynamics theory-practice comparison.
-    
+
     Args:
         comparison: Output from compare_dynamics_theory_practice()
-        
+
     Returns:
         str: Formatted report
     """
@@ -371,7 +371,7 @@ def generate_dynamics_theory_report(comparison: Dict) -> str:
     report.append("DYNAMICS THEORY-PRACTICE COMPARISON")
     report.append("="*80)
     report.append("")
-    
+
     # Velocity
     vel = comparison['velocity']
     report.append("1. VELOCITY MAGNITUDE")
@@ -385,7 +385,7 @@ def generate_dynamics_theory_report(comparison: Dict) -> str:
     else:
         report.append("   ✗ Poor agreement (>25% error)")
     report.append("")
-    
+
     # Oscillation
     osc = comparison['oscillation']
     report.append("2. OSCILLATION AMPLITUDE")
@@ -401,7 +401,7 @@ def generate_dynamics_theory_report(comparison: Dict) -> str:
     else:
         report.append("   ⚠ No theoretical prediction (non-convex, no curvature)")
     report.append("")
-    
+
     # Smoothness
     smooth = comparison['smoothness']
     report.append("3. TRAJECTORY SMOOTHNESS")
@@ -413,9 +413,9 @@ def generate_dynamics_theory_report(comparison: Dict) -> str:
     else:
         report.append("   ⚠ Moderate/poor agreement")
     report.append("")
-    
+
     report.append("="*80)
-    
+
     return "\n".join(report)
 
 
@@ -423,24 +423,24 @@ if __name__ == '__main__':
     # Example usage
     print("Dynamics Theory Predictions - Example")
     print("="*80)
-    
+
     # Test case: SGD with momentum on a smooth strongly convex problem
     lr = 0.01
     L = 10.0
     mu = 0.1
     momentum = 0.9
     sigma = 0.01
-    
+
     print(f"\nParameters: lr={lr}, L={L}, μ={mu}, β={momentum}, σ={sigma}")
     print()
-    
+
     # Velocity prediction
     vel_pred = theoretical_velocity_magnitude(lr, L, momentum, sigma)
     print("VELOCITY PREDICTION:")
     print(f"  Expected magnitude: {vel_pred['expected_velocity']:.6f}")
     print(f"  Amplification:      {vel_pred['amplification_factor']:.2f}x")
     print()
-    
+
     # Oscillation prediction
     osc_pred = theoretical_oscillation_amplitude(lr, L, mu, momentum, sigma)
     print("OSCILLATION PREDICTION:")
@@ -448,13 +448,13 @@ if __name__ == '__main__':
     print(f"  Regime:            {osc_pred['regime']}")
     print(f"  Critical β:        {osc_pred['critical_momentum']:.4f}")
     print()
-    
+
     # Smoothness prediction
     smooth_pred = theoretical_smoothness_index(lr, momentum, sigma)
     print("SMOOTHNESS PREDICTION:")
     print(f"  Expected angle:    {smooth_pred['expected_angle']:.4f} rad ({smooth_pred['expected_angle_degrees']:.1f}°)")
     print(f"  Improvement:       {smooth_pred['smoothness_improvement']:.2f}x vs vanilla SGD")
     print()
-    
+
     print("="*80)
     print("✓ Dynamics theory module functional")

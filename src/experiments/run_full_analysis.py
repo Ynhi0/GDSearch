@@ -48,7 +48,7 @@ def run_full_pipeline(
     2. Aggregate results
     3. Statistical comparison
     4. Generate plots with error bars
-    
+
     Args:
         config_path: Path to base config file
         seeds: List of random seeds
@@ -58,11 +58,11 @@ def run_full_pipeline(
     """
     os.makedirs(results_dir, exist_ok=True)
     os.makedirs(plots_dir, exist_ok=True)
-    
+
     # Load base config
     with open(config_path, 'r', encoding='utf-8') as f:
         base_config = json.load(f)
-    
+
     print("="*70)
     print(f"FULL MULTI-SEED ANALYSIS PIPELINE")
     print("="*70)
@@ -72,51 +72,51 @@ def run_full_pipeline(
     print(f"Results dir: {results_dir}")
     print(f"Plots dir: {plots_dir}")
     print("="*70)
-    
+
     # ====================================================================
     # PHASE 1: RUN MULTI-SEED EXPERIMENTS
     # ====================================================================
     print("\n[PHASE 1] Running multi-seed experiments...")
     print("-"*70)
-    
+
     result_files = run_multi_seed_experiment(
         base_config=base_config,
         seeds=seeds,
         results_dir=results_dir
     )
-    
+
     print(f"Completed {len(result_files)} experiment runs")
-    
+
     # ====================================================================
     # PHASE 2: AGGREGATE RESULTS
     # ====================================================================
     print("\n[PHASE 2] Aggregating results...")
     print("-"*70)
-    
+
     # Determine metric based on task type
     task_type = base_config.get('task', 'neural_network')
     if task_type == 'neural_network':
         metrics = ['test_accuracy', 'test_loss', 'train_loss']
     else:
         metrics = ['loss', 'grad_norm', 'update_norm']
-    
+
     aggregated = {}
     for metric in metrics:
         agg = aggregate_results(result_files, metric=metric)
         aggregated[metric] = agg
-        
+
         # Print summary
         print(f"\n{metric}:")
         print(f"  Mean: {agg['mean']:.4f}")
         print(f"  Std:  {agg['std']:.4f}")
         print(f"  Min:  {agg['min']:.4f}")
         print(f"  Max:  {agg['max']:.4f}")
-    
+
     # Save aggregated results
     agg_path = os.path.join(results_dir, 'aggregated_results.json')
     save_aggregated_results(aggregated, agg_path)
     print(f"\nAggregated results saved to: {agg_path}")
-    
+
     # ====================================================================
     # PHASE 3: STATISTICAL COMPARISONS
     # ====================================================================
@@ -125,26 +125,26 @@ def run_full_pipeline(
         print("-"*70)
         summary_rows = []
         p_values = []
-        
+
         for opt_A, opt_B in comparison_pairs:
             print(f"\n{'='*70}")
             print(f"Comparing: {opt_A} vs {opt_B}")
             print(f"{'='*70}")
-            
+
             # Load results for both optimizers
             pattern_A = f"*{opt_A}*seed*.csv"
             pattern_B = f"*{opt_B}*seed*.csv"
-            
+
             dfs_A = load_multiseed_results(pattern_A, results_dir)
             dfs_B = load_multiseed_results(pattern_B, results_dir)
-            
+
             if not dfs_A or not dfs_B:
                 print(f"Missing results for {opt_A} or {opt_B}, skipping...")
                 continue
-            
+
             # Extract final metric
             metric = metrics[0]  # Primary metric (test_accuracy or loss)
-            
+
             # Build final metrics and attempt to enable paired comparison by matching seeds
             def _extract_seed(fname: str):
                 import re, os
@@ -196,7 +196,7 @@ def run_full_pipeline(
                 seeds_A_only = set(map_A) - set(map_B)
                 seeds_B_only = set(map_B) - set(map_A)
                 n_common_seeds = len(common)
-                
+
                 # Warn if seeds don't fully match
                 if seeds_A_only or seeds_B_only:
                     logging.warning("Seed mismatch detected: %s has %d seeds, %s has %d seeds, %d in common",
@@ -206,7 +206,7 @@ def run_full_pipeline(
                     if seeds_B_only:
                         logging.warning("%s-only seeds: %s", opt_B, sorted(seeds_B_only))
                     logging.warning("Recommendation: Use identical seed lists for all optimizers to enable pairing.")
-                
+
                 if n_common_seeds >= 3:
                     results_A = np.array([map_A[s] for s in common], dtype=float)
                     results_B = np.array([map_B[s] for s in common], dtype=float)
@@ -253,7 +253,7 @@ def run_full_pipeline(
             auto = auto_select_test(results_A, results_B, paired=paired, name_A=opt_A, name_B=opt_B)
             test_result = auto['test_result']
             test_type = auto.get('test_type', 'unknown')
-            
+
             # Unified access to p-value and effect size
             if 'p_value' in test_result:
                 p_value = float(test_result['p_value'])
@@ -264,7 +264,7 @@ def run_full_pipeline(
                 test_result = tt
                 test_type = 'parametric (t-test)'
             p_values.append(p_value)
-            
+
             # Print a concise report
             print(f"Test selected: {test_type}")
             if 't_statistic' in test_result:
@@ -272,7 +272,7 @@ def run_full_pipeline(
             else:
                 # Minimal print for non-param; defer full formatting to CSV
                 print(f"p={p_value:.4f}, significant={test_result.get('significant')}")
-            
+
             # Collect summary row
             row = {
                 'Optimizer A': opt_A,
@@ -288,19 +288,19 @@ def run_full_pipeline(
             # Use effect_size field which works for both parametric and non-parametric
             effect_size_val = test_result.get('effect_size', test_result.get('cohens_d'))
             effect_size_type = test_result.get('effect_size_type', 'unknown')
-            
+
             if effect_size_val is not None:
                 row['Effect size'] = float(effect_size_val)
                 row['Effect size type'] = effect_size_type
-                
+
             # Backward compatibility: keep cohens_d column if present
             if test_result.get('cohens_d') is not None:
                 row['Effect size (Cohen_d)'] = float(test_result['cohens_d'])
-            
+
             # Legacy field for rank-biserial (if present)
             if 'effect_size_r' in test_result:
                 row['Effect size (r)'] = float(test_result['effect_size_r'])
-            
+
             # Means (if available)
             for k in ('mean_A','std_A','n_A','mean_B','std_B','n_B'):
                 if k in test_result:
@@ -329,7 +329,7 @@ def run_full_pipeline(
                 row['Required n (80% power)'] = np.nan
 
             summary_rows.append(row)
-            
+
             # Plot comparison
             plot_path = os.path.join(plots_dir, f'statistical_{opt_A}_vs_{opt_B}.png')
             plot_comparison_with_errorbars(
@@ -339,7 +339,7 @@ def run_full_pipeline(
                 metric=metric.replace('_', ' ').title(),
                 save_path=plot_path
             )
-        
+
         # Save CSV summary with Holm-Bonferroni correction across all pairs
         if summary_rows:
             df_summary = pd.DataFrame(summary_rows)
@@ -355,7 +355,7 @@ def run_full_pipeline(
             out_csv = os.path.join(results_dir, 'statistical_comparisons.csv')
             df_summary.to_csv(out_csv, index=False)
             print(f"\nSaved statistical comparison summary ({correction}) to: {out_csv}")
-            
+
             # Summary warnings for seed consistency across all comparisons
             paired_count = df_summary['Paired'].sum()
             unpaired_count = len(df_summary) - paired_count
@@ -368,21 +368,21 @@ def run_full_pipeline(
                     max_common = df_summary.loc[df_summary['Paired'], 'n_common_seeds'].max() if paired_count > 0 else 0
                     print(f"   Common seeds ranged from {int(min_common)} to {int(max_common)} for paired comparisons.")
                 print(f"   Recommendation: Run all optimizers with identical seed lists (≥5 seeds) for full pairing benefit.\n")
-    
+
     # ====================================================================
     # PHASE 4: GENERATE PLOTS WITH ERROR BARS
     # ====================================================================
     print("\n[PHASE 4] Generating plots with error bars...")
     print("-"*70)
-    
+
     # Group results by optimizer
     optimizer_results = {}
-    
+
     for result_file in result_files:
         # Extract optimizer name from metadata JSON (robust) or fallback to filename parsing
         filename = os.path.basename(result_file)
         opt_name = None
-        
+
         # Try metadata JSON first (most reliable)
         meta_path = result_file.replace('.csv', '_meta.json')
         if os.path.exists(meta_path):
@@ -392,7 +392,7 @@ def run_full_pipeline(
                     opt_name = meta.get('optimizer')
             except (json.JSONDecodeError, IOError):
                 pass
-        
+
         # Fallback to filename parsing if no metadata
         if opt_name is None:
             parts = filename.split('_')
@@ -407,13 +407,13 @@ def run_full_pipeline(
             optimizer_results[opt_name] = []
 
         optimizer_results[opt_name].append(pd.read_csv(result_file))
-    
+
     print(f"Found {len(optimizer_results)} optimizers: {list(optimizer_results.keys())}")
-    
+
     # Plot comparison curves with error bars for each metric
     for metric in metrics:
         plot_path = os.path.join(plots_dir, f'multiseed_comparison_{metric}.png')
-        
+
         plot_multiseed_comparison(
             optimizer_results,
             metric=metric,
@@ -421,15 +421,15 @@ def run_full_pipeline(
             save_path=plot_path,
             exclude_tainted=True
         )
-    
+
     # Plot final metric comparison (bar plot with error bars)
     if task_type == 'neural_network':
         primary_metric = 'test_accuracy'
     else:
         primary_metric = 'loss'
-    
+
     plot_path = os.path.join(plots_dir, f'final_{primary_metric}_comparison.png')
-    
+
     plot_final_metric_comparison(
         optimizer_results,
         metric=primary_metric,
@@ -437,7 +437,7 @@ def run_full_pipeline(
         save_path=plot_path,
         exclude_tainted=True
     )
-    
+
     print("\n" + "="*70)
     print("FULL PIPELINE COMPLETED!")
     print("="*70)
@@ -449,7 +449,7 @@ def run_full_pipeline(
 
 def main():
     parser = argparse.ArgumentParser(description='Run full multi-seed analysis pipeline with reproducibility checks')
-    
+
     parser.add_argument('--config', type=str, default='configs/nn_tuning.json',
                         help='Path to configuration file')
     parser.add_argument('--seeds', type=str, default='1,2,3,4,5',
@@ -462,30 +462,30 @@ def main():
                         help='Comma-separated pairs to compare, e.g., "AdamW-SGDMomentum,Adam-RMSProp"')
     parser.add_argument('--skip-fairness-check', action='store_true',
                         help='Skip automatic fairness validation (NOT RECOMMENDED for formal reporting)')
-    
+
     args = parser.parse_args()
-    
+
     # Parse seeds
     seeds = [int(s.strip()) for s in args.seeds.split(',')]
-    
+
     # Parse comparison pairs
     comparison_pairs = None
     if args.compare:
         pairs = args.compare.split(',')
         comparison_pairs = [tuple(p.split('-')) for p in pairs]
-    
+
     # PRE-RUN VALIDATION: Schema check and tuning fairness validation
     print("\n[PRE-RUN VALIDATION] Checking configuration and integrity...")
     try:
         with open(args.config, 'r', encoding='utf-8') as f:
             base_cfg_preview = json.load(f)
-        
+
         # Check 1: Config schema compatibility
         if 'optimizer' not in base_cfg_preview and ('sweeps' in base_cfg_preview or 'final' in base_cfg_preview):
             print("\nThe provided config appears to be a tuning spec (contains 'sweeps'/'final') without a top-level 'optimizer'.")
             print("   This runner expects a single-optimizer config, e.g.: {\n     'model': 'SimpleMLP', 'dataset': 'MNIST', 'optimizer': 'AdamW', 'lr': 1e-3, 'epochs': 5, 'batch_size': 128\n   }")
             print("   To generate tuned configs and results, run: python scripts/tune_nn.py (which reads configs/nn_tuning.json).\n")
-        
+
         # Check 2: Multi-optimizer fairness validation (if applicable)
         if not args.skip_fairness_check and 'sweeps' in base_cfg_preview:
             try:
@@ -506,7 +506,7 @@ def main():
                                     'batch_size': sweep.get('batch_size'),
                                     'is_tuned': True
                                 }
-                
+
                 if len(optimizers) > 1:
                     # Validate fairness across multiple optimizers
                     validate_tuning_fairness(optimizers, tuning_configs, strict=True)
@@ -520,7 +520,7 @@ def main():
         # Non-fatal; proceed and let downstream raise if truly invalid
         print(f"   Warning: Pre-run validation encountered error: {e}")
         pass
-    
+
     print("[PRE-RUN VALIDATION] Complete\n")
 
     # Run pipeline

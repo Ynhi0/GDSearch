@@ -39,11 +39,11 @@ import logging
 def validate_pytorch_version(expected_version: str = "2.6.0", strict: bool = False):
     """
     Validate PyTorch version to prevent version-sensitive API failures.
-    
+
     Args:
         expected_version: Expected PyTorch version (from requirements.txt)
         strict: If True, raise error on mismatch; if False, only warn
-        
+
     Raises:
         RuntimeError: If strict=True and version mismatch detected
     """
@@ -51,7 +51,7 @@ def validate_pytorch_version(expected_version: str = "2.6.0", strict: bool = Fal
         current_version = torch.__version__.split('+')[0]  # Remove cuda/cpu suffix
         major_minor_current = '.'.join(current_version.split('.')[:2])
         major_minor_expected = '.'.join(expected_version.split('.')[:2])
-        
+
         if major_minor_current != major_minor_expected:
             msg = (
                 f"PyTorch version mismatch detected!\n"
@@ -124,50 +124,50 @@ def set_seed(seed: int, deterministic: bool = True):
 class LabelSmoothingCrossEntropy(nn.Module):
     """
     Cross Entropy Loss with Label Smoothing.
-    
+
     Label smoothing is a regularization technique that prevents the model
     from becoming overconfident by softening the hard targets.
-    
+
     Args:
         smoothing: Label smoothing factor (0.0 to 1.0)
         reduction: Specifies the reduction to apply to the output
-    
+
     Reference:
         "Rethinking the Inception Architecture for Computer Vision"
         Szegedy et al., CVPR 2016
-        
+
     GAP 36 FIX - Entropy Floor Warning:
         Label smoothing enforces a mathematical minimum loss (Entropy Floor) > 0.
         For num_classes=10 and smoothing=0.1:
             min_loss ≈ -[0.9*log(0.9) + 9*(0.1/9)*log(0.1/9)] ≈ 0.54
-        
+
         This means:
         - Loss will NEVER converge to 0, even with perfect predictions
         - Convergence analysis must account for this floor
         - Use get_entropy_floor() to compute the theoretical minimum
     """
-    
+
     def __init__(self, smoothing: float = 0.1, reduction: str = 'mean'):
         super().__init__()
         self.smoothing = smoothing
         self.reduction = reduction
-        
+
     @staticmethod
     def compute_entropy_floor(num_classes: int, smoothing: float) -> float:
         """
         GAP 36 FIX: Compute the theoretical minimum loss for label smoothing.
-        
+
         When using label smoothing, the loss cannot converge to 0.
         This function computes the entropy floor so convergence analysis
         can subtract it from the loss curve.
-        
+
         Args:
             num_classes: Number of output classes
             smoothing: Label smoothing factor
-            
+
         Returns:
             Entropy floor (minimum achievable loss)
-            
+
         Example:
             For CIFAR-10 (10 classes) with smoothing=0.1:
             >>> LabelSmoothingCrossEntropy.compute_entropy_floor(10, 0.1)
@@ -176,53 +176,53 @@ class LabelSmoothingCrossEntropy(nn.Module):
         import math
         if smoothing == 0.0:
             return 0.0
-        
+
         # Smoothed target distribution: [1-s, s/(n-1), s/(n-1), ...]
         p_true = 1.0 - smoothing
         p_other = smoothing / (num_classes - 1) if num_classes > 1 else 0.0
-        
+
         # Cross-entropy with perfect predictions (q = p):
         # H(p, q) = -sum(p * log(q)) = -p_true*log(p_true) - (n-1)*p_other*log(p_other)
         entropy = -p_true * math.log(p_true + 1e-12)
         if p_other > 0:
             entropy -= (num_classes - 1) * p_other * math.log(p_other + 1e-12)
-        
+
         return entropy
-    
+
     def get_entropy_floor(self, num_classes: int) -> float:
         """
         Get the entropy floor for this loss function instance.
-        
+
         Args:
             num_classes: Number of output classes
-            
+
         Returns:
             Minimum achievable loss value
         """
         return self.compute_entropy_floor(num_classes, self.smoothing)
-        
+
     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         """
         Compute label smoothing cross entropy loss.
-        
+
         Args:
             pred: Predictions (logits) of shape [batch_size, num_classes]
             target: Target labels of shape [batch_size]
-            
+
         Returns:
             Loss value
         """
         n_classes = pred.size(-1)
         log_preds = F.log_softmax(pred, dim=-1)
-        
+
         # Create smoothed labels
         with torch.no_grad():
             true_dist = torch.zeros_like(log_preds)
             true_dist.fill_(self.smoothing / (n_classes - 1))
             true_dist.scatter_(1, target.unsqueeze(1), 1.0 - self.smoothing)
-        
+
         loss = torch.sum(-true_dist * log_preds, dim=-1)
-        
+
         if self.reduction == 'mean':
             return loss.mean()
         elif self.reduction == 'sum':
@@ -234,94 +234,94 @@ class LabelSmoothingCrossEntropy(nn.Module):
 class ModelEMA:
     """
     Exponential Moving Average of model weights.
-    
+
     Maintains a shadow copy of model parameters that is updated using
     exponential moving average. This can improve generalization and
     provide more stable predictions.
-    
+
     Args:
         model: PyTorch model to track
         decay: EMA decay rate (default: 0.9999)
         device: Device to store EMA model
-    
+
     Reference:
         "Mean teachers are better role models"
         Tarvainen & Valpola, NeurIPS 2017
     """
-    
+
     def __init__(self, model: nn.Module, decay: float = 0.9999, device: Optional[torch.device] = None):
         self.decay = decay
         # Default to model's device if not specified
         if device is None:
             device = next(model.parameters()).device if len(list(model.parameters())) > 0 else torch.device('cpu')
         self.device = device
-        
+
         # Create shadow model
         self.shadow = copy.deepcopy(model).to(self.device)
         self.shadow.eval()
-        
+
         # Store original model for reference
         self.model = model
-        
+
         # Disable gradients for shadow model
         for param in self.shadow.parameters():
             param.requires_grad = False
-    
+
     @torch.no_grad()
     def update(self, model: Optional[nn.Module] = None):
         """
         Update EMA parameters.
-        
+
         Args:
             model: Model to update from (uses self.model if None)
         """
         if model is None:
             model = self.model
-            
+
         # Move to same device as shadow
-        model_params = {name: param.data.to(self.device) 
+        model_params = {name: param.data.to(self.device)
                        for name, param in model.named_parameters()}
-        
+
         # Update shadow parameters
         for name, shadow_param in self.shadow.named_parameters():
             if name in model_params:
                 shadow_param.mul_(self.decay).add_(
                     model_params[name], alpha=1 - self.decay
                 )
-    
+
     def state_dict(self) -> Dict[str, Any]:
         """Get state dict for saving."""
         return {
             'shadow': self.shadow.state_dict(),
             'decay': self.decay
         }
-    
+
     def load_state_dict(self, state_dict: Dict[str, Any]):
         """Load state dict."""
         self.shadow.load_state_dict(state_dict['shadow'])
         self.decay = state_dict.get('decay', self.decay)
-    
+
     def apply_shadow(self, model: Optional[nn.Module] = None):
         """
         Apply EMA weights to model (for evaluation).
-        
+
         Args:
             model: Model to apply shadow weights to (uses self.model if None)
         """
         if model is None:
             model = self.model
-            
+
         with torch.no_grad():
             for param, shadow_param in zip(model.parameters(), self.shadow.parameters()):
                 param.data.copy_(shadow_param.data.to(param.device))
-    
+
     def restore(self, model: Optional[nn.Module] = None):
         """
         Restore original model weights (after evaluation).
-        
+
         Args:
             model: Model to restore (uses self.model if None)
-            
+
         Note:
             This method is not typically needed if you use the shadow model
             directly for evaluation. If you need to restore, save model state
@@ -329,7 +329,7 @@ class ModelEMA:
         """
         if model is None:
             model = self.model
-        
+
         # Restore by copying from original model (which should be unchanged)
         # If apply_shadow was called, you should have saved state beforehand
         import warnings
@@ -342,39 +342,39 @@ class ModelEMA:
 class AMPWrapper:
     """
     Automatic Mixed Precision Training Wrapper.
-    
+
     Wraps training loop with mixed precision support using torch.cuda.amp.
     Automatically handles gradient scaling and prevents underflow/overflow.
-    
+
     Args:
         enabled: Whether to enable AMP (default: True if CUDA available)
         dtype: Data type for autocast (default: torch.float16)
-    
+
     Usage:
         amp = AMPWrapper()
-        
+
         for inputs, targets in loader:
             with amp.autocast():
                 outputs = model(inputs)
                 loss = criterion(outputs, targets)
-            
+
             amp.backward(loss, optimizer)
             amp.step(optimizer)
             amp.update()
-    
+
     Reference:
         PyTorch Automatic Mixed Precision documentation
         https://pytorch.org/docs/stable/amp.html
     """
-    
+
     def __init__(self, enabled: Optional[bool] = None, dtype: torch.dtype = torch.float16):
         if enabled is None:
             enabled = torch.cuda.is_available()
-        
+
         self.enabled = enabled
         self.dtype = dtype
         self.device_type = 'cuda' if torch.cuda.is_available() and enabled else 'cpu'
-        
+
         if self.enabled and torch.cuda.is_available():
             # Prefer the new public API `torch.amp.GradScaler` when available
             # to avoid deprecation warnings for `torch.cuda.amp.GradScaler`.
@@ -402,11 +402,11 @@ class AMPWrapper:
                 self.scaler = None
         else:
             self.scaler = None
-    
+
     def autocast(self):
         """
         Context manager for automatic mixed precision.
-        
+
         Returns:
             Autocast context manager
         """
@@ -424,26 +424,26 @@ class AMPWrapper:
         else:
             # Return no-op context manager for CPU or when autocast not available
             return contextlib.nullcontext()
-    
+
     def backward(self, loss: torch.Tensor, optimizer: torch.optim.Optimizer):
         """
         Backward pass with gradient scaling.
-        
+
         Args:
             loss: Loss tensor
             optimizer: Optimizer instance
         """
         optimizer.zero_grad()
-        
+
         if self.enabled and self.scaler is not None:
             self.scaler.scale(loss).backward()
         else:
             loss.backward()
-    
+
     def step(self, optimizer: torch.optim.Optimizer):
         """
         Optimizer step with gradient unscaling.
-        
+
         Args:
             optimizer: Optimizer instance
         """
@@ -451,12 +451,12 @@ class AMPWrapper:
             self.scaler.step(optimizer)
         else:
             optimizer.step()
-    
+
     def update(self):
         """Update gradient scaler."""
         if self.enabled and self.scaler is not None:
             self.scaler.update()
-    
+
     def state_dict(self) -> Dict[str, Any]:
         """Get state dict for saving."""
         if self.enabled and self.scaler is not None:
@@ -466,11 +466,11 @@ class AMPWrapper:
                 'dtype': str(self.dtype)
             }
         return {'enabled': False}
-    
+
     def load_state_dict(self, state_dict: Dict[str, Any]):
         """Load state dict."""
         self.enabled = state_dict.get('enabled', False)
-        
+
         if self.enabled and self.scaler is not None:
             self.scaler.load_state_dict(state_dict['scaler'])
 
@@ -482,12 +482,12 @@ def get_loss_function(
 ) -> nn.Module:
     """
     Factory function to get loss function with optional label smoothing.
-    
+
     Args:
         loss_type: Type of loss ('cross_entropy', 'bce', 'mse')
         label_smoothing: Label smoothing factor for classification
         **kwargs: Additional arguments for loss function
-    
+
     Returns:
         Loss function module
     """
@@ -507,10 +507,10 @@ def get_loss_function(
 def create_amp_wrapper(enabled: Optional[bool] = None) -> AMPWrapper:
     """
     Create AMP wrapper with automatic device detection.
-    
+
     Args:
         enabled: Whether to enable AMP (auto-detect if None)
-    
+
     Returns:
         AMPWrapper instance
     """
@@ -520,11 +520,11 @@ def create_amp_wrapper(enabled: Optional[bool] = None) -> AMPWrapper:
 def create_model_ema(model: nn.Module, decay: float = 0.9999) -> ModelEMA:
     """
     Create Model EMA tracker.
-    
+
     Args:
         model: Model to track
         decay: EMA decay rate
-    
+
     Returns:
         ModelEMA instance
     """

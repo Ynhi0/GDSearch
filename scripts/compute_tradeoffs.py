@@ -99,8 +99,8 @@ def _scatter(df: pd.DataFrame, x: str, y: str, title: str, out_png: Path):
         arr = np.asarray(opt_col)
         try:
             arr = arr[~pd.isna(arr)]
-        except Exception:
-            pass
+        except Exception as e:
+            logging.debug("_scatter: filtering NA failed: %s", e, exc_info=True)
         opts = sorted(np.unique(arr).tolist())
     cmap = plt.cm.get_cmap('tab10', max(1, len(opts)))
     for i, opt in enumerate(opts):
@@ -115,18 +115,18 @@ def _scatter(df: pd.DataFrame, x: str, y: str, title: str, out_png: Path):
     plt.tight_layout()
     fig.savefig(out_png, dpi=300)
     plt.close(fig)
-    print(f"Saved: {out_png}")
+    logging.info("Saved: %s", out_png)
 
 
 def main():
     df = _collect_runs()
     if df.empty:
-        print("No result CSVs found in 'results/'.")
+        logging.info("No result CSVs found in 'results'.")
         return 1
     # Save summary
     summary_csv = RESULTS_DIR / 'tradeoffs_summary.csv'
     df.to_csv(summary_csv, index=False)
-    print(f"Saved: {summary_csv}")
+    logging.info("Saved: %s", summary_csv)
 
     # Per-dataset plots
     ds_col = df.get('dataset', np.array([]))
@@ -136,8 +136,8 @@ def main():
         arr = np.asarray(ds_col)
         try:
             arr = arr[~pd.isna(arr)]
-        except Exception:
-            pass
+        except Exception as e:
+            logging.debug("compute_tradeoffs: filtering NA failed for ds_col: %s", e, exc_info=True)
         ds_list = sorted(np.unique(arr).tolist())
 
     for dataset in ds_list:

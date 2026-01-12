@@ -102,12 +102,12 @@ def oom_safe_train_step(
 ) -> Tuple[float, int, Any, bool]:
     """
     OOM-safe training step with automatic batch size reduction.
-    
+
     When CUDA OOM occurs, this function automatically reduces the batch size
     and retries the training step. The run is marked as "tainted" to indicate
     that it used variable batch sizes, which invalidates fair optimizer
     comparisons.
-    
+
     Args:
         model: PyTorch model
         optimizer: Optimizer instance
@@ -121,14 +121,14 @@ def oom_safe_train_step(
             switches model to eval() when batch size becomes too small for
             BatchNorm training mode (this changes training semantics and taints the run).
             Default: False (safer behaviour; prefer explicit opt-in).
-        
+
     Returns:
         Tuple of (loss_value, actual_batch_size, outputs, tainted)
         - loss_value: Scalar loss value
         - actual_batch_size: Final batch size used
         - outputs: Model outputs
         - tainted: True if OOM recovery reduced batch size (run is invalid)
-        
+
     Raises:
         RuntimeError: If OOM recovery fails after max_retries or batch too small
     """
@@ -195,12 +195,12 @@ def oom_safe_train_step(
     retries = 0
     original_batch_size = inputs.size(0)
     tainted = False
-    
+
     while retries < max_retries:
         try:
             current_inputs = current_inputs.to(device)
             current_targets = current_targets.to(device)
-            
+
             # Handle closure-based optimizers (SAM, LBFGS, etc.) that require a closure
             if is_closure_based:
                 def closure_retry():
@@ -236,7 +236,7 @@ def oom_safe_train_step(
                     )
 
                 return loss_value, current_inputs.size(0), outputs, tainted
-            
+
             else:
                 # Standard optimizer step
                 if getattr(optimizer, 'requires_closure', False):
@@ -260,7 +260,7 @@ def oom_safe_train_step(
                     outputs = model(current_inputs)
                     loss = criterion(outputs, current_targets)
                     loss.backward()
-                    
+
                     # NEW: Apply robust gradient handling if enabled
                     if robust_grad_handler is not None:
                         try:
@@ -277,7 +277,7 @@ def oom_safe_train_step(
                     else:
                         # Fallback: Standard gradient clipping to prevent explosion
                         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-                    
+
                     if getattr(optimizer, 'requires_closure', False):
                         def _closure_for_step():
                             optimizer.zero_grad()
@@ -299,14 +299,14 @@ def oom_safe_train_step(
                         return loss_value, current_inputs.size(0), model(current_inputs), tainted
                     else:
                         _call_optimizer_step(optimizer)
-                    
+
                     # Check for loss divergence
                     if torch.isnan(loss) or torch.isinf(loss):
                         logging.warning("Loss divergence detected: %f", loss.item())
                         return float('inf'), current_inputs.size(0), outputs, tainted
-                    
+
                     return loss.item(), current_inputs.size(0), outputs, tainted
-                
+
         except RuntimeError as e:
             if 'out of memory' in str(e).lower():
                 # CRITICAL: Enforce documented fail-fast for closure-based optimizers
@@ -320,13 +320,13 @@ def oom_safe_train_step(
                         "OOM with closure-based optimizer. Retry disabled to prevent corruption. "
                         "Reduce batch size manually."
                     ) from e
-                
+
                 retries += 1
                 torch.cuda.empty_cache()
-                
+
                 old_size = current_inputs.size(0)
                 new_size = max(min_batch_size, old_size // 2)
-                
+
                 # Check BatchNorm compatibility BEFORE reduction
                 # Provide more graceful handling for BatchNorm constraints
                 if new_size < 2:
@@ -352,15 +352,15 @@ def oom_safe_train_step(
                         )
                         # Set tainted flag since we're mixing train/eval modes
                         tainted = True
-                        
+
                         # Process the batch in eval mode, then restore
                         current_inputs_small = inputs[:new_size]
                         current_targets_small = targets[:new_size]
-                        
+
                         optimizer.zero_grad(set_to_none=True)
                         current_inputs_small = current_inputs_small.to(device)
                         current_targets_small = current_targets_small.to(device)
-                        
+
                         outputs = model(current_inputs_small)
                         loss = criterion(outputs, current_targets_small)
                         loss.backward()
@@ -385,18 +385,18 @@ def oom_safe_train_step(
                             return loss_small_val, current_inputs_small.size(0), model(current_inputs_small), tainted
                         else:
                             _call_optimizer_step(optimizer)
-                        
+
                         # Restore training mode before returning
                         if was_training:
                             model.train()
-                        
+
                         # Check for loss divergence
                         if torch.isnan(loss) or torch.isinf(loss):
                             logging.warning("Loss divergence detected: %f", loss.item())
                             return float('inf'), new_size, outputs, tainted
-                        
+
                         return loss.item(), new_size, outputs, tainted
-                        
+
                     except Exception as eval_error:
                         # Restore training mode before raising
                         if was_training:
@@ -409,14 +409,14 @@ def oom_safe_train_step(
                         raise RuntimeError(
                             "Batch size too small for BatchNorm layers and eval mode fallback failed"
                         ) from eval_error
-                
+
                 if new_size < min_batch_size:
                     logging.error(
                         "OOM: Cannot reduce batch below %d",
                         min_batch_size
                     )
                     raise
-                
+
                 # Mark run as tainted and log warning
                 tainted = True
                 logging.warning(
@@ -436,16 +436,16 @@ def oom_safe_train_step(
                     "    This run uses variable batch size and should be "
                     "excluded from fair comparisons."
                 )
-                
+
                 # Slice the batch
                 current_inputs = inputs[:new_size]
                 current_targets = targets[:new_size]
-                
+
                 # Clear optimizer gradients
                 optimizer.zero_grad(set_to_none=True)
             else:
                 raise
-    
+
     logging.error("OOM recovery failed after %d retries", max_retries)
     raise RuntimeError(f"CUDA OOM after {max_retries} recovery attempts")
 
@@ -453,33 +453,33 @@ def oom_safe_train_step(
 def clear_gpu_memory(force: bool = False):
     """
     Clear GPU memory between experiments to prevent fragmentation and OOM.
-    
+
     This is critical for long-running benchmark suites to:
     - Prevent cumulative memory leaks
     - Avoid fragmentation
     - Ensure consistent performance
     - Prevent OOM crashes
-    
+
     Args:
         force: If True, perform aggressive cleanup
     """
     if torch.cuda.is_available():
         # Synchronize all CUDA streams
         torch.cuda.synchronize()
-        
+
         # Empty the cache
         torch.cuda.empty_cache()
-        
+
         # Force garbage collection
         import gc
         gc.collect()
-        
+
         if force:
             # Aggressive cleanup: clear all caches
             torch.cuda.empty_cache()
             gc.collect()
             torch.cuda.empty_cache()
-        
+
         # Log memory state
         try:
             allocated = torch.cuda.memory_allocated() / 1024**2

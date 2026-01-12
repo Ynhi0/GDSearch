@@ -43,7 +43,7 @@ def run_single_experiment(config, seed, output_dir):
     """Run a single experiment with full logging."""
     set_seed(seed)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    
+
     # Build model and data (support both 3-tuple and 4-tuple return shapes)
     model_and_data = build_model_and_data(
         dataset=config['dataset'],
@@ -58,7 +58,7 @@ def run_single_experiment(config, seed, output_dir):
     else:
         model, train_loader, test_loader = model_and_data  # type: ignore[assignment]
         val_loader = None
-    
+
     # Build optimizer
     optimizer = build_optimizer(
         optimizer_name=config['optimizer'],
@@ -67,36 +67,36 @@ def run_single_experiment(config, seed, output_dir):
         weight_decay=config.get('weight_decay', 0.0),
         momentum=config.get('momentum', 0.9)
     )
-    
+
     # Training loop
     criterion = torch.nn.CrossEntropyLoss()
     loss_history = []
-    
+
     epochs = config.get('epochs', 10)
     for epoch in range(epochs):
         model.train()
         epoch_loss = 0.0
         n_batches = 0
-        
+
         for batch_idx, (data, target) in enumerate(train_loader):
             data, target = data.to(device), target.to(device)
-            
+
             optimizer.zero_grad()
             output = model(data)
             loss = criterion(output, target)
             loss.backward()
             optimizer.step()
-            
+
             epoch_loss += loss.item()
             n_batches += 1
-            
+
             if batch_idx >= 100:  # Limit batches for speed
                 break
-        
+
         avg_loss = epoch_loss / n_batches
         loss_history.append(avg_loss)
         logger.info(f"Seed {seed}, Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.4f}")
-    
+
     # Test accuracy
     model.eval()
     correct = 0
@@ -110,9 +110,9 @@ def run_single_experiment(config, seed, output_dir):
             _, predicted = torch.max(output.data, 1)
             total += target.size(0)
             correct += (predicted == target).sum().item()
-    
+
     accuracy = 100.0 * correct / total
-    
+
     return {
         'seed': seed,
         'optimizer': config['optimizer'],
@@ -125,7 +125,7 @@ def run_single_experiment(config, seed, output_dir):
 
 def main():
     parser = argparse.ArgumentParser(description='Run experiments with convergence analysis')
-    parser.add_argument('--dataset', type=str, default='MNIST', 
+    parser.add_argument('--dataset', type=str, default='MNIST',
                         help='Dataset (MNIST, CIFAR-10, CIFAR-100)')
     parser.add_argument('--model', type=str, default='SimpleMLP',
                         help='Model architecture')
@@ -139,16 +139,16 @@ def main():
                         help='Learning rate')
     parser.add_argument('--output-dir', type=str, default='results/convergence_analysis',
                         help='Output directory for results')
-    
+
     args = parser.parse_args()
-    
+
     # Parse seeds
     seeds = [int(s.strip()) for s in args.seeds.split(',')]
-    
+
     # Create output directory
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     logger.info("="*80)
     logger.info("EXPERIMENT CONFIGURATION")
     logger.info("="*80)
@@ -160,27 +160,27 @@ def main():
     logger.info(f"Learning Rate: {args.lr}")
     logger.info(f"Output: {output_dir}")
     logger.info("="*80)
-    
+
     # Get dataset provenance
     provenance = get_dataset_provenance(
         dataset_name=args.dataset,
         split='train',
         data_root='./data'
     )
-    
+
     logger.info("\nDATASET PROVENANCE:")
     for key, value in provenance.items():
         logger.info(f"  {key}: {value}")
-    
+
     # Run experiments for each optimizer
     all_results = []
     convergence_results = {}
-    
+
     for optimizer_name in args.optimizers:
         logger.info(f"\n{'='*80}")
         logger.info(f"OPTIMIZER: {optimizer_name}")
         logger.info(f"{'='*80}")
-        
+
         config = {
             'dataset': args.dataset,
             'model': args.model,
@@ -191,35 +191,35 @@ def main():
             'momentum': 0.9 if 'SGD' in optimizer_name.upper() else 0.0,
             'weight_decay': 0.0001
         }
-        
+
         optimizer_results = []
         loss_histories = []
-        
+
         for seed in seeds:
             logger.info(f"\n  Running seed {seed}...")
             result = run_single_experiment(config, seed, output_dir)
             optimizer_results.append(result)
             loss_histories.append(result['loss_history'])
             all_results.append(result)
-        
+
         # Compute mean loss history across seeds
         min_length = min(len(h) for h in loss_histories)
         loss_histories_trimmed = [h[:min_length] for h in loss_histories]
         mean_loss_history = np.mean(loss_histories_trimmed, axis=0).tolist()
-        
+
         # Analyze convergence
         logger.info(f"\n  Analyzing convergence rate for {optimizer_name}...")
         convergence_result = compute_empirical_rate(mean_loss_history, method='auto')
-        
+
         if convergence_result.get('success'):
             best_fit = convergence_result.get('best_fit', 'power_law')
             r2 = convergence_result.get('best_r_squared', 0)
             logger.info(f"  Best fit: {best_fit} (R² = {r2:.4f})")
-            
+
             if best_fit == 'power_law':
                 alpha = convergence_result['power_law'].get('alpha', 0)
                 logger.info(f"  Convergence rate α = {alpha:.4f}")
-                
+
                 # Compare to theory
                 comparison = compare_to_theoretical_bounds(
                     empirical_rate=alpha,
@@ -233,14 +233,14 @@ def main():
             else:
                 beta = convergence_result['exponential'].get('beta', 0)
                 logger.info(f"  Convergence rate β = {beta:.4f}")
-        
+
         convergence_results[optimizer_name] = convergence_result
-    
+
     # Generate comprehensive report
     logger.info(f"\n{'='*80}")
     logger.info("GENERATING REPORTS")
     logger.info(f"{'='*80}")
-    
+
     # Save raw results
     results_df = pd.DataFrame([
         {
@@ -254,7 +254,7 @@ def main():
     results_path = output_dir / 'experiment_results.csv'
     results_df.to_csv(results_path, index=False)
     logger.info(f"✓ Saved results to {results_path}")
-    
+
     # Generate convergence report
     conv_report = generate_convergence_report(
         convergence_results,
@@ -263,7 +263,7 @@ def main():
     logger.info(f"✓ Saved convergence analysis to {output_dir / 'convergence_rates.csv'}")
     print("\nConvergence Rate Summary:")
     print(conv_report.to_string(index=False))
-    
+
     # Plot convergence comparison
     plot_convergence_comparison(
         convergence_results,
@@ -271,7 +271,7 @@ def main():
         title=f'Convergence Rate Comparison - {args.dataset}'
     )
     logger.info(f"✓ Saved convergence plot to {output_dir / 'convergence_comparison.png'}")
-    
+
     # Create experiment manifest
     manifest_config = {
         'dataset': args.dataset,
@@ -288,7 +288,7 @@ def main():
         output_path=output_dir / 'experiment_manifest.json'
     )
     logger.info(f"✓ Saved experiment manifest to {output_dir / 'experiment_manifest.json'}")
-    
+
     # Summary statistics
     logger.info(f"\n{'='*80}")
     logger.info("SUMMARY STATISTICS")
@@ -298,12 +298,12 @@ def main():
         'test_accuracy': ['mean', 'std']
     }).round(4)
     print(summary)
-    
+
     logger.info(f"\n{'='*80}")
     logger.info("EXPERIMENT COMPLETE")
     logger.info(f"{'='*80}")
     logger.info(f"All results saved to: {output_dir}")
-    
+
     return 0
 
 

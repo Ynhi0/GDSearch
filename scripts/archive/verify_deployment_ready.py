@@ -26,7 +26,7 @@ def test_dependency_available(package: str, min_version: Optional[str] = None) -
         spec = importlib.util.find_spec(package)
         if spec is None:
             return False
-        
+
         # Try to import and check version
         module = importlib.import_module(package)
         if min_version and hasattr(module, '__version__'):
@@ -41,18 +41,18 @@ def main():
     print("GDSearch Deployment Verification")
     print("=" * 80)
     print()
-    
+
     # Get project root (parent of scripts directory)
     project_root = Path(__file__).parent.parent
     print(f"Project root: {project_root}")
     print()
-    
+
     all_passed = True
-    
+
     # P0 Tests: Critical Dependencies
     print(f"{YELLOW}P0 Tests: Critical Dependencies{RESET}")
     print("-" * 80)
-    
+
     critical_deps = [
         ("psutil", "5.9.0", "System monitoring (run_all_kaggle.py line 42)"),
         ("scipy", "1.10.0", "Statistical analysis"),
@@ -63,51 +63,51 @@ def main():
         ("plotly", "5.14.0", "Interactive visualizations"),
         ("kaleido", "0.2.0", "Static image export"),
     ]
-    
+
     for package, min_ver, purpose in critical_deps:
         passed = test_dependency_available(package, min_ver)
         all_passed &= passed
         status = check_mark(passed)
         print(f"  {status} {package:20s} >= {min_ver:10s} [{purpose}]")
-    
+
     print()
-    
+
     # P1 Tests: Path Resolution
     print(f"{YELLOW}P1 Tests: Path Resolution{RESET}")
     print("-" * 80)
-    
+
     # Test if src/ is in path
     project_root = Path(__file__).parent
     src_path = project_root / 'src'
-    
+
     # Add to path like run_all_kaggle.py does
     sys.path.insert(0, str(project_root))
     sys.path.insert(0, str(src_path))
-    
+
     # Test core imports
     path_tests = [
         ("src.core.optimizers", "SGD, Adam, AdamW"),
         ("src.core.pytorch_optimizers", "Wrappers for PyTorch"),
         ("src.core.functions", "Test functions"),
     ]
-    
+
     for module_name, description in path_tests:
         try:
             module = importlib.import_module(module_name)
             passed = True
         except ImportError as e:
             passed = False
-        
+
         all_passed &= passed
         status = check_mark(passed)
         print(f"  {status} {module_name:40s} [{description}]")
-    
+
     print()
-    
+
     # Verification of Configuration
     print(f"{YELLOW}Configuration Verification{RESET}")
     print("-" * 80)
-    
+
     # Check multi-seed configuration (should be 10)
     try:
         with open(project_root / 'run_all_kaggle.py', encoding='utf-8') as f:
@@ -121,10 +121,10 @@ def main():
         # Specify exception types for config file errors
         logging.debug(f"Config check failed: {e}")
         seeds_ok = False
-    
+
     all_passed &= seeds_ok
     print(f"  {check_mark(seeds_ok)} Multi-seed configuration (10 seeds)")
-    
+
     # Check VRAM cleanup integration
     cleanup_count = 0
     try:
@@ -136,10 +136,10 @@ def main():
         # Handle file read errors
         logging.debug(f"File read failed: {e}")
         vram_ok = False
-    
+
     all_passed &= vram_ok
     print(f"  {check_mark(vram_ok)} VRAM cleanup integration ({cleanup_count} calls)")
-    
+
     # Check enhanced path setup
     try:
         with open(project_root / 'run_all_kaggle.py') as f:
@@ -149,16 +149,16 @@ def main():
         # Handle file read errors
         logging.debug(f"File read failed: {e}")
         path_ok = False
-    
+
     all_passed &= path_ok
     print(f"  {check_mark(path_ok)} Enhanced path setup (src/ explicitly added)")
-    
+
     print()
-    
+
     # Files Check
     print(f"{YELLOW}Required Files Verification{RESET}")
     print("-" * 80)
-    
+
     required_files = [
         "run_all_kaggle.py",
         "kaggle/requirements_kaggle.txt",
@@ -168,16 +168,16 @@ def main():
         "src/core/optimizers.py",
         "src/core/pytorch_optimizers.py",
     ]
-    
+
     for file_path in required_files:
         full_path = project_root / file_path
         exists = full_path.exists()
         all_passed &= exists
         print(f"  {check_mark(exists)} {file_path}")
-    
+
     print()
     print("=" * 80)
-    
+
     if all_passed:
         print(f"{GREEN}ALL CHECKS PASSED - Ready for deployment{RESET}")
         print()

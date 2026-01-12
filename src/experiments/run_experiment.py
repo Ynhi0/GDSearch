@@ -18,7 +18,7 @@ from src.core.optimizers import SGD, SGDMomentum, SGDNesterov, RMSProp, Adam, Ad
 def run_single_experiment(optimizer_config, function_config, initial_point, num_iterations, seed):
     """
     Run a single experiment with specified configuration.
-    
+
     Args:
         optimizer_config: Dictionary configuring optimizer
             {'type': 'SGD'|'SGDMomentum'|'RMSProp'|'Adam', 'params': {...}}
@@ -27,18 +27,18 @@ def run_single_experiment(optimizer_config, function_config, initial_point, num_
         initial_point: Tuple (x0, y0) - starting point
         num_iterations: Number of iterations
         seed: Seed for random number generator
-        
+
     Returns:
         DataFrame containing optimization process history
     """
     # Set seed to ensure reproducibility across libraries
     from src.core.training_utils import set_seed
     set_seed(seed)
-    
+
     # Initialize test function
     func_type = function_config['type']
     func_params = function_config.get('params', {})
-    
+
     if func_type == 'Rosenbrock':
         test_function = Rosenbrock(**func_params)
     elif func_type == 'IllConditionedQuadratic':
@@ -49,7 +49,7 @@ def run_single_experiment(optimizer_config, function_config, initial_point, num_
         test_function = Ackley2D(**func_params)
     else:
         raise ValueError(f"Invalid test function type: {func_type}")
-    
+
     # Initialize optimizer
     opt_type = optimizer_config['type']
     opt_params = optimizer_config.get('params', {})
@@ -61,10 +61,10 @@ def run_single_experiment(optimizer_config, function_config, initial_point, num_
 
     # Reset optimizer to initial state
     optimizer.reset()
-    
+
     # Initialize parameters
     current_x, current_y = initial_point
-    
+
     # List to store history
     history = []
 
@@ -78,7 +78,7 @@ def run_single_experiment(optimizer_config, function_config, initial_point, num_
         # Calculate function value and gradient
         loss = test_function.compute(current_x, current_y)
         grad_x, grad_y = test_function.gradient(current_x, current_y)
-        
+
         # Calculate gradient norm (use hypot to avoid overflow and handle large values safely)
         import math
         try:
@@ -87,14 +87,14 @@ def run_single_experiment(optimizer_config, function_config, initial_point, num_
             # Robust fallback and logging
             grad_norm = float('inf')
             logging.warning("Gradient norm computation overflowed or invalid: grad_x=%s, grad_y=%s", grad_x, grad_y, exc_info=True)
-        
+
         # Compute Hessian eigenvalues for curvature analysis
         hessian = test_function.hessian(current_x, current_y)
         eigenvalues = np.linalg.eigvalsh(hessian)  # Returns sorted eigenvalues
         lambda_min = eigenvalues[0]
         lambda_max = eigenvalues[1]
         condition_number = abs(lambda_max / lambda_min) if abs(lambda_min) > 1e-10 else np.inf
-        
+
         # Perform update step
         new_x, new_y = optimizer.step((current_x, current_y), (grad_x, grad_y))
 
@@ -132,10 +132,10 @@ def run_single_experiment(optimizer_config, function_config, initial_point, num_
             'seed': seed,
             'optimizer': getattr(optimizer, 'name', str(opt_type))
         })
-        
+
         # Update parameters
         current_x, current_y = new_x, new_y
-    
+
     # Convert history to DataFrame
     df = pd.DataFrame(history)
 
@@ -169,17 +169,17 @@ def run_single_experiment(optimizer_config, function_config, initial_point, num_
 def create_experiment_configs():
     """
     Create list of experiment configurations according to Design Matrix.
-    
+
     Returns:
         List of experiment configuration dictionaries
     """
     configs = []
-    
+
     # Starting points for functions
     initial_rosenbrock = (-1.5, 2.0)
     initial_quad = (1.0, 1.0)
     initial_saddle = (0.5, 0.5)
-    
+
     # ========== SGD Momentum on Rosenbrock ==========
     # SGDM-R-1: beta=0.5
     configs.append({
@@ -190,7 +190,7 @@ def create_experiment_configs():
         'num_iterations': 10000,
         'seed': 42
     })
-    
+
     # SGDM-R-2: beta=0.9
     configs.append({
         'experiment_id': 'SGDM-R-2',
@@ -200,7 +200,7 @@ def create_experiment_configs():
         'num_iterations': 10000,
         'seed': 42
     })
-    
+
     # SGDM-R-3: beta=0.99
     configs.append({
         'experiment_id': 'SGDM-R-3',
@@ -210,7 +210,7 @@ def create_experiment_configs():
         'num_iterations': 10000,
         'seed': 42
     })
-    
+
     # ========== Adam on Rosenbrock ==========
     # ADAM-R-1: beta1=0.9, beta2=0.999 (default)
     configs.append({
@@ -221,7 +221,7 @@ def create_experiment_configs():
         'num_iterations': 10000,
         'seed': 42
     })
-    
+
     # ADAM-R-2: beta1=0.5, beta2=0.999
     configs.append({
         'experiment_id': 'ADAM-R-2',
@@ -231,7 +231,7 @@ def create_experiment_configs():
         'num_iterations': 10000,
         'seed': 42
     })
-    
+
     # ADAM-R-3: beta1=0.9, beta2=0.9
     configs.append({
         'experiment_id': 'ADAM-R-3',
@@ -241,7 +241,7 @@ def create_experiment_configs():
         'num_iterations': 10000,
         'seed': 42
     })
-    
+
     # ADAM-R-4: beta1=0.5, beta2=0.9
     configs.append({
         'experiment_id': 'ADAM-R-4',
@@ -290,7 +290,7 @@ def create_experiment_configs():
         'num_iterations': 10000,
         'seed': 42
     })
-    
+
     # ========== SGD on other functions ==========
     # SGD on Rosenbrock
     configs.append({
@@ -301,7 +301,7 @@ def create_experiment_configs():
         'num_iterations': 10000,
         'seed': 42
     })
-    
+
     # SGD on IllConditionedQuadratic
     configs.append({
         'experiment_id': 'SGD-Q-1',
@@ -311,7 +311,7 @@ def create_experiment_configs():
         'num_iterations': 10000,
         'seed': 42
     })
-    
+
     # SGD on SaddlePoint
     configs.append({
         'experiment_id': 'SGD-S-1',
@@ -321,7 +321,7 @@ def create_experiment_configs():
         'num_iterations': 10000,
         'seed': 42
     })
-    
+
     # ========== RMSProp on functions ==========
     # RMSProp on Rosenbrock
     configs.append({
@@ -332,7 +332,7 @@ def create_experiment_configs():
         'num_iterations': 10000,
         'seed': 42
     })
-    
+
     # RMSProp on IllConditionedQuadratic
     configs.append({
         'experiment_id': 'RMS-Q-1',
@@ -342,7 +342,7 @@ def create_experiment_configs():
         'num_iterations': 10000,
         'seed': 42
     })
-    
+
     # RMSProp on SaddlePoint
     configs.append({
         'experiment_id': 'RMS-S-1',
@@ -352,7 +352,7 @@ def create_experiment_configs():
         'num_iterations': 10000,
         'seed': 42
     })
-    
+
     # ========== Add experiments on other functions ==========
     # SGDMomentum on IllConditionedQuadratic
     configs.append({
@@ -363,7 +363,7 @@ def create_experiment_configs():
         'num_iterations': 10000,
         'seed': 42
     })
-    
+
     # SGDMomentum on SaddlePoint
     configs.append({
         'experiment_id': 'SGDM-S-1',
@@ -373,7 +373,7 @@ def create_experiment_configs():
         'num_iterations': 10000,
         'seed': 42
     })
-    
+
     # Adam on IllConditionedQuadratic
     configs.append({
         'experiment_id': 'ADAM-Q-1',
@@ -383,7 +383,7 @@ def create_experiment_configs():
         'num_iterations': 10000,
         'seed': 42
     })
-    
+
     # Adam on SaddlePoint
     configs.append({
         'experiment_id': 'ADAM-S-1',
@@ -393,17 +393,17 @@ def create_experiment_configs():
         'num_iterations': 10000,
         'seed': 42
     })
-    
+
     return configs
 
 
 def generate_filename(config):
     """
     Generate unique filename for experiment results.
-    
+
     Args:
         config: Full experiment configuration dictionary
-        
+
     Returns:
         Filename (string)
     """
@@ -417,7 +417,7 @@ def generate_filename(config):
         func_type = config['function_config']['type']
         seed = config['seed']
         filename = f"{opt_type}_{func_type}_seed{seed}.csv"
-    
+
     return filename
 
 
@@ -425,13 +425,13 @@ def main():
     """Main function to run all experiments."""
     # Create results directory if it doesn't exist
     os.makedirs('results', exist_ok=True)
-    
+
     # Create list of experiment configurations
     configs = create_experiment_configs()
-    
+
     print(f"Total experiments: {len(configs)}")
     print("Starting experiments...\n")
-    
+
     # Run all experiments
     for config in tqdm(configs, desc="Running experiments"):
         # Run experiment
@@ -442,19 +442,19 @@ def main():
             num_iterations=config['num_iterations'],
             seed=config['seed']
         )
-        
+
         # Generate filename
         filename = generate_filename(config)
-        
+
         # Save results
         filepath = os.path.join('results', filename)
         df.to_csv(filepath, index=False)
-        
+
         # Add experiment_id to metadata if available
         if 'experiment_id' in config:
             # Can add experiment_id to DataFrame if needed
             pass
-    
+
     print("\nCompleted all experiments!")
     print("Results saved in 'results/' directory")
     print(f"Total files: {len(configs)}")

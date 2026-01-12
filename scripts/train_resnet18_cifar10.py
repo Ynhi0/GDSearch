@@ -30,32 +30,32 @@ def train_epoch(model, train_loader, optimizer, criterion, device):
     total_loss = 0
     correct = 0
     total = 0
-    
+
     pbar = tqdm(train_loader, desc="Training", leave=False)
     for batch_idx, (data, target) in enumerate(pbar):
         data, target = data.to(device), target.to(device)
-        
+
         # Forward pass
         optimizer.zero_grad()
         output = model(data)
         loss = criterion(output, target)
-        
+
         # Backward pass
         loss.backward()
         optimizer.step()
-        
+
         # Statistics
         total_loss += loss.item()
         pred = output.argmax(dim=1, keepdim=True)
         correct += pred.eq(target.view_as(pred)).sum().item()
         total += target.size(0)
-        
+
         # Update progress bar
         pbar.set_postfix({
             'loss': f'{total_loss/(batch_idx+1):.4f}',
             'acc': f'{100.*correct/total:.2f}%'
         })
-    
+
     return total_loss / len(train_loader), 100. * correct / total
 
 
@@ -65,7 +65,7 @@ def evaluate(model, test_loader, criterion, device):
     test_loss = 0
     correct = 0
     total = 0
-    
+
     with torch.no_grad():
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)
@@ -74,10 +74,10 @@ def evaluate(model, test_loader, criterion, device):
             pred = output.argmax(dim=1, keepdim=True)
             correct += pred.eq(target.view_as(pred)).sum().item()
             total += target.size(0)
-    
+
     test_loss /= max(1, len(test_loader))
     accuracy = 100. * correct / max(1, total)
-    
+
     return test_loss, accuracy
 
 
@@ -93,20 +93,20 @@ def main():
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
     parser.add_argument('--num-workers', type=int, default=2, help='DataLoader workers')
     args = parser.parse_args()
-    
+
     # Set random seed for reproducibility
     set_seed(args.seed)
-    
+
     # Device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
     print()
-    
+
     # Print header
     print("=" * 80)
     print("ResNet-18 Training on CIFAR-10")
     print("=" * 80)
-    
+
     # Load data
     print("Loading CIFAR-10 dataset...")
     train_loader, test_loader = get_cifar10_loaders(
@@ -116,19 +116,19 @@ def main():
     print(f"✓ Train batches: {len(train_loader)}")
     print(f"✓ Test batches: {len(test_loader)}")
     print()
-    
+
     # Create model
     print("Creating ResNet-18 model...")
     model = ResNet18(num_classes=10, dropout=args.dropout).to(device)
     num_params = model.get_num_parameters()
     print(f"✓ Parameters: {num_params:,}")
     print()
-    
+
     # Create optimizer
     print(f"Optimizer: {args.optimizer.upper()}")
     print(f"Learning rate: {args.lr}")
     print()
-    
+
     optimizer = None
     if args.optimizer == 'sgd':
         optimizer = SGDWrapper(model.parameters(), lr=args.lr)
@@ -140,39 +140,39 @@ def main():
         optimizer = RMSPropWrapper(model.parameters(), lr=args.lr)
     if optimizer is None:
         raise ValueError(f"Unsupported optimizer: {args.optimizer}")
-    
+
     # Loss function
     criterion = nn.CrossEntropyLoss()
-    
+
     # Training loop
     print("=" * 80)
     print("Training...")
     print("=" * 80)
     print()
-    
+
     best_acc = 0.0
     start_time = time.time()
-    
+
     for epoch in range(1, args.epochs + 1):
         print(f"Epoch {epoch}/{args.epochs}")
         print("-" * 80)
-        
+
         # Train
         train_loss, train_acc = train_epoch(model, train_loader, optimizer, criterion, device)
-        
+
         # Test
         test_loss, test_acc = evaluate(model, test_loader, criterion, device)
-        
+
         # Print results
         print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.2f}%")
         print(f"Test Loss:  {test_loss:.4f} | Test Acc:  {test_acc:.2f}%")
-        
+
         if test_acc > best_acc:
             best_acc = test_acc
             print(f"✓ New best test accuracy: {best_acc:.2f}%")
-        
+
         print()
-    
+
     # Final summary
     elapsed_time = time.time() - start_time
     print("=" * 80)

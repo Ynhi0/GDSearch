@@ -3,7 +3,7 @@ if __name__ == '__main__':
     import numpy as np
     from typing import Iterable, Any, cast
 
-    trajectories = {'a': np.array([[-1.0,1.0],[0.0,0.0]]),'b':np.array([[0,0],[1,2]])} 
+    trajectories = {'a': np.array([[-1.0,1.0],[0.0,0.0]]),'b':np.array([[0,0],[1,2]])}
     loss_histories={'a':np.array([1.0,0.5]),'b':np.array([2.0,0.4])}
     fig = animate_convergence(trajectories, loss_histories, title='debug', frame_duration=50)
     layout = getattr(fig,'layout')
@@ -16,7 +16,7 @@ if __name__ == '__main__':
                 sequence = tuple(cast(Iterable[Any], data)) if data is not None else ()
             except Exception:
                 sequence = ()
-            return super().__new__(cls, sequence) 
+            return super().__new__(cls, sequence)
 
     props = getattr(layout, '_props')
     up_raw = props.get('updatemenus', [])

@@ -30,23 +30,23 @@ def run_single_trial(
 ) -> Dict:
     """
     Run one trial with a given initial point.
-    
+
     Added gradient clipping to prevent NaN explosion on
     Rosenbrock and other ill-conditioned functions where gradients can
     reach 1e9+ magnitude.
-    
+
     Returns:
         Dictionary with final_loss, converged (bool), iterations_to_converge, grad_norm
     """
     optimizer.reset()
     x, y = initial_point
-    
+
     for iteration in range(max_iterations):
         loss = test_function.compute(x, y)
         grad_x, grad_y = test_function.gradient(x, y)
         # NUMERICAL STABILITY FIX: Use np.hypot to avoid overflow
         grad_norm = np.hypot(grad_x, grad_y)
-        
+
         # Convergence check
         if grad_norm < convergence_threshold:
             return {
@@ -57,14 +57,14 @@ def run_single_trial(
                 'final_x': x,
                 'final_y': y
             }
-        
+
         # Gradient clipping to prevent exploding gradients
         # Rosenbrock gradients can reach O(1e9) at x,y >> 1
         if grad_norm > grad_clip_value:
             clip_scale = grad_clip_value / grad_norm
             grad_x = grad_x * clip_scale
             grad_y = grad_y * clip_scale
-        
+
         # Wrap in try-except to catch NaN/Inf gracefully
         try:
             x, y = optimizer.step((x, y), (grad_x, grad_y))
@@ -88,13 +88,13 @@ def run_single_trial(
                 'final_y': float('nan'),
                 'error': str(e)
             }
-    
+
     # Did not converge within max_iterations
     final_loss = test_function.compute(x, y)
     final_grad_x, final_grad_y = test_function.gradient(x, y)
     # NUMERICAL STABILITY FIX: Use np.hypot to avoid overflow
     final_grad_norm = np.hypot(final_grad_x, final_grad_y)
-    
+
     return {
         'final_loss': final_loss,
         'converged': False,
@@ -113,19 +113,19 @@ def generate_initial_points(
 ) -> List[Tuple[float, float]]:
     """
     Generate initial points in a circle around a center.
-    
+
     Args:
         center: Center point (x0, y0)
         radius: Radius of circle
         num_points: Number of points to generate
         seed: Random seed
-        
+
     Returns:
         List of (x, y) tuples
     """
     np.random.seed(seed)
     points = []
-    
+
     # Use uniform sampling in polar coordinates
     angles = np.linspace(0, 2 * np.pi, num_points, endpoint=False)
     for angle in angles:
@@ -134,7 +134,7 @@ def generate_initial_points(
         x = center[0] + r * np.cos(angle)
         y = center[1] + r * np.sin(angle)
         points.append((x, y))
-    
+
     return points
 
 
@@ -149,7 +149,7 @@ def run_robustness_experiment(
 ) -> pd.DataFrame:
     """
     Run robustness experiment across multiple initial points and optimizers.
-    
+
     Args:
         optimizer_configs: List of dicts with 'type' and 'params'
         function_config: Dict with 'type' and 'params'
@@ -158,17 +158,17 @@ def run_robustness_experiment(
         convergence_threshold: Grad norm threshold for convergence
         results_dir: Directory for CSV output
         plots_dir: Directory for plots
-        
+
     Returns:
         DataFrame with aggregated results
     """
     os.makedirs(results_dir, exist_ok=True)
     os.makedirs(plots_dir, exist_ok=True)
-    
+
     # Initialize test function
     func_type = function_config['type']
     func_params = function_config.get('params', {})
-    
+
     if func_type == 'Rosenbrock':
         test_function = Rosenbrock(**func_params)
     elif func_type == 'IllConditionedQuadratic':
@@ -177,14 +177,14 @@ def run_robustness_experiment(
         test_function = SaddlePoint(**func_params)
     else:
         raise ValueError(f"Unknown function type: {func_type}")
-    
+
     # Collect detailed results
     detailed_rows = []
-    
+
     for opt_cfg in tqdm(optimizer_configs, desc="Optimizers"):
         opt_type = opt_cfg['type']
         opt_params = opt_cfg.get('params', {})
-        
+
         # Instantiate optimizer
         if opt_type == 'SGD':
             optimizer = SGD(**opt_params)
@@ -202,15 +202,15 @@ def run_robustness_experiment(
             optimizer = AMSGrad(**opt_params)
         else:
             raise ValueError(f"Unknown optimizer type: {opt_type}")
-        
+
         opt_name = optimizer.name
-        
+
         # Run trials for all initial points
         for idx, init_pt in enumerate(initial_points):
             trial_result = run_single_trial(
                 optimizer, test_function, init_pt, max_iterations, convergence_threshold
             )
-            
+
             detailed_rows.append({
                 'optimizer': opt_name,
                 'optimizer_type': opt_type,
@@ -224,25 +224,25 @@ def run_robustness_experiment(
                 'final_x': trial_result['final_x'],
                 'final_y': trial_result['final_y']
             })
-    
+
     df_detailed = pd.DataFrame(detailed_rows)
-    
+
     # Save detailed results
     detail_path = os.path.join(results_dir, f'initial_condition_robustness_detailed_{func_type}.csv')
     df_detailed.to_csv(detail_path, index=False)
     print(f"\nDetailed results saved to: {detail_path}")
-    
+
     # Aggregate by optimizer
     agg_rows = []
     for opt_name in df_detailed['optimizer'].unique():
         opt_df = df_detailed[df_detailed['optimizer'] == opt_name]
-        
+
         success_rate = opt_df['converged'].mean()
         mean_loss = opt_df['final_loss'].mean()
         std_loss = opt_df['final_loss'].std()
         min_loss = opt_df['final_loss'].min()
         max_loss = opt_df['final_loss'].max()
-        
+
         converged_df = opt_df[opt_df['converged']]
         if len(converged_df) > 0:
             mean_iters = converged_df['iterations'].mean()
@@ -250,7 +250,7 @@ def run_robustness_experiment(
         else:
             mean_iters = np.nan
             std_iters = np.nan
-        
+
         agg_rows.append({
             'optimizer': opt_name,
             'num_trials': len(opt_df),
@@ -262,21 +262,21 @@ def run_robustness_experiment(
             'mean_iterations_to_converge': mean_iters,
             'std_iterations_to_converge': std_iters
         })
-    
+
     from typing import cast
     df_agg = cast(pd.DataFrame, pd.DataFrame(agg_rows)).sort_values(by=['success_rate'], ascending=False)
-    
+
     # Save aggregated results
     agg_path = os.path.join(results_dir, f'initial_condition_robustness_summary_{func_type}.csv')
     df_agg.to_csv(agg_path, index=False)
     print(f"Aggregated summary saved to: {agg_path}")
-    
+
     # Plot success rate comparison
     fig, ax = plt.subplots(figsize=(10, 6))
-    
+
     optimizers = df_agg['optimizer'].astype(str).tolist()
     success_rates = df_agg['success_rate'].to_numpy(dtype=float)
-    
+
     bars = ax.bar(range(len(optimizers)), success_rates, color='steelblue', alpha=0.8)
     ax.set_xticks(range(len(optimizers)))
     ax.set_xticklabels(optimizers, rotation=45, ha='right')
@@ -286,24 +286,24 @@ def run_robustness_experiment(
                  fontsize=14, fontweight='bold')
     ax.set_ylim((0.0, 1.0))
     ax.grid(axis='y', alpha=0.3)
-    
+
     # Annotate bars
     for i, (opt, sr) in enumerate(zip(optimizers, success_rates)):
         ax.text(i, sr + 0.02, f'{sr:.2%}', ha='center', va='bottom', fontsize=10, fontweight='bold')
-    
+
     plt.tight_layout()
     plot_path = os.path.join(plots_dir, f'initial_condition_robustness_{func_type}.png')
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
     print(f"Plot saved to: {plot_path}")
     plt.close()
-    
+
     # Print summary
     print(f"\n{'='*70}")
     print(f"Initial Condition Robustness Summary: {func_type}")
     print(f"{'='*70}")
     print(df_agg.to_string(index=False))
     print(f"{'='*70}\n")
-    
+
     return df_agg
 
 
@@ -313,11 +313,11 @@ def main():
     parser.add_argument('--results-dir', type=str, default='results')
     parser.add_argument('--plots-dir', type=str, default='plots')
     args = parser.parse_args()
-    
+
     print("="*70)
     print("2D Initial Condition Robustness Experiment")
     print("="*70)
-    
+
     # Generate initial points around (-1.5, 2.0) - a challenging area for Rosenbrock
     initial_points = generate_initial_points(
         center=(-1.5, 2.0),
@@ -325,9 +325,9 @@ def main():
         num_points=20,
         seed=42
     )
-    
+
     print(f"\nGenerated {len(initial_points)} initial points around (-1.5, 2.0)")
-    
+
     # Define optimizers to test
     optimizer_configs = [
         {'type': 'SGD', 'params': {'lr': 0.001}},
@@ -338,13 +338,13 @@ def main():
         {'type': 'AdamW', 'params': {'lr': 0.01, 'weight_decay': 0.01}},
         {'type': 'AMSGrad', 'params': {'lr': 0.01}},
     ]
-    
+
     # Run experiment on Rosenbrock
     function_config = {
         'type': 'Rosenbrock',
         'params': {'a': 1, 'b': 100}
     }
-    
+
     df_agg = run_robustness_experiment(
         optimizer_configs=optimizer_configs,
         function_config=function_config,
@@ -354,7 +354,7 @@ def main():
         results_dir=args.results_dir,
         plots_dir=args.plots_dir
     )
-    
+
     print("\nRobustness experiment complete!")
 
 

@@ -1,0 +1,446 @@
+﻿{
+    "version": "1.1.407",
+    "time": "1768149356687",
+    "generalDiagnostics": [
+        {
+            "file": "c:\\Users\\MPhuc\\Desktop\\GDSearch\\run_all_kaggle.py",
+            "severity": "warning",
+            "message": "\"set_tracking_uri\" is not a known attribute of \"None\"",
+            "range": {
+                "start": {
+                    "line": 669,
+                    "character": 23
+                },
+                "end": {
+                    "line": 669,
+                    "character": 39
+                }
+            },
+            "rule": "reportOptionalMemberAccess"
+        },
+        {
+            "file": "c:\\Users\\MPhuc\\Desktop\\GDSearch\\run_all_kaggle.py",
+            "severity": "warning",
+            "message": "\"set_experiment\" is not a known attribute of \"None\"",
+            "range": {
+                "start": {
+                    "line": 670,
+                    "character": 19
+                },
+                "end": {
+                    "line": 670,
+                    "character": 33
+                }
+            },
+            "rule": "reportOptionalMemberAccess"
+        },
+        {
+            "file": "c:\\Users\\MPhuc\\Desktop\\GDSearch\\run_all_kaggle.py",
+            "severity": "warning",
+            "message": "\"start_run\" is not a known attribute of \"None\"",
+            "range": {
+                "start": {
+                    "line": 679,
+                    "character": 46
+                },
+                "end": {
+                    "line": 679,
+                    "character": 55
+                }
+            },
+            "rule": "reportOptionalMemberAccess"
+        },
+        {
+            "file": "c:\\Users\\MPhuc\\Desktop\\GDSearch\\run_all_kaggle.py",
+            "severity": "warning",
+            "message": "\"MlflowException\" is not a known attribute of \"None\"",
+            "range": {
+                "start": {
+                    "line": 680,
+                    "character": 31
+                },
+                "end": {
+                    "line": 680,
+                    "character": 46
+                }
+            },
+            "rule": "reportOptionalMemberAccess"
+        },
+        {
+            "file": "c:\\Users\\MPhuc\\Desktop\\GDSearch\\run_all_kaggle.py",
+            "severity": "warning",
+            "message": "\"start_run\" is not a known attribute of \"None\"",
+            "range": {
+                "start": {
+                    "line": 687,
+                    "character": 42
+                },
+                "end": {
+                    "line": 687,
+                    "character": 51
+                }
+            },
+            "rule": "reportOptionalMemberAccess"
+        },
+        {
+            "file": "c:\\Users\\MPhuc\\Desktop\\GDSearch\\run_all_kaggle.py",
+            "severity": "warning",
+            "message": "\"end_run\" is not a known attribute of \"None\"",
+            "range": {
+                "start": {
+                    "line": 694,
+                    "character": 19
+                },
+                "end": {
+                    "line": 694,
+                    "character": 26
+                }
+            },
+            "rule": "reportOptionalMemberAccess"
+        },
+        {
+            "file": "c:\\Users\\MPhuc\\Desktop\\GDSearch\\run_all_kaggle.py",
+            "severity": "warning",
+            "message": "\"log_param\" is not a known attribute of \"None\"",
+            "range": {
+                "start": {
+                    "line": 745,
+                    "character": 27
+                },
+                "end": {
+                    "line": 745,
+                    "character": 36
+                }
+            },
+            "rule": "reportOptionalMemberAccess"
+        },
+        {
+            "file": "c:\\Users\\MPhuc\\Desktop\\GDSearch\\run_all_kaggle.py",
+            "severity": "warning",
+            "message": "\"log_metric\" is not a known attribute of \"None\"",
+            "range": {
+                "start": {
+                    "line": 753,
+                    "character": 23
+                },
+                "end": {
+                    "line": 753,
+                    "character": 33
+                }
+            },
+            "rule": "reportOptionalMemberAccess"
+        },
+        {
+            "file": "c:\\Users\\MPhuc\\Desktop\\GDSearch\\run_all_kaggle.py",
+            "severity": "warning",
+            "message": "\"log_artifact\" is not a known attribute of \"None\"",
+            "range": {
+                "start": {
+                    "line": 769,
+                    "character": 19
+                },
+                "end": {
+                    "line": 769,
+                    "character": 31
+                }
+            },
+            "rule": "reportOptionalMemberAccess"
+        },
+        {
+            "file": "c:\\Users\\MPhuc\\Desktop\\GDSearch\\run_all_kaggle.py",
+            "severity": "warning",
+            "message": "Import \"GPUtil\" could not be resolved",
+            "range": {
+                "start": {
+                    "line": 1256,
+                    "character": 15
+                },
+                "end": {
+                    "line": 1256,
+                    "character": 21
+                }
+            },
+            "rule": "reportMissingImports"
+        },
+        {
+            "file": "c:\\Users\\MPhuc\\Desktop\\GDSearch\\run_all_kaggle.py",
+            "severity": "warning",
+            "message": "\"zero_grad\" is not a known attribute of \"None\"",
+            "range": {
+                "start": {
+                    "line": 5380,
+                    "character": 38
+                },
+                "end": {
+                    "line": 5380,
+                    "character": 47
+                }
+            },
+            "rule": "reportOptionalMemberAccess"
+        },
+        {
+            "file": "c:\\Users\\MPhuc\\Desktop\\GDSearch\\run_all_kaggle.py",
+            "severity": "warning",
+            "message": "\"zero_grad\" is not a known attribute of \"None\"",
+            "range": {
+                "start": {
+                    "line": 7553,
+                    "character": 30
+                },
+                "end": {
+                    "line": 7553,
+                    "character": 39
+                }
+            },
+            "rule": "reportOptionalMemberAccess"
+        },
+        {
+            "file": "c:\\Users\\MPhuc\\Desktop\\GDSearch\\run_all_kaggle.py",
+            "severity": "warning",
+            "message": "Import \"medmnist\" could not be resolved",
+            "range": {
+                "start": {
+                    "line": 9123,
+                    "character": 19
+                },
+                "end": {
+                    "line": 9123,
+                    "character": 27
+                }
+            },
+            "rule": "reportMissingImports"
+        },
+        {
+            "file": "c:\\Users\\MPhuc\\Desktop\\GDSearch\\src\\analysis\\correlation_analysis.py",
+            "severity": "warning",
+            "message": "\"iloc\" is not a known attribute of \"None\"",
+            "range": {
+                "start": {
+                    "line": 153,
+                    "character": 97
+                },
+                "end": {
+                    "line": 153,
+                    "character": 101
+                }
+            },
+            "rule": "reportOptionalMemberAccess"
+        },
+        {
+            "file": "c:\\Users\\MPhuc\\Desktop\\GDSearch\\src\\core\\dataset_provenance.py",
+            "severity": "warning",
+            "message": "Import \"medmnist\" could not be resolved",
+            "range": {
+                "start": {
+                    "line": 34,
+                    "character": 15
+                },
+                "end": {
+                    "line": 34,
+                    "character": 23
+                }
+            },
+            "rule": "reportMissingImports"
+        },
+        {
+            "file": "c:\\Users\\MPhuc\\Desktop\\GDSearch\\src\\core\\medical_data_utils.py",
+            "severity": "warning",
+            "message": "Import \"medmnist\" could not be resolved",
+            "range": {
+                "start": {
+                    "line": 74,
+                    "character": 15
+                },
+                "end": {
+                    "line": 74,
+                    "character": 23
+                }
+            },
+            "rule": "reportMissingImports"
+        },
+        {
+            "file": "c:\\Users\\MPhuc\\Desktop\\GDSearch\\src\\core\\medical_data_utils.py",
+            "severity": "warning",
+            "message": "Import \"medmnist\" could not be resolved",
+            "range": {
+                "start": {
+                    "line": 75,
+                    "character": 13
+                },
+                "end": {
+                    "line": 75,
+                    "character": 21
+                }
+            },
+            "rule": "reportMissingImports"
+        },
+        {
+            "file": "c:\\Users\\MPhuc\\Desktop\\GDSearch\\src\\experiments\\run_medical_segmentation.py",
+            "severity": "warning",
+            "message": "Import \"monai.networks.nets.unet\" could not be resolved",
+            "range": {
+                "start": {
+                    "line": 38,
+                    "character": 13
+                },
+                "end": {
+                    "line": 38,
+                    "character": 37
+                }
+            },
+            "rule": "reportMissingImports"
+        },
+        {
+            "file": "c:\\Users\\MPhuc\\Desktop\\GDSearch\\src\\experiments\\run_medical_segmentation.py",
+            "severity": "warning",
+            "message": "Import \"monai.transforms.compose\" could not be resolved",
+            "range": {
+                "start": {
+                    "line": 39,
+                    "character": 13
+                },
+                "end": {
+                    "line": 39,
+                    "character": 37
+                }
+            },
+            "rule": "reportMissingImports"
+        },
+        {
+            "file": "c:\\Users\\MPhuc\\Desktop\\GDSearch\\src\\experiments\\run_medical_segmentation.py",
+            "severity": "warning",
+            "message": "Import \"monai.transforms.io.dictionary\" could not be resolved",
+            "range": {
+                "start": {
+                    "line": 40,
+                    "character": 13
+                },
+                "end": {
+                    "line": 40,
+                    "character": 43
+                }
+            },
+            "rule": "reportMissingImports"
+        },
+        {
+            "file": "c:\\Users\\MPhuc\\Desktop\\GDSearch\\src\\experiments\\run_medical_segmentation.py",
+            "severity": "warning",
+            "message": "Import \"monai.transforms.utility.dictionary\" could not be resolved",
+            "range": {
+                "start": {
+                    "line": 41,
+                    "character": 13
+                },
+                "end": {
+                    "line": 41,
+                    "character": 48
+                }
+            },
+            "rule": "reportMissingImports"
+        },
+        {
+            "file": "c:\\Users\\MPhuc\\Desktop\\GDSearch\\src\\experiments\\run_medical_segmentation.py",
+            "severity": "warning",
+            "message": "Import \"monai.transforms.intensity.dictionary\" could not be resolved",
+            "range": {
+                "start": {
+                    "line": 42,
+                    "character": 13
+                },
+                "end": {
+                    "line": 42,
+                    "character": 50
+                }
+            },
+            "rule": "reportMissingImports"
+        },
+        {
+            "file": "c:\\Users\\MPhuc\\Desktop\\GDSearch\\src\\experiments\\run_medical_segmentation.py",
+            "severity": "warning",
+            "message": "Import \"monai.data.dataset\" could not be resolved",
+            "range": {
+                "start": {
+                    "line": 43,
+                    "character": 13
+                },
+                "end": {
+                    "line": 43,
+                    "character": 31
+                }
+            },
+            "rule": "reportMissingImports"
+        },
+        {
+            "file": "c:\\Users\\MPhuc\\Desktop\\GDSearch\\src\\experiments\\run_medical_segmentation.py",
+            "severity": "warning",
+            "message": "Import \"monai.data.dataloader\" could not be resolved",
+            "range": {
+                "start": {
+                    "line": 44,
+                    "character": 13
+                },
+                "end": {
+                    "line": 44,
+                    "character": 34
+                }
+            },
+            "rule": "reportMissingImports"
+        },
+        {
+            "file": "c:\\Users\\MPhuc\\Desktop\\GDSearch\\src\\experiments\\run_medical_segmentation.py",
+            "severity": "warning",
+            "message": "Import \"monai.losses.dice\" could not be resolved",
+            "range": {
+                "start": {
+                    "line": 45,
+                    "character": 13
+                },
+                "end": {
+                    "line": 45,
+                    "character": 30
+                }
+            },
+            "rule": "reportMissingImports"
+        },
+        {
+            "file": "c:\\Users\\MPhuc\\Desktop\\GDSearch\\src\\experiments\\run_medical_segmentation.py",
+            "severity": "warning",
+            "message": "Import \"monai.metrics.meandice\" could not be resolved",
+            "range": {
+                "start": {
+                    "line": 46,
+                    "character": 13
+                },
+                "end": {
+                    "line": 46,
+                    "character": 35
+                }
+            },
+            "rule": "reportMissingImports"
+        },
+        {
+            "file": "c:\\Users\\MPhuc\\Desktop\\GDSearch\\tests\\test_checkpoint_resume_integration.py",
+            "severity": "warning",
+            "message": "\"get\" is not a known attribute of \"None\"",
+            "range": {
+                "start": {
+                    "line": 132,
+                    "character": 37
+                },
+                "end": {
+                    "line": 132,
+                    "character": 40
+                }
+            },
+            "rule": "reportOptionalMemberAccess"
+        }
+    ],
+    "summary": {
+        "filesAnalyzed": 213,
+        "errorCount": 0,
+        "warningCount": 27,
+        "informationCount": 0,
+        "timeInSec": 40.533
+    }
+}
+

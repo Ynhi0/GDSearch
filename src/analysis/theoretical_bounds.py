@@ -44,32 +44,32 @@ def sgd_convergence_bound(
 ) -> Dict[str, Any]:
     """
     Compute theoretical convergence bound for SGD.
-    
+
     **Strongly Convex** (μ > 0):
         E[f(x_T) - f(x*)] ≤ (1 - μη)^T * ||x_0 - x*||^2 / 2 + η * σ^2 / (2μ)
-    
+
     **Non-Convex with PL** (μ_PL > 0):
         E[f(x_T) - f(x*)] ≤ (1 - ημ_PL)^T * (f(x_0) - f(x*))
         (Linear convergence for non-convex functions satisfying PL condition)
-    
+
     **Non-Convex General** (μ = 0, smooth with Lipschitz constant L):
         min_{t≤T} E[||∇f(x_t)||²] ≤ 2Δ/(ηT) + Lησ²
         where Δ = f(x_0) - f(x*) (initial suboptimality)
-    
+
     **GAP 22 FIX**: Noise Model Handling
     - noise_model='additive': σ is constant (standard theory)
       Formula: Noise variance = σ² (independent of gradient)
       Result: Convergence hits noise floor E[f - f*] ≈ ησ²/(2μ)
-      
+
     - noise_model='multiplicative': σ scales with gradient norm (σ_t = σ * ||∇f(x_t)||)
       Formula: Noise variance = σ² * ||∇f||²
       Result: Noise vanishes at optimum (||∇f|| → 0), enabling convergence to 0
       Modified bound: Linear convergence maintained without noise floor
-      
+
     CRITICAL: Your test_functions.py supports multiplicative noise, but your bounds
     assume additive. If empirical results beat theory, you likely used multiplicative
     noise without updating the bound formula.
-    
+
     Args:
         L: Lipschitz smoothness constant
         mu: Strong convexity parameter (0 for non-convex)
@@ -79,7 +79,7 @@ def sgd_convergence_bound(
         problem_type: 'strongly_convex', 'convex', 'non_convex', or 'non_convex_pl'
         pl_constant: Polyak-Łojasiewicz constant (if applicable)
         noise_model: 'additive' or 'multiplicative' (GAP 22 fix)
-        
+
     Returns:
         Dict containing:
          - optimal_lr: Optimal learning rate
@@ -94,11 +94,11 @@ def sgd_convergence_bound(
     # Detect problem type if not specified
     if problem_type == 'strongly_convex' and mu <= 1e-12:
         problem_type = 'non_convex' if L > 0 else 'convex'
-    
+
     # If PL constant provided and non-zero, use PL-based bound (linear convergence for non-convex!)
     if pl_constant is not None and pl_constant > 1e-12 and problem_type in ['non_convex', 'non_convex_pl']:
         # PL condition enables linear convergence even for non-convex functions
-        
+
         if noise_model == 'multiplicative':
             # GAP 22 FIX: Multiplicative noise vanishes as ||∇f|| → 0
             # Modified bound: (1 - ημ_PL(1 - C₁σ²))^T where C₁ is small constant
@@ -110,23 +110,23 @@ def sgd_convergence_bound(
             # Additive noise: standard formula with noise floor
             convergence_rate = 1.0 - lr * pl_constant
             noise_floor = lr * sigma ** 2 / (2 * pl_constant) if pl_constant > 1e-12 else float('inf')
-        
+
         optimal_lr = 1.0 / L  # Standard for smooth PL functions
-        
+
         # Iterations to ε-accuracy (linear convergence)
         epsilon = 1e-6
         if 0 < convergence_rate < 1:
             iterations_to_eps = np.log(epsilon) / np.log(convergence_rate)
         else:
             iterations_to_eps = float('inf')
-        
+
         # Final bound (function value, not gradient norm!)
         if 0 < convergence_rate < 1:
             geometric_term = convergence_rate ** T
             final_bound = geometric_term + noise_floor
         else:
             final_bound = float('inf')
-        
+
         return {
             'optimal_lr': float(optimal_lr),
             'convergence_rate': float(convergence_rate),
@@ -140,13 +140,13 @@ def sgd_convergence_bound(
             'is_lr_optimal': abs(lr - optimal_lr) / max(optimal_lr, 1e-10) < 0.2 if optimal_lr > 0 else False,
             'convergence_regime': 'linear (PL condition)'
         }
-    
+
     if problem_type == 'non_convex' or (mu <= 1e-12 and problem_type != 'strongly_convex'):
         # Non-convex smooth case: gradient norm bound
         # E[min ||∇f(x_t)||²] ≤ 2Δ/(ηT) + Lησ²
         # Optimal learning rate: η* = √(2Δ/(LTσ²)) (stochastic) or η = 1/L (deterministic)
         Delta = 1.0  # Assume initial suboptimality = 1
-        
+
         if noise_model == 'multiplicative':
             # GAP 22 FIX: For multiplicative noise, variance term vanishes with gradient
             # Modified bound: E[||∇f||²] ≤ 2Δ/(ηT) (noise term negligible near stationary point)
@@ -154,7 +154,7 @@ def sgd_convergence_bound(
                 optimal_lr = 1.0 / L  # Noise doesn't dominate asymptotically
             else:
                 optimal_lr = 1.0 / L  # Deterministic case
-            
+
             # Gradient norm bound WITHOUT persistent noise term
             gradient_norm_squared = 2 * Delta / (lr * T)
             noise_floor = 0.0  # No noise floor - can reach ||∇f|| = 0
@@ -164,21 +164,21 @@ def sgd_convergence_bound(
                 optimal_lr = np.sqrt(2 * Delta / (L * T * sigma ** 2))
             else:
                 optimal_lr = 1.0 / L  # Deterministic case
-            
+
             # Gradient norm bound with additive noise floor
             gradient_norm_squared = 2 * Delta / (lr * T) + L * lr * sigma ** 2
             noise_floor = L * lr * sigma ** 2  # Persistent noise floor
-        
+
         # Convergence "rate" for comparison (O(1/√T) scaling)
         convergence_rate_coefficient = np.sqrt(gradient_norm_squared)
-        
+
         # Iterations to reach ε-flatness (||∇f|| ≤ ε)
         epsilon = 1e-6
         if lr > 1e-12:
             iterations_to_eps = (2 * Delta) / (lr * epsilon ** 2)
         else:
             iterations_to_eps = float('inf')
-        
+
         return {
             'optimal_lr': float(optimal_lr),
             'convergence_rate': float(convergence_rate_coefficient),
@@ -193,10 +193,10 @@ def sgd_convergence_bound(
             'L': float(L),
             'sigma': float(sigma)
         }
-    
+
     # Strongly convex case (original logic)
     optimal_lr = 2.0 / (L + mu) if (L + mu) > 0 else 0.0
-    
+
     # Convergence rate (can be negative; use magnitude for stability checks)
     if noise_model == 'multiplicative':
         # GAP 22 FIX: Multiplicative noise decays with (f - f*), enabling convergence to 0
@@ -210,9 +210,9 @@ def sgd_convergence_bound(
         convergence_rate = 1.0 - mu * lr
         variance_term = lr * sigma ** 2 / (2 * mu) if mu > 1e-12 else float('inf')
         noise_floor = variance_term
-    
+
     rate_magnitude = abs(convergence_rate)
-    
+
     # Iterations to reach ε-accuracy
     epsilon = 1e-6
     if rate_magnitude >= 1:
@@ -223,18 +223,18 @@ def sgd_convergence_bound(
         )
     else:
         iterations_to_eps = np.log(epsilon) / np.log(rate_magnitude)
-    
+
     # Final error bound
     if rate_magnitude >= 1:
         geometric_term = float('inf')
     else:
         geometric_term = rate_magnitude ** T
-    
+
     if geometric_term == float('inf') or variance_term == float('inf'):
         final_bound = float('inf')
     else:
         final_bound = geometric_term / 2.0 + variance_term
-    
+
     return {
         'optimal_lr': float(optimal_lr),
         'convergence_rate': float(convergence_rate),
@@ -260,24 +260,24 @@ def momentum_convergence_bound(
 ) -> Dict[str, Any]:
     """
     Compute theoretical convergence bound for Momentum-based methods.
-    
+
     Implements bounds for:
     1. Heavy Ball Momentum (Polyak, 1964): O((1 - sqrt(μ/L))^T) for strongly convex
     2. Nesterov Accelerated Gradient (Nesterov, 1983): O(1/T^2) for convex
     3. Non-Convex Momentum (Jin et al. 2017): Saddle point escape O(poly(d)/ε²) iterations
-    
+
     For strongly convex functions with Heavy Ball:
     E[f(x_T) - f(x*)] ≤ C * ρ^T, where ρ = 1 - sqrt(μ/L) (accelerated rate)
-    
+
     For non-convex with PL condition:
     E[f(x_T) - f(x*)] ≤ (1 - η√(μ/L))^T (accelerated even without strong convexity!)
-    
+
     For Nesterov in convex case:
     f(x_T) - f(x*) ≤ 2L||x_0 - x*||^2 / (T+1)^2
-    
+
     For non-convex (saddle escape):
     Time to escape saddle: O(1/(ε² * √λ_min)) where λ_min is min negative eigenvalue
-    
+
     Args:
         L: Lipschitz smoothness constant
         mu: Strong convexity parameter (0 for convex-only)
@@ -287,7 +287,7 @@ def momentum_convergence_bound(
         sigma: Stochastic gradient variance
         method: 'heavy_ball' (Polyak) or 'nesterov' (NAG)
         pl_constant: Polyak-Łojasiewicz constant (if applicable)
-        
+
     Returns:
         Dict containing:
           - optimal_momentum: Optimal momentum coefficient
@@ -306,16 +306,16 @@ def momentum_convergence_bound(
         optimal_momentum = ((sqrt_kappa - 1.0) / (sqrt_kappa + 1.0)) ** 2
         optimal_lr = 4.0 / (np.sqrt(L) + np.sqrt(pl_constant)) ** 2
         convergence_rate = 1.0 - np.sqrt(pl_constant / L)
-        
+
         epsilon = 1e-6
         if 0 < convergence_rate < 1:
             iterations_to_eps = np.log(epsilon) / np.log(convergence_rate)
         else:
             iterations_to_eps = float('inf')
-        
+
         geometric_term = convergence_rate ** T if convergence_rate < 1 else float('inf')
         final_bound = geometric_term / 2.0 if geometric_term < float('inf') else float('inf')
-        
+
         return {
             'optimal_momentum': float(optimal_momentum),
             'optimal_lr': float(optimal_lr),
@@ -329,21 +329,21 @@ def momentum_convergence_bound(
             'problem_type': 'non_convex_pl',
             'pl_constant': float(pl_constant)
         }
-    
+
     # Non-convex case without PL: gradient norm bound + saddle escape
     if mu <= 1e-12 and (pl_constant is None or pl_constant <= 1e-12):
         # Gradient norm bound (similar to SGD but with momentum acceleration)
         # E[||∇f||²] ≤ O(1/T) for deterministic momentum (Jin et al. 2017)
         Delta = 1.0
         gradient_norm_bound = 2 * Delta * L / T  # Slightly better than SGD
-        
+
         # Saddle point escape time (Jin et al. 2017)
         # T_escape ≈ O(1/(ε²√λ_min)) where λ_min is smallest negative Hessian eigenvalue
         # Assume λ_min ≈ -0.01 (typical for neural networks)
         lambda_min = -0.01
         epsilon = 1e-6
         saddle_escape_time = 1.0 / (epsilon ** 2 * np.sqrt(abs(lambda_min)))
-        
+
         return {
             'optimal_momentum': 0.9,  # Heuristic for non-convex
             'optimal_lr': float(1.0 / L),
@@ -358,7 +358,7 @@ def momentum_convergence_bound(
             'bound_type': 'gradient_norm',
             'saddle_escape_time': float(saddle_escape_time)
         }
-    
+
     # Compute optimal momentum and learning rate for strongly convex case
     if mu > 1e-12:
         # Optimal momentum: β* = ((sqrt(κ) - 1) / (sqrt(κ) + 1))^2 where κ = L/μ
@@ -366,14 +366,14 @@ def momentum_convergence_bound(
         sqrt_kappa = np.sqrt(kappa)
         optimal_momentum = ((sqrt_kappa - 1.0) / (sqrt_kappa + 1.0)) ** 2
         optimal_lr = 4.0 / (np.sqrt(L) + np.sqrt(mu)) ** 2
-        
+
         # Accelerated convergence rate: ρ = 1 - sqrt(μ/L) for optimal parameters
         # This is faster than SGD's rate of (1 - μ/L)
         convergence_rate = 1.0 - np.sqrt(mu / L)
-        
+
         # Vanilla SGD rate for comparison
         sgd_rate = 1.0 - mu * lr
-        
+
         # Acceleration factor: how much faster than SGD
         if sgd_rate > 0 and sgd_rate < 1 and convergence_rate > 0:
             # Compare iteration counts: log(ε) / log(rate)
@@ -381,21 +381,21 @@ def momentum_convergence_bound(
             acceleration_factor = np.log(sgd_rate) / np.log(convergence_rate)
         else:
             acceleration_factor = 1.0
-            
+
     else:
         # Convex-only case (μ = 0)
         optimal_momentum = 0.0  # No strong convexity to exploit
         optimal_lr = 1.0 / L
-        
+
         if method == 'nesterov':
             # Nesterov achieves O(1/T^2) for convex
             convergence_rate = 1.0 / (T ** 2)
         else:
             # Heavy ball without strong convexity: similar to SGD O(1/T)
             convergence_rate = 1.0 / T
-        
+
         acceleration_factor = 1.0  # No acceleration without strong convexity
-    
+
     # Compute iterations to reach ε-accuracy
     epsilon = 1e-6
     rate_magnitude = abs(convergence_rate)
@@ -405,12 +405,12 @@ def momentum_convergence_bound(
     elif rate_magnitude >= 1:
         iterations_to_eps = float('inf')
         logging.warning("momentum_convergence_bound: |convergence_rate|=%.4f >= 1. "
-                       "Parameters lr=%.6f, momentum=%.4f do not yield geometric decay.", 
+                       "Parameters lr=%.6f, momentum=%.4f do not yield geometric decay.",
                        rate_magnitude, lr, momentum)
     else:
         # Geometric decay case: |ρ|^T ≤ ε (allows bounded oscillations)
         iterations_to_eps = np.log(epsilon) / np.log(rate_magnitude)
-    
+
     # Compute final error bound
     if method == 'nesterov' and mu <= 1e-12:
         # Nesterov bound: 2L||x_0 - x*||^2 / (T+1)^2
@@ -420,7 +420,7 @@ def momentum_convergence_bound(
         # Strongly convex case: C * ρ^T + variance term
         geometric_term = convergence_rate ** T if convergence_rate < 1 else float('inf')
         variance_term = lr * sigma ** 2 / (2 * mu) if mu > 1e-12 else float('inf')
-        
+
         if geometric_term == float('inf') or variance_term == float('inf'):
             final_bound = float('inf')
         else:
@@ -428,7 +428,7 @@ def momentum_convergence_bound(
     else:
         # Convex case without strong convexity
         final_bound = 1.0 / T  # Simplified bound
-    
+
     return {
         'optimal_momentum': float(optimal_momentum),
         'optimal_lr': float(optimal_lr),
@@ -453,16 +453,16 @@ def adam_convergence_bound(
 ) -> Dict[str, Any]:
     """
     Compute theoretical convergence bound for Adam.
-    
+
     Based on "On the Convergence of Adam and Beyond" (Reddi et al., 2018).
-    
+
     **Convex**: Regret bound R(T) ≤ O(√T)
     **Non-Convex**: E[min ||∇f(x_t)||²] ≤ O(1/√T) × (proper constants with L, α, β)
-    
+
     The non-convex bound properly accounts for adaptive learning rates:
         E[||∇f||²] ≤ C₁√(L²/T) + C₂
     where C₁, C₂ depend on α, β₁, β₂ (see Reddi et al. 2018, Theorem 4)
-    
+
     Args:
         L: Lipschitz constant of gradients
         T: Number of iterations
@@ -470,14 +470,14 @@ def adam_convergence_bound(
         beta2: Exponential decay rate for second moment
         alpha: Step size
         problem_type: 'convex' or 'non_convex'
-        
+
     Returns:
         Dict with regret and convergence estimates
     """
     # Gradient bound (assumes ||∇f|| ≤ G_∞)
     G = L  # Assume ||∇f|| ≤ G
     D = 1.0  # Assume ||x_0 - x*|| ≤ D
-    
+
     if problem_type == 'convex':
         # Regret bound from theory: O(√T)
         regret_bound = (alpha * G * np.sqrt(T)) / (1 - beta1)
@@ -492,16 +492,16 @@ def adam_convergence_bound(
         term1 = (2 * Delta) / (alpha * (1 - beta1) * np.sqrt(T))
         term2 = (alpha ** 2 * G ** 2 * np.sqrt(T)) / ((1 - beta1) * (1 - beta2))
         gradient_norm_bound = term1 + term2
-        
+
         # Regret not primary metric for non-convex
         regret_bound = None
         per_iteration_regret = None
         convergence_regime = 'sublinear (gradient norm)'
-    
+
     # Compute fallback values for missing bounds
     fallback_gradient_bound = L * np.sqrt(1.0 / T)
     fallback_regret = fallback_gradient_bound * T
-    
+
     return {
         'regret_bound': regret_bound if regret_bound is not None else (gradient_norm_bound * T if gradient_norm_bound is not None else fallback_regret),
         'per_iteration_regret': per_iteration_regret if per_iteration_regret is not None else (gradient_norm_bound if gradient_norm_bound is not None else fallback_gradient_bound),
@@ -526,25 +526,25 @@ def estimate_pl_constant(
 ) -> Dict[str, Any]:
     """
     Estimate Polyak-Łojasiewicz (PL) constant from trajectory data.
-    
+
     PL condition: ||∇f(x)||² ≥ 2μ(f(x) - f*) for all x
-    
+
     If satisfied, guarantees linear convergence even for non-convex functions.
-    
+
     GAP FIX #8: Added known_f_star parameter to avoid tautological estimation.
     WARNING: Using f_star = min(loss_values) is BIASED:
     - If model stuck in local minimum (e.g., loss=0.5), f_star=0.5
     - This makes (f-f*) artificially small, inflating μ estimate
     - For synthetic functions (Rosenbrock, Quadratic), use known_f_star=0.0
     - For neural networks, use best known loss from exhaustive search or acknowledge bias
-    
+
     Args:
         loss_values: Array of loss values along trajectory
         grad_norms: Array of gradient norms (||∇f||)
         f_star: Optimal value (if known). If None, uses minimum observed loss.
         known_f_star: TRUE global minimum (for synthetic functions, e.g., 0.0)
                       Overrides f_star if provided to avoid bias.
-        
+
     Returns:
         Dict containing:
           - pl_constant_estimate: Estimated μ from ||∇f||²/(2(f-f*))
@@ -553,12 +553,12 @@ def estimate_pl_constant(
           - analysis: Statistical summary
           - f_star_used: The f* value used (known or estimated)
           - f_star_source: 'known_analytical' or 'min_observed' (for transparency)
-    
+
     Note: This is an empirical estimate from observed data, not a theoretical proof.
     """
     loss_values = np.asarray(loss_values, dtype=float)
     grad_norms = np.asarray(grad_norms, dtype=float)
-    
+
     # GAP FIX: Prioritize known_f_star to avoid tautological estimation
     if known_f_star is not None:
         f_star = float(known_f_star)
@@ -570,10 +570,10 @@ def estimate_pl_constant(
         # Fallback: Use minimum observed loss (BIASED - document this!)
         f_star = float(np.min(loss_values))
         f_star_source = 'min_observed (BIASED)'
-    
+
     # Filter valid points (finite and above f*)
     valid_mask = np.isfinite(loss_values) & np.isfinite(grad_norms) & (loss_values > f_star + 1e-10)
-    
+
     if not np.any(valid_mask):
         return {
             'pl_constant_estimate': 0.0,
@@ -581,23 +581,23 @@ def estimate_pl_constant(
             'violation_ratio': 1.0,
             'analysis': 'Insufficient valid data points'
         }
-    
+
     loss_valid = loss_values[valid_mask]
     grad_valid = grad_norms[valid_mask]
-    
+
     # Estimate μ from PL inequality: ||∇f||² ≥ 2μ(f-f*)
     # μ ≤ ||∇f||² / (2(f-f*))
     mu_estimates = (grad_valid ** 2) / (2 * (loss_valid - f_star))
-    
+
     # Use conservative estimate (minimum) as the PL constant
     mu_estimate = float(np.min(mu_estimates))
-    
+
     # Check how many points satisfy PL with this μ
     pl_rhs = 2 * mu_estimate * (loss_valid - f_star)
     pl_lhs = grad_valid ** 2
     violations = pl_lhs < pl_rhs
     violation_ratio = float(np.mean(violations))
-    
+
     return {
         'pl_constant_estimate': mu_estimate,
         'pl_condition_satisfied': violation_ratio < 0.1,  # Allow 10% numerical tolerance
@@ -623,37 +623,37 @@ def check_pl_condition(
 ) -> Dict[str, Any]:
     """
     Verify if Polyak-Łojasiewicz condition holds for given μ.
-    
+
     Args:
         loss_values: Loss trajectory
         grad_norms: Gradient norm trajectory
         mu: PL constant to verify
         f_star: Optimal value
         tolerance: Allowed violation fraction
-        
+
     Returns:
         Dict with verification results
     """
     loss_values = np.asarray(loss_values, dtype=float)
     grad_norms = np.asarray(grad_norms, dtype=float)
-    
+
     if f_star is None:
         f_star = float(np.min(loss_values))
-    
+
     valid_mask = np.isfinite(loss_values) & np.isfinite(grad_norms) & (loss_values > f_star + 1e-10)
-    
+
     if not np.any(valid_mask):
         return {'satisfied': False, 'violation_ratio': 1.0}
-    
+
     loss_valid = loss_values[valid_mask]
     grad_valid = grad_norms[valid_mask]
-    
+
     # Check PL: ||∇f||² ≥ 2μ(f-f*)
     pl_rhs = 2 * mu * (loss_valid - f_star)
     pl_lhs = grad_valid ** 2
     violations = pl_lhs < pl_rhs
     violation_ratio = float(np.mean(violations))
-    
+
     return {
         'satisfied': violation_ratio <= tolerance,
         'violation_ratio': violation_ratio,
@@ -669,27 +669,27 @@ def sam_sharpness_bound(
 ) -> Dict[str, Any]:
     """
     Analyze sharpness-aware minimization (SAM) properties.
-    
+
     SAM seeks flat minima by minimizing:
         max_{||δ|| ≤ ρ} f(x + δ)
-    
+
     Args:
         rho: Perturbation radius
         L: Lipschitz constant
         epsilon_flat: Target flatness (sharpness threshold)
-        
+
     Returns:
         Dict with SAM-specific bounds
     """
     # Maximum sharpness (second-order bound)
     max_sharpness = L * rho
-    
+
     # Effective perturbation impact
     perturbation_impact = rho * L
-    
+
     # Number of iterations to achieve ε-flatness
     iterations_for_flatness = max_sharpness / epsilon_flat if epsilon_flat > 0 else float('inf')
-    
+
     return {
         'perturbation_radius': rho,
         'max_sharpness': max_sharpness,
@@ -705,34 +705,34 @@ def compute_regret(
 ) -> Dict[str, Any]:
     """
     Compute empirical regret from loss trajectory.
-    
+
     Regret: R(T) = Σ_{t=1}^T [f(x_t) - f(x*)]
-    
+
     Args:
         losses: Array of loss values over time
         optimal_loss: Known optimal loss (if available)
-        
+
     Returns:
         Dict with regret metrics
     """
     T = len(losses)
-    
+
     if optimal_loss is None:
         # Use minimum observed loss as proxy
         optimal_loss = np.min(losses)
-    
+
     # Cumulative regret
     regret_per_step = losses - optimal_loss
     cumulative_regret = np.cumsum(regret_per_step)
-    
+
     # Average regret
     avg_regret = cumulative_regret / np.arange(1, T + 1)
-    
+
     # Regret growth rate (fit to √T or log T)
     t_vals = np.arange(1, T + 1)
     sqrt_t_fit = np.polyfit(np.sqrt(t_vals), cumulative_regret, deg=1)[0]
     log_t_fit = np.polyfit(np.log(t_vals + 1), cumulative_regret, deg=1)[0]
-    
+
     return {
         'total_regret': cumulative_regret[-1],
         'average_regret': avg_regret[-1],
@@ -750,23 +750,23 @@ def estimate_smoothness(
 ) -> float:
     """
     Estimate Lipschitz smoothness constant L from gradient samples.
-    
+
     L ≈ max ||g_i - g_j|| / ||x_i - x_j||
-    
+
     NUMERICAL STABILITY: Validates inputs and handles overflow/NaN gracefully.
-    
+
     Args:
         gradients: List of gradient vectors
         params: List of parameter vectors
-        
+
     Returns:
         Estimated L (0.0 if computation fails)
     """
     if len(gradients) < 2:
         return 0.0
-    
+
     max_L = 0.0
-    
+
     for i in range(len(gradients) - 1):
         for j in range(i + 1, min(i + 10, len(gradients))):  # Sample pairs
             try:
@@ -775,14 +775,14 @@ def estimate_smoothness(
                     continue  # Skip pairs with NaN/Inf
                 if not (np.all(np.isfinite(params[i])) and np.all(np.isfinite(params[j]))):
                     continue
-                
+
                 grad_diff = np.linalg.norm(gradients[i] - gradients[j])
                 param_diff = np.linalg.norm(params[i] - params[j])
-                
+
                 # Additional validation after norm computation
                 if not np.isfinite(grad_diff) or not np.isfinite(param_diff):
                     continue
-                
+
                 if param_diff > 1e-10:
                     L_estimate = grad_diff / param_diff
                     if np.isfinite(L_estimate) and L_estimate < 1e10:  # Sanity bound
@@ -790,7 +790,7 @@ def estimate_smoothness(
             except (FloatingPointError, RuntimeWarning, ValueError):
                 # Silently skip problematic pairs rather than failing entire estimation
                 continue
-    
+
     return float(max_L) if np.isfinite(max_L) else 0.0
 
 
@@ -800,23 +800,23 @@ def estimate_strong_convexity(
 ) -> float:
     """
     Estimate strong convexity parameter μ from gradient samples.
-    
+
     μ ≈ min (g_i - g_j)^T (x_i - x_j) / ||x_i - x_j||^2
-    
+
     NUMERICAL STABILITY: Validates inputs and prevents overflow in norm^2 computation.
-    
+
     Args:
         gradients: List of gradient vectors
         params: List of parameter vectors
-        
+
     Returns:
         Estimated μ (0.0 if computation fails)
     """
     if len(gradients) < 2:
         return 0.0
-    
+
     min_mu = float('inf')
-    
+
     for i in range(len(gradients) - 1):
         for j in range(i + 1, min(i + 10, len(gradients))):
             try:
@@ -825,32 +825,32 @@ def estimate_strong_convexity(
                     continue
                 if not (np.all(np.isfinite(params[i])) and np.all(np.isfinite(params[j]))):
                     continue
-                
+
                 grad_diff = gradients[i] - gradients[j]
                 param_diff = params[i] - params[j]
-                
+
                 # Validate after subtraction
                 if not (np.all(np.isfinite(grad_diff)) and np.all(np.isfinite(param_diff))):
                     continue
-                
+
                 # Use safe computation: avoid x**2 overflow by computing norm then squaring with check
                 param_diff_norm = np.linalg.norm(param_diff)
                 if not np.isfinite(param_diff_norm) or param_diff_norm <= 1e-10:
                     continue
-                    
+
                 # Safe squared norm with overflow check
                 param_diff_norm_sq = param_diff_norm * param_diff_norm
                 if not np.isfinite(param_diff_norm_sq):
                     continue
-                
+
                 mu_estimate = np.dot(grad_diff, param_diff) / param_diff_norm_sq
-                
+
                 if np.isfinite(mu_estimate) and mu_estimate > 0 and mu_estimate < 1e10:
                     min_mu = min(min_mu, mu_estimate)
             except (FloatingPointError, RuntimeWarning, ValueError):
                 # Silently skip problematic pairs
                 continue
-    
+
     return 0.0 if min_mu == float('inf') else float(min_mu)
 
 
@@ -862,42 +862,42 @@ def sgd_pl_convergence_bound(
 ) -> Dict[str, Any]:
     """
     Compute SGD convergence bound under Polyak-Łojasiewicz (PL) condition.
-    
+
     PL Condition: ||∇f(x)||² ≥ 2μ(f(x) - f*) for all x
-    
+
     Under PL condition, SGD achieves LINEAR convergence even for non-convex functions:
         E[f(x_T) - f*] ≤ (1 - ημ)^T * (f(x_0) - f*)
-    
+
     This is the KEY bound for neural networks that satisfy PL locally.
-    
+
     Args:
         L: Lipschitz smoothness constant
         pl_constant: Estimated PL constant (μ from PL inequality)
         lr: Learning rate
         T: Number of iterations
-    
+
     Returns:
         Dict with PL-based convergence bound
     """
     # PL-based convergence rate (same form as strongly convex, but for non-convex!)
     convergence_rate = 1.0 - lr * pl_constant
-    
+
     # Optimal learning rate under PL
     optimal_lr = 1.0 / L  # Common choice for smooth PL functions
-    
+
     # Iterations to ε-accuracy
     epsilon = 1e-6
     if 0 < convergence_rate < 1:
         iterations_to_eps = np.log(epsilon) / np.log(convergence_rate)
     else:
         iterations_to_eps = float('inf')
-    
+
     # Final bound (assumes f(x_0) - f* = 1)
     if 0 < convergence_rate < 1:
         final_bound = convergence_rate ** T
     else:
         final_bound = float('inf')
-    
+
     return {
         'optimal_lr': float(optimal_lr),
         'convergence_rate': float(convergence_rate),
@@ -917,17 +917,17 @@ def momentum_dynamics_theory(
 ) -> Dict[str, Any]:
     """
     Theoretical predictions for momentum dynamics (velocity, trajectory properties).
-    
+
     Based on continuous-time ODE analysis of momentum methods:
         x' = v
         v' = -∇f(x) - γv + β*v_prev
-    
+
     Args:
         L: Lipschitz smoothness
         mu: Strong convexity (or PL constant)
         beta: Momentum coefficient
         lr: Learning rate
-    
+
     Returns:
         Dict with theoretical dynamics predictions:
           - max_velocity_bound: Upper bound on ||v_t||
@@ -936,22 +936,22 @@ def momentum_dynamics_theory(
           - damping_ratio: Ratio of damping to critical damping
     """
     kappa = L / mu if mu > 1e-12 else float('inf')
-    
+
     # Maximum velocity bound (from energy analysis)
     # ||v_t|| ≤ C * ||x_0 - x*|| * √(L/μ)
     max_velocity_bound = np.sqrt(kappa) if np.isfinite(kappa) else float('inf')
-    
+
     # Oscillation frequency (for underdamped case)
     # ω = √(μ/L) for optimal momentum
     if mu > 1e-12:
         oscillation_frequency = np.sqrt(mu / L)
     else:
         oscillation_frequency = 0.0
-    
+
     # Trajectory curvature (second derivative bound)
     # κ(trajectory) ≤ L (Lipschitz smoothness implies curvature bound)
     trajectory_curvature_bound = L
-    
+
     # Damping ratio (ζ = actual_damping / critical_damping)
     # ζ < 1: underdamped (oscillations)
     # ζ = 1: critically damped (no oscillations, fastest convergence)
@@ -959,7 +959,7 @@ def momentum_dynamics_theory(
     sqrt_kappa = np.sqrt(kappa) if np.isfinite(kappa) else 1.0
     optimal_beta = ((sqrt_kappa - 1) / (sqrt_kappa + 1)) ** 2
     damping_ratio = (1 - beta) / (1 - optimal_beta) if optimal_beta < 1 else 1.0
-    
+
     return {
         'max_velocity_bound': float(max_velocity_bound),
         'oscillation_frequency': float(oscillation_frequency),
@@ -976,35 +976,35 @@ def analyze_convergence_trajectory(
 ) -> Dict[str, Any]:
     """
     Comprehensive convergence analysis from loss trajectory.
-    
+
     Args:
         losses: Array of loss values over iterations
         optimizer_name: Name of optimizer
-        
+
     Returns:
         Dict with convergence metrics and theoretical bounds
     """
     T = len(losses)
-    
+
     # Empirical convergence rate
     if losses[0] > losses[-1]:
         empirical_rate = (losses[0] - losses[-1]) / losses[0]
     else:
         empirical_rate = 0.0
-    
+
     # Detect convergence regime
     recent_window = min(100, T // 4)
     recent_std = np.std(losses[-recent_window:])
     has_converged = recent_std < 0.01 * losses[-recent_window:].mean()
-    
+
     # Compute regret
     regret_stats = compute_regret(losses)
-    
+
     # Estimate iteration complexity (iterations to 90% of best)
     best_loss = np.min(losses)
     threshold = best_loss + 0.1 * (losses[0] - best_loss)
     iterations_to_90 = np.argmax(losses <= threshold) if np.any(losses <= threshold) else T
-    
+
     return {
         'optimizer': optimizer_name,
         'total_iterations': int(T),

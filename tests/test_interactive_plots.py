@@ -47,11 +47,11 @@ except ImportError:
 @unittest.skipIf(not PLOTLY_AVAILABLE, "Plotly not installed")
 class TestInteractivePlots(unittest.TestCase):
     """Tests for interactive plotting functions."""
-    
+
     def setUp(self):
         """Set up test fixtures."""
         np.random.seed(42)
-        
+
         # Sample trajectories
         self.trajectories = {
             'Adam': np.array([
@@ -67,26 +67,26 @@ class TestInteractivePlots(unittest.TestCase):
                 [1.0, 1.0]
             ])
         }
-        
+
         self.loss_histories = {
             'Adam': np.array([10.0, 5.0, 1.0, 0.1]),
             'SGD': np.array([10.0, 7.0, 3.0, 0.5])
         }
-    
+
     def test_plot_trajectory_interactive_basic(self):
         """Test basic interactive trajectory plot."""
         fig = plot_trajectory_interactive(
             self.trajectories,
             title="Test Trajectories"
         )
-        
+
         # Should return a Figure
         assert isinstance(fig, go.Figure)
         data = getattr(fig, 'data', ())
         assert isinstance(data, (list, tuple)), "Figure.data is not a sequence"
         # Should have traces for each optimizer (line + start + end = 3 per optimizer)
         assert len(data) >= len(self.trajectories) * 3
-    
+
     def test_plot_trajectory_with_contour(self):
         """Test trajectory plot with contour overlay."""
         fig = plot_trajectory_interactive(
@@ -95,16 +95,16 @@ class TestInteractivePlots(unittest.TestCase):
             show_contour=True,
             n_contour_points=20
         )
-        
+
         # Should have contour trace plus optimizer traces
         data = getattr(fig, 'data', ())
         assert len(data) > len(self.trajectories) * 3
-        
+
         # First trace should be contour
         data = getattr(fig, 'data', ())
         assert len(data) > 0, "No traces in figure"
         assert getattr(data[0], 'type', None) == 'contour'
-    
+
     def test_plot_loss_landscape_3d(self):
         """Test 3D loss landscape visualization."""
         fig = plot_loss_landscape_3d(
@@ -114,15 +114,15 @@ class TestInteractivePlots(unittest.TestCase):
             n_points=20,
             title="Test 3D Landscape"
         )
-        
+
         # Should return a Figure
         assert isinstance(fig, go.Figure)
-        
+
         # Should have at least one surface trace
         data = getattr(fig, 'data', ())
         assert len(data) >= 1
         assert getattr(data[0], 'type', None) == 'surface'
-    
+
     def test_plot_landscape_with_trajectories(self):
         """Test 3D landscape with trajectory overlay."""
         fig = plot_loss_landscape_3d(
@@ -132,16 +132,16 @@ class TestInteractivePlots(unittest.TestCase):
             n_points=15,
             trajectories=self.trajectories
         )
-        
+
         # Should have surface + trajectory traces
         data = getattr(fig, 'data', ())
         assert len(data) == 1 + len(self.trajectories)
-        
+
         # Check trajectory traces
         data = getattr(fig, 'data', ())
         for i in range(1, len(data)):
             assert getattr(data[i], 'type', None) == 'scatter3d'
-    
+
     def test_animate_convergence(self):
         """Test convergence animation creation."""
         fig = animate_convergence(
@@ -150,10 +150,10 @@ class TestInteractivePlots(unittest.TestCase):
             title="Test Animation",
             frame_duration=50
         )
-        
+
         # Should return a Figure
         assert isinstance(fig, go.Figure)
-        
+
         # Should have frames
         frames = getattr(fig, 'frames', [])
         assert isinstance(frames, (list, tuple)) and len(frames) > 0
@@ -196,7 +196,7 @@ class TestInteractivePlots(unittest.TestCase):
                 candidate = []
 
         assert len(candidate) > 0, "updatemenus has no iterable content"
-    
+
     def test_multi_optimizer_comparison(self):
         """Test multi-optimizer comparison plot."""
         results = {
@@ -213,41 +213,41 @@ class TestInteractivePlots(unittest.TestCase):
                 'iterations': 4
             }
         }
-        
+
         fig = plot_multi_optimizer_comparison(
             results,
             title="Test Comparison"
         )
-        
+
         # Should return a Figure
         assert isinstance(fig, go.Figure)
-        
+
         # Should have multiple traces (2 line plots + 2 bar plots)
         data = getattr(fig, 'data', ())
         assert len(data) >= 4
-    
+
     def test_save_interactive_html(self):
         """Test saving figure to HTML."""
         import tempfile
         import os
-        
+
         fig = plot_trajectory_interactive(
             self.trajectories,
             title="Test Save"
         )
-        
+
         # Create temp file
         with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False) as f:
             temp_path = f.name
-        
+
         try:
             # Save figure
             save_interactive_html(fig, temp_path, include_plotlyjs='cdn')
-            
+
             # Check file exists and has content
             assert os.path.exists(temp_path)
             assert os.path.getsize(temp_path) > 0
-            
+
             # Check it's HTML
             with open(temp_path, 'r', encoding='utf-8') as f:
                 content = f.read()
@@ -261,97 +261,97 @@ class TestInteractivePlots(unittest.TestCase):
 @unittest.skipIf(not PLOTLY_AVAILABLE, "Plotly not installed")
 class TestEdgeCases(unittest.TestCase):
     """Test edge cases and error handling."""
-    
+
     def test_single_point_trajectory(self):
         """Test with single-point trajectory."""
         trajectories = {
             'Test': np.array([[0.0, 0.0]])
         }
-        
+
         fig = plot_trajectory_interactive(trajectories)
         assert isinstance(fig, go.Figure)
-    
+
     def test_empty_trajectories(self):
         """Test with empty trajectory dict."""
         fig = plot_trajectory_interactive({})
         assert isinstance(fig, go.Figure)
         data = getattr(fig, 'data', ())
         assert len(data) == 0
-    
+
     def test_different_trajectory_lengths(self):
         """Test with trajectories of different lengths."""
         trajectories = {
             'Short': np.array([[0, 0], [1, 1]]),
             'Long': np.array([[0, 0], [0.5, 0.5], [1, 1], [1.5, 1.5]])
         }
-        
+
         loss_histories = {
             'Short': np.array([1.0, 0.1]),
             'Long': np.array([1.0, 0.5, 0.2, 0.05])
         }
-        
+
         fig = animate_convergence(trajectories, loss_histories)
         assert isinstance(fig, go.Figure)
-        
+
         # Should have frames equal to max trajectory length
         assert len(fig.frames) == 4
-    
+
     def test_3d_landscape_extreme_values(self):
         """Test 3D landscape with function returning extreme values."""
         def extreme_function(x):
             return 1e10 * x[0]**2 + 1e-10 * x[1]**2
-        
+
         fig = plot_loss_landscape_3d(
             extreme_function,
             x_range=(0, 1),
             y_range=(0, 1),
             n_points=10
         )
-        
+
         assert isinstance(fig, go.Figure)
 
 
 @unittest.skipIf(not PLOTLY_AVAILABLE, "Plotly not installed")
 class TestPlotProperties(unittest.TestCase):
     """Test specific plot properties and customization."""
-    
+
     def test_plot_title(self):
         """Test that custom title is applied."""
         trajectories = {'Test': np.array([[0, 0], [1, 1]])}
         custom_title = "My Custom Title"
-        
+
         fig = plot_trajectory_interactive(trajectories, title=custom_title)
         assert fig.layout.title.text == custom_title
-    
+
     def test_contour_disabled(self):
         """Test trajectory plot without contours."""
         trajectories = {'Test': np.array([[0, 0], [1, 1]])}
-        
+
         fig = plot_trajectory_interactive(
             trajectories,
             test_function=rosenbrock,
             show_contour=False
         )
-        
+
         # Should not have contour trace
         for trace in fig.data:
             assert trace.type != 'contour'
-    
+
     def test_animation_frame_duration(self):
         """Test custom animation frame duration."""
         trajectories = {'Test': np.array([[0, 0], [1, 1]])}
         loss_histories = {'Test': np.array([1.0, 0.1])}
-        
+
         custom_duration = 200
         fig = animate_convergence(
             trajectories,
             loss_histories,
             frame_duration=custom_duration
         )
-        
+
         # Check that animation config exists
         assert len(fig.layout.updatemenus) > 0
-    
+
     def test_3d_camera_position(self):
         """Test that 3D plot has camera configuration."""
         fig = plot_loss_landscape_3d(
@@ -360,7 +360,7 @@ class TestPlotProperties(unittest.TestCase):
             y_range=(0, 1),
             n_points=10
         )
-        
+
         # Should have scene configuration with camera
         assert 'scene' in fig.layout
         assert 'camera' in fig.layout.scene

@@ -27,10 +27,10 @@ def test_aggregate_results_excludes_tainted_runs():
             filepath = os.path.join(tmpdir, f'test_seed{seed}.csv')
             df.to_csv(filepath, index=False)
             files.append(filepath)
-        
+
         # Aggregate with exclude_tainted=True (default)
         results = aggregate_results(files, metric='test_accuracy', exclude_tainted=True)
-        
+
         # Should only include seeds 1 and 3 (not seed 2 which is tainted)
         assert results['n'] == 2, f"Expected 2 runs, got {results['n']}"
         assert 0.96 not in results['values'], "Tainted run (0.96) should be excluded"
@@ -53,10 +53,10 @@ def test_aggregate_results_includes_tainted_when_disabled():
             filepath = os.path.join(tmpdir, f'test_seed{seed}.csv')
             df.to_csv(filepath, index=False)
             files.append(filepath)
-        
+
         # Aggregate with exclude_tainted=False
         results = aggregate_results(files, metric='test_accuracy', exclude_tainted=False)
-        
+
         # Should include all 3 runs
         assert results['n'] == 3, f"Expected 3 runs, got {results['n']}"
         assert 0.96 in results['values'], "Tainted run should be included when exclude_tainted=False"
@@ -74,10 +74,10 @@ def test_extract_final_metric_excludes_tainted():
             'tainted': [tainted] * 6
         })
         dfs.append(df)
-    
+
     # Extract with exclude_tainted=True (default)
     values = extract_final_metric(dfs, metric='test_accuracy', exclude_tainted=True)
-    
+
     # Should only include 2 runs
     assert len(values) == 2, f"Expected 2 values, got {len(values)}"
     assert 0.96 not in values, "Tainted run should be excluded"
@@ -99,7 +99,7 @@ def test_aggregate_results_empty_when_all_tainted():
             filepath = os.path.join(tmpdir, f'test_seed{seed}.csv')
             df.to_csv(filepath, index=False)
             files.append(filepath)
-        
+
         # Should return empty results
         results = aggregate_results(files, metric='test_accuracy', exclude_tainted=True)
         assert results['n'] == 0, "Should have 0 runs when all are tainted"
@@ -130,10 +130,10 @@ def test_aggregate_results_handles_string_boolean_tainted():
             filepath = os.path.join(tmpdir, f'test_seed{seed}.csv')
             df.to_csv(filepath, index=False)
             files.append(filepath)
-        
+
         # Aggregate with exclude_tainted=True
         results = aggregate_results(files, metric='test_accuracy', exclude_tainted=True)
-        
+
         # Should include: false, False, 0, no (0.95, 0.94, 0.92, 0.90)
         # Exclude: true, 1, yes (0.96, 0.93, 0.91)
         expected_values = [0.95, 0.94, 0.92, 0.90]
