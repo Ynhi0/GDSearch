@@ -71,16 +71,27 @@ def safe_print(*args, **kwargs):
         """Replace Unicode symbols with ASCII equivalents."""
         if not isinstance(s, str):
             return s
-        # Unicode symbol replacements
+        # Unicode symbol replacements (unique keys only)
+        # Use the canonical unicode escape or the direct char, not both
         replacements = {
-            '\u2713': '[OK]', '✓': '[OK]',
-            '\u2717': '[ERROR]', '✗': '[ERROR]',
-            '\u26a0': '[WARN]', '⚠': '[WARN]', '⚠️': '[WARN]',
-            '💾': '[SAVE]', '🔬': '[TEST]', '🎛️': '[CONFIG]',
-            '🔄': '[SYNC]', '🔧': '[FIX]', '🧹': '[CLEAN]',
-            '📚': '[DOCS]', '🎨': '[FORMAT]', '📦': '[PACKAGE]',
-            '💡': '[TIP]', '🐳': '[DOCKER]', '🏗️': '[BUILD]',
-            '🌌': '[SPACE]', '⏰': '[TIME]', '🔍': '[SEARCH]',
+            '\u2713': '[OK]',             # ✓
+            '\u2717': '[ERROR]',          # ✗
+            '\u26a0': '[WARN]',           # ⚠
+            '💾': '[SAVE]',
+            '🔬': '[TEST]',
+            '🎛️': '[CONFIG]',
+            '🔄': '[SYNC]',
+            '🔧': '[FIX]',
+            '🧹': '[CLEAN]',
+            '📚': '[DOCS]',
+            '🎨': '[FORMAT]',
+            '📦': '[PACKAGE]',
+            '💡': '[TIP]',
+            '🐳': '[DOCKER]',
+            '🏗️': '[BUILD]',
+            '🌌': '[SPACE]',
+            '⏰': '[TIME]',
+            '🔍': '[SEARCH]',
         }
         for unicode_char, ascii_replacement in replacements.items():
             s = s.replace(unicode_char, ascii_replacement)
@@ -104,6 +115,13 @@ def safe_print(*args, **kwargs):
 # Import typing items at once for consistency
 from typing import Any, Dict, List, Optional, Union
 from pathlib import Path
+
+# Use centralized helper to compute gradient norms for consistency
+try:
+    from src.runners.training import compute_gradient_norm
+except Exception:
+    # Fallback: will use inline computation if import fails
+    compute_gradient_norm = None  # type: ignore
 
 def _int_if_possible(x: Any) -> int:
     try:
@@ -278,6 +296,55 @@ except ImportError:
 
 # Plot helpers
 from src.utils.plot_helpers import arr_to_numpy_float
+
+
+# =============================================================================
+# Metric Naming Standardization
+# =============================================================================
+def normalize_metric_names(data_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normalize inconsistent metric naming across experiments.
+    
+    Handles variations like:
+    - test_acc / test_accuracy / final_test_acc → unified to 'test_acc' (with final_test_acc preserved)
+    - train_accuracy / train_acc → unified to 'train_acc'
+    - final_accuracy → unified to 'final_test_acc'
+    
+    This resolves GAP 29: Metric naming inconsistencies that break plotting/analysis.
+    
+    USAGE: Call this on all result dictionaries before appending to results lists:
+        result_dict = {'final_accuracy': 95.2, 'optimizer': 'Adam', ...}
+        results.append(normalize_metric_names(result_dict))
+    
+    Args:
+        data_dict: Dictionary with potentially inconsistent metric keys
+        
+    Returns:
+        Dictionary with standardized metric names
+    """
+    normalized = data_dict.copy()
+    
+    # Test accuracy normalization (many variations observed)
+    if 'test_accuracy' in normalized and 'test_acc' not in normalized:
+        normalized['test_acc'] = normalized.pop('test_accuracy')
+    elif 'final_test_acc' in normalized and 'test_acc' not in normalized:
+        # Keep final_test_acc for summary, but also provide test_acc alias
+        normalized['test_acc'] = normalized['final_test_acc']
+    
+    # Train accuracy normalization
+    if 'train_accuracy' in normalized and 'train_acc' not in normalized:
+        normalized['train_acc'] = normalized.pop('train_accuracy')
+    
+    # Final accuracy variations
+    if 'final_accuracy' in normalized and 'final_test_acc' not in normalized:
+        normalized['final_test_acc'] = normalized.pop('final_accuracy')
+    
+    # Validation accuracy normalization
+    if 'val_accuracy' in normalized and 'val_acc' not in normalized:
+        normalized['val_acc'] = normalized.pop('val_accuracy')
+    
+    return normalized
+
 
 # Filter CUDA and XLA warnings
 warnings.filterwarnings('ignore', message='.*cuFFT.*')
@@ -655,119 +722,8 @@ class PerformanceProfiler:
                 print(f"  GPU memory free: {metrics['gpu_memory_free_mb']:.1f} MB")
         print("="*60 + "\n")
 
-class ExperimentTracker:
-    """Experiment tracking with MLflow integration"""
-
-    def __init__(self, experiment_name: str = "GDSearch_Benchmark",
-                 tracking_uri: Optional[str] = None):
-        self.experiment_name = experiment_name
-        self.tracking_uri = tracking_uri
-        self.current_run = None
-        self.run_stack = []  # Stack to track nested runs
-
-        if HAS_MLFLOW:
-            if tracking_uri:
-                mlflow.set_tracking_uri(tracking_uri)
-            mlflow.set_experiment(experiment_name)
-
-    def start_run(self, run_name: Optional[str] = None) -> Optional[str]:
-        """Start a new MLflow run, using nested runs if a run is already active"""
-        if HAS_MLFLOW:
-            if self.current_run is not None:
-                # Start a nested/child run
-                self.run_stack.append(self.current_run)
-                try:
-                    self.current_run = mlflow.start_run(run_name=run_name, nested=True)
-                except (mlflow.MlflowException, RuntimeError):
-                    # Restore stack on failure to prevent corruption
-                    # Narrow to MLflow exceptions + RuntimeError for state issues
-                    self.run_stack.pop()
-                    raise
-            else:
-                # Start a new top-level run
-                self.current_run = mlflow.start_run(run_name=run_name)
-            return self.current_run.info.run_id
-        return None
-
-    def end_run(self):
-        """End the current MLflow run"""
-        if HAS_MLFLOW and self.current_run:
-            mlflow.end_run()
-            if self.run_stack:
-                # Restore parent run
-                self.current_run = self.run_stack.pop()
-            else:
-                self.current_run = None
-
-    def log_params(self, params: Dict[str, Any]):
-        """Log parameters
-
-        Ensure consistent hyperparameter serialization.
-        Convert all values to JSON-serializable types for proper MLflow tracking.
-        """
-        if HAS_MLFLOW and self.current_run:
-            for k, v in params.items():
-                # Handle numpy/torch types explicitly
-                if isinstance(v, (np.ndarray,)):
-                    try:
-                        elem_count = int(v.size)
-                    except Exception:
-                        elem_count = None
-                    if elem_count is not None and elem_count <= 100:
-                        try:
-                            v = v.tolist()
-                        except Exception:
-                            v = str(v)
-                    else:
-                        v = f"<{type(v).__name__} shape={getattr(v, 'shape', None)}>"
-                elif isinstance(v, torch.Tensor):
-                    try:
-                        elem_count = int(v.numel())
-                    except Exception:
-                        elem_count = None
-                    if elem_count is not None and elem_count <= 100:
-                        try:
-                            v = v.tolist()
-                        except Exception:
-                            v = str(v)
-                    else:
-                        v = f"<{type(v).__name__} shape={getattr(v, 'shape', None)}>"
-                # Convert non-serializable types
-                elif isinstance(v, (list, tuple)):
-                    v = str(v)  # Convert sequences to string
-                elif isinstance(v, dict):
-                    v = str(v)  # Convert dicts to string
-                elif v is None:
-                    v = "None"  # Convert None to string
-                elif not isinstance(v, (str, int, float, bool)):
-                    v = str(v)  # Convert any other type to string
-
-                try:
-                    mlflow.log_param(k, v)
-                except (ValueError, Exception) as e:
-                    logging.warning("Failed to log param %s=%s: %s", k, v, e)
-
-    def log_metrics(self, metrics: Dict[str, float], step: Optional[int] = None):
-        """Log metrics"""
-        if HAS_MLFLOW and self.current_run:
-            for k, v in metrics.items():
-                mlflow.log_metric(k, v, step=step)
-
-    def log_model(self, model: torch.nn.Module, model_name: str = "model"):
-        """Log model"""
-        if HAS_MLFLOW and self.current_run:
-            try:
-                if mlflow_pytorch is not None:
-                    mlflow_pytorch.log_model(model, model_name)
-                else:
-                    logging.warning("mlflow.pytorch not available; skipping model logging")
-            except Exception as e:
-                logging.warning("Failed to log model to MLflow: %s", e)
-
-    def log_artifact(self, local_path: str, artifact_path: Optional[str] = None):
-        """Log artifact file"""
-        if HAS_MLFLOW and self.current_run:
-            mlflow.log_artifact(local_path, artifact_path)
+# Use centralized ExperimentTracker implementation from src to avoid duplication and typing drift
+from src.core.experiment_tracker import ExperimentTracker
 
 class RobustCheckpointManager:
     """Robust checkpointing with backup, validation, and disk space awareness"""
@@ -1254,7 +1210,7 @@ def get_system_info() -> Dict[str, Any]:
 
     # Try to get GPU utilization
     try:
-        import GPUtil
+        import GPUtil  # type: ignore[reportMissingImports]
         gpus = GPUtil.getGPUs()
         if gpus:
             info['gpu_utilization'] = gpus[0].load * 100
@@ -2129,7 +2085,7 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
             # FIX: Include training trajectories to enable convergence rate analysis
             # GAP 1: Include time_history for wall-clock analysis
             # GAP 15: Include grad_norm_history for non-convex validation
-            batch_results.append({
+            result_dict = {
                 'dataset': dataset_name,
                 'optimizer': opt_name,
                 'batch_size': batch_size,
@@ -2142,7 +2098,9 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
                 'grad_norm_history': grad_norm_history,  # GAP 15: Gradient norm decay
                 'time_history': time_history,  # GAP 1: Wall-clock time
                 'total_time': time.time() - start_time  # Total training time
-            })
+            }
+            # Apply metric name normalization (GAP 29: test_acc/test_accuracy/final_test_acc consistency)
+            batch_results.append(normalize_metric_names(result_dict))
 
     # Save to CSV
     df = pd.DataFrame(batch_results)
@@ -2848,11 +2806,13 @@ def get_default_hyperparameters(optimizer_name: str, experiment_type: str = "2d_
 # EXPERIMENT FUNCTIONS
 # ==============================================================================
 
-def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
+def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False, grad_noise_every=10, grad_noise_samples=100):
     """Run MNIST benchmark with multiple optimizers - Enhanced with profiling and tracking
 
     Args:
         resume: If True, skip experiments that already have result files
+        grad_noise_every: Estimate gradient noise variance every N epochs (0 to disable)
+        grad_noise_samples: Number of gradient samples for noise estimation
     """
     if seeds is None:
         seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
@@ -3362,17 +3322,29 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                                 train_acc = 100. * train_correct / len(train_dataset)
 
                                 # PROPOSAL REQUIREMENT: Compute gradient norm for convergence analysis
-                                # This is important for validating convergence rate claims
-                                grad_norm = 0.0
-                                for param in model.parameters():
-                                    if param.grad is not None:
-                                        grad_norm += param.grad.data.norm(2).item() ** 2
-                                grad_norm = grad_norm ** 0.5
+                                # Use centralized helper when available to ensure consistency
+                                try:
+                                    if compute_gradient_norm is not None:
+                                        grad_norm = float(compute_gradient_norm(model))
+                                    else:
+                                        # Fallback to inline computation if helper unavailable
+                                        grad_norm = 0.0
+                                        for param in model.parameters():
+                                            if param.grad is not None:
+                                                grad_norm += param.grad.data.norm(2).item() ** 2
+                                        grad_norm = grad_norm ** 0.5
+                                except Exception as e:
+                                    logging.warning(f"Could not compute gradient norm via helper: {e}; falling back to inline computation")
+                                    grad_norm = 0.0
+                                    for param in model.parameters():
+                                        if param.grad is not None:
+                                            grad_norm += param.grad.data.norm(2).item() ** 2
+                                    grad_norm = grad_norm ** 0.5
 
-                                # QA INTEGRATION (Issue #2): Estimate gradient noise variance every 10 epochs
+                                # QA INTEGRATION (Issue #2): Estimate gradient noise variance periodically (configurable)
                                 # Important for validating theoretical SGD bounds vs empirical results
                                 grad_noise_var = None
-                                if epoch % 10 == 0:
+                                if grad_noise_every > 0 and epoch % grad_noise_every == 0:
                                     try:
                                         from src.analysis.gradient_noise_analysis import estimate_gradient_noise_variance
                                         noise_stats = estimate_gradient_noise_variance(
@@ -3380,7 +3352,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                                             data_loader=train_loader,
                                             criterion=criterion,
                                             device=device,
-                                            num_samples=20,  # Limited samples to avoid slowdown
+                                            num_samples=grad_noise_samples,  # Use configurable sample count
                                             method='empirical_variance'
                                         )
                                         grad_noise_var = noise_stats['sigma_squared']
@@ -3583,7 +3555,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                                            seed, history, params, device=device, exp_tracker=tracker,
                                            model=model, save_model=True)  # Save model weights
 
-                        results.append({
+                        results.append(normalize_metric_names({
                             'optimizer': opt_name,
                             'seed': seed,
                             'train_loss': train_loss,
@@ -3595,7 +3567,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                             # Add taint tracking columns
                             'effective_batch_size': effective_batch_size,
                             'tainted': run_tainted
-                        })
+                        }))
 
                 # Clean GPU memory between seeds to prevent accumulation and OOM
                 if torch.cuda.is_available():
@@ -4117,7 +4089,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
                     logging.debug(f"Could not retrieve robust gradient stats: {e}")
 
             # Include tainted and effective_batch_size in results
-            all_results.append({
+            all_results.append(normalize_metric_names({
                 'optimizer': opt_name,
                 'seed': seed,
                 'lr': lr,
@@ -4128,7 +4100,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
                 'tainted': run_tainted,
                 'effective_batch_size': effective_batch_size,
                 'original_batch_size': original_batch_size
-            })
+            }))
 
             logging.info(f"CIFAR-10 {opt_name} seed {seed}: Test Acc={test_acc:.2f}%")
 
@@ -5147,13 +5119,14 @@ class BiLSTMLayer(nn.Module):
         return torch.cat([h_n[0], h_n[1]], dim=1)  # [batch, hidden*2]
 
 
-def run_medical_experiment(results_dir="results_medical", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
+def run_medical_experiment(results_dir="results_medical", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False, require_medmnist=False):
     if seeds is None:
         seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
     """Run full medical image segmentation with U-Net
 
     Args:
         resume: If True, skip experiments that already have result files
+        require_medmnist: If True, enforce strict MedMNIST usage (no synthetic fallback)
     """
     # Clear GPU memory before starting new experiment
     clear_gpu_memory()
@@ -5199,6 +5172,15 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
     dataset_type = os.environ.get('MEDICAL_DATASET_TYPE', 'medmnist')
     medmnist_name = os.environ.get('MEDMNIST_NAME', 'pathmnist')
     kaggle_path = os.environ.get('KAGGLE_MEDICAL_PATH', './data/medical')
+    
+    # STRICT MODE: Enforce real MedMNIST datasets if --require-medmnist flag is set
+    # This resolves the docs/code inconsistency (DATASET_PROVENANCE.md says REQUIRED, code allowed synthetic)
+    if require_medmnist and dataset_type != 'medmnist':
+        raise ValueError(
+            f"ERROR: --require-medmnist flag is set, but MEDICAL_DATASET_TYPE='{dataset_type}' (not 'medmnist').\n"
+            f"For strict compliance with proposal requirements, medical experiments MUST use real MedMNIST datasets.\n"
+            f"Either: (1) Set MEDICAL_DATASET_TYPE='medmnist' or (2) Remove --require-medmnist flag to allow fallback."
+        )
 
     logging.info(f"Medical dataset type: {dataset_type}")
     if dataset_type == 'medmnist':
@@ -5206,6 +5188,8 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
     elif dataset_type == 'kaggle':
         logging.info(f"  Kaggle dataset path: {kaggle_path}")
     elif dataset_type == 'synthetic':
+        if require_medmnist:
+            raise ValueError("STRICT MODE: Synthetic medical data is not allowed when --require-medmnist is set")
         logging.warning("  Using synthetic data - NOT RECOMMENDED for research")
 
 
@@ -5378,7 +5362,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
 
                     if isinstance(optimizer, SAMWrapper):
                         def closure():
-                            optimizer.zero_grad()
+                            optimizer.zero_grad()  # type: ignore[union-attr]
                             outputs = model(images)
                             loss = criterion(outputs, masks)
                             loss.backward()
@@ -5554,7 +5538,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
             except Exception:
                 logging.debug("Could not attach final test metrics to Medical history for %s seed %s", opt_name, seed, exc_info=True)
 
-            results.append({
+            results.append(normalize_metric_names({
                 'optimizer': opt_name,
                 'seed': seed,
                 'final_train_loss': train_loss,
@@ -5567,7 +5551,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                 'max_grad_norm': robust_stats.get('max_grad_norm', 0.0),
                 'clip_fraction': robust_stats.get('clip_fraction', 0.0),
                 'heavy_tail_fraction': robust_stats.get('heavy_tail_fraction', 0.0)
-            })
+            }))
 
             # Save per-run artifacts for this optimizer/seed
             try:
@@ -6861,8 +6845,12 @@ def aggregate_cross_experiment_results(results_dir: Path, experiment_results: Di
     if HAS_SCIPY and len(optimizer_performance) >= 2:
         print("\n   Cross-Experiment Statistical Analysis:")
 
+        # Import safe helper and multiple-comparisons correction
+        from src.analysis.statistical_analysis import safe_ttest_rel, cohens_d_ci_paired, interpret_cohens_d
+
         stat_results = []
         optimizers = list(optimizer_performance.keys())
+        raw_p_values = []  # Collect all p-values for multiple-comparisons correction
 
         for i, opt_a in enumerate(optimizers):
             for opt_b in optimizers[i+1:]:
@@ -6876,72 +6864,13 @@ def aggregate_cross_experiment_results(results_dir: Path, experiment_results: Di
                     vals_a = [exps_a[e] for e in common_exps]
                     vals_b = [exps_b[e] for e in common_exps]
 
-                    # Paired comparison
+                    # Paired comparison using robust safe_ttest_rel helper
                     try:
-                        # Use a robust unpacking to handle different scipy/numpy return types
-                        res = stats.ttest_rel(vals_a, vals_b)
+                        t_stat, p_scalar = safe_ttest_rel(vals_a, vals_b)
 
-                        # Extract t_statistic and p_value with proper type handling
-                        t_stat_raw: Any = None
-                        p_val_raw: Any = None
-
-                        if isinstance(res, tuple):
-                            t_stat_raw, p_val_raw = res
-                        elif hasattr(res, "pvalue"):
-                            # SciPy >=1.9 returns a TtestResult-like object
-                            t_stat_raw = getattr(res, "statistic", None)
-                            p_val_raw = getattr(res, "pvalue", None)
-                        else:
-                            # Fallback: try to unpack
-                            try:
-                                t_stat_raw, p_val_raw = res
-                            except (TypeError, ValueError):
-                                logging.debug("Could not unpack ttest result for %s vs %s", opt_a, opt_b)
-                                continue
-
-                        # Convert t_statistic to float
-                        if t_stat_raw is None:
-                            t_stat = float("nan")
-                        else:
-                            try:
-                                t_arr = np.asarray(t_stat_raw)
-                                if t_arr.size == 1:
-                                    t_stat = float(t_arr.item())
-                                else:
-                                    t_stat = float(t_arr.flatten()[0])
-                            except (ValueError, TypeError, IndexError):
-                                try:
-                                    t_stat = float(t_stat_raw)
-                                except (ValueError, TypeError):
-                                    t_stat = float("nan")
-
-                        # Convert p_value to float with comprehensive error handling
-                        if p_val_raw is None:
-                            p_scalar = float("nan")
-                        else:
-                            try:
-                                arr = np.asarray(p_val_raw)
-                                if arr.size == 1:
-                                    p_scalar = float(arr.item())
-                                else:
-                                    p_scalar = float(arr.flatten()[0])
-                            except (ValueError, TypeError, IndexError):
-                                try:
-                                    p_scalar = float(p_val_raw)
-                                except (ValueError, TypeError):
-                                    p_scalar = float("nan")
-
-                        # Effect size (Cohen's d for paired)
-                        diff = np.array(vals_a) - np.array(vals_b)
-                        diff_std = diff.std()
-                        if diff_std < 1e-10:
-                            cohens_d = 0.0
-                        else:
-                            cohens_d = float(diff.mean() / diff_std)
-
-                        is_significant = False
-                        if not math.isnan(p_scalar) and p_scalar < 0.05:
-                            is_significant = True
+                        # Effect size (Cohen's d for paired differences) with confidence interval
+                        cohens_d, d_ci_lower, d_ci_upper = cohens_d_ci_paired(vals_a, vals_b, confidence=0.95)
+                        d_interpretation = interpret_cohens_d(cohens_d)
 
                         stat_results.append({
                             'optimizer_a': opt_a,
@@ -6951,13 +6880,67 @@ def aggregate_cross_experiment_results(results_dir: Path, experiment_results: Di
                             't_statistic': t_stat,
                             'p_value': p_scalar,
                             'cohens_d': cohens_d,
-                            'significant': is_significant
+                            'cohens_d_ci_lower': d_ci_lower,
+                            'cohens_d_ci_upper': d_ci_upper,
+                            'effect_interpretation': d_interpretation,
+                            'significant': False  # Will be updated after FDR correction
                         })
+                        raw_p_values.append(p_scalar)
 
-                        sig_mark = "*" if is_significant else ""
-                        print(f"      {opt_a} vs {opt_b}: p={p_scalar:.4f}{sig_mark}, d={cohens_d:.3f}")
                     except (KeyError, IndexError, ValueError, TypeError, RuntimeError) as e:
                         logging.debug("Could not compare %s vs %s: %s", opt_a, opt_b, e)
+
+        # Apply Benjamini-Hochberg FDR correction for multiple comparisons
+        if stat_results and raw_p_values:
+            # Filter out NaN p-values for correction
+            valid_indices = [i for i, p in enumerate(raw_p_values) if not math.isnan(p)]
+            valid_p_values = [raw_p_values[i] for i in valid_indices]
+
+            if len(valid_p_values) > 0:
+                # Benjamini-Hochberg procedure
+                n_tests = len(valid_p_values)
+                sorted_indices = sorted(range(len(valid_p_values)), key=lambda i: valid_p_values[i])
+                adjusted_p_values = [float("nan")] * len(valid_p_values)
+
+                for rank, idx in enumerate(sorted_indices, start=1):
+                    # BH critical value: (rank / n_tests) * alpha
+                    # Adjusted p-value: p * n_tests / rank (but capped at 1.0)
+                    adj_p = min(1.0, valid_p_values[idx] * n_tests / rank)
+                    adjusted_p_values[idx] = adj_p
+
+                # Update stat_results with adjusted p-values and significance
+                for i, valid_idx in enumerate(valid_indices):
+                    stat_results[valid_idx]['p_value_adjusted'] = adjusted_p_values[i]
+                    stat_results[valid_idx]['significant'] = (adjusted_p_values[i] < 0.05)
+
+                # Print results with adjusted p-values, CIs, and interpretation
+                print("\n   Effect Size Interpretation Guide:")
+                print("     |d| < 0.2: negligible, 0.2-0.5: small, 0.5-0.8: medium, ≥0.8: large")
+                print()
+                for result in stat_results:
+                    opt_a = result['optimizer_a']
+                    opt_b = result['optimizer_b']
+                    p_raw = result['p_value']
+                    p_adj = result.get('p_value_adjusted', float('nan'))
+                    cohens_d = result['cohens_d']
+                    d_ci_low = result.get('cohens_d_ci_lower', float('nan'))
+                    d_ci_high = result.get('cohens_d_ci_upper', float('nan'))
+                    interpretation = result.get('effect_interpretation', '')
+                    sig_mark = "*" if result['significant'] else ""
+                    
+                    if not math.isnan(p_adj) and not math.isnan(d_ci_low):
+                        print(f"      {opt_a} vs {opt_b}:")
+                        print(f"        p={p_raw:.4f}, p_adj={p_adj:.4f}{sig_mark}")
+                        print(f"        d={cohens_d:.3f} [95% CI: {d_ci_low:.3f}, {d_ci_high:.3f}] ({interpretation})")
+                    elif not math.isnan(p_adj):
+                        print(f"      {opt_a} vs {opt_b}: p={p_raw:.4f}, p_adj={p_adj:.4f}{sig_mark}, d={cohens_d:.3f}")
+                    else:
+                        print(f"      {opt_a} vs {opt_b}: p={p_raw:.4f} (no adjustment), d={cohens_d:.3f}")
+            else:
+                # All p-values were NaN
+                for result in stat_results:
+                    result['p_value_adjusted'] = float('nan')
+                    result['significant'] = False
 
         if stat_results:
             stat_df = pd.DataFrame(stat_results)
@@ -7229,7 +7212,7 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, resume=False):
                     if loss_value < 1e-6:
                         break
 
-                results.append({
+                results.append(normalize_metric_names({
                     'function': func_name,
                     'optimizer': opt_name,
                     'seed': seed,
@@ -7237,7 +7220,7 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, resume=False):
                     'final_x': x.detach().numpy().tolist(),
                     'iterations': len(history),
                     'converged': loss_value < 1e-6 if history else False
-                })
+                }))
 
                 # Save per-run artifact for this 2D optimization run
                 try:
@@ -7577,7 +7560,7 @@ def run_ablation_study(results_dir="results_ablation", seeds=None, resume=False)
             raise ValueError(f"Unsupported optimizer: {opt_name}")
         max_iter = 1000
         for i in range(max_iter):
-            optimizer.zero_grad()
+            optimizer.zero_grad()  # type: ignore[union-attr]
 
             # Compute loss using PyTorch autograd
             loss = rosenbrock.torch_loss(x)
@@ -7585,7 +7568,7 @@ def run_ablation_study(results_dir="results_ablation", seeds=None, resume=False)
 
             if opt_name.startswith('SAM'):
                 def closure():
-                    optimizer.zero_grad()
+                    optimizer.zero_grad()  # type: ignore[union-attr]
                     loss_c = rosenbrock.torch_loss(x)
                     loss_c.backward()
                     return loss_c
@@ -8968,6 +8951,10 @@ Examples:
                         help='Force deterministic mode (use_deterministic_algorithms + CUBLAS_WORKSPACE_CONFIG)')
     parser.add_argument('--no-mlflow', action='store_true',
                         help='Disable MLflow tracking even if available')
+    parser.add_argument('--grad-noise-every', type=int, default=10,
+                        help='Estimate gradient noise variance every N epochs (default: 10). Set to 0 to disable.')
+    parser.add_argument('--grad-noise-samples', type=int, default=100,
+                        help='Number of gradient samples for noise variance estimation (default: 100)')
     parser.add_argument('--profile', action='store_true',
                         help='Enable performance profiling')
     parser.add_argument('--kaggle-t4', action='store_true',
@@ -9018,6 +9005,8 @@ Examples:
     # Visualization and analysis flags
     parser.add_argument('--loss-landscape', action='store_true',
                         help='Generate loss landscape visualizations for trained models (requires scipy)')
+    parser.add_argument('--require-medmnist', action='store_true',
+                        help='STRICT MODE: Require real MedMNIST datasets for medical experiments (fail if unavailable, no synthetic fallback)')
 
     args = parser.parse_args()
 
@@ -9155,7 +9144,7 @@ Examples:
 
     if 'medical' in selected_experiments or args.experiments == 'all':
         try:
-            import medmnist
+            import medmnist  # type: ignore[reportMissingImports]
             safe_print("   Medical imaging dependencies available (medmnist)")
         except ImportError:
             missing_deps.append("Medical experiments require: pip install medmnist")
@@ -9513,7 +9502,9 @@ Examples:
                 profiler=profiler,
                 tracker=tracker,
                 checkpoint_manager=checkpoint_manager,
-                resume=args.resume
+                resume=args.resume,
+                grad_noise_every=args.grad_noise_every,
+                grad_noise_samples=getattr(args, 'grad_noise_samples', 100)
             )
 
     if 'cifar10' in selected_experiments:
@@ -9560,7 +9551,8 @@ Examples:
                 resume=args.resume,
                 profiler=profiler,
                 tracker=tracker,
-                checkpoint_manager=checkpoint_manager
+                checkpoint_manager=checkpoint_manager,
+                require_medmnist=args.require_medmnist
             )
 
     if '2d' in selected_experiments:

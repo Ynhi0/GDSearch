@@ -14,10 +14,12 @@ def torch_load_safe(path_or_file: Any, map_location=None, weights_only=None):
     the `weights_only` parameter. Accepts either a path or a file-like object.
     """
     try:
-        if weights_only is not None:
-            return torch.load(path_or_file, map_location=map_location, weights_only=weights_only)
+        if weights_only is None:
+            # Adopt safe future-friendly default: explicitly set weights_only=True so
+            # torch.load does not implicitly use pickle for arbitrary objects.
+            return torch.load(path_or_file, map_location=map_location, weights_only=True)
         else:
-            return torch.load(path_or_file, map_location=map_location)
+            return torch.load(path_or_file, map_location=map_location, weights_only=weights_only)
     except TypeError:
         logging.debug("torch.load does not support weights_only param on this PyTorch version; retrying without it")
         return torch.load(path_or_file, map_location=map_location)

@@ -29,7 +29,8 @@ def enforce_validation_only(loader, loader_name: str, phase: str = 'tuning'):
             f"Error: Attempted to use {loader_name} during tuning phase! "
             f"This constitutes adaptive overfitting. Use val_loader instead."
         )
-    return True
+    # Success: no return value (None). This function raises on forbidden access.
+    return None
 
 
 class TestTuningSafety:

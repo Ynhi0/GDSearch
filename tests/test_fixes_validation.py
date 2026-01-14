@@ -65,7 +65,7 @@ def test_csv_has_final_metrics():
             print(f"❌ {test_case['name']}: {metric}={actual} (expected {expected})")
             all_passed = False
 
-    return all_passed
+    assert all_passed
 
 def test_scaling_detection():
     """Test automatic fraction vs percentage detection"""
@@ -93,7 +93,7 @@ def test_scaling_detection():
             print(f"❌ {test_case['type']}: max={max_val}, scale={scale_factor} (expected {expected})")
             all_passed = False
 
-    return all_passed
+    assert all_passed
 
 def test_optimizer_extraction():
     """Test robust optimizer name extraction from filenames"""
@@ -159,7 +159,7 @@ def test_optimizer_extraction():
             print(f"❌ {filename}: extracted '{optimizer}' (expected '{expected}')")
             all_passed = False
 
-    return all_passed
+    assert all_passed
 
 def test_dice_metric_detection():
     """Test that dice metrics are properly detected and labeled"""
@@ -216,7 +216,7 @@ def test_dice_metric_detection():
             print(f"❌ Columns {columns[:3]}...: detected metric='{acc_col}', type='{metric_type}' (expected '{expected_metric}', '{expected_type}')")
             all_passed = False
 
-    return all_passed
+    assert all_passed
 
 def main():
     print("\n" + "="*80)

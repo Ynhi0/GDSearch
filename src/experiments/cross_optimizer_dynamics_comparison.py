@@ -165,6 +165,7 @@ def run_single_optimizer_with_dynamics(
         train_acc = 100.0 * correct / max(1, total)
 
         loss_history.append(avg_loss)
+        accuracy_history.append(train_acc)
 
         if (epoch + 1) % 10 == 0:
             print(f"  Epoch {epoch+1}/{epochs}: Loss={avg_loss:.4f}, Train Acc={train_acc:.2f}%")
@@ -211,6 +212,7 @@ def run_single_optimizer_with_dynamics(
     return {
         'optimizer': optimizer_name,
         'loss_history': loss_history,
+        'accuracy_history': accuracy_history,
         'speeds': speeds,
         'gradient_norms': gradient_norms,
         'dynamics_metrics': dynamics_metrics,

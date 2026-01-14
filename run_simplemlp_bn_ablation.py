@@ -22,9 +22,8 @@ import torch
 import torch.nn.functional as F
 import pandas as pd
 
-# Setup reproducibility FIRST
+# Import reproducibility setup function (will be called in main(), not at import time)
 from src.utils.reproducibility import setup_experiment_reproducibility
-setup_experiment_reproducibility(seed=42, deterministic=False)
 
 from src.core.models import SimpleMLP
 from src.core.data_utils import get_mnist_loaders
@@ -210,6 +209,9 @@ Examples:
         seeds = [int(s) for s in args.seeds.split(',')]
         epochs = args.epochs
 
+    # Setup reproducibility after parsing args
+    setup_experiment_reproducibility(seed=42, deterministic=False)
+
     results_dir = Path(args.results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -237,24 +239,35 @@ Examples:
 
     results = []
 
-    for config in configurations:
-        bn_status = "WITH BN" if config['use_bn'] else "WITHOUT BN"
-        logging.info(f"\n--- Testing {config['optimizer']} {bn_status} ---")
+    try:
+        for config in configurations:
+            bn_status = "WITH BN" if config['use_bn'] else "WITHOUT BN"
+            logging.info(f"\n--- Testing {config['optimizer']} {bn_status} ---")
 
-        for seed in seeds:
-            logging.info(f"  Seed {seed}...")
-            result = run_ablation(
-                use_bn=config['use_bn'],
-                optimizer_name=config['optimizer'],
-                lr=config['lr'],
-                seed=seed,
-                epochs=epochs,
-                device=device
-            )
-            results.append(result)
+            for seed in seeds:
+                try:
+                    logging.info(f"  Seed {seed}...")
+                    result = run_ablation(
+                        use_bn=config['use_bn'],
+                        optimizer_name=config['optimizer'],
+                        lr=config['lr'],
+                        seed=seed,
+                        epochs=epochs,
+                        device=device
+                    )
+                    results.append(result)
 
-            logging.info(f"    Final Test Acc: {result['final_test_acc']:.4f} "
-                        f"({result['elapsed_seconds']:.1f}s)")
+                    logging.info(f"    Final Test Acc: {result['final_test_acc']:.4f} "
+                                f"({result['elapsed_seconds']:.1f}s)")
+                except Exception as e:
+                    logging.error(f"    Failed seed {seed}: {e}", exc_info=True)
+                    # Continue with next seed
+
+    finally:
+        # Save partial results even if experiment is interrupted
+        if not results:
+            logging.warning("No results to save")
+            return 1
 
     # Save detailed results
     df = pd.DataFrame([{

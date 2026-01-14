@@ -130,7 +130,8 @@ class TestCheckpointResumeEarlyStoppingState:
         loaded_checkpoint = manager.load_checkpoint(ckpt_file, "test_run")
 
         # Verify safe defaults (should not crash)
-        metadata = loaded_checkpoint.get('metadata', {})
+        # Be defensive in case `load_checkpoint` returned None
+        metadata = (loaded_checkpoint or {}).get('metadata', {})
         best_val_acc = metadata.get('best_val_acc', 0.0)
         patience_counter = metadata.get('patience_counter', 0)
 

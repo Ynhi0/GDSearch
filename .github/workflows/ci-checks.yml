@@ -29,7 +29,13 @@ jobs:
 
       - name: Run pytest
         run: |
-          pytest tests/ -q --maxfail=1
+          # For PRs: Run only fast tests (exclude @pytest.mark.slow and @pytest.mark.integration)
+          # For main branch pushes: Run all tests
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            pytest tests/ -q --maxfail=1 -m "not slow and not integration"
+          else
+            pytest tests/ -q --maxfail=1
+          fi
 
       - name: Checkpoint roundtrip
         run: |

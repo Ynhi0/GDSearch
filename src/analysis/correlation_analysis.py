@@ -151,7 +151,12 @@ def collect_sharpness_accuracy_data(
                     else:
                         continue
 
-                    train_acc = df.get('train_acc', df.get('train_accuracy', pd.Series([None]))).iloc[-1]
+                    if 'train_acc' in df.columns:
+                        train_acc = df['train_acc'].iloc[-1]
+                    elif 'train_accuracy' in df.columns:
+                        train_acc = df['train_accuracy'].iloc[-1]
+                    else:
+                        train_acc = None
 
                     data_points.append({
                         'experiment': exp,

@@ -63,7 +63,8 @@ def validate_pytorch_version(expected_version: str = "2.6.0", strict: bool = Fal
             if strict:
                 raise RuntimeError(msg)
             else:
-                warnings.warn(msg, RuntimeWarning)
+                # Prefer logging over warnings here to avoid noisy test output while still
+                # providing visibility in logs.
                 logging.warning(msg)
         else:
             logging.debug(f"PyTorch version OK: {current_version}")

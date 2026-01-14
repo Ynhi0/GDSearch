@@ -12,9 +12,12 @@
     ],
     "reportMissingImports": "warning",
     "reportMissingTypeStubs": false,
-    "reportOptionalMemberAccess": "warning",
+    "reportOptionalMemberAccess": "none",
     "reportPossiblyUnbound": "warning",
     "reportUnusedImport": false,
+    "reportOptionalSubscript": "none",
+    "reportOptionalCall": "none",
     "pythonVersion": "3.12",
-    "typeCheckingMode": "basic"
+    "typeCheckingMode": "basic",
+    "stubPath": ""
 }

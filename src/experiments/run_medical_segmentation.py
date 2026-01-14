@@ -32,22 +32,27 @@ from typing import List, Dict
 import numpy as np
 import pandas as pd
 import torch
+from src.core.medical_dependencies import HAS_MONAI, require_monai
 
 
 def _try_import_monai():
+    """Import MONAI components with clear error if unavailable."""
+    require_monai("Medical segmentation experiments (U-Net)")
+    
     try:
-        from monai.networks.nets.unet import UNet
-        from monai.transforms.compose import Compose
-        from monai.transforms.io.dictionary import LoadImaged
-        from monai.transforms.utility.dictionary import EnsureChannelFirstd, ToTensord
-        from monai.transforms.intensity.dictionary import ScaleIntensityd
-        from monai.data.dataset import CacheDataset
-        from monai.data.dataloader import DataLoader
-        from monai.losses.dice import DiceLoss
-        from monai.metrics.meandice import DiceMetric
+        from monai.networks.nets.unet import UNet  # type: ignore[reportMissingImports]
+        from monai.transforms.compose import Compose  # type: ignore[reportMissingImports]
+        from monai.transforms.io.dictionary import LoadImaged  # type: ignore[reportMissingImports]
+        from monai.transforms.utility.dictionary import EnsureChannelFirstd, ToTensord  # type: ignore[reportMissingImports]
+        from monai.transforms.intensity.dictionary import ScaleIntensityd  # type: ignore[reportMissingImports]
+        from monai.data.dataset import CacheDataset  # type: ignore[reportMissingImports]
+        from monai.data.dataloader import DataLoader  # type: ignore[reportMissingImports]
+        from monai.losses.dice import DiceLoss  # type: ignore[reportMissingImports]
+        from monai.metrics.meandice import DiceMetric  # type: ignore[reportMissingImports]
         return UNet, Compose, LoadImaged, EnsureChannelFirstd, ScaleIntensityd, ToTensord, CacheDataset, DataLoader, DiceLoss, DiceMetric
     except Exception as e:
-        raise RuntimeError("MONAI is required for this script. Install via `pip install monai[all]`." ) from e
+        # This should not be reached if require_monai() works correctly
+        raise RuntimeError("MONAI import failed despite dependency check. Please reinstall: pip install 'monai[all]'") from e
 
 
 def medical_image_segmentation(

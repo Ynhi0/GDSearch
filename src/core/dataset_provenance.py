@@ -25,18 +25,18 @@ except ImportError:
 
 # Move heavy optional imports to function-level to avoid module-level import issues
 # This allows static analysis to run without requiring optional packages
-HAS_MEDMNIST = False
+from src.core.medical_dependencies import HAS_MEDMNIST, HAS_MONAI, require_medmnist
+
 HAS_HF_DATASETS = False
 
 def _check_medmnist():
     """Check if medmnist is available (lazy import)."""
-    global HAS_MEDMNIST
+    if not HAS_MEDMNIST:
+        return False, None
     try:
-        import medmnist
-        HAS_MEDMNIST = True
+        import medmnist  # type: ignore[reportMissingImports]
         return True, medmnist
     except ImportError:
-        HAS_MEDMNIST = False
         return False, None
 
 def _check_hf_datasets():

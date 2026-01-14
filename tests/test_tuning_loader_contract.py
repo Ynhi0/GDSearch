@@ -14,8 +14,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 def _iter_py_files():
     for p in REPO_ROOT.rglob('*.py'):
-        # skip tests themselves
-        if 'tests' in p.parts:
+        # skip tests themselves and typical non-source folders (venv, site-packages, build artifacts)
+        skip_parts = {'tests', 'venv', '.venv', 'site-packages', 'build', 'dist', 'node_modules'}
+        if any(part in skip_parts for part in p.parts):
             continue
         yield p
 

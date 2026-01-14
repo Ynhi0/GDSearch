@@ -37,10 +37,10 @@ def test_import():
             get_robust_loss_function
         )
         print("✓ Robust gradient module imported successfully")
-        return True
+        assert True
     except Exception as e:
         print(f"✗ Failed to import robust gradient module: {e}")
-        return False
+        assert False, f"Failed to import robust gradient module: {e}"
 
 
 def test_heavy_tail_detection():
@@ -76,16 +76,16 @@ def test_heavy_tail_detection():
 
         if stats['heavy_tail_fraction'] > 0.0:
             print(f"✓ Heavy-tail detection works (detected in {stats['heavy_tail_fraction']:.1%} of steps)")
-            return True
+            assert True
         else:
             print("✗ Heavy-tail detection failed (no heavy tails detected)")
-            return False
+            assert False, "Heavy-tail detection failed (no heavy tails detected)"
 
     except Exception as e:
         print(f"✗ Heavy-tail detection test failed: {e}")
         import traceback
         traceback.print_exc()
-        return False
+        assert False, f"Heavy-tail detection test failed: {e}"
 
 
 def test_gradient_clipping():
@@ -119,16 +119,16 @@ def test_gradient_clipping():
         # Check clipping worked
         if diagnostics['clipped'] and norm_after <= 1.0 + 1e-3:
             print(f"✓ Gradient clipping works (norm: {norm_before:.2f} → {norm_after:.2f})")
-            return True
+            assert True
         else:
             print(f"✗ Gradient clipping failed (norm: {norm_before:.2f} → {norm_after:.2f}, clipped={diagnostics['clipped']})")
-            return False
+            assert False, f"Gradient clipping failed (norm: {norm_before:.2f} → {norm_after:.2f}, clipped={diagnostics['clipped']})"
 
     except Exception as e:
         print(f"✗ Gradient clipping test failed: {e}")
         import traceback
         traceback.print_exc()
-        return False
+        assert False, f"Gradient clipping test failed: {e}"
 
 
 def test_agc():
@@ -159,16 +159,16 @@ def test_agc():
 
         if stats['clip_fraction'] > 0.0:
             print(f"✓ AGC works (clipped {stats['clip_fraction']:.1%} of steps)")
-            return True
+            assert True
         else:
             print("⚠ AGC test inconclusive (no clipping occurred)")
-            return True  # Not a failure, just no clipping needed
+            assert True  # Not a failure, just no clipping needed
 
     except Exception as e:
         print(f"✗ AGC test failed: {e}")
         import traceback
         traceback.print_exc()
-        return False
+        assert False, f"AGC test failed: {e}"
 
 
 def test_huber_loss():
@@ -191,16 +191,16 @@ def test_huber_loss():
 
         if loss_small < loss_large:
             print(f"✓ Huber loss works (small error: {loss_small:.3f}, large error: {loss_large:.3f})")
-            return True
+            assert True
         else:
             print(f"✗ Huber loss failed (small: {loss_small:.3f}, large: {loss_large:.3f})")
-            return False
+            assert False, f"Huber loss failed (small: {loss_small:.3f}, large: {loss_large:.3f})"
 
     except Exception as e:
         print(f"✗ Huber loss test failed: {e}")
         import traceback
         traceback.print_exc()
-        return False
+        assert False, f"Huber loss test failed: {e}"
 
 
 def test_integration_with_oom_handler():
@@ -242,16 +242,16 @@ def test_integration_with_oom_handler():
         # Check that training worked
         if not np.isnan(loss_value) and not tainted:
             print(f"✓ Integration with OOM handler works (loss: {loss_value:.4f})")
-            return True
+            assert True
         else:
             print(f"✗ Integration test failed (loss: {loss_value}, tainted: {tainted})")
-            return False
+            assert False, f"Integration test failed (loss: {loss_value}, tainted: {tainted})"
 
     except Exception as e:
         print(f"✗ Integration test failed: {e}")
         import traceback
         traceback.print_exc()
-        return False
+        assert False, f"Integration test failed: {e}"
 
 
 def main():
@@ -274,7 +274,16 @@ def main():
     for name, test_func in tests:
         print(f"\n[TEST] {name}")
         print("-" * 70)
-        passed = test_func()
+        try:
+            # Run the test function. Tests are expected to use assertions and
+            # will raise an AssertionError on failure. If the function
+            # completes without raising, we consider it a pass.
+            test_func()
+            passed = True
+        except AssertionError:
+            passed = False
+        except Exception:
+            passed = False
         results.append((name, passed))
         print()
 

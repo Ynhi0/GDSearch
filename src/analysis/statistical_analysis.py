@@ -79,6 +79,103 @@ def safe_ttest_rel(a, b, **kwargs) -> Tuple[float, float]:
     return _to_float(t_raw), _to_float(p_raw)
 
 
+def cohens_d_paired(a, b, ddof: int = 1) -> float:
+    """
+    Calculate Cohen's d for paired samples (within-subjects design).
+    
+    For paired data, Cohen's d is computed as:
+        d = mean(differences) / std(differences)
+    
+    Args:
+        a: First set of measurements
+        b: Second set of measurements (paired with a)
+        ddof: Degrees of freedom for std calculation (1 for unbiased estimator)
+    
+    Returns:
+        Cohen's d effect size
+    """
+    diff = np.array(a) - np.array(b)
+    diff_std = diff.std(ddof=ddof) if len(diff) > 1 else diff.std()
+    if diff_std < 1e-10:
+        return 0.0
+    return float(diff.mean() / diff_std)
+
+
+def cohens_d_ci_paired(a, b, confidence: float = 0.95, n_bootstrap: int = 10000) -> Tuple[float, float, float]:
+    """
+    Calculate Cohen's d with confidence interval for paired samples using bootstrap.
+    
+    Args:
+        a: First set of measurements
+        b: Second set of measurements
+        confidence: Confidence level (default 0.95 for 95% CI)
+        n_bootstrap: Number of bootstrap iterations
+    
+    Returns:
+        Tuple of (cohens_d, ci_lower, ci_upper)
+    """
+    n = len(a)
+    if n < 2:
+        return float("nan"), float("nan"), float("nan")
+    
+    # Compute point estimate
+    d_observed = cohens_d_paired(a, b)
+    
+    # Bootstrap resampling
+    np.random.seed(42)  # For reproducibility within this function
+    bootstrap_ds = []
+    
+    for _ in range(n_bootstrap):
+        # Resample paired indices
+        indices = np.random.choice(n, size=n, replace=True)
+        a_resample = np.array(a)[indices]
+        b_resample = np.array(b)[indices]
+        
+        d_boot = cohens_d_paired(a_resample, b_resample)
+        if not np.isnan(d_boot):
+            bootstrap_ds.append(d_boot)
+    
+    if len(bootstrap_ds) == 0:
+        return d_observed, float("nan"), float("nan")
+    
+    # Calculate percentile confidence interval
+    alpha = 1 - confidence
+    ci_lower = np.percentile(bootstrap_ds, 100 * alpha / 2)
+    ci_upper = np.percentile(bootstrap_ds, 100 * (1 - alpha / 2))
+    
+    return d_observed, float(ci_lower), float(ci_upper)
+
+
+def interpret_cohens_d(d: float) -> str:
+    """
+    Interpret Cohen's d effect size using standard thresholds.
+    
+    Cohen's conventions (1988):
+        - |d| < 0.2: Negligible
+        - 0.2 ≤ |d| < 0.5: Small
+        - 0.5 ≤ |d| < 0.8: Medium
+        - |d| ≥ 0.8: Large
+    
+    Args:
+        d: Cohen's d value
+    
+    Returns:
+        String interpretation
+    """
+    abs_d = abs(d)
+    if abs_d < 0.2:
+        magnitude = "negligible"
+    elif abs_d < 0.5:
+        magnitude = "small"
+    elif abs_d < 0.8:
+        magnitude = "medium"
+    else:
+        magnitude = "large"
+    
+    direction = "favoring A" if d > 0 else "favoring B" if d < 0 else "no difference"
+    return f"{magnitude} effect ({direction})"
+
+
 def safe_shapiro(data: np.ndarray, alpha: float = 0.05) -> Dict:
     """
     Safe Shapiro-Wilk test with zero-variance handling.

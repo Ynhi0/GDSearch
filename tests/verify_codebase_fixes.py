@@ -44,10 +44,12 @@ def check_shallow_copies():
         print("  ❌ FAIL: Found risky shallow copies:")
         for issue in found_issues:
             print(f"    {issue}")
-        return False
+        # Fail fast using assertion so the function does not return a bool
+        assert False, "Found risky shallow copies"
     else:
         print("  ✅ PASS: All config copies use deepcopy")
-        return True
+        # Success: do not return a value (None) to avoid pytest complaining about returning a value
+        return None
 
 def check_history_guards():
     """Check for unguarded history[-1] accesses."""
@@ -71,10 +73,11 @@ def check_history_guards():
     if found_accesses:
         print(f"  ⚠️  Found {len(found_accesses)} history[-1] accesses")
         print("  ℹ️  Manual review recommended to ensure all are guarded")
-        return True  # Don't fail, just warn
+        # Warning only — keep execution path passing but avoid returning a boolean
+        return None
     else:
         print("  ✅ PASS: No history[-1] accesses found")
-        return True
+        return None
 
 def check_division_by_zero():
     """Check for potential division by zero issues."""
@@ -88,7 +91,8 @@ def check_division_by_zero():
     # This is a heuristic check - actual validation requires code review
     print("  ℹ️  This check requires manual code review")
     print("  ℹ️  Ensure all divisions check for zero denominators")
-    return True
+    # Heuristic check — returns None to indicate non-failing/manual review required
+    return None
 
 def check_accuracy_scale():
     """Check for accuracy scale consistency."""
@@ -99,13 +103,13 @@ def check_accuracy_scale():
         content = nlp_file.read_text()
         if "100.0 * correct / max(1, total)" in content:
             print("  ✅ PASS: NLP accuracy returns percentage")
-            return True
+            return None
         else:
             print("  ❌ FAIL: NLP accuracy scale incorrect")
-            return False
+            assert False, "NLP accuracy scale incorrect"
     else:
         print("  ⚠️  SKIP: NLP file not found")
-        return True
+        return None
 
 def run_quick_import_test():
     """Quick import test to catch any syntax errors."""
@@ -123,10 +127,10 @@ def run_quick_import_test():
         from src.analysis import ablation_study
 
         print("  ✅ PASS: All modified modules import successfully")
-        return True
+        return None
     except Exception as e:
         print(f"  ❌ FAIL: Import error: {e}")
-        return False
+        raise AssertionError(f"Import error: {e}")
 
 def main():
     print("="*70)
@@ -134,16 +138,31 @@ def main():
     print("="*70)
 
     results = []
-    results.append(check_shallow_copies())
-    results.append(check_history_guards())
-    results.append(check_division_by_zero())
-    results.append(check_accuracy_scale())
-    results.append(run_quick_import_test())
+
+    checks = [
+        check_shallow_copies,
+        check_history_guards,
+        check_division_by_zero,
+        check_accuracy_scale,
+        run_quick_import_test,
+    ]
+
+    for check in checks:
+        try:
+            _res = check()
+            # None means pass or warning; treat as pass
+            results.append(True)
+        except AssertionError as ae:
+            print(f"  ❌ CHECK FAILED: {check.__name__}: {ae}")
+            results.append(False)
+        except Exception as e:
+            print(f"  ❌ CHECK ERROR: {check.__name__}: {e}")
+            results.append(False)
 
     print("\n" + "="*70)
     print("SUMMARY")
     print("="*70)
-    passed = sum(results)
+    passed = sum(1 for r in results if r)
     total = len(results)
     print(f"Passed: {passed}/{total}")
 

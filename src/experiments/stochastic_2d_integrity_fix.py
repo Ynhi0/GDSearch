@@ -151,10 +151,15 @@ def run_stochastic_2d_experiments(
                 for iteration in range(max_iter):
                     # Compute loss
                     loss = func.compute(x, y)
-                    history.append({'iteration': iteration, 'x': x, 'y': y, 'loss': loss})
-
+                    
                     # Compute STOCHASTIC gradient (this is the key fix!)
                     grad_x, grad_y = func.gradient(x, y, noise_std=noise_std, noise_type=noise_type)
+                    
+                    # Compute gradient norm for convergence analysis (proposal requirement)
+                    grad_norm = np.hypot(grad_x, grad_y)
+                    
+                    # Store iteration data including grad_norm (required by proposal)
+                    history.append({'iteration': iteration, 'x': x, 'y': y, 'loss': loss, 'grad_norm': grad_norm})
 
                     # Update parameters (with SAM-specific handling)
                     if isinstance(optimizer, SAM):

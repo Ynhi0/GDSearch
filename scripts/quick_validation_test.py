@@ -107,7 +107,7 @@ def test_imports():
     print_success("Statistical analysis module")
 
     print(f"\n{GREEN}All imports successful{RESET}")
-    return True
+    assert True
 
 
 def test_mnist_quick():
@@ -116,7 +116,7 @@ def test_mnist_quick():
     success = run_quick_experiment('mnist', expected_min_optimizers=3, min_train_acc=80.0, min_test_acc=80.0)
     if not success:
         raise AssertionError("MNIST quick test failed")
-    return success
+    assert True
 
 
 
@@ -154,7 +154,6 @@ def test_validation_script():
 
     print_success("Comprehensive validation PASSED")
     # Show summary
-    return True
     lines = result.stdout.split('\n')
     for line in lines:
         if 'Total Passed' in line or 'Total Failed' in line or 'Missing Files' in line:
@@ -320,6 +319,28 @@ def run_quick_experiment(experiment_name, expected_min_optimizers=3, min_train_a
             return False
 
 
+def _run_check(func, *args, **kwargs):
+    """Run a check function and return a boolean result.
+
+    - If the function returns True/False, that value is used.
+    - If the function returns None but completes without assertion, treat as True.
+    - If the function raises AssertionError or any other exception, return False.
+    """
+    try:
+        res = func(*args, **kwargs)
+        # If function didn't return anything explicitly, it's considered a pass
+        if res is None:
+            return True
+        return bool(res)
+    except AssertionError:
+        return False
+    except Exception as e:
+        print_error(f"{func.__name__} raised an exception: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='Quick validation of all GDSearch experiments')
@@ -338,14 +359,14 @@ def main():
     results = {}
 
     # Test 1: Imports
-    results['imports'] = test_imports()
+    results['imports'] = _run_check(test_imports)
 
     # Test 2: Comprehensive validation
-    results['validation'] = test_validation_script()
+    results['validation'] = _run_check(test_validation_script)
 
     # Test 3: MNIST quick test (most comprehensive)
     if not args.skip_mnist:
-        results['mnist'] = test_mnist_quick()
+        results['mnist'] = _run_check(test_mnist_quick)
     else:
         print_info("Skipping MNIST test (--skip-mnist flag)")
         results['mnist'] = None
@@ -357,7 +378,7 @@ def main():
     else:
         print_info("Running CIFAR-10 quick test (ultra-quick)")
         # CIFAR can be slow on local machines; increase timeout to 1 hour in case ULTRA_QUICK didn't propagate
-        results['cifar10'] = run_quick_experiment('cifar10', expected_min_optimizers=3, min_train_acc=40.0, min_test_acc=20.0, timeout_sec=3600)
+        results['cifar10'] = _run_check(run_quick_experiment, 'cifar10', expected_min_optimizers=3, min_train_acc=40.0, min_test_acc=20.0, timeout_sec=3600)
 
     # Run NLP quick test
     if args.skip_nlp:
@@ -366,7 +387,7 @@ def main():
     else:
         print_info("Running NLP quick test (ultra-quick)")
         # Simplified local NLP may only run 2 optimizers; accept 2 as minimum for a pass
-        results['nlp'] = run_quick_experiment('nlp', expected_min_optimizers=2, min_train_acc=40.0, min_test_acc=30.0)
+        results['nlp'] = _run_check(run_quick_experiment, 'nlp', expected_min_optimizers=2, min_train_acc=40.0, min_test_acc=30.0)
 
     # Run Medical quick test
     if args.skip_medical:
@@ -374,7 +395,7 @@ def main():
         results['medical'] = None
     else:
         print_info("Running Medical quick test (ultra-quick)")
-        results['medical'] = run_quick_experiment('medical', expected_min_optimizers=3, min_train_acc=30.0, min_test_acc=20.0)
+        results['medical'] = _run_check(run_quick_experiment, 'medical', expected_min_optimizers=3, min_train_acc=30.0, min_test_acc=20.0)
 
     # Final summary
     print_header("FINAL SUMMARY")

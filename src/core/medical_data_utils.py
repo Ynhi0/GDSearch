@@ -12,6 +12,7 @@ from typing import Tuple, Optional
 import numpy as np
 import torch
 from torch.utils.data import Dataset
+from src.core.medical_dependencies import HAS_MEDMNIST, require_medmnist
 
 
 class SyntheticMedicalDataset(Dataset):
@@ -23,27 +24,34 @@ class SyntheticMedicalDataset(Dataset):
     def __init__(self, num_samples: int = 1000, img_size: int = 128, seed: int = 42):
         self.num_samples = num_samples
         self.img_size = img_size
-        np.random.seed(seed)
+        self.seed = seed
         logging.info(f"Created SyntheticMedicalDataset: {num_samples} samples, size={img_size}x{img_size}, seed={seed}")
 
     def __len__(self):
         return self.num_samples
 
     def __getitem__(self, idx):
+        # Use per-index Generator for reproducibility (preferred over RandomState)
+        rng = np.random.default_rng(self.seed + idx)
+        
         # Generate synthetic medical-like images and masks
         # Create base image with noise
-        image = np.random.normal(0.5, 0.2, (self.img_size, self.img_size)).astype(np.float32)
+        image = rng.normal(0.5, 0.2, (self.img_size, self.img_size)).astype(np.float32)
         image = np.clip(image, 0, 1)
 
         # Create synthetic anatomical structures (ellipses, circles)
         mask = np.zeros((self.img_size, self.img_size), dtype=np.float32)
 
         # Add 1-3 random structures
-        for _ in range(np.random.randint(1, 4)):
-            center_x = np.random.randint(20, self.img_size-20)
-            center_y = np.random.randint(20, self.img_size-20)
-            radius_x = np.random.randint(10, 30)
-            radius_y = np.random.randint(10, 30)
+        margin = min(20, self.img_size // 4)
+        max_radius = min(30, self.img_size // 3)
+        min_radius = min(10, self.img_size // 6)
+        
+        for _ in range(int(rng.integers(1, 4))):
+            center_x = int(rng.integers(margin, max(margin+1, self.img_size-margin)))
+            center_y = int(rng.integers(margin, max(margin+1, self.img_size-margin)))
+            radius_x = int(rng.integers(min_radius, max(min_radius+1, max_radius)))
+            radius_y = int(rng.integers(min_radius, max(min_radius+1, max_radius)))
 
             y, x = np.ogrid[:self.img_size, :self.img_size]
             dist_from_center = ((x - center_x)**2 / radius_x**2) + \
@@ -59,7 +67,8 @@ class SyntheticMedicalDataset(Dataset):
 
 
 def load_medmnist_dataset(dataset_name: str = 'pathmnist', split: str = 'train',
-                          download: bool = True, root: str = './data') -> Optional[Dataset]:
+                          download: bool = True, root: str = './data',
+                          strict: bool = False) -> Optional[Dataset]:
     """Load a MedMNIST dataset if the medmnist package is available.
 
     Args:
@@ -67,13 +76,24 @@ def load_medmnist_dataset(dataset_name: str = 'pathmnist', split: str = 'train',
         split: 'train', 'val', or 'test'
         download: Whether to download if not present
         root: Root directory for data storage
+        strict: If True, raise error when medmnist unavailable; if False, return None
 
     Returns:
         MedMNIST dataset instance or None if not available
+
+    Raises:
+        MedicalDependencyError: If strict=True and medmnist not available
     """
+    if not HAS_MEDMNIST:
+        if strict:
+            require_medmnist(f"MedMNIST dataset loading ('{dataset_name}')")
+        else:
+            logging.info("medmnist package not installed. Install with: pip install medmnist")
+            return None
+
     try:
-        import medmnist
-        from medmnist import INFO
+        import medmnist  # type: ignore[reportMissingImports]
+        from medmnist import INFO  # type: ignore[reportMissingImports]
         import torchvision.transforms as transforms
 
         if dataset_name not in INFO:
@@ -93,9 +113,6 @@ def load_medmnist_dataset(dataset_name: str = 'pathmnist', split: str = 'train',
         logging.info(f"Loaded MedMNIST dataset '{dataset_name}' ({split} split): {len(dataset)} samples")
         return dataset
 
-    except ImportError:
-        logging.info("medmnist package not installed. Install with: pip install medmnist")
-        return None
     except Exception as e:
         logging.warning(f"Failed to load MedMNIST dataset '{dataset_name}': {e}")
         return None

@@ -41,6 +41,7 @@ checkpoints/
 
 # Results and outputs
 results/
+results_test_mnist/
 plots/
 !plots/lr_schedulers*.png
 
@@ -72,6 +73,10 @@ htmlcov/
 # Ignore local AI assistant guidance file
 .github/copilot-instructions.md
 
+# Ignore AI agent files
+.github/agents/
+.qodo/agents/
+
 # MLflow
 mlruns/
 
@@ -80,5 +85,4 @@ mlruns/
 *.temp
 .cache/
 
-.github/agents/judge.agent.md
 .gitignore

@@ -13,10 +13,10 @@ def test_theory_pipeline_import():
     try:
         from run_all_kaggle import run_theory_analysis_pipeline
         print("✓ Successfully imported run_theory_analysis_pipeline")
-        return True
+        assert True
     except ImportError as e:
         print(f"✗ Failed to import: {e}")
-        return False
+        assert False, f"Failed to import run_theory_analysis_pipeline: {e}"
 
 def test_theory_pipeline_dry_run():
     """Test the theory analysis pipeline in dry-run mode."""
@@ -36,13 +36,13 @@ def test_theory_pipeline_dry_run():
 
         print(f"\n✓ Dry-run completed successfully")
         print(f"   Result keys: {list(result.keys())}")
-        return True
+        assert True
 
     except Exception as e:
         print(f"\n✗ Dry-run failed: {e}")
         import traceback
         traceback.print_exc()
-        return False
+        assert False, f"Dry-run failed: {e}"
 
 def test_advanced_bounds_import():
     """Test that we can import the advanced bounds module."""
@@ -54,10 +54,10 @@ def test_advanced_bounds_import():
             variance_reduction_bound
         )
         print("✓ Successfully imported advanced_bounds module")
-        return True
+        assert True
     except ImportError as e:
         print(f"⚠ Advanced bounds module not available: {e}")
-        return False
+        assert False, f"Advanced bounds module not available: {e}"
 
 if __name__ == '__main__':
     print("="*80)

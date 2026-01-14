@@ -1,0 +1,39 @@
+name: Type Checking
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  pyright:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    
+    - name: Create virtual environment
+      run: |
+        python -m venv .venv
+        
+    - name: Install dependencies
+      run: |
+        .venv/bin/python -m pip install --upgrade pip
+        .venv/bin/pip install -r requirements.txt
+        .venv/bin/pip install pyright
+    
+    - name: Run Pyright on core modules (strict - fail on errors)
+      run: |
+        .venv/bin/pyright --venv .venv src/core/ src/analysis/ src/runners/
+      continue-on-error: false
+    
+    - name: Run Pyright on tests (warnings only)
+      run: |
+        .venv/bin/pyright --venv .venv tests/
+      continue-on-error: true

@@ -1,0 +1,195 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gdsearch"
+version = "1.0.0"
+description = "Comprehensive Python framework for gradient descent optimization research"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "Le Tran Minh Phuc", email = "mphuc666@gmail.com"}
+]
+keywords = [
+    "optimization",
+    "gradient-descent",
+    "deep-learning",
+    "pytorch",
+    "research",
+    "sgd",
+    "adam",
+    "sam",
+    "convergence-analysis"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Mathematics"
+]
+
+dependencies = [
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "numpy>=1.21.0",
+    "pandas>=1.3.0",
+    "matplotlib>=3.4.0",
+    "seaborn>=0.11.0",
+    "scikit-learn>=1.0.0",
+    "scipy>=1.7.0",
+    "tqdm>=4.62.0",
+    "pyyaml>=5.4.0",
+    "tensorboard>=2.8.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=3.0.0",
+    "pyright>=1.1.0",
+    "black>=22.0.0",
+    "isort>=5.10.0",
+    "flake8>=4.0.0"
+]
+medical = [
+    "medmnist>=2.1.0",
+    "pillow>=9.0.0"
+]
+nlp = [
+    "transformers>=4.20.0",
+    "datasets>=2.0.0"
+]
+visualization = [
+    "plotly>=5.0.0",
+    "kaleido>=0.2.0"
+]
+all = [
+    "gdsearch[dev,medical,nlp,visualization]"
+]
+
+[project.urls]
+Homepage = "https://github.com/Ynhi0/GDSearch"
+Repository = "https://github.com/Ynhi0/GDSearch"
+Documentation = "https://github.com/Ynhi0/GDSearch/tree/main/docs"
+"Bug Tracker" = "https://github.com/Ynhi0/GDSearch/issues"
+
+[project.scripts]
+gdsearch = "run_all_kaggle:main"
+
+# =============================================================================
+# Tool Configurations
+# =============================================================================
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--showlocals"
+]
+markers = [
+    "slow: marks tests as slow (deselect with -m 'not slow')",
+    "integration: marks tests as integration tests requiring full environment (deselect with -m 'not integration')",
+    "gpu: marks tests requiring GPU/CUDA",
+    "download: marks tests that download datasets"
+]
+filterwarnings = [
+    "ignore::pytest.PytestUnknownMarkWarning",
+    "ignore:'mode' parameter is deprecated and will be removed in Pillow 13:DeprecationWarning",
+    "ignore:Downloading.*:UserWarning",
+    "ignore:.*already exists.*:UserWarning"
+]
+
+[tool.pyright]
+include = ["src", "tests", "run_all_kaggle.py"]
+exclude = [
+    "**/__pycache__",
+    "**/node_modules",
+    ".venv",
+    "build",
+    "dist",
+    "archive"
+]
+pythonVersion = "3.10"
+pythonPlatform = "All"
+typeCheckingMode = "basic"
+reportMissingImports = true
+reportMissingTypeStubs = false
+reportUnusedImport = "warning"
+reportUnusedClass = "warning"
+reportUnusedFunction = "warning"
+reportUnusedVariable = "warning"
+reportDuplicateImport = "warning"
+reportOptionalSubscript = "none"
+reportOptionalMemberAccess = "none"
+reportOptionalCall = "none"
+reportOptionalIterable = "none"
+reportPrivateUsage = "warning"
+reportConstantRedefinition = "error"
+reportIncompatibleMethodOverride = "error"
+stubPath = ""
+venvPath = "."
+venv = ".venv"
+
+[tool.black]
+line-length = 120
+target-version = ['py38', 'py39', 'py310', 'py311']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+    \.git
+  | \.venv
+  | build
+  | dist
+  | archive
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 120
+skip_gitignore = true
+known_first_party = ["src"]
+known_third_party = ["torch", "numpy", "pandas", "matplotlib"]
+sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+ensure_newline_before_comments = true
+
+[tool.coverage.run]
+source = ["src"]
+omit = [
+    "*/tests/*",
+    "*/test_*.py",
+    "*/__pycache__/*",
+    "*/archive/*"
+]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstractmethod"
+]

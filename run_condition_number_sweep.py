@@ -20,9 +20,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-# Setup reproducibility FIRST
+# Import reproducibility setup function (will be called in main(), not at import time)
 from src.utils.reproducibility import setup_experiment_reproducibility
-setup_experiment_reproducibility(seed=42, deterministic=False)
 
 from src.analysis.condition_number_analysis import (
     quadratic_with_condition_number,
@@ -72,6 +71,9 @@ Examples:
                        help='Ultra-quick mode: κ ∈ {1,10,100}, 1 seed')
 
     args = parser.parse_args()
+
+    # Setup reproducibility after parsing args
+    setup_experiment_reproducibility(seed=42, deterministic=False)
 
     # Parse condition numbers and seeds
     if args.ultra_quick:
