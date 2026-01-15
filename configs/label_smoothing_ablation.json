@@ -1,0 +1,38 @@
+{
+  "description": "Label Smoothing Ablation Study - Multi-seed paired comparison (proposal-compliant extension)",
+  "task": "neural_network",
+  "experiments": [
+    "label_smoothing_baseline",
+    "label_smoothing_enabled"
+  ],
+  "label_smoothing_baseline": {
+    "model": "SimpleMLP",
+    "dataset": "MNIST",
+    "optimizer": "Adam",
+    "lr": 0.001,
+    "epochs": 10,
+    "batch_size": 128,
+    "label_smoothing": 0.0,
+    "seeds": [42, 123, 456, 789, 1011],
+    "tag": "baseline_no_smoothing"
+  },
+  "label_smoothing_enabled": {
+    "model": "SimpleMLP",
+    "dataset": "MNIST",
+    "optimizer": "Adam",
+    "lr": 0.001,
+    "epochs": 10,
+    "batch_size": 128,
+    "label_smoothing": 0.1,
+    "seeds": [42, 123, 456, 789, 1011],
+    "tag": "with_smoothing_0.1"
+  },
+  "analysis": {
+    "statistical_test": "paired_ttest",
+    "metrics": ["test_accuracy", "test_loss"],
+    "compute_effect_size": true,
+    "compute_power": true,
+    "report_entropy_floor": true,
+    "note": "Label smoothing is an allowed extension to the proposal baseline. Baseline (smoothing=0) represents the strict convergence-theory case. Smoothing=0.1 represents the generalization-focused extension."
+  }
+}

@@ -426,29 +426,34 @@ class AMPWrapper:
             # Return no-op context manager for CPU or when autocast not available
             return contextlib.nullcontext()
 
-    def backward(self, loss: torch.Tensor, optimizer: torch.optim.Optimizer):
+    def backward(self, loss: torch.Tensor, optimizer: Any):
         """
         Backward pass with gradient scaling.
 
         Args:
             loss: Loss tensor
-            optimizer: Optimizer instance
+            optimizer: Optimizer-like object (supports zero_grad())
         """
+        # Call optimizer.zero_grad on the provided optimizer-like object
         optimizer.zero_grad()
 
         if self.enabled and self.scaler is not None:
+            # Use the scaler to scale the loss, which handles .backward()
             self.scaler.scale(loss).backward()
         else:
             loss.backward()
 
-    def step(self, optimizer: torch.optim.Optimizer):
+    def step(self, optimizer: Any):
         """
         Optimizer step with gradient unscaling.
 
         Args:
-            optimizer: Optimizer instance
+            optimizer: Optimizer-like object (supports step())
         """
         if self.enabled and self.scaler is not None:
+            # Scaler.step expects an object with a .step() method (optimizer-like);
+            # allow wrapper objects that implement step() even if not a subclass
+            # of torch.optim.Optimizer.
             self.scaler.step(optimizer)
         else:
             optimizer.step()

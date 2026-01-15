@@ -19,7 +19,15 @@ import torch.optim as optim
 from src.core.models import SimpleMLP, SimpleCNN, ConvNet
 from src.core.data_utils import get_mnist_loaders, get_cifar10_loaders
 from src.core.optimizer_wrappers import DelayedOptimizer
-from src.core.training_utils import set_seed, validate_pytorch_version
+from src.core.training_utils import (
+    set_seed, 
+    validate_pytorch_version,
+    get_loss_function,
+    AMPWrapper,
+    ModelEMA,
+    create_amp_wrapper,
+    create_model_ema
+)
 from src.utils.file_safety import safe_to_csv  # AUDIT FIX: Safe file I/O
 from src.core.pytorch_optimizers import (
     SGDWrapper,
@@ -223,6 +231,10 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
       - delay_steps: int (if wrapper is used)
       - capture_layer_grad_epochs: List[int] (optional) -> capture per-layer grad norms on these epochs
       - val_split: float (optional) -> fraction of training data to use for validation (e.g., 0.1)
+      - label_smoothing: float (optional) -> label smoothing factor (0.0 = off, 0.1 typical)
+      - use_amp: bool (optional) -> enable automatic mixed precision training
+      - use_ema: bool (optional) -> enable exponential moving average of model weights
+      - ema_decay: float (optional) -> EMA decay rate (default: 0.9999)
     """
     seed = int(config.get('seed', 42))
     set_seed(seed)
@@ -240,7 +252,10 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
         dataset, model_name, batch_size, device, seed, val_split=val_split
     )
 
-    criterion = nn.CrossEntropyLoss()
+    # AUDIT FIX: Use configurable loss function to respect label_smoothing config
+    label_smoothing = float(config.get('label_smoothing', 0.0))
+    criterion = get_loss_function('cross_entropy', label_smoothing=label_smoothing)
+    
     optimizer = build_optimizer(
         optimizer_name=config['optimizer'],
         model=model,
@@ -253,6 +268,15 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
     delay_steps = int(config.get('delay_steps', 1))
     if use_delay:
         optimizer = DelayedOptimizer(optimizer, delay_steps=delay_steps)
+
+    # AUDIT FIX: Setup AMP if enabled
+    use_amp = bool(config.get('use_amp', False))
+    amp = create_amp_wrapper(enabled=use_amp) if use_amp else None
+    
+    # AUDIT FIX: Setup EMA if enabled
+    use_ema = bool(config.get('use_ema', False))
+    ema_decay = float(config.get('ema_decay', 0.9999))
+    ema = create_model_ema(model, decay=ema_decay) if use_ema else None
 
     history = []
     global_step = 0
@@ -317,6 +341,10 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
                         run_tainted = True
                         effective_batch_size = actual_batch_size
 
+                    # AUDIT FIX: Update EMA if enabled
+                    if ema is not None:
+                        ema.update(model)
+
                     update_norm = _update_norm(model, params_before)
                 except RuntimeError as e:
                     if 'out of memory' in str(e).lower():
@@ -328,13 +356,22 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
                         raise
             else:
                 # Fallback: standard training without OOM handling
+                # AUDIT FIX: Use AMP wrapper if enabled
                 inputs = inputs.to(device, non_blocking=True)
                 targets = targets.to(device, non_blocking=True)
 
                 optimizer.zero_grad()
-                logits = model(inputs)
-                loss = criterion(logits, targets)
-                loss.backward()
+                
+                # Forward pass with optional AMP
+                if amp is not None:
+                    with amp.autocast():
+                        logits = model(inputs)
+                        loss = criterion(logits, targets)
+                    amp.backward(loss, optimizer)
+                else:
+                    logits = model(inputs)
+                    loss = criterion(logits, targets)
+                    loss.backward()
 
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 
@@ -345,7 +382,15 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
                 params_before = _params_clone(model)
 
                 # step (possibly delayed optimizer)
-                optimizer.step()
+                if amp is not None:
+                    amp.step(optimizer)
+                    amp.update()
+                else:
+                    optimizer.step()
+                
+                # AUDIT FIX: Update EMA if enabled
+                if ema is not None:
+                    ema.update(model)
 
                 update_norm = _update_norm(model, params_before)
                 loss_value = loss.item()
@@ -403,7 +448,9 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
                         })
 
         if val_loader is not None:
-            val_loss, val_acc = evaluate(model, val_loader, criterion, device)
+            # AUDIT FIX: Evaluate with EMA model if enabled
+            eval_model = ema.shadow if ema is not None else model
+            val_loss, val_acc = evaluate(eval_model, val_loader, criterion, device)
             history.append({
                 'phase': 'val',
                 'epoch': epoch,
@@ -417,7 +464,9 @@ def train_and_evaluate(config: Dict[str, Any]) -> pd.DataFrame:
             })
 
         # evaluation after each epoch (test set - only for final reporting)
-        test_loss, test_acc = evaluate(model, test_loader, criterion, device)
+        # AUDIT FIX: Evaluate with EMA model if enabled
+        eval_model = ema.shadow if ema is not None else model
+        test_loss, test_acc = evaluate(eval_model, test_loader, criterion, device)
         history.append({
             'phase': 'eval',
             'epoch': epoch,
