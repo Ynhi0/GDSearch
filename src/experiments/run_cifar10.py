@@ -242,6 +242,31 @@ def run_single(optimizer_name: str, seed: int, lr: float, epochs: int, batch_siz
     return out
 
 
+def _get_epochs_and_test_acc(df):
+    """Return (epochs, test_accuracy_series_in_percent_or_None).
+
+    Robust extraction of epoch and test accuracy from different CSV column naming conventions.
+    """
+    epoch_col = 'epoch' if 'epoch' in df.columns else next((col for col in df.columns if 'epoch' in col.lower()), None)
+    if epoch_col:
+        epochs = df[epoch_col].values
+    else:
+        epochs = np.arange(1, len(df) + 1)
+
+    acc_col = next((col for col in df.columns if 'test' in col.lower() and ('acc' in col.lower() or 'accuracy' in col.lower())), None)
+    if acc_col is None:
+        return epochs, None
+
+    acc_vals = pd.to_numeric(df[acc_col], errors='coerce')
+    if acc_vals.isna().all():
+        return epochs, None
+
+    if acc_vals.max() <= 1.01:
+        acc_vals = acc_vals * 100.0
+
+    return epochs, acc_vals.values
+
+
 def create_cifar10_summary_plots(results_dir: Path, output_file: str = 'cifar10_summary.png'):
     """
     Create high-quality summary plots from CIFAR-10 results.
@@ -332,16 +357,24 @@ def create_cifar10_summary_plots(results_dir: Path, output_file: str = 'cifar10_
     # Plot 2: Test Accuracy
     ax = axes[0, 1]
     for optimizer, runs in results.items():
+        plot_runs = []
         for seed, df in runs:
-            color = colors.get(optimizer, '#999999')
-            alpha = 0.3 if len(runs) > 1 else 1.0
-            ax.plot(df['epoch'], df['test_acc'] * 100, color=color, alpha=alpha, linewidth=1)
+            epochs, acc = _get_epochs_and_test_acc(df)
+            if acc is not None:
+                color = colors.get(optimizer, '#999999')
+                alpha = 0.3 if len(runs) > 1 else 1.0
+                ax.plot(epochs, acc, color=color, alpha=alpha, linewidth=1)
+                plot_runs.append((epochs, acc))
         # Plot mean
-        if len(runs) > 1:
-            epochs = runs[0][1]['epoch'].values
-            accs = np.array([df['test_acc'].values for _, df in runs])
-            mean_acc = accs.mean(axis=0)
-            ax.plot(epochs, mean_acc * 100, color=colors.get(optimizer, '#999999'),
+        if len(plot_runs) > 0:
+            common_epochs = np.arange(1, int(max(e.max() for e, _ in plot_runs)) + 1)
+            aligned = []
+            for e, a in plot_runs:
+                s = pd.Series(a, index=e)
+                s = s.reindex(common_epochs).interpolate().ffill().bfill().values
+                aligned.append(s)
+            mean_acc = np.mean(np.vstack(aligned), axis=0)
+            ax.plot(common_epochs, mean_acc, color=colors.get(optimizer, '#999999'),
                    linewidth=2.5, label=optimizer)
 
     ax.set_xlabel('Epoch', fontsize=12, fontweight='bold')
@@ -355,9 +388,14 @@ def create_cifar10_summary_plots(results_dir: Path, output_file: str = 'cifar10_
     final_accs = {}
     final_stds = {}
     for optimizer, runs in results.items():
-        accs = [df['test_acc'].iloc[-1] * 100 for _, df in runs]
-        final_accs[optimizer] = np.mean(accs)
-        final_stds[optimizer] = np.std(accs) if len(accs) > 1 else 0
+        acc_vals = []
+        for _, df in runs:
+            _, acc = _get_epochs_and_test_acc(df)
+            if acc is not None:
+                acc_vals.append(acc[-1])
+        if acc_vals:
+            final_accs[optimizer] = np.mean(acc_vals)
+            final_stds[optimizer] = np.std(acc_vals) if len(acc_vals) > 1 else 0
 
     optimizers_sorted = sorted(final_accs.keys(), key=lambda x: final_accs[x], reverse=True)
     x_pos = np.arange(len(optimizers_sorted))

@@ -22,6 +22,35 @@ plt.rcParams['figure.dpi'] = 300
 plt.rcParams['font.size'] = 10
 
 
+def _get_epochs_and_test_acc(df):
+    """Return (epochs, test_accuracy_series_in_percent_or_None).
+
+    Handles missing `epoch` column, accepts either `test_acc` or `test_accuracy` (or variants).
+    Converts values in [0,1] to percentages.
+    """
+    # Epochs
+    epoch_col = next((col for col in df.columns if col.strip().lower() == 'epoch' or 'epoch' in col.lower()), None)
+    if epoch_col is not None:
+        epochs = df[epoch_col].values
+    else:
+        epochs = np.arange(1, len(df) + 1)
+
+    # Test accuracy column detection
+    acc_col = next((col for col in df.columns if 'test' in col.lower() and ('acc' in col.lower() or 'accuracy' in col.lower())), None)
+    if acc_col is None:
+        return epochs, None
+
+    acc_vals = pd.to_numeric(df[acc_col], errors='coerce')
+    if acc_vals.isna().all():
+        return epochs, None
+
+    # Convert to percentage when in [0,1]
+    if acc_vals.max() <= 1.01:
+        acc_vals = acc_vals * 100.0
+
+    return epochs, acc_vals.values
+
+
 def plot_training_curves(csv_files: List[str], output_dir: Path, title: str = "Training Curves"):
     """
     Generate training curves from CSV files.
@@ -98,30 +127,24 @@ def plot_training_curves(csv_files: List[str], output_dir: Path, title: str = "T
     ax = axes[0, 1]
     for i, (optimizer, dfs) in enumerate(sorted(results.items())):
         color = colors[i % len(colors)]
+        # Collect per-run (epochs, acc) and plot raw runs
+        runs_for_mean = []
         for df in dfs:
-            acc_col = next((col for col in df.columns if 'acc' in col.lower() and 'test' in col.lower()), None)
-            if acc_col and 'epoch' in df.columns:
-                # Convert to percentage if needed
-                acc_values = df[acc_col].values
-                if acc_values.max() <= 1.0:
-                    acc_values = acc_values * 100
-                ax.plot(df['epoch'], acc_values, color=color, alpha=0.3, linewidth=1)
+            epochs, acc = _get_epochs_and_test_acc(df)
+            if acc is not None:
+                ax.plot(epochs, acc, color=color, alpha=0.3, linewidth=1)
+                runs_for_mean.append((epochs, acc))
 
-        # Mean line
-        if dfs:
-            acc_col = next((col for col in dfs[0].columns if 'acc' in col.lower() and 'test' in col.lower()), None)
-            if acc_col:
-                epochs = dfs[0]['epoch'].values
-                accs = []
-                for df in dfs:
-                    if acc_col in df.columns:
-                        acc_values = df[acc_col].values
-                        if acc_values.max() <= 1.0:
-                            acc_values = acc_values * 100
-                        accs.append(acc_values)
-                if accs:
-                    mean_acc = np.array(accs).mean(axis=0)
-                    ax.plot(epochs, mean_acc, color=color, linewidth=2.5, label=optimizer)
+        # Mean line (align runs by common epoch grid using interpolation)
+        if runs_for_mean:
+            common_epochs = np.arange(1, int(max(e.max() for e, _ in runs_for_mean)) + 1)
+            aligned_accs = []
+            for e, a in runs_for_mean:
+                s = pd.Series(a, index=e)
+                s = s.reindex(common_epochs).interpolate().ffill().bfill().values
+                aligned_accs.append(s)
+            mean_acc = np.mean(np.vstack(aligned_accs), axis=0)
+            ax.plot(common_epochs, mean_acc, color=color, linewidth=2.5, label=optimizer)
 
     ax.set_xlabel('Epoch', fontsize=12, fontweight='bold')
     ax.set_ylabel('Test Accuracy (%)', fontsize=12, fontweight='bold')

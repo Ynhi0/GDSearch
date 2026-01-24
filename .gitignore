@@ -86,3 +86,6 @@ mlruns/
 .cache/
 
 .gitignore
+
+# Ignore local AI assistant guidance file
+.github/copilot-instructions.md 
