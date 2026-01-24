@@ -10606,6 +10606,17 @@ Examples:
     print(f"     - Format: {{DATASET}}_{{MODEL}}_{{OPTIMIZER}}_seed{{N}}.csv")
     print("="*80)
 
+    # If running in resume mode, ensure visualizations exist (regenerate missing ones)
+    try:
+        if getattr(args, 'resume', False):
+            from scripts.checkpoint_and_viz_check import detect_csv_experiments, ensure_visualizations
+            experiments = detect_csv_experiments(Path(results_dir))
+            if experiments:
+                print("\nResume detected — checking visualizations and regenerating missing artifacts...")
+                ensure_visualizations(Path(results_dir), experiments, force=False)
+    except Exception as e:
+        logging.warning("Visualization check on resume failed: %s", e, exc_info=True)
+
     # Generate universal plots for ALL experiments
     print("\n" + "="*80)
     print("GENERATING HIGH-QUALITY PLOTS")
