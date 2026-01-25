@@ -5426,23 +5426,74 @@ def create_experiment_visualizations(experiment_name, results_dir, csv_files):
 
     if has_epoch and has_optimizer and acc_col:
         try:
+            import numpy as _np
+            # Create a local copy and normalize optimizer names to avoid duplicate labels from whitespace/case
+            df_plot = combined_df.copy()
+            df_plot['optimizer'] = df_plot['optimizer'].astype(str).str.strip()
+
             plt.figure(figsize=(10, 6))
-            for opt in combined_df['optimizer'].unique():
-                opt_data = combined_df[combined_df['optimizer'] == opt]
+
+            # Prepare color cycle
+            prop_cycle = plt.rcParams['axes.prop_cycle'].by_key().get('color', None)
+            if not prop_cycle:
+                prop_cycle = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple', 'tab:brown', 'tab:pink', 'tab:gray']
+
+            unique_opts = sorted(df_plot['optimizer'].unique())
+
+            for idx, opt in enumerate(unique_opts):
+                color = prop_cycle[idx % len(prop_cycle)]
+                opt_data = df_plot[df_plot['optimizer'] == opt]
+
                 if 'seed' in opt_data.columns:
-                    grouped = opt_data.groupby('epoch')[acc_col].agg(['mean', 'std'])
-                    plt.plot(arr_to_numpy_float(grouped.index), arr_to_numpy_float(grouped['mean'] * 100), label=opt, linewidth=2)
-                    plt.fill_between(arr_to_numpy_float(grouped.index),
-                                   arr_to_numpy_float((grouped['mean'] - grouped['std']) * 100),
-                                   arr_to_numpy_float((grouped['mean'] + grouped['std']) * 100),
-                                   alpha=0.2)
+                    # Plot per-seed runs faintly (no legend) to convey spread without clutter
+                    for seed, seed_df in opt_data.groupby('seed'):
+                        if seed_df[acc_col].dropna().empty:
+                            continue
+                        plt.plot(arr_to_numpy_float(seed_df['epoch']), arr_to_numpy_float(seed_df[acc_col] * 100),
+                                 color=color, linewidth=0.8, alpha=0.25, label='_' + opt)
+
+                    grouped = opt_data.groupby('epoch')[acc_col].agg(['mean', 'std', 'count']).sort_index()
+                    # Require at least half of the seeds (min 2) to show mean/std at an epoch
+                    n_seeds = int(opt_data['seed'].nunique())
+                    min_count = max(2, n_seeds // 2)
+                    valid_mask = grouped['count'] >= min_count
+
+                    if valid_mask.any():
+                        epochs = grouped.index
+                        mean_vals = grouped['mean'] * 100
+                        std_vals = grouped['std'] * 100
+
+                        # Mask out epochs with low coverage to avoid spurious lines
+                        mean_plot = mean_vals.where(valid_mask, _np.nan)
+                        std_plot = std_vals.where(valid_mask, _np.nan)
+
+                        plt.plot(arr_to_numpy_float(epochs), arr_to_numpy_float(mean_plot), color=color,
+                                 linewidth=2.5, label=opt)
+                        plt.fill_between(arr_to_numpy_float(epochs),
+                                         arr_to_numpy_float(mean_plot - std_plot),
+                                         arr_to_numpy_float(mean_plot + std_plot),
+                                         color=color, alpha=0.18)
+                    else:
+                        # Fall back: if not enough overlapping epochs, show per-seed final epoch markers
+                        last_vals = opt_data.groupby('seed')[acc_col].apply(lambda s: s.dropna().iloc[-1] if s.dropna().size > 0 else _np.nan).dropna()
+                        if not last_vals.empty:
+                            final_epoch = float(opt_data['epoch'].max())
+                            plt.scatter([final_epoch] * len(last_vals), last_vals.values * 100,
+                                        color=color, alpha=0.6, s=20, edgecolors='k', linewidths=0.3, label=opt)
+
                 else:
-                    plt.plot(arr_to_numpy_float(opt_data['epoch']), arr_to_numpy_float(opt_data[acc_col] * 100), label=opt, linewidth=2)
+                    # Single-run: just plot the line
+                    values = opt_data[acc_col].dropna()
+                    if values.empty:
+                        continue
+                    plt.plot(arr_to_numpy_float(opt_data['epoch']), arr_to_numpy_float(values * 100),
+                             color=color, linewidth=2, label=opt)
 
             plt.xlabel('Epoch', fontsize=12)
             plt.ylabel('Test Accuracy (%)', fontsize=12)
             plt.title(f'{experiment_name} - Test Accuracy over Epochs', fontsize=14, fontweight='bold')
-            plt.legend()
+            # Show one legend entry per optimizer only (matplotlib ignores labels that start with underscore)
+            plt.legend(ncol=2, fontsize=9, framealpha=0.9)
             plt.grid(True, alpha=0.3)
             plt.tight_layout()
             plt.savefig(static_dir / f'{experiment_name.lower()}_test_accuracy.png', dpi=300, bbox_inches='tight')
