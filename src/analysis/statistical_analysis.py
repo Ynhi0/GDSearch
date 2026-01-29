@@ -239,8 +239,14 @@ def load_multiseed_results(pattern: str, results_dir: str = 'results') -> List[p
         List of DataFrames
     """
     import glob
+    from src.utils.csv_utils import safe_read_csv
     files = glob.glob(os.path.join(results_dir, pattern))
-    return [pd.read_csv(f) for f in sorted(files)]
+    results = []
+    for f in sorted(files):
+        df = safe_read_csv(f)
+        if df is not None:
+            results.append(df)
+    return results
 
 
 def extract_final_metric(

@@ -1478,7 +1478,21 @@ def save_run_artifacts(base_results_dir: Union[str, Path], dataset: str, model_n
         else:
             df_hist = pd.DataFrame([history])
 
-        df_hist.to_csv(csv_path, index=False)
+        # If the history is empty and has no columns, write a placeholder CSV
+        from src.utils.file_safety import safe_to_csv
+        if df_hist.empty or len(df_hist.columns) == 0:
+            logging.warning("History is empty for %s seed %s; writing placeholder CSV and marking run as tainted", file_stem, seed)
+            placeholder = pd.DataFrame([{
+                'tainted': True,
+                'note': 'Empty training history (possible failure or early exit)'
+            }])
+            safe_to_csv(placeholder, csv_path, index=False)
+            rows_written = 0
+            tainted_flag = True
+        else:
+            safe_to_csv(df_hist, csv_path, index=False)
+            rows_written = len(df_hist)
+            tainted_flag = False
 
         # Save final model weights for loss landscape visualization
         model_path = None
@@ -1516,12 +1530,15 @@ def save_run_artifacts(base_results_dir: Union[str, Path], dataset: str, model_n
             'model': model_name,
             'optimizer': optimizer_name,
             'seed': seed,
-            'rows': len(df_hist),
+            # rows should reflect actual history rows (0 if placeholder used)
+            'rows': int(rows_written),
             'params': params,
             'model_path': str(model_path) if model_path else None,
             'system': get_system_info(),
             'provenance': get_provenance_info(),
-            'completed': True
+            # Mark completed False when tainted/empty history
+            'completed': not bool(tainted_flag),
+            'tainted': bool(tainted_flag)
         }
         if device is not None:
             try:
@@ -3609,7 +3626,14 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
             os.makedirs(results_dir, exist_ok=True)
             df = pd.DataFrame(results)
             results_file = f"{results_dir}/mnist_results.csv"
-            df.to_csv(results_file, index=False)
+            # Prevent zero-byte CSVs: write placeholder if results empty
+            from src.utils.file_safety import safe_to_csv
+            if df.empty or len(df.columns) == 0:
+                logging.warning("MNIST results are empty; writing placeholder and marking tainted")
+                placeholder = pd.DataFrame([{'tainted': True, 'note': 'No results generated (possible failed run/to-be-rerun)'}])
+                safe_to_csv(placeholder, results_file, index=False)
+            else:
+                safe_to_csv(df, results_file, index=False)
 
             # Clean up GPU memory after experiment
             logging.info("Cleaning up GPU memory after MNIST experiment...")
@@ -3624,6 +3648,11 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
 
             # Generate visualizations for MNIST experiment
             try:
+                # Remove empty or corrupt CSVs left by previous runs so visualizations and
+                # downstream notebooks don't fail during parsing
+                from src.utils.csv_utils import cleanup_empty_csvs
+                cleanup_empty_csvs(Path(results_dir))
+
                 mnist_csvs = list(Path(results_dir).glob("*.csv"))
                 if mnist_csvs:
                     create_experiment_visualizations('MNIST', str(Path(results_dir).parent.parent), mnist_csvs)
@@ -4130,7 +4159,13 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
     # Save results
     os.makedirs(results_dir, exist_ok=True)
     df = pd.DataFrame(all_results) if all_results else pd.DataFrame()
-    df.to_csv(f"{results_dir}/cifar10_results.csv", index=False)
+    from src.utils.file_safety import safe_to_csv
+    if df.empty or len(df.columns) == 0:
+        logging.warning("CIFAR10 results are empty; writing placeholder and marking tainted")
+        placeholder = pd.DataFrame([{'tainted': True, 'note': 'No results generated (possible failed run/to-be-rerun)'}])
+        safe_to_csv(placeholder, f"{results_dir}/cifar10_results.csv", index=False)
+    else:
+        safe_to_csv(df, f"{results_dir}/cifar10_results.csv", index=False)
 
     if tracker:
         tracker.log_artifact(f"{results_dir}/cifar10_results.csv", "results")
@@ -4735,7 +4770,13 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
     # Save results
     os.makedirs(results_dir, exist_ok=True)
     df = pd.DataFrame(results)
-    df.to_csv(f"{results_dir}/nlp_results.csv", index=False)
+    from src.utils.file_safety import safe_to_csv
+    if df.empty or len(df.columns) == 0:
+        logging.warning("NLP results are empty; writing placeholder and marking tainted")
+        placeholder = pd.DataFrame([{'tainted': True, 'note': 'No results generated (possible failed run/to-be-rerun)'}])
+        safe_to_csv(placeholder, f"{results_dir}/nlp_results.csv", index=False)
+    else:
+        safe_to_csv(df, f"{results_dir}/nlp_results.csv", index=False)
 
     if tracker:
         tracker.log_artifact(f"{results_dir}/nlp_results.csv", "results")
@@ -7187,16 +7228,26 @@ def generate_final_summary_report(results_dir, experiment_results):
 
         f.write("### Analyze Results Programmatically\n")
         f.write("```python\n")
-        f.write("import pandas as pd\n\n")
-        f.write("# Load convergence analysis\n")
-        f.write(f"conv = pd.read_csv('{results_dir}/analysis/convergence_rates.csv')\n")
-        f.write("print(conv.groupby('optimizer')['convergence_rate'].mean())\n\n")
-        f.write("# Load statistical comparison\n")
-        f.write(f"stats = pd.read_csv('{results_dir}/analysis/statistical_comparison.csv')\n")
-        f.write("print(stats[stats['is_significant']])\n\n")
-        f.write("# Load experiment data\n")
-        f.write(f"mnist = pd.read_csv('{results_dir}/experiments/mnist/MNIST_MLP_Adam_seed42.csv')\n")
-        f.write("print(mnist[['epoch', 'test_acc']].tail())\n")
+        f.write("import pandas as pd\n")
+        f.write("from src.utils.csv_utils import safe_read_csv\n\n")
+        f.write("# Load convergence analysis (skip if empty)\n")
+        f.write(f"conv = safe_read_csv('{results_dir}/analysis/convergence_rates.csv')\n")
+        f.write("if conv is None:\n")
+        f.write("    print('convergence CSV is empty or missing')\n")
+        f.write("else:\n")
+        f.write("    print(conv.groupby('optimizer')['convergence_rate'].mean())\n\n")
+        f.write("# Load statistical comparison (skip if empty)\n")
+        f.write(f"stats = safe_read_csv('{results_dir}/analysis/statistical_comparison.csv')\n")
+        f.write("if stats is None:\n")
+        f.write("    print('statistical comparison CSV is empty or missing')\n")
+        f.write("else:\n")
+        f.write("    print(stats[stats['is_significant']])\n\n")
+        f.write("# Load experiment data (skip if empty)\n")
+        f.write(f"mnist = safe_read_csv('{results_dir}/experiments/mnist/MNIST_MLP_Adam_seed42.csv')\n")
+        f.write("if mnist is None:\n")
+        f.write("    print('MNIST experiment CSV is empty or missing')\n")
+        f.write("else:\n")
+        f.write("    print(mnist[['epoch', 'test_acc']].tail())\n")
         f.write("```\n\n")
 
         f.write("## Key Findings\n\n")

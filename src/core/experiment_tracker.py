@@ -7,17 +7,21 @@ from typing import Any, Dict, Optional
 import logging
 
 try:
+    # Import mlflow. In some environments (e.g., mismatched DB schema), importing mlflow
+    # can raise runtime exceptions other than ImportError (like mlflow.exceptions.MlflowException).
+    # Catch all exceptions to avoid failing module import and fall back to disabled tracking.
     import mlflow
     try:
         import mlflow.pytorch as mlflow_pytorch
     except Exception:
         mlflow_pytorch = None
     HAS_MLFLOW = True
-except ImportError:
+except Exception as e:
+    # Includes ImportError and runtime MlflowException raised during import
     mlflow = None  # type: ignore[assignment]
     mlflow_pytorch = None
     HAS_MLFLOW = False
-    logging.warning("mlflow not available. Experiment tracking will be limited.")
+    logging.warning("mlflow import failed (%s). Experiment tracking will be limited.", e)
 
 import numpy as np
 import torch
