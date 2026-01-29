@@ -147,7 +147,8 @@ def plot_generalization_gap(nn_df: Union[pd.DataFrame, ArrayLike], title: str = 
     ax1.tick_params(axis='y', labelcolor='tab:red')
 
     if 'test_accuracy' in merged.columns:
-        ax2.plot(arr_to_numpy_float(merged['epoch']), arr_to_numpy_float(merged['test_accuracy'] * 100.0), marker='s', color='tab:blue', label='Test Accuracy')
+        from src.utils.metric_normalization import to_percent_series
+        ax2.plot(arr_to_numpy_float(merged['epoch']), arr_to_numpy_float(to_percent_series(merged['test_accuracy'])), marker='s', color='tab:blue', label='Test Accuracy')
         ax2.set_ylabel('Test Accuracy (%)', color='tab:blue')
         ax2.tick_params(axis='y', labelcolor='tab:blue')
 

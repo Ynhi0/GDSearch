@@ -41,6 +41,16 @@ def train_quick(config):
     seed = config.get('seed', 42)
     set_seed(seed)
 
+
+def parse_seeds(seeds_arg: str, seed_arg: int):
+    """Return a list of integer seeds given --seeds or --seed values.
+
+    This helper is provided at module level for unit testing.
+    """
+    if seeds_arg:
+        return [int(s) for s in seeds_arg.split(',') if s.strip()]
+    return [int(seed_arg)]
+
     # Build model and data - handle potential val_split
     val_split = config.get('val_split', None)
     # build_model_and_data now returns a 4-tuple (model, train_loader, val_loader, test_loader)
@@ -136,13 +146,18 @@ def main():
                        help='Output directory for plots (default: plots)')
     parser.add_argument('--seed', type=int, default=123,
                        help='Random seed (default: 123)')
+    parser.add_argument('--seeds', type=str, default=None,
+                       help='Comma-separated seeds (e.g., "42,123,456"). If provided, runs visualization for each seed in the list')
 
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
 
-    # Minimal MNIST MLP training to get a reasonable point
-    config = {
+    # Determine seeds to run: prefer --seeds (comma-separated), fall back to --seed
+    seeds = parse_seeds(args.seeds, args.seed)
+
+    # Minimal MNIST MLP training config used per-seed
+    base_config = {
         'dataset': args.dataset,
         'model': args.model,
         'batch_size': 128,
@@ -150,23 +165,72 @@ def main():
         'optimizer': 'AdamW',
         'lr': 1e-3,
         'weight_decay': 1e-4,
-        'seed': args.seed,
     }
 
-    # Load model: either from checkpoint or train quick snapshot
-    if args.load_checkpoint:
-        model, _train_loader, _val_loader, test_loader, criterion, device = load_checkpoint_model(args.load_checkpoint, config)
-        mode_label = "Final Checkpoint"
-        filename_suffix = "_final"
-    else:
-        print("WARNING: Using quick training snapshot (2 epochs).")
-        print("For high-quality plots, use --load-checkpoint with a fully trained model.")
-        model, _train_loader, _val_loader, test_loader, criterion, device = train_quick(config)
-        mode_label = "Quick Snapshot (2 epochs)"
-        filename_suffix = "_snapshot"
+    # Run for each seed and save outputs per-seed
+    for seed in seeds:
+        config = dict(base_config)
+        config['seed'] = int(seed)
 
-    # We evaluate the loss landscape using the test loader by design
-    run_loader = test_loader
+        # Load model: either from checkpoint or train quick snapshot
+        if args.load_checkpoint:
+            model, _train_loader, _val_loader, test_loader, criterion, device = load_checkpoint_model(args.load_checkpoint, config)
+            mode_label = "Final Checkpoint"
+            filename_suffix = f"_final_seed{seed}"
+        else:
+            print(f"WARNING: Using quick training snapshot (2 epochs) for seed {seed}.")
+            print("For high-quality plots, use --load-checkpoint with a fully trained model.")
+            model, _train_loader, _val_loader, test_loader, criterion, device = train_quick(config)
+            mode_label = f"Quick Snapshot (2 epochs) - seed {seed}"
+            filename_suffix = f"_snapshot_seed{seed}"
+
+        # We evaluate the loss landscape using the test loader by design
+        run_loader = test_loader
+
+        # 1D probe
+        dir1 = _random_direction_like(model, seed=0).to(device)
+        alphas = np.linspace(-1.0, 1.0, 41)
+        a, losses_1d = probe_loss_1d(model, run_loader, criterion, device, dir1, alphas, max_batches=50)
+
+        plt.figure(figsize=(6,4))
+        plt.plot(a, losses_1d, 'k-')
+        plt.xlabel('Alpha (direction 1)')
+        plt.ylabel('Loss')
+        plt.title(f'Loss Landscape 1D - {mode_label}')
+        plt.tight_layout()
+        plt.savefig(f'{args.output_dir}/loss_landscape_1d_{args.dataset.lower()}{filename_suffix}.png', dpi=300)
+        plt.close()
+
+        # 2D probe
+        dir2 = _random_direction_like(model, seed=1).to(device)
+        alphas2 = np.linspace(-0.5, 0.5, 41)
+        betas2 = np.linspace(-0.5, 0.5, 41)
+        A, B, Z = probe_loss_2d(model, run_loader, criterion, device, dir1, dir2, alphas2, betas2, max_batches=30)
+
+        from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+        fig = plt.figure(figsize=(7,5))
+        ax = fig.add_subplot(111, projection='3d')
+        ax.plot_surface(A, B, Z, cmap='viridis', linewidth=0, antialiased=True)
+        ax.set_xlabel('Alpha (dir1)')
+        ax.set_ylabel('Beta (dir2)')
+        ax.set_zlabel('Loss')
+        ax.set_title(f'Loss Landscape 2D - {mode_label}')
+        plt.tight_layout()
+        plt.savefig(f'{args.output_dir}/loss_landscape_2d_surface_{args.dataset.lower()}{filename_suffix}.png', dpi=300)
+        plt.close(fig)
+
+        # Contour
+        plt.figure(figsize=(6,5))
+        cs = plt.contourf(A, B, Z, levels=30, cmap='viridis')
+        plt.colorbar(cs, label='Loss')
+        plt.xlabel('Alpha (dir1)')
+        plt.ylabel('Beta (dir2)')
+        plt.title(f'Loss Landscape 2D Contour - {mode_label}')
+        plt.tight_layout()
+        plt.savefig(f'{args.output_dir}/loss_landscape_2d_contour_{args.dataset.lower()}{filename_suffix}.png', dpi=300)
+        plt.close()
+
+    # end per-seed loop
 
     # 1D probe
     dir1 = _random_direction_like(model, seed=0).to(device)

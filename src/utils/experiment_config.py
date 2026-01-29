@@ -87,7 +87,32 @@ class ExperimentConfig:
 
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> 'ExperimentConfig':
-        """Create config from dictionary."""
+        """Create config from dictionary.
+
+        Backwards-compatibility: accept a single integer key 'seed' and
+        migrate it to the canonical 'seeds' list. Also warn if an explicit
+        small seeds list is provided to encourage multi-seed experiments.
+        """
+        # Backwards compatibility: accept 'seed' as alias for 'seeds'
+        if 'seed' in config_dict and 'seeds' not in config_dict:
+            seed_val = config_dict.pop('seed')
+            # If caller provided an integer, wrap it in a list
+            if isinstance(seed_val, int):
+                config_dict['seeds'] = [seed_val]
+            # If caller already provided a list under 'seed', accept it
+            elif isinstance(seed_val, (list, tuple)):
+                config_dict['seeds'] = list(seed_val)
+
+        # Warn about too-few seeds (recommend ≥3 for statistical validity)
+        if 'seeds' in config_dict and isinstance(config_dict['seeds'], (list, tuple)):
+            if len(config_dict['seeds']) < 3:
+                import logging
+                logging.warning(
+                    "Configuration contains fewer than 3 seeds (%s). "
+                    "For statistical validity, use at least 3 distinct seeds.",
+                    config_dict['seeds']
+                )
+
         # Filter out unknown keys
         valid_keys = {f.name for f in cls.__dataclass_fields__.values()}
         filtered_dict = {k: v for k, v in config_dict.items() if k in valid_keys}

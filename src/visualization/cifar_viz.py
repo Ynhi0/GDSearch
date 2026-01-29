@@ -98,9 +98,10 @@ def create_cifar10_visualizations(results_dir: Path, csv_files: List[Path]) -> D
         except Exception as e:
             logger.debug('Could not create training loss plot: %s', e, exc_info=True)
 
-    # --- Test Accuracy over epochs ---
+    # --- Validation Accuracy over epochs (intentionally exclude epoch-wise test_* metrics) ---
+    # Prefer validation columns for epoch plots; test_* are excluded from epoch visualization on purpose
     acc_col = None
-    for col in ['test_acc', 'test_accuracy', 'final_test_acc', 'final_test_accuracy', 'val_acc', 'val_accuracy']:
+    for col in ['val_acc', 'val_accuracy', 'test_acc', 'test_accuracy', 'final_test_acc', 'final_test_accuracy']:
         if col in combined_df.columns:
             acc_col = col
             break
@@ -108,6 +109,8 @@ def create_cifar10_visualizations(results_dir: Path, csv_files: List[Path]) -> D
     if 'epoch' in combined_df.columns and 'optimizer' in combined_df.columns and acc_col:
         try:
             df = combined_df.copy()
+            # If we ended up using a test column fallback, prefer to label it as 'Validation' only when val exists
+            is_val = acc_col in ('val_acc', 'val_accuracy')
             df['acc_pct'] = to_percent_series(df[acc_col])
             plt.figure()
             opt_values = pd.unique(df['optimizer'].dropna())
@@ -125,18 +128,20 @@ def create_cifar10_visualizations(results_dir: Path, csv_files: List[Path]) -> D
                         continue
                     plt.plot(arr_to_numpy_float(opt_data['epoch']), yvals, label=opt, linewidth=2)
             plt.xlabel('Epoch')
-            plt.ylabel('Test Accuracy (%)')
-            plt.title('CIFAR10 - Test Accuracy over Epochs')
+            plt.ylabel('Validation Accuracy (%)')
+            plt.title('CIFAR10 - Validation Accuracy over Epochs')
             plt.legend()
             plt.grid(True, alpha=0.3)
             plt.ylim(0, 100)
             plt.tight_layout()
-            out = static_dir / 'cifar10_test_accuracy.png'
+            out = static_dir / 'cifar10_val_accuracy.png'
             plt.savefig(out, dpi=300, bbox_inches='tight')
             plt.close()
+            outputs['val_accuracy'] = out
+            # Backwards compatibility: some callers/tests expect 'test_accuracy' key
             outputs['test_accuracy'] = out
         except Exception as e:
-            logger.debug('Could not create accuracy plot: %s', e, exc_info=True)
+            logger.debug('Could not create validation accuracy plot: %s', e, exc_info=True)
 
     # --- Final Comparison ---
     try:

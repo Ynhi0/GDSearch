@@ -394,7 +394,32 @@ def create_experiment_configs():
         'seed': 42
     })
 
-    return configs
+    # Expand configs to multiple seeds (prefer explicit 'seeds' list in a config, fall back to 'seed', otherwise use defaults)
+    import copy
+    DEFAULT_SEEDS = [42, 123, 456]
+
+    expanded = []
+    for cfg in configs:
+        seeds = None
+        if 'seeds' in cfg:
+            seeds = list(cfg.pop('seeds'))
+        elif 'seed' in cfg:
+            # Legacy single 'seed' entries are treated as deprecated: expand to DEFAULT_SEEDS
+            # to ensure multi-seed experiments for statistical validity
+            cfg.pop('seed')
+            seeds = DEFAULT_SEEDS
+        else:
+            seeds = DEFAULT_SEEDS
+
+        for s in seeds:
+            c = copy.deepcopy(cfg)
+            c['seed'] = int(s)
+            # Ensure unique per-seed experiment id if experiment_id provided
+            if 'experiment_id' in c:
+                c['experiment_id'] = f"{c['experiment_id']}_seed{s}"
+            expanded.append(c)
+
+    return expanded
 
 
 def generate_filename(config):

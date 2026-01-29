@@ -146,6 +146,17 @@ def _safe_len(obj: object) -> int:
         except (TypeError, AttributeError):
             return 0
 
+
+# Backwards-compatibility wrapper used by existing tests/scripts
+def parse_opt_seed_from_stem(stem: str):
+    """Compatibility shim returning (optimizer, seed) for legacy callers."""
+    try:
+        from src.utils.filename import parse_experiment_filename
+        parsed = parse_experiment_filename(stem)
+        return parsed.get('optimizer'), parsed.get('seed')
+    except Exception:
+        return None, None
+
     # numpy arrays
     try:
         import numpy as _np  # noqa: F811  # Lazy import with alias for optional dependency check
@@ -5850,63 +5861,44 @@ def create_experiment_visualizations(experiment_name, results_dir, csv_files):
 
     print(f"\nCreating visualizations for {experiment_name}...")
 
-    # Load and combine all CSVs for this experiment
+    # Load and combine only time-series CSVs for epoch plots; keep summaries separate
+    from src.visualization.plotting_utils import filter_time_series_files
+    from src.utils.filename import parse_experiment_filename
+
+    csv_paths = [Path(p) for p in csv_files]
+
+    # Delegate CIFAR10 to dedicated, hardened visualizer
+    if str(experiment_name).upper() == 'CIFAR10':
+        try:
+            from src.visualization.cifar_viz import create_cifar10_visualizations
+            # Call and return early (preserves legacy behavior for other datasets)
+            return create_cifar10_visualizations(results_path, csv_paths)
+        except Exception as e:
+            logging.debug("CIFAR10 dedicated visualizer failed, falling back to legacy plotting: %s", e, exc_info=True)
+
+    time_series_paths = filter_time_series_files(csv_paths)
+
     dfs = []
-    for csv_file in csv_files:
+    for csv_file in time_series_paths:
         try:
             df = pd.read_csv(csv_file)
-            # Extract optimizer from filename with robust fallback
-            stem = csv_file.stem
-            if 'optimizer' not in df.columns:
-                parts = stem.split('_')
-                optimizer_found = False
-
-                # Method 1: Look for token(s) before 'seed'
-                # Handle compound names like SAM_Adam, Lookahead_SGD, SGD_Momentum
-                for i, part in enumerate(parts):
-                    if 'seed' in part:
-                        if i >= 2:
-                            # Check if previous 2 tokens form a known optimizer (e.g., SAM_Adam)
-                            compound_name = f"{parts[i-2]}_{parts[i-1]}"
-                            known_compound = ['SAM_SGD', 'SAM_Adam', 'Lookahead_SGD', 'Lookahead_Adam',
-                                            'SGD_Momentum']
-                            if compound_name in known_compound:
-                                df['optimizer'] = compound_name
-                                optimizer_found = True
-                                break
-                        if not optimizer_found and i > 0:
-                            # Fallback to single token before seed
-                            df['optimizer'] = parts[i-1]
-                            optimizer_found = True
-                        break
-
-                # Method 2: Fallback to scanning for known optimizer names (case-insensitive)
-                if not optimizer_found:
-                    known_optimizers = ['sgd', 'adam', 'adamw', 'amsgrad', 'sam', 'lookahead',
-                                       'radam', 'lamb', 'adabound', 'rmsprop', 'nesterov']
-                    for part in parts:
-                        part_lower = part.lower()
-                        for opt_name in known_optimizers:
-                            if opt_name in part_lower:
-                                df['optimizer'] = part
-                                optimizer_found = True
-                                break
-                        if optimizer_found:
-                            break
-            # Extract seed
-            if 'seed' not in df.columns:
-                for part in parts:
-                    if 'seed' in part:
-                        df['seed'] = int(part.replace('seed', ''))
-                        break
+            # Parse filename metadata
+            parsed = parse_experiment_filename(csv_file.stem)
+            if 'optimizer' not in df.columns or df['optimizer'].isnull().all():
+                if parsed.get('optimizer'):
+                    df['optimizer'] = parsed.get('optimizer')
+            if 'seed' not in df.columns or df['seed'].isnull().all():
+                if parsed.get('seed') is not None:
+                    df['seed'] = parsed.get('seed')
             dfs.append(df)
         except Exception as e:
-            logging.debug(f"Could not load {csv_file}: {e}")
+            logging.debug(f"Could not load time series {csv_file}: {e}")
 
     if not dfs:
-        return
-
-    combined_df = pd.concat(dfs, ignore_index=True)
+        # Nothing time-series to plot
+        combined_df = pd.DataFrame()
+    else:
+        combined_df = pd.concat(dfs, ignore_index=True)
 
     # Check what columns we have
     has_epoch = 'epoch' in combined_df.columns
@@ -5966,24 +5958,27 @@ def create_experiment_visualizations(experiment_name, results_dir, csv_files):
 
     if has_epoch and has_optimizer and acc_col:
         try:
-            # Detect if values are fractions (0-1) or percentages (0-100)
-            max_val = combined_df[acc_col].max()
-            is_fraction = max_val <= 1.5  # Assume fraction if max <= 1.5
-            scale_factor = 100.0 if is_fraction else 1.0
+            from src.utils.metric_normalization import to_percent_series
+
+            # Convert metric column to percent form robustly
+            combined_df = combined_df.copy()
+            combined_df['acc_pct'] = to_percent_series(combined_df[acc_col])
 
             plt.figure(figsize=(10, 6))
             opt_values = pd.unique(combined_df['optimizer'].dropna()) if 'optimizer' in combined_df.columns else []
             for opt in opt_values:
                 opt_data = combined_df[combined_df['optimizer'] == opt]
                 if 'seed' in opt_data.columns:
-                    grouped = opt_data.groupby('epoch')[acc_col].agg(['mean', 'std'])
-                    plt.plot(arr_to_numpy_float(grouped.index), arr_to_numpy_float(grouped['mean'] * scale_factor), label=opt, linewidth=2)
+                    grouped = opt_data.groupby('epoch')['acc_pct'].agg(['mean', 'std'])
+                    plt.plot(arr_to_numpy_float(grouped.index), arr_to_numpy_float(grouped['mean']), label=opt, linewidth=2)
                     plt.fill_between(arr_to_numpy_float(grouped.index),
-                                   arr_to_numpy_float((grouped['mean'] - grouped['std']) * scale_factor),
-                                   arr_to_numpy_float((grouped['mean'] + grouped['std']) * scale_factor),
+                                   arr_to_numpy_float((grouped['mean'] - grouped['std'])),
+                                   arr_to_numpy_float((grouped['mean'] + grouped['std'])),
                                    alpha=0.2)
                 else:
-                    plt.plot(arr_to_numpy_float(opt_data['epoch']), arr_to_numpy_float(opt_data[acc_col] * scale_factor), label=opt, linewidth=2)
+                    # single run
+                    yvals = arr_to_numpy_float(opt_data['acc_pct'])
+                    plt.plot(arr_to_numpy_float(opt_data['epoch']), yvals, label=opt, linewidth=2)
 
             plt.xlabel('Epoch', fontsize=12)
             y_label = 'Dice Score (%)' if metric_type == 'dice' else 'Test Accuracy (%)'
@@ -5992,6 +5987,7 @@ def create_experiment_visualizations(experiment_name, results_dir, csv_files):
             plt.title(f'{experiment_name} - {title_metric} over Epochs', fontsize=14, fontweight='bold')
             plt.legend()
             plt.grid(True, alpha=0.3)
+            plt.ylim(0, 100)
             plt.tight_layout()
             filename = f'{experiment_name.lower()}_test_dice.png' if metric_type == 'dice' else f'{experiment_name.lower()}_test_accuracy.png'
             plt.savefig(static_dir / filename, dpi=300, bbox_inches='tight')
@@ -6003,33 +5999,53 @@ def create_experiment_visualizations(experiment_name, results_dir, csv_files):
     # 3. Final Performance Comparison (Bar Chart) with automatic scaling
     if has_optimizer and acc_col:
         try:
-            # Detect if values are fractions or percentages
-            max_val = combined_df[acc_col].max()
-            is_fraction = max_val <= 1.5
-            scale_factor = 100.0 if is_fraction else 1.0
+            from src.visualization.plotting_utils import normalize_final_results, safe_add_text
 
-            plt.figure(figsize=(10, 6))
-            # Get final epoch results per optimizer
-            final_results = combined_df.groupby('optimizer')[acc_col].agg(['mean', 'std'])
+            # Try to use summary CSV if present
+            summary_file = None
+            for p in csv_paths:
+                if p.stem.lower() in ('summary', 'final') or 'summary' in p.name.lower():
+                    summary_file = p
+                    break
 
-            x = range(len(final_results))
-            plt.bar(x, final_results['mean'] * scale_factor, yerr=final_results['std'] * scale_factor,
-                   capsize=5, alpha=0.7, edgecolor='black', linewidth=1.5)
-            plt.xticks(x, list(map(str, final_results.index)), rotation=45, ha='right')
-            y_label = 'Final Dice Score (%)' if metric_type == 'dice' else 'Final Test Accuracy (%)'
-            plt.ylabel(y_label, fontsize=12)
-            plt.title(f'{experiment_name} - Final Performance Comparison', fontsize=14, fontweight='bold')
-            plt.grid(axis='y', alpha=0.3)
+            if summary_file is not None:
+                try:
+                    summary_df = pd.read_csv(summary_file)
+                    if 'optimizer' in summary_df.columns and 'mean' in summary_df.columns:
+                        final_results = summary_df.set_index('optimizer')[['mean', 'std']]
+                    else:
+                        # Fall back to grouping by optimizer last epoch
+                        final_results = combined_df.groupby(['optimizer', 'seed']).last().reset_index().groupby('optimizer')[acc_col].agg(['mean', 'std'])
+                except Exception:
+                    final_results = combined_df.groupby(['optimizer', 'seed']).last().reset_index().groupby('optimizer')[acc_col].agg(['mean', 'std'])
+            else:
+                final_results = combined_df.groupby(['optimizer', 'seed']).last().reset_index().groupby('optimizer')[acc_col].agg(['mean', 'std'])
 
-            # Add value labels
-            for i, (mean, std) in enumerate(zip(final_results['mean'], final_results['std'])):
-                plt.text(i, mean * scale_factor, f'{mean*scale_factor:.1f}%\n±{std*scale_factor:.1f}',
-                        ha='center', va='bottom', fontsize=9)
+            # Normalize to percent and clean
+            final_results = normalize_final_results(final_results)
 
-            plt.tight_layout()
-            plt.savefig(static_dir / f'{experiment_name.lower()}_final_comparison.png', dpi=300, bbox_inches='tight')
-            plt.close()
-            print(f"   Created {experiment_name.lower()}_final_comparison.png")
+            if final_results.empty:
+                logging.debug("No finite final results to plot")
+            else:
+                plt.figure(figsize=(10, 6))
+                x = range(len(final_results))
+                plt.bar(x, final_results['mean'], yerr=final_results['std'], capsize=5, alpha=0.7, edgecolor='black', linewidth=1.5)
+                plt.xticks(x, list(map(str, final_results.index)), rotation=45, ha='right')
+                y_label = 'Final Dice Score (%)' if metric_type == 'dice' else 'Final Test Accuracy (%)'
+                plt.ylabel(y_label, fontsize=12)
+                plt.title(f'{experiment_name} - Final Performance Comparison', fontsize=14, fontweight='bold')
+                plt.grid(axis='y', alpha=0.3)
+                plt.ylim(0, 100)
+
+                # Add value labels safely
+                ax = plt.gca()
+                for i, (idx, row) in enumerate(final_results.iterrows()):
+                    safe_add_text(ax, i, row['mean'], f"{row['mean']:.1f}%\n±{row['std']:.1f}", ha='center', va='bottom', fontsize=9)
+
+                plt.tight_layout()
+                plt.savefig(static_dir / f'{experiment_name.lower()}_final_comparison.png', dpi=300, bbox_inches='tight')
+                plt.close()
+                print(f"   Created {experiment_name.lower()}_final_comparison.png")
         except Exception as e:
             logging.debug(f"Could not create comparison plot: {e}")
 
@@ -6039,9 +6055,9 @@ def create_experiment_visualizations(experiment_name, results_dir, csv_files):
             import plotly.graph_objects as go
             from plotly.subplots import make_subplots
 
-            # Create interactive multi-metric plot
+            # Create interactive multi-metric plot (intentionally exclude epoch-wise test_*; use validation metrics instead)
             metric_cols = []
-            for col in ['train_loss', 'test_loss', 'train_acc', 'test_acc', 'test_accuracy']:
+            for col in ['train_loss', 'val_loss', 'train_acc', 'val_acc', 'val_accuracy']:
                 if col in combined_df.columns:
                     metric_cols.append(col)
 
@@ -6065,58 +6081,174 @@ def create_experiment_visualizations(experiment_name, results_dir, csv_files):
                     for opt in opt_values:
                         opt_data = combined_df[combined_df['optimizer'] == opt]
 
+                        # Fallback logic: if plotting a test metric and it is sparse for this optimizer,
+                        # prefer plotting the corresponding validation metric (val_loss/val_accuracy)
+                        plot_metric = metric
+                        val_metric = None
+                        label_suffix = ''
+                        try:
+                            from src.utils.metric_normalization import to_percent_series
+                        except Exception:
+                            to_percent_series = lambda s: s
+
+                        if metric.lower().startswith('test'):
+                            # Choose val metric when test is too sparse
+                            if metric == 'test_loss':
+                                tcnt = opt_data['test_loss'].dropna().shape[0] if 'test_loss' in opt_data.columns else 0
+                                if tcnt < 2 and 'val_loss' in opt_data.columns and opt_data['val_loss'].dropna().shape[0] >= 2:
+                                    val_metric = 'val_loss'
+                            if metric in ('test_acc', 'test_accuracy'):
+                                tcnt = opt_data['test_accuracy'].dropna().shape[0] if 'test_accuracy' in opt_data.columns else 0
+                                if tcnt < 2 and 'val_accuracy' in opt_data.columns and opt_data['val_accuracy'].dropna().shape[0] >= 2:
+                                    val_metric = 'val_accuracy'
+
+                            if val_metric:
+                                plot_metric = val_metric
+                                label_suffix = ' (val plotted)'
+                                if val_metric == 'val_accuracy':
+                                    opt_data = opt_data.copy()
+                                    opt_data['val_accuracy'] = to_percent_series(pd.to_numeric(opt_data['val_accuracy'], errors='coerce'))
+
                         if 'seed' in opt_data.columns:
                             # Plot mean with error bars
                             grouped = opt_data.groupby('epoch')[metric].agg(['mean', 'std'])
 
-                            # Add mean line
-                            fig.add_trace(
-                                go.Scatter(
-                                    x=grouped.index,
-                                    y=grouped['mean'],
-                                    name=opt,
-                                    mode='lines',
-                                    showlegend=(idx == 0),
-                                    legendgroup=opt,
-                                    hovertemplate=f'<b>{opt}</b><br>Epoch: %{{x}}<br>{metric}: %{{y:.4f}}<extra></extra>'
-                                ),
-                                row=row, col=col
-                            )
+                            nonnull = grouped['mean'].dropna().size
+                            if nonnull == 0:
+                                # nothing to plot for this optimizer
+                                continue
 
-                            # Add uncertainty band
-                            fig.add_trace(
-                                go.Scatter(
-                                    x=grouped.index.tolist() + grouped.index.tolist()[::-1],
-                                    y=(grouped['mean'] + grouped['std']).tolist() + (grouped['mean'] - grouped['std']).tolist()[::-1],
-                                    fill='toself',
-                                    fillcolor='rgba(0,0,0,0.1)',
-                                    line=dict(color='rgba(255,255,255,0)'),
-                                    showlegend=False,
-                                    legendgroup=opt,
-                                    hoverinfo='skip'
-                                ),
-                                row=row, col=col
-                            )
+                            is_test_metric = metric.lower().startswith('test') or 'test' in metric.lower()
+
+                            if nonnull == 1:
+                                # Single-point: draw a horizontal dashed line across the full epoch range and add a marker
+                                val = float(grouped['mean'].dropna().iloc[0])
+                                epoch_min = int(combined_df['epoch'].min()) if 'epoch' in combined_df.columns else int(grouped.index.min())
+                                epoch_max = int(combined_df['epoch'].max()) if 'epoch' in combined_df.columns else int(grouped.index.max())
+                                # dashed line for visibility
+                                fig.add_trace(
+                                    go.Scatter(
+                                        x=[epoch_min, epoch_max],
+                                        y=[val, val],
+                                        name=opt,
+                                        mode='lines',
+                                        line=dict(dash='dash', width=2 if is_test_metric else 1),
+                                        showlegend=(idx == 0),
+                                        legendgroup=opt,
+                                        hovertemplate=f'<b>{opt}</b><br>Epoch: %{{x}}<br>{metric}: %{{y:.4f}}<extra></extra>'
+                                    ),
+                                    row=row, col=col
+                                )
+                                # marker at a representative epoch (use epoch_max)
+                                fig.add_trace(
+                                    go.Scatter(
+                                        x=[epoch_max],
+                                        y=[val],
+                                        name=f"{opt} (pt)",
+                                        mode='markers',
+                                        marker=dict(size=8),
+                                        showlegend=False,
+                                        legendgroup=opt,
+                                        hovertemplate=f'<b>{opt}</b><br>Epoch: %{{x}}<br>{metric}: %{{y:.4f}}<extra></extra>'
+                                    ),
+                                    row=row, col=col
+                                )
+                            else:
+                                # Add mean line
+                                fig.add_trace(
+                                    go.Scatter(
+                                        x=grouped.index,
+                                        y=grouped['mean'],
+                                        name=opt,
+                                        mode='lines',
+                                        line=dict(width=2 if is_test_metric else 1),
+                                        showlegend=(idx == 0),
+                                        legendgroup=opt,
+                                        hovertemplate=f'<b>{opt}</b><br>Epoch: %{{x}}<br>{metric}: %{{y:.4f}}<extra></extra>'
+                                    ),
+                                    row=row, col=col
+                                )
+
+                                # Add uncertainty band (only when we have multiple points)
+                                fig.add_trace(
+                                    go.Scatter(
+                                        x=grouped.index.tolist() + grouped.index.tolist()[::-1],
+                                        y=(grouped['mean'] + grouped['std']).tolist() + (grouped['mean'] - grouped['std']).tolist()[::-1],
+                                        fill='toself',
+                                        fillcolor='rgba(0,0,0,0.1)',
+                                        line=dict(color='rgba(255,255,255,0)'),
+                                        showlegend=False,
+                                        legendgroup=opt,
+                                        hoverinfo='skip'
+                                    ),
+                                    row=row, col=col
+                                )
                         else:
-                            # Single run - just plot the line
-                            fig.add_trace(
-                                go.Scatter(
-                                    x=opt_data['epoch'],
-                                    y=opt_data[metric],
-                                    name=opt,
-                                    mode='lines+markers',
-                                    showlegend=(idx == 0),
-                                    legendgroup=opt,
-                                    hovertemplate=f'<b>{opt}</b><br>Epoch: %{{x}}<br>{metric}: %{{y:.4f}}<extra></extra>'
-                                ),
-                                row=row, col=col
-                            )
+                            # Single run - plot line or marker; if only a single point, draw a horizontal dashed line for visibility
+                            nonnull = opt_data[metric].dropna().shape[0]
+                            if nonnull == 0:
+                                continue
+                            if nonnull == 1:
+                                val = float(opt_data[metric].dropna().iloc[-1])
+                                epoch_min = int(combined_df['epoch'].min()) if 'epoch' in combined_df.columns else int(opt_data['epoch'].min())
+                                epoch_max = int(combined_df['epoch'].max()) if 'epoch' in combined_df.columns else int(opt_data['epoch'].max())
+                                is_test_metric = metric.lower().startswith('test') or 'test' in metric.lower()
+                                fig.add_trace(
+                                    go.Scatter(
+                                        x=[epoch_min, epoch_max],
+                                        y=[val, val],
+                                        name=opt,
+                                        mode='lines',
+                                        line=dict(dash='dash', width=2 if is_test_metric else 1),
+                                        showlegend=(idx == 0),
+                                        legendgroup=opt,
+                                        hovertemplate=f'<b>{opt}</b><br>Epoch: %{{x}}<br>{metric}: %{{y:.4f}}<extra></extra>'
+                                    ),
+                                    row=row, col=col
+                                )
+                                # Add marker so single points are visible
+                                fig.add_trace(
+                                    go.Scatter(
+                                        x=[epoch_max],
+                                        y=[val],
+                                        name=f"{opt} (pt)",
+                                        mode='markers',
+                                        marker=dict(size=8),
+                                        showlegend=False,
+                                        legendgroup=opt,
+                                        hovertemplate=f'<b>{opt}</b><br>Epoch: %{{x}}<br>{metric}: %{{y:.4f}}<extra></extra>'
+                                    ),
+                                    row=row, col=col
+                                )
+                            else:
+                                fig.add_trace(
+                                    go.Scatter(
+                                        x=opt_data['epoch'],
+                                        y=opt_data[metric],
+                                        name=opt,
+                                        mode='lines+markers',
+                                        line=dict(width=2 if (metric.lower().startswith('test') or 'test' in metric.lower()) else 1),
+                                        marker=dict(size=6),
+                                        showlegend=(idx == 0),
+                                        legendgroup=opt,
+                                        hovertemplate=f'<b>{opt}</b><br>Epoch: %{{x}}<br>{metric}: %{{y:.4f}}<extra></extra>'
+                                    ),
+                                    row=row, col=col
+                                )
 
                 fig.update_layout(
                     title_text=f"{experiment_name} - Interactive Optimizer Comparison",
                     height=300 * rows,
                     hovermode='x unified',
                     template='plotly_white'
+                )
+
+                # Add a brief annotation explaining fallback behavior when test metrics are sparse
+                fig.add_annotation(
+                    text="Note: when per-epoch 'test_*' is missing or sparse, we plot 'val_*' (validation) instead for visibility.",
+                    x=0.99, xref='paper', xanchor='right',
+                    y=1.02, yref='paper', yanchor='bottom',
+                    showarrow=False, font=dict(size=10, color='gray')
                 )
 
                 output_path = interactive_dir / f"{experiment_name.lower()}_interactive_comparison.html"
@@ -6157,7 +6289,41 @@ def generate_interactive_visualizations(results_dir, plots_dir):
         for csv_file in csv_files:
             try:
                 df = pd.read_csv(csv_file)
-                # Extract optimizer from filename
+                # Normalize metric column names and apply fallbacks so interactive plots reliably show test metrics
+                try:
+                    from src.utils.metric_normalization import normalize_dataframe_columns, to_percent_series
+                    # Normalize common aliases (test_acc -> test_accuracy, val_acc -> val_accuracy, etc.)
+                    df = normalize_dataframe_columns(df, inplace=False)
+
+                    # If test columns are missing, try to populate from val_* columns (many CSVs use val_* instead)
+                    if 'test_loss' not in df.columns and 'val_loss' in df.columns:
+                        df['test_loss'] = df['val_loss']
+
+                    # If test_loss exists but contains only NaNs, fill from val_loss when available
+                    if 'test_loss' in df.columns and ('val_loss' in df.columns) and df['test_loss'].dropna().empty:
+                        df['test_loss'] = df['val_loss']
+
+                    # Populate test_accuracy from val_accuracy/val_acc when missing
+                    if 'test_accuracy' not in df.columns:
+                        if 'val_accuracy' in df.columns:
+                            df['test_accuracy'] = df['val_accuracy']
+                        elif 'val_acc' in df.columns:
+                            df['test_accuracy'] = df['val_acc']
+
+                    # If test_accuracy exists but empty, try to fill from val_* alternatives
+                    if 'test_accuracy' in df.columns and df['test_accuracy'].dropna().empty:
+                        if 'val_accuracy' in df.columns:
+                            df['test_accuracy'] = df['val_accuracy']
+                        elif 'val_acc' in df.columns:
+                            df['test_accuracy'] = df['val_acc']
+
+                    # Ensure test_accuracy is in percent units (vectorized and robust)
+                    if 'test_accuracy' in df.columns:
+                        df['test_accuracy'] = to_percent_series(pd.to_numeric(df['test_accuracy'], errors='coerce'))
+                except Exception as e_metric:
+                    logging.debug("Could not normalize metrics for %s: %s", csv_file, e_metric, exc_info=True)
+
+                # Extract optimizer from filename if missing
                 stem = csv_file.stem
                 if 'optimizer' not in df.columns:
                     # Try to extract from filename
