@@ -206,14 +206,16 @@ class TestConfigStructure:
             assert 'loss_window' in convergence
 
     def test_seed_specified(self, config_dir):
-        """Test that random seed is specified for reproducibility."""
+        """Test that random seeds are specified for reproducibility and statistical validity."""
         for config_file in ['nn_tuning.json', 'cifar10_tuning.json']:
             config = load_config(config_dir / config_file)
 
-            assert 'seed' in config, \
-                f"{config_file}: Missing 'seed' for reproducibility"
-            assert isinstance(config['seed'], int), \
-                f"{config_file}: Seed must be an integer"
+            assert 'seeds' in config, \
+                f"{config_file}: Missing 'seeds' for reproducibility and statistical validity"
+            assert isinstance(config['seeds'], list), \
+                f"{config_file}: 'seeds' must be a list of integers"
+            assert len(config['seeds']) >= 3, \
+                f"{config_file}: Need at least 3 seeds for multi-seed experiments (found {len(config['seeds'])})"
 
     def test_batch_size_reasonable(self, config_dir):
         """Test that batch sizes are reasonable."""

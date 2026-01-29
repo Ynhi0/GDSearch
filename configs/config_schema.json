@@ -10,9 +10,15 @@
     "model": {
       "type": "string"
     },
+    "seeds": {
+      "type": "array",
+      "items": {"type": "integer", "minimum": 0},
+      "minItems": 1,
+      "description": "Preferred: list of integer seeds for multi-seed experiments"
+    },
     "seed": {
-      "type": "integer",
-      "minimum": 0
+      "type": ["integer", "null"],
+      "description": "Deprecated: use `seeds` (array of integers). Will be migrated automatically by ExperimentConfig.from_dict when loading configs."
     },
     "batch_size": {
       "type": "integer",

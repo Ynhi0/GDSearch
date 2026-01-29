@@ -253,6 +253,39 @@ def aggregate_metric_across_seeds(
     return values
 
 
+def to_percent(value: object) -> float:
+    """Convert numeric-like input into a percentage float.
+
+    Handles:
+    - fractions in [0, 1.5] (e.g., 0.78 -> 78.0)
+    - numeric percentages (e.g., 78.0 -> 78.0)
+    - string percentages (e.g., '92.8%')
+    - large values (e.g., 9280 -> 92.8 by repeated division by 100)
+
+    Returns float('nan') for unparseable inputs.
+    """
+    try:
+        if isinstance(value, str) and value.strip().endswith('%'):
+            s = value.strip().rstrip('%').strip()
+            vv = float(s)
+        else:
+            vv = float(value)
+    except Exception:
+        return float('nan')
+
+    if vv <= 1.5:
+        vv = vv * 100.0
+    while vv > 200:
+        vv = vv / 100.0
+    return vv
+
+
+def to_percent_series(series: pd.Series) -> pd.Series:
+    """Vectorized conversion of a pandas Series to percentage floats."""
+    # Preserve index and coerce to float; non-convertible entries become NaN
+    return series.map(to_percent).astype(float)
+
+
 if __name__ == '__main__':
     # Self-test (np imported only for test)
     import numpy as _np_test

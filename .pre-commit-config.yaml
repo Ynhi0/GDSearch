@@ -18,7 +18,12 @@ repos:
         entry: python scripts/hooks/check_seeding.py
         language: python
         files: (src/experiments/|src/analysis/).*\.py$
-  
+
+      - id: check-config-seeds
+        name: Check for top-level 'seed' in config files (prefer 'seeds')
+        entry: python scripts/hooks/check_config_seeds.py
+        language: python
+        files: configs/.*\.json$  
   # Code quality
   - repo: https://github.com/psf/black
     rev: 24.1.1

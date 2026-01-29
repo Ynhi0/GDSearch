@@ -1,7 +1,7 @@
 {
   "dataset": "CIFAR10",
   "model": "ConvNet",
-  "seed": 1,
+  "seeds": [42, 123, 456, 789, 1011],
   "batch_size": 128,
   "sweeps": [
     {

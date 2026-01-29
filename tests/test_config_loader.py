@@ -6,6 +6,12 @@ print("="*80)
 print("CONFIG LOADER TESTS")
 print("="*80)
 
+# Ensure loader searches the repo-local configs directory
+from pathlib import Path
+from src.utils.config_loader import get_config_loader
+repo_configs = str(Path(__file__).resolve().parent.parent / "configs")
+get_config_loader(repo_configs)  # set global loader to repo configs dir
+
 # Test 1: Load Adam config
 print("\n[TEST 1] Load Adam optimizer config for ResNet CIFAR-10")
 adam_cfg = load_optimizer_config('benchmark_hyperparameters', 'resnet_cifar10', 'Adam')
