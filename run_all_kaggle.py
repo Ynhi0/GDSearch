@@ -9448,6 +9448,12 @@ Examples:
     profiler = PerformanceProfiler() if args.profile else None
     tracker = None if args.no_mlflow else (ExperimentTracker() if HAS_MLFLOW else None)
 
+    # If the tracker object exists but failed to enable (e.g., mlflow DB/schema errors),
+    # convert it to `None` so downstream code does not rely on a partially-initialized tracker.
+    if tracker is not None and not getattr(tracker, "enabled", False):
+        logging.warning("ExperimentTracker created but not enabled (MLflow initialization failed). Disabling tracker for this run.")
+        tracker = None
+
     # Checkpoint manager ALWAYS initialized (enabled by default)
     # This ensures model weights are saved for post-hoc loss landscape visualization
     # and reproducibility. Checkpoints include model, optimizer, scheduler, RNG states.
@@ -9514,7 +9520,16 @@ Examples:
     print(f"  Adaptive Batch Sizing: {'enabled' if ADAPTIVE_BATCH_ENABLED else 'disabled'}")
     print(f"  Experiments: {', '.join(selected_experiments)}")
     print(f"  Results dir: {results_dir}")
-    print(f"  MLflow: {'disabled' if args.no_mlflow else 'enabled' if HAS_MLFLOW else 'unavailable'}")
+    if args.no_mlflow:
+        mlflow_status = 'disabled'
+    elif tracker is not None:
+        mlflow_status = 'enabled'
+    elif HAS_MLFLOW:
+        # mlflow package present but tracker failed to initialize
+        mlflow_status = 'failed'
+    else:
+        mlflow_status = 'unavailable'
+    print(f"  MLflow: {mlflow_status}")
     print(f"  Profiling: {'enabled' if args.profile else 'disabled'}")
 
     if args.resume:
@@ -10729,7 +10744,15 @@ Examples:
     print(f"  Interactive Plots: {'ENABLED' if HAS_INTERACTIVE else 'DISABLED (install plotly)'}")
     print(f"  Loss Landscapes: {'ENABLED' if HAS_LANDSCAPE else 'DISABLED'}")
     print(f"  Statistical Analysis: {'ENABLED' if HAS_STATS else 'DISABLED'}")
-    print(f"  MLflow Tracking: {'ENABLED' if HAS_MLFLOW and not args.no_mlflow else 'DISABLED'}")
+    if args.no_mlflow:
+        mlflow_tracking = 'DISABLED'
+    elif tracker is not None:
+        mlflow_tracking = 'ENABLED'
+    elif HAS_MLFLOW:
+        mlflow_tracking = 'FAILED'
+    else:
+        mlflow_tracking = 'UNAVAILABLE'
+    print(f"  MLflow Tracking: {mlflow_tracking}")
     print(f"  Theory-Practice Validation: {'ENABLED' if args.with_theory_analysis else 'DISABLED (use --with-theory-analysis)'}")
     print("="*80)
 

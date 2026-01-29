@@ -35,18 +35,29 @@ class ExperimentTracker:
         self.tracking_uri = tracking_uri
         self.current_run = None
         self.run_stack = []  # type: list
+        self.enabled = False
 
         # Early exit if MLflow not available -- avoids optional-member access
         if not (HAS_MLFLOW and mlflow is not None):
+            logging.warning("mlflow not available. Experiment tracking disabled.")
             return
 
-        if tracking_uri:
-            mlflow.set_tracking_uri(tracking_uri)
-        mlflow.set_experiment(experiment_name)
+        # Try to configure MLflow (tracking URI + experiment). If this fails
+        # (for example due to an out-of-date DB schema), we log a warning and
+        # proceed with MLflow disabled so experiments don't crash.
+        try:
+            if tracking_uri:
+                mlflow.set_tracking_uri(tracking_uri)
+            mlflow.set_experiment(experiment_name)
+            self.enabled = True
+        except Exception as e:
+            logging.warning("MLflow initialization failed (%s). Experiment tracking disabled.", e)
+            # Do not raise; experiments should continue even if MLflow is misconfigured
+            self.enabled = False
 
     def start_run(self, run_name: Optional[str] = None) -> Optional[str]:
         """Start a new MLflow run (supports nested runs)."""
-        if not (HAS_MLFLOW and mlflow is not None):
+        if not self.enabled:
             return None
 
         if self.current_run is not None:
@@ -65,7 +76,7 @@ class ExperimentTracker:
 
     def end_run(self):
         """End the current MLflow run."""
-        if not (HAS_MLFLOW and mlflow is not None and self.current_run):
+        if not (self.enabled and self.current_run):
             return
 
         try:
@@ -80,7 +91,7 @@ class ExperimentTracker:
 
     def log_params(self, params: Dict[str, Any]):
         """Log parameters, converting non-serializable types to strings."""
-        if not (HAS_MLFLOW and mlflow is not None and self.current_run):
+        if not (self.enabled and self.current_run):
             return
 
         for k, v in params.items():
@@ -123,7 +134,7 @@ class ExperimentTracker:
 
     def log_metrics(self, metrics: Dict[str, float], step: Optional[int] = None):
         """Log metrics."""
-        if not (HAS_MLFLOW and mlflow is not None and self.current_run):
+        if not (self.enabled and self.current_run):
             return
 
         for k, v in metrics.items():
@@ -134,7 +145,7 @@ class ExperimentTracker:
 
     def log_model(self, model: torch.nn.Module, model_name: str = "model"):
         """Log model via mlflow.pytorch when available."""
-        if not (HAS_MLFLOW and mlflow is not None and self.current_run):
+        if not (self.enabled and self.current_run):
             return
 
         try:
@@ -147,7 +158,7 @@ class ExperimentTracker:
 
     def log_artifact(self, local_path: str, artifact_path: Optional[str] = None):
         """Log artifact file."""
-        if not (HAS_MLFLOW and mlflow is not None and self.current_run):
+        if not (self.enabled and self.current_run):
             return
 
         try:
