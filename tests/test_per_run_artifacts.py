@@ -32,6 +32,15 @@ def test_save_run_artifacts_creates_files(tmp_path):
     assert meta['optimizer'] == 'SGD'
     assert meta['seed'] == 999
     assert 'system' in meta
+    # New: run_signature should be included for robust resume matching
+    assert 'run_signature' in meta
+
+    # Summary file should contain an entry with this signature
+    summary = os.path.join(str(base), 'summary_quantitative.csv')
+    assert os.path.exists(summary)
+    with open(summary, 'r', encoding='utf-8') as f:
+        s = f.read()
+    assert meta['run_signature'] in s
 
 
 def test_save_run_artifacts_handles_empty_history(tmp_path):
@@ -52,3 +61,5 @@ def test_save_run_artifacts_handles_empty_history(tmp_path):
     assert meta['completed'] is False
     assert meta.get('tainted', False) is True
     assert meta['rows'] == 0
+    # Signature still present even for empty/tainted runs
+    assert 'run_signature' in meta

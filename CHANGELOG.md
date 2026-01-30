@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+- Add `resume_behavior` option and robust resume checks: implement `src/core/resume_utils.py` for deterministic run signatures and results-aware resume decisions. Adds CLI flag `--resume-behavior` with choices `error_if_no_checkpoint`, `restart_if_no_checkpoint`, `skip_if_results_exist`. (PR: feature/bdnsca-ci)
+
+
 ### Fixed
 - **DiskSpaceGuardian**: Corrected checkpoint cleanup logic to only delete checkpoints when the number of checkpoints exceeds `max_checkpoints`. Added tests to verify behavior. (src/core/training_enhancements.py, tests/test_disk_space_guardian.py)
 - **Retry utilities**: Narrowed default caught exceptions in `retry_with_backoff` and `retry_operation` to `NETWORK_EXCEPTIONS` (no longer catches all `Exception`, so signals like `KeyboardInterrupt` are not swallowed). Added tests for retry behavior. (src/core/retry.py, tests/test_retry.py)

@@ -212,6 +212,7 @@ import torchvision
 import torchvision.transforms as transforms
 import numpy as np
 import pandas as pd
+from src.utils.csv_utils import safe_read_csv
 import matplotlib.pyplot as plt
 # Path already imported above
 import random
@@ -735,6 +736,7 @@ class PerformanceProfiler:
 
 # Use centralized ExperimentTracker implementation from src to avoid duplication and typing drift
 from src.core.experiment_tracker import ExperimentTracker
+from src.core.resume_utils import compute_run_signature, decide_resume_action, results_exist
 
 class RobustCheckpointManager:
     """Robust checkpointing with backup, validation, and disk space awareness"""
@@ -1277,7 +1279,10 @@ def is_experiment_completed(results_dir: Union[str, Path], dataset: str, model_n
         # Fall back to CSV presence check
         if csv_path.exists():
             try:
-                df = pd.read_csv(csv_path)
+                df = safe_read_csv(csv_path)
+                if df is None:
+                    logging.warning("Result CSV '%s' is empty or unreadable. Will re-run.", csv_path.name)
+                    return False
                 # Accept even a single-row history as completed (handles quick tests / ultra-quick mode)
                 if len(df) >= 1:
                     logging.info("Found existing result CSV: %s", csv_path.name)
@@ -1523,6 +1528,9 @@ def save_run_artifacts(base_results_dir: Union[str, Path], dataset: str, model_n
 
             logging.info(f"Saved model weights: {model_path}")
 
+        # Compute deterministic run signature and include in metadata
+        run_sig = compute_run_signature({'dataset': dataset, 'model': model_name, 'optimizer': optimizer_name, 'seed': seed, 'params': params})
+
         # Metadata with provenance
         meta = {
             'timestamp': datetime.now().isoformat(),
@@ -1538,7 +1546,8 @@ def save_run_artifacts(base_results_dir: Union[str, Path], dataset: str, model_n
             'provenance': get_provenance_info(),
             # Mark completed False when tainted/empty history
             'completed': not bool(tainted_flag),
-            'tainted': bool(tainted_flag)
+            'tainted': bool(tainted_flag),
+            'run_signature': run_sig
         }
         if device is not None:
             try:
@@ -1558,6 +1567,55 @@ def save_run_artifacts(base_results_dir: Union[str, Path], dataset: str, model_n
                     exp_tracker.log_artifact(str(model_path), artifact_path=f"{dataset}/models")
             except Exception as e:
                 logging.debug("Tracker artifact logging failed for %s: %s", file_stem, e, exc_info=True)
+
+        # Append a condensed summary row to top-level summary_quantitative.csv for quick lookups
+        try:
+            # Determine top-level results root (prefer ancestor named 'results')
+            results_root = None
+            for p in [results_base] + list(results_base.parents):
+                if p.name == 'results':
+                    results_root = p
+                    break
+            if results_root is None:
+                results_root = results_base.parent
+
+            summary_path = results_root / 'summary_quantitative.csv'
+            summary_row = {
+                'dataset': dataset,
+                'model': model_name,
+                'optimizer': optimizer_name,
+                'seed': seed,
+                'final_test_acc': None,
+                'final_loss': None,
+                'run_signature': run_sig,
+                'completed': meta.get('completed', False)
+            }
+            # Try extract final metrics if available
+            if isinstance(history, list) and len(history) > 0:
+                last = history[-1]
+                if 'test_accuracy' in last:
+                    summary_row['final_test_acc'] = last.get('test_accuracy')
+                elif 'test_acc' in last:
+                    summary_row['final_test_acc'] = last.get('test_acc')
+                if 'test_loss' in last:
+                    summary_row['final_loss'] = last.get('test_loss')
+                elif 'val_loss' in last:
+                    summary_row['final_loss'] = last.get('val_loss')
+
+            import csv
+            # If file exists, append; otherwise create with header
+            if summary_path.exists():
+                with open(summary_path, 'a', newline='', encoding='utf-8') as sf:
+                    writer = csv.DictWriter(sf, fieldnames=list(summary_row.keys()))
+                    writer.writerow(summary_row)
+            else:
+                summary_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(summary_path, 'w', newline='', encoding='utf-8') as sf:
+                    writer = csv.DictWriter(sf, fieldnames=list(summary_row.keys()))
+                    writer.writeheader()
+                    writer.writerow(summary_row)
+        except Exception as e:
+            logging.debug("Could not append to summary_quantitative.csv: %s", e)
 
         logging.info(f"Saved run artifacts: {csv_path} and {meta_path}")
         return str(csv_path), str(meta_path)
@@ -2834,7 +2892,7 @@ def get_default_hyperparameters(optimizer_name: str, experiment_type: str = "2d_
 # EXPERIMENT FUNCTIONS
 # ==============================================================================
 
-def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False, grad_noise_every=10, grad_noise_samples=100):
+def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False, resume_behavior: str = None, grad_noise_every=10, grad_noise_samples=100):
     """Run MNIST benchmark with multiple optimizers - Enhanced with profiling and tracking
 
     Args:
@@ -3175,42 +3233,61 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                         history = []
                         checkpoint = None  # Initialize to prevent NameError if checkpoint_manager is None
 
+                        # Compute run signature for matching completed results if needed
+                        run_sig = compute_run_signature({'dataset': 'MNIST', 'model': 'SimpleMLP', 'optimizer': opt_name, 'seed': seed, 'params': tuned_params.get(opt_name, {})})
+
+                        # Try to load checkpoint if checkpoint manager available
                         if checkpoint_manager:
                             checkpoint = checkpoint_manager.load_checkpoint(ckpt_file, f"MNIST_{opt_name}_seed{seed}")
-                            if checkpoint:
-                                # Check if experiment already completed
-                                if checkpoint.get('metadata', {}).get('completed', False):
-                                    logging.info(f"[WARN] Experiment {opt_name} seed {seed} already completed at epoch {checkpoint.get('epoch', 0)}")
-                                    logging.info("  Skipping to avoid duplicate work")
-                                    continue  # Skip this run
 
-                                # Validate optimizer compatibility
-                                if checkpoint_manager.validate_optimizer_compatibility(checkpoint, opt_name):
-                                    model.load_state_dict(checkpoint['model'], strict=False)
-                                    try:
-                                        # Use unified optimizer.load_state_dict for all wrappers
-                                        # SAMWrapper and other wrappers implement their own state dict handling.
-                                        optimizer.load_state_dict(checkpoint['optimizer'])
+                        # Decide what to do when resuming
+                        if resume and checkpoint is None:
+                            try:
+                                action = decide_resume_action(checkpoint, Path(results_dir), run_sig, resume_behavior or 'skip_if_results_exist')
+                            except RuntimeError as e:
+                                logging.error("Resume error for %s seed %s: %s", opt_name, seed, e)
+                                raise
 
-                                        start_epoch = int(checkpoint.get('epoch', 0)) + 1
-                                        history = checkpoint.get('history', [])
+                            if action == 'skip':
+                                logging.info(f"Skipping {opt_name} seed {seed} (results exist for signature)")
+                                continue
+                            elif action == 'restart':
+                                logging.info(f"No checkpoint found for {opt_name} seed {seed}. Restarting from scratch per resume_behavior=%s", resume_behavior)
 
-                                        # Scheduler will be created after this block, so we defer restoration
-                                        # AMP scaler and EMA not used in MNIST baseline
-                                        # (Would restore here if mixed precision training was enabled)
+                        if checkpoint:
+                            # Check if experiment already completed at checkpoint
+                            if checkpoint.get('metadata', {}).get('completed', False):
+                                logging.info(f"[WARN] Experiment {opt_name} seed {seed} already completed at epoch {checkpoint.get('epoch', 0)}")
+                                logging.info("  Skipping to avoid duplicate work")
+                                continue  # Skip this run
 
-                                        # Restore RNG states for reproducibility
-                                        checkpoint_manager.restore_rng_states(checkpoint)
+                            # Validate optimizer compatibility
+                            if checkpoint_manager.validate_optimizer_compatibility(checkpoint, opt_name):
+                                model.load_state_dict(checkpoint['model'], strict=False)
+                                try:
+                                    # Use unified optimizer.load_state_dict for all wrappers
+                                    # SAMWrapper and other wrappers implement their own state dict handling.
+                                    optimizer.load_state_dict(checkpoint['optimizer'])
 
-                                        logging.info(f"Resuming {opt_name} from epoch {start_epoch}")
-                                    except Exception as e:
-                                        logging.warning(f"Failed to load optimizer state for {opt_name}: {e}. Starting fresh.")
-                                        start_epoch = 1
-                                        history = []
-                                else:
-                                    logging.warning(f"Optimizer mismatch for {opt_name}, starting from scratch")
+                                    start_epoch = int(checkpoint.get('epoch', 0)) + 1
+                                    history = checkpoint.get('history', [])
+
+                                    # Scheduler will be created after this block, so we defer restoration
+                                    # AMP scaler and EMA not used in MNIST baseline
+                                    # (Would restore here if mixed precision training was enabled)
+
+                                    # Restore RNG states for reproducibility
+                                    checkpoint_manager.restore_rng_states(checkpoint)
+
+                                    logging.info(f"Resuming {opt_name} from epoch {start_epoch}")
+                                except Exception as e:
+                                    logging.warning(f"Failed to load optimizer state for {opt_name}: {e}. Starting fresh.")
                                     start_epoch = 1
                                     history = []
+                            else:
+                                logging.warning(f"Optimizer mismatch for {opt_name}, starting from scratch")
+                                start_epoch = 1
+                                history = []
 
                         # Import LR scheduler
                         from src.core.lr_schedulers import CosineAnnealingLR
@@ -3489,7 +3566,8 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                                             'current_lr': optimizer.param_groups[0]['lr'],
                                             'best_val_acc': best_val_acc,
                                             'patience_counter': patience_counter,
-                                            'completed': epoch >= epochs
+                                            'completed': epoch >= epochs,
+                                            'run_signature': run_sig
                                         }
                                     }
                                     try:
@@ -3664,7 +3742,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
         logging.error(f"Error during MNIST experiment: {e}")
         raise
 
-def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
+def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False, resume_behavior: str = None):
     if seeds is None:
         seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
     """Run CIFAR-10 ResNet-18 experiment
@@ -5658,7 +5736,10 @@ def run_statistical_analysis(results_dir="results", plots_dir="plots"):
             dfs = []
             for f in csv_files:
                 try:
-                    df = pd.read_csv(f)
+                    df = safe_read_csv(f)
+                    if df is None:
+                        logging.warning(f"Skipping empty/unreadable CSV: {f}")
+                        continue
                     dfs.append(df)
                 except Exception as e:
                     logging.warning(f"Could not load {f}: {e}")
@@ -5823,7 +5904,10 @@ def run_convergence_analysis_on_results(results_dir):
 
     for csv_file in all_csvs:
         try:
-            df = pd.read_csv(csv_file)
+            df = safe_read_csv(csv_file)
+            if df is None:
+                logging.debug("Skipping empty/unreadable CSV in convergence analysis: %s", csv_file)
+                continue
 
             # Skip if no loss column
             if 'test_loss' not in df.columns and 'train_loss' not in df.columns:
@@ -6051,8 +6135,8 @@ def create_experiment_visualizations(experiment_name, results_dir, csv_files):
 
             if summary_file is not None:
                 try:
-                    summary_df = pd.read_csv(summary_file)
-                    if 'optimizer' in summary_df.columns and 'mean' in summary_df.columns:
+                    summary_df = safe_read_csv(summary_file)
+                    if summary_df is not None and 'optimizer' in summary_df.columns and 'mean' in summary_df.columns:
                         final_results = summary_df.set_index('optimizer')[['mean', 'std']]
                     else:
                         # Fall back to grouping by optimizer last epoch
@@ -9178,6 +9262,8 @@ Examples:
                         help='Optimize for Kaggle T4 GPU (larger batches, mixed precision, optimized workers)')
     parser.add_argument('--resume', action='store_true',
                         help='Resume from partial results - skip already completed experiments (checks for existing CSV files)')
+    parser.add_argument('--resume-behavior', type=str, choices=['error_if_no_checkpoint','restart_if_no_checkpoint','skip_if_results_exist'], default=None,
+                        help="Behaviour when --resume is used and no checkpoint is found. Defaults to 'skip_if_results_exist' when --resume is set, otherwise 'restart_if_no_checkpoint'.")
     parser.add_argument('--auto-tune', action='store_true',
                         help='Automatically find optimal learning rate and batch size before training')
     parser.add_argument('--auto-lr', action='store_true',
@@ -9226,6 +9312,11 @@ Examples:
                         help='STRICT MODE: Require real MedMNIST datasets for medical experiments (fail if unavailable, no synthetic fallback)')
 
     args = parser.parse_args()
+
+    # Resolve default resume behavior: if user didn't explicitly set it, choose a safe default
+    if getattr(args, 'resume_behavior', None) is None:
+        args.resume_behavior = 'skip_if_results_exist' if args.resume else 'restart_if_no_checkpoint'
+        print(f"Using resume behavior: {args.resume_behavior}")
 
     # Load experiment configuration from JSON if provided
     # This ensures that --config CLI argument is actually used and config authority is enforced
@@ -9735,6 +9826,7 @@ Examples:
                 tracker=tracker,
                 checkpoint_manager=checkpoint_manager,
                 resume=args.resume,
+                resume_behavior=args.resume_behavior,
                 grad_noise_every=args.grad_noise_every,
                 grad_noise_samples=getattr(args, 'grad_noise_samples', 100)
             )
@@ -9751,7 +9843,8 @@ Examples:
                 profiler=profiler,
                 tracker=tracker,
                 checkpoint_manager=checkpoint_manager,
-                resume=args.resume
+                resume=args.resume,
+                resume_behavior=args.resume_behavior
             )
 
     if 'nlp' in selected_experiments:

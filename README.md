@@ -340,6 +340,12 @@ python run_all_kaggle.py --kaggle-t4 --quick
 # Resume from partial results
 python run_all_kaggle.py --resume
 
+Resume behavior note:
+
+- Use `--resume-behavior` to control how the runner behaves when a checkpoint is not available.
+  Choices: `error_if_no_checkpoint`, `restart_if_no_checkpoint`, `skip_if_results_exist`.
+  Default when `--resume` is used: **skip_if_results_exist** (safe, avoids re-running completed work).
+
 # Enable advanced features
 python run_all_kaggle.py --use-amp --use-ema --label-smoothing 0.1
 

@@ -24,6 +24,12 @@ class ExperimentConfig:
     ultra_quick_mode: bool = False
     quick_mode: bool = False
     resume: bool = False
+    # Resume behavior controls how the runner behaves when --resume is requested but no checkpoint is found.
+    # Valid choices:
+    #  - 'error_if_no_checkpoint': raise an error when a checkpoint is missing
+    #  - 'restart_if_no_checkpoint': proceed as a fresh run if no checkpoint exists
+    #  - 'skip_if_results_exist': consult summary/results and skip if completed
+    resume_behavior: str = None
 
     # Seeds for reproducibility
     seeds: List[int] = field(default_factory=lambda: [42, 123, 456, 789, 1011])
@@ -248,6 +254,13 @@ def get_config_from_args(args) -> ExperimentConfig:
 
     if hasattr(args, 'resume'):
         overrides['resume'] = args.resume
+
+    # Resolve resume behavior default: if not explicitly provided use 'skip_if_results_exist' when resume is used,
+    # otherwise default to 'restart_if_no_checkpoint'. This mirrors CLI behavior.
+    if hasattr(args, 'resume_behavior') and getattr(args, 'resume_behavior') is not None:
+        overrides['resume_behavior'] = args.resume_behavior
+    else:
+        overrides['resume_behavior'] = 'skip_if_results_exist' if getattr(args, 'resume', False) else 'restart_if_no_checkpoint'
 
     if hasattr(args, 'seeds'):
         overrides['seeds'] = args.seeds
