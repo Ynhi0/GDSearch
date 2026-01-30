@@ -3,11 +3,23 @@ Robust checkpoint management with backup, validation, and disk space awareness.
 
 This module provides the RobustCheckpointManager class for production-grade
 checkpoint handling with atomic writes, rollback, and integrity validation.
+
+Locking protocol (implemented in _create_backup):
+- Locks are implemented via lock files created atomically with open(..., 'x').
+- Each locker writes a unique token (``pid:uuid4``) into the lock file; only
+  the creator that holds the matching token may remove the lock.
+- If a lock file exists and is younger than ``stale_lock_seconds`` we wait up to
+  ``backup_lock_timeout`` seconds for it to be released. If the lock is older
+  than ``stale_lock_seconds`` it is considered stale and may be removed
+  (best-effort) to prevent deadlocks from crashed processes.
+- This design avoids accidental unlocking by other processes while allowing
+  safe stale-lock recovery when necessary.
 """
 import os
 import time
 import random
 import logging
+import uuid
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -52,7 +64,7 @@ class RobustCheckpointManager:
     - Disk space monitoring
     """
 
-    def __init__(self, base_dir: str, max_backups: int = 3, min_free_gb: float = 1.0, strict: bool = True):
+    def __init__(self, base_dir: str, max_backups: int = 3, min_free_gb: float = 1.0, strict: bool = True, backup_lock_timeout: int = 30, stale_lock_seconds: int = 3600):
         """
         Initialize checkpoint manager.
 
@@ -61,11 +73,15 @@ class RobustCheckpointManager:
             max_backups: Maximum number of backup files to keep
             min_free_gb: Minimum free disk space in GB
             strict: If True, raise on critical save/load/validation failures. If False, return False and log warnings (backward compatibility).
+            backup_lock_timeout: Time in seconds to wait for an existing lock before timing out.
+            stale_lock_seconds: Age in seconds after which an existing lock is considered stale and may be removed.
         """
         self.base_dir = Path(base_dir)
         self.max_backups = max_backups
         self.min_free_gb = min_free_gb
         self.strict = bool(strict)
+        self.backup_lock_timeout = int(backup_lock_timeout)
+        self.stale_lock_seconds = int(stale_lock_seconds)
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
         # Initialize disk space guardian if available
@@ -302,48 +318,75 @@ class RobustCheckpointManager:
             logging.warning("Failed to restore RNG states: %s", e)
 
     def _create_backup(self, ckpt_path: Path, _experiment_name: Optional[str]):
-        """Create rolling backup - only if checkpoint exists."""
+        """Create rolling backup - only if checkpoint exists.
+
+        Locking protocol summary:
+        - Attempt to create a lock file atomically using open(..., 'x') and write
+          a unique token: "<pid>:<uuid>".
+        - Wait up to ``self.backup_lock_timeout`` seconds for acquisition.
+        - If a lock file exists and is older than ``self.stale_lock_seconds``
+          it is considered stale and may be removed to allow progress.
+        - On release, verify that the lock file contains the same token before
+          unlinking to prevent accidental unlock by other processes.
+        """
         if not ckpt_path.exists():
             return
 
-        # Create lock file for atomic backup operations
         lock_file = self.base_dir / f"{ckpt_path.name}.backup.lock"
 
         try:
-            # Attempt to remove stale locks older than 1 hour
+            # Remove stale lock if present and older than configured threshold
             try:
                 if lock_file.exists():
                     age = time.time() - lock_file.stat().st_mtime
-                    if age > 3600:
+                    if age > self.stale_lock_seconds:
                         logging.warning("Removing stale backup lock (age %.0fs): %s", age, lock_file)
                         try:
                             lock_file.unlink()
-                        except Exception:
-                            pass
-            except Exception:
-                # Non-fatal: proceed with lock acquisition below
-                pass
+                        except Exception as e:
+                            logging.debug("Failed to unlink stale lock (%s): %s", lock_file, e)
+            except Exception as e:
+                logging.debug("Non-fatal error checking stale lock: %s", e, exc_info=True)
 
             # Try to acquire lock atomically using 'x' mode with timeout
-            max_wait = 30  # seconds
-            wait_time = 0
+            wait_time = 0.0
             acquired = False
-            while wait_time < max_wait:
+            token = f"{os.getpid()}:{uuid.uuid4()}"
+            while wait_time < float(self.backup_lock_timeout):
                 try:
                     with open(lock_file, 'x') as lf:
-                        lf.write(str(os.getpid()))
+                        lf.write(token)
+                        lf.flush()
+                        os.fsync(lf.fileno())
                     acquired = True
+                    logging.debug("Acquired backup lock %s (token=%s)", lock_file, token)
                     break
                 except FileExistsError:
+                    # Lock held by someone else; re-check for staleness
+                    try:
+                        age = time.time() - lock_file.stat().st_mtime
+                        if age > self.stale_lock_seconds:
+                            logging.warning("Lock appears stale (age %.0fs), removing: %s", age, lock_file)
+                            try:
+                                lock_file.unlink()
+                                logging.debug("Removed stale lock: %s", lock_file)
+                                # small backoff before trying to acquire
+                                time.sleep(0.05)
+                                wait_time += 0.05
+                                continue
+                            except Exception as e:
+                                logging.debug("Failed to remove stale lock: %s", e)
+                    except Exception:
+                        pass
                     time.sleep(0.1)
                     wait_time += 0.1
 
             if not acquired:
-                logging.warning("Backup lock timeout for %s", ckpt_path.name)
+                logging.warning("Backup lock timeout for %s, could not acquire %s", ckpt_path.name, lock_file)
                 return
 
             try:
-                # Roll backups: backup_2 -> backup_3, backup_1 -> backup_2, etc.
+                # Roll backups: backup_n-1 -> backup_n
                 for i in range(self.max_backups - 1, 0, -1):
                     old_backup = self.base_dir / f"{ckpt_path.name}.backup_{i-1}"
                     new_backup = self.base_dir / f"{ckpt_path.name}.backup_{i}"
@@ -360,17 +403,30 @@ class RobustCheckpointManager:
                 try:
                     import shutil
                     shutil.copy2(str(ckpt_path), str(backup_0))
+                    logging.info("Created backup: %s", backup_0)
                 except (OSError, PermissionError) as e:
                     logging.warning("Failed to create backup_0: %s", e)
             finally:
-                # Release lock
+                # Release lock but only if the token still matches
                 try:
-                    lock_file.unlink()
-                except (OSError, PermissionError):
-                    pass
+                    try:
+                        with open(lock_file, 'r') as lf:
+                            existing = lf.read().strip()
+                    except Exception:
+                        existing = None
+                    if existing == token:
+                        try:
+                            lock_file.unlink()
+                            logging.debug("Released backup lock %s", lock_file)
+                        except Exception as e:
+                            logging.debug("Failed to unlink lock file on release: %s", e)
+                    else:
+                        logging.warning("Lock token mismatch on release: expected %s, found %s. Not unlinking %s", token, existing, lock_file)
+                except Exception as e:
+                    logging.debug("Error during lock release: %s", e, exc_info=True)
 
         except Exception as e:
-            logging.warning("Backup creation failed: %s", e)
+            logging.warning("Backup creation failed: %s", e, exc_info=True)
 
     def _validate_checkpoint(self, ckpt_path: Path, original_data: Dict) -> bool:
         """

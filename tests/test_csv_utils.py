@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+import pytest
 
 from src.utils.csv_utils import safe_read_csv
 
@@ -43,3 +44,16 @@ def test_cleanup_empty_csvs_moves_empty_and_unreadable_files(tmp_path):
     corrupt = base / 'corrupt'
     assert (corrupt / 'bad_empty.csv').exists()
     assert (corrupt / 'bad_parsable.csv').exists()
+
+
+def test_safe_read_csv_headerless_and_missing(tmp_path):
+    # Headerless but has numeric rows -> parsed, acceptable
+    p = tmp_path / "noheader.csv"
+    p.write_text("1,2\n3,4\n")
+    res = safe_read_csv(str(p))
+    assert res is not None
+
+    # Non-existent file should raise a CSVReadError
+    from src.utils.csv_utils import CSVReadError
+    with pytest.raises(CSVReadError):
+        safe_read_csv(tmp_path / "does_not_exist.csv")

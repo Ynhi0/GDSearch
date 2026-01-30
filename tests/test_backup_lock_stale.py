@@ -1,7 +1,7 @@
 import os
 import time
 from pathlib import Path
-from run_all_kaggle import RobustCheckpointManager
+from src.core.checkpoint_manager import RobustCheckpointManager
 
 
 def test_stale_lock_is_removed_and_backup_created(tmp_path):
