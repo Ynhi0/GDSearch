@@ -867,45 +867,64 @@ class RobustCheckpointManager:
         lock_file = self.base_dir / f"{ckpt_path.name}.backup.lock"
 
         try:
-            # Try to acquire lock (with timeout)
+            # Attempt to remove stale locks older than 1 hour
+            try:
+                if lock_file.exists():
+                    age = time.time() - lock_file.stat().st_mtime
+                    if age > 3600:
+                        logging.warning("Removing stale backup lock (age %.0fs): %s", age, lock_file)
+                        try:
+                            lock_file.unlink()
+                        except Exception:
+                            pass
+            except Exception:
+                # Non-fatal: proceed with lock acquisition below
+                pass
+
+            # Try to acquire lock atomically using 'x' mode with timeout
             max_wait = 30  # seconds
             wait_time = 0
-            while lock_file.exists() and wait_time < max_wait:
-                time.sleep(0.1)
-                wait_time += 0.1
+            acquired = False
+            while wait_time < max_wait:
+                try:
+                    with open(lock_file, 'x') as lf:
+                        lf.write(str(os.getpid()))
+                    acquired = True
+                    break
+                except FileExistsError:
+                    time.sleep(0.1)
+                    wait_time += 0.1
 
-            if lock_file.exists():
-                logging.warning("Backup lock timeout for %s, skipping backup", ckpt_path.name)
+            if not acquired:
+                logging.warning("Backup lock timeout for %s", ckpt_path.name)
                 return
 
-            # Create lock file
-            lock_file.touch()
-
-            # Roll existing backups
+            # Roll existing backups: backup_2 -> backup_3, backup_1 -> backup_2, etc.
             for i in range(self.max_backups - 1, 0, -1):
                 src = self.base_dir / f"{ckpt_path.name}.backup_{i-1}"
                 dst = self.base_dir / f"{ckpt_path.name}.backup_{i}"
                 if src.exists():
                     try:
-                        src.replace(dst)
-                    except (OSError, RuntimeError) as e:
-                        logging.debug("Failed to rotate backup %d: %s", i, e)
+                        if dst.exists():
+                            dst.unlink()
+                        src.rename(dst)
+                    except (OSError, PermissionError) as e:
+                        logging.warning("Failed to roll backup %d: %s", i, e)
 
-            # Create new backup from current checkpoint
+            # Copy current checkpoint to backup_0
             backup_path = self.base_dir / f"{ckpt_path.name}.backup_0"
             try:
                 import shutil
                 shutil.copy2(str(ckpt_path), str(backup_path))
-            except (OSError, RuntimeError) as e:
-                logging.debug("Failed to create backup: %s", e)
-
+            except (OSError, PermissionError) as e:
+                logging.warning("Failed to create backup_0: %s", e)
         finally:
-            # Always release lock
+            # Release lock (best-effort)
             try:
                 if lock_file.exists():
                     lock_file.unlink()
-            except OSError as e:
-                logging.debug("Failed to remove lock file: %s", e)
+            except (OSError, PermissionError):
+                pass
 
     def _validate_checkpoint(self, ckpt_path: Path, _expected_data: Dict) -> bool:
         """Validate checkpoint integrity"""

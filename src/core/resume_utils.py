@@ -60,14 +60,36 @@ def results_exist(results_dir: Path, signature: str) -> bool:
         logging.debug("No rows matching signature %s in %s", signature, summary_path)
         return False
 
-    # Consider completed if any matching row has a completed==True or has a final metric
+    def _is_truthy(v) -> bool:
+        # Robust check for boolean-like values (bool, numpy bool, numeric, common strings)
+        import numpy as _np
+        if isinstance(v, bool):
+            return v
+        if pd.isna(v):
+            return False
+        if isinstance(v, (_np.bool_,)):
+            return bool(v)
+        if isinstance(v, (int, float)):
+            # treat 1 / 1.0 as True, others False
+            return v == 1 or v == 1.0
+        if isinstance(v, str):
+            return v.strip().lower() in ("true", "1", "t", "yes", "y")
+        return False
+
+    # Consider completed if any matching row has a completed==True or a numeric final metric
     for _, row in hits.iterrows():
-        if 'completed' in row.index and pd.notna(row.get('completed')) and bool(row.get('completed')):
+        if 'completed' in row.index and _is_truthy(row.get('completed')):
             return True
-        # metrics to check
+        # metrics to check (require numeric non-NaN)
         for col in ('final_test_acc', 'final_loss', 'iters_to_thresh'):
-            if col in row.index and pd.notna(row.get(col)):
-                return True
+            if col in row.index:
+                val = row.get(col)
+                try:
+                    num = pd.to_numeric(val, errors='coerce')
+                    if pd.notna(num):
+                        return True
+                except Exception:
+                    continue
     return False
 
 

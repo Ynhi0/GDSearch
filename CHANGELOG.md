@@ -12,6 +12,8 @@
 - **ExperimentTracker**: Made `start_run()` defensive when `mlflow` returns a run-like object missing `info` or `run_id` attributes (returns `None` instead of raising). (src/core/experiment_tracker.py, tests/test_experiment_tracker_start_run.py)
 - **Statistical analysis**: Use a local RNG in `cohens_d_ci_paired` to avoid mutating global NumPy RNG state and improve reproducibility. (src/analysis/statistical_analysis.py)
 - **Checkpoint backups**: Improved lock acquisition to use atomic creation and remove stale locks older than 1 hour to prevent deadlocks and stale lock files. (src/core/checkpoint_manager.py)
+- **Resume detection**: Robust boolean parsing in `results_exist()` to avoid treating string values like `'False'` as truthy, and improved numeric final metric checks to avoid treating `'nan'` strings as valid metrics. Added tests for these edge cases. (src/core/resume_utils.py, tests/test_resume_behavior_extended.py)
+- **Runtime backups**: Unified atomic lock acquisition in `run_all_kaggle.py` to match `CheckpointManager` behavior and added stale-lock removal tests (tests/test_backup_lock_stale.py).
 
 ### Testing
-- Added unit tests for retry behavior, DiskSpaceGuardian cleanup, and ExperimentTracker `start_run` edge case. (tests/test_retry.py, tests/test_disk_space_guardian.py, tests/test_experiment_tracker_start_run.py)
+- Added unit tests for retry behavior, DiskSpaceGuardian cleanup, ExperimentTracker `start_run` edge case, resume boolean parsing, and backup-stale behavior. (tests/test_retry.py, tests/test_disk_space_guardian.py, tests/test_experiment_tracker_start_run.py, tests/test_resume_behavior_extended.py, tests/test_backup_lock_stale.py)
