@@ -9,7 +9,15 @@ from pathlib import Path
 import logging
 import json
 import nbformat
-from scripts.validate_notebooks import check_notebook
+# Import check_notebook from scripts. Use importlib fallback when running as a script (scripts/ not a package)
+try:
+    from scripts.validate_notebooks import check_notebook
+except Exception:
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('validate_notebooks', str(Path(__file__).resolve().parent / 'validate_notebooks.py'))
+    validate_mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(validate_mod)
+    check_notebook = validate_mod.check_notebook
 
 logging.basicConfig(level=logging.INFO)
 
