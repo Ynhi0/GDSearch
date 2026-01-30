@@ -737,6 +737,26 @@ class PerformanceProfiler:
 # Use centralized ExperimentTracker implementation from src to avoid duplication and typing drift
 from src.core.experiment_tracker import ExperimentTracker
 from src.core.resume_utils import compute_run_signature, decide_resume_action, results_exist
+
+
+def _create_experiment_tracker(no_mlflow: bool) -> Optional[ExperimentTracker]:
+    """Create an ExperimentTracker safely and return None if it cannot be initialized.
+
+    This function catches unexpected MLflow/DB errors and logs clear remediation steps
+    (e.g., database schema migration guidance) instead of letting the exception crash
+    the entire run. Exported for testing.
+    """
+    if no_mlflow or not HAS_MLFLOW:
+        return None
+    try:
+        return ExperimentTracker()
+    except Exception as e:
+        logging.warning("ExperimentTracker could not be initialized: %s. Disabling MLflow tracking for this run.", e)
+        # Provide helpful guidance for common Mlflow errors (DB schema migrations)
+        msg = str(e).lower()
+        if 'schema' in msg or 'out-of-date' in msg or 'upgrade' in msg:
+            logging.warning("Detected MLflow DB schema issue: consider running 'mlflow db upgrade <database_uri>' after taking a DB backup.")
+        return None
 from src.core.checkpoint_manager import RobustCheckpointManager
 
 # NOTE: The local duplication of RobustCheckpointManager was removed in favor of
@@ -8948,6 +8968,12 @@ def main():  # type: ignore[misc]  # pyright: complexity limit exceeded (10k+ li
     # INTEGRATION FIX (Issue #9): Add reproducibility setup BEFORE any experiments
     # This ensures GPU determinism across all experiment runs
     from src.utils.reproducibility import setup_experiment_reproducibility, warn_if_nondeterministic
+
+    # Suppress noisy SyntaxWarnings from third-party markdown/rendering libraries
+    import warnings
+    warnings.filterwarnings('ignore', message=r".*invalid escape sequence.*", category=SyntaxWarning)
+
+    # Initialize reproducibility defaults (can be overridden by CLI --deterministic)
     setup_experiment_reproducibility(seed=42, deterministic=False)  # Will be overridden by --seeds
     warn_if_nondeterministic()
 
@@ -9339,7 +9365,21 @@ Examples:
 
     # Initialize utilities
     profiler = PerformanceProfiler() if args.profile else None
-    tracker = None if args.no_mlflow else (ExperimentTracker() if HAS_MLFLOW else None)
+    # Create ExperimentTracker defensively to avoid crashing when MLflow has configuration issues
+    def _create_experiment_tracker(no_mlflow: bool) -> Optional[ExperimentTracker]:
+        if no_mlflow or not HAS_MLFLOW:
+            return None
+        try:
+            return ExperimentTracker()
+        except Exception as e:
+            logging.warning("ExperimentTracker could not be initialized: %s. Disabling MLflow tracking for this run.", e)
+            # Provide helpful guidance for common Mlflow errors (DB schema migrations)
+            if 'schema' in str(e).lower() or 'out-of-date' in str(e).lower() or 'upgrade' in str(e).lower():
+                logging.warning("Detected MLflow DB schema issue: consider running 'mlflow db upgrade <database_uri>' after taking a DB backup.")
+            return None
+
+    tracker = _create_experiment_tracker(args.no_mlflow)
+
 
     # If the tracker object exists but failed to enable (e.g., mlflow DB/schema errors),
     # convert it to `None` so downstream code does not rely on a partially-initialized tracker.
