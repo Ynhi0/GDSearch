@@ -94,3 +94,42 @@ def safe_to_float(x: Any) -> float:
         return float(str(x))
     except Exception:
         return float(np.nan)
+
+
+def safe_len(obj: object) -> int:
+    """Robustly determine the number of elements in an object.
+
+    Handles Python containers, numpy arrays, and torch tensors, returning 0
+    for None or unsupported objects. This helper avoids raising on unusual
+    inputs and is safe for use in dataset/loader size computations.
+    """
+    if obj is None:
+        return 0
+
+    # numpy arrays (prefer total element count over first-dimension len)
+    try:
+        import numpy as _np
+        if isinstance(obj, _np.ndarray):
+            return int(obj.size)
+    except Exception:
+        pass
+
+    # torch tensors
+    try:
+        import torch as _torch
+        if isinstance(obj, _torch.Tensor):
+            try:
+                return int(obj.numel())
+            except Exception:
+                return 0
+    except Exception:
+        pass
+
+    # Builtin containers (lists, tuples, dicts, etc.)
+    try:
+        return int(len(obj))
+    except Exception:
+        pass
+
+    # Fallback: try iterator consuming (not ideal for generators) - avoid expensive ops
+    return 0
