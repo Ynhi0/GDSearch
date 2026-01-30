@@ -122,12 +122,13 @@ def cohens_d_ci_paired(a, b, confidence: float = 0.95, n_bootstrap: int = 10000)
     d_observed = cohens_d_paired(a, b)
     
     # Bootstrap resampling
-    np.random.seed(42)  # For reproducibility within this function
+    # Use a local RNG to avoid mutating global numpy/random state
+    rng = np.random.default_rng(42)
     bootstrap_ds = []
     
     for _ in range(n_bootstrap):
-        # Resample paired indices
-        indices = np.random.choice(n, size=n, replace=True)
+        # Resample paired indices using local RNG
+        indices = rng.choice(n, size=n, replace=True)
         a_resample = np.array(a)[indices]
         b_resample = np.array(b)[indices]
         

@@ -76,7 +76,10 @@ class ExperimentTracker:
         else:
             # Start a new top-level run
             self.current_run = mlflow.start_run(run_name=run_name)
-        return getattr(self.current_run, "info", None).run_id if self.current_run is not None else None
+        if self.current_run is None:
+            return None
+        info = getattr(self.current_run, "info", None)
+        return getattr(info, "run_id", None)
 
     def end_run(self):
         """End the current MLflow run."""

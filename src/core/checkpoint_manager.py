@@ -310,19 +310,37 @@ class RobustCheckpointManager:
         lock_file = self.base_dir / f"{ckpt_path.name}.backup.lock"
 
         try:
-            # Try to acquire lock (with timeout)
+            # Attempt to remove stale locks older than 1 hour
+            try:
+                if lock_file.exists():
+                    age = time.time() - lock_file.stat().st_mtime
+                    if age > 3600:
+                        logging.warning("Removing stale backup lock (age %.0fs): %s", age, lock_file)
+                        try:
+                            lock_file.unlink()
+                        except Exception:
+                            pass
+            except Exception:
+                # Non-fatal: proceed with lock acquisition below
+                pass
+
+            # Try to acquire lock atomically using 'x' mode with timeout
             max_wait = 30  # seconds
             wait_time = 0
-            while lock_file.exists() and wait_time < max_wait:
-                time.sleep(0.1)
-                wait_time += 0.1
+            acquired = False
+            while wait_time < max_wait:
+                try:
+                    with open(lock_file, 'x') as lf:
+                        lf.write(str(os.getpid()))
+                    acquired = True
+                    break
+                except FileExistsError:
+                    time.sleep(0.1)
+                    wait_time += 0.1
 
-            if wait_time >= max_wait:
+            if not acquired:
                 logging.warning("Backup lock timeout for %s", ckpt_path.name)
                 return
-
-            # Acquire lock
-            lock_file.touch()
 
             try:
                 # Roll backups: backup_2 -> backup_3, backup_1 -> backup_2, etc.
