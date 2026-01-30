@@ -15,7 +15,7 @@
 - **Resume detection**: Robust boolean parsing in `results_exist()` to avoid treating string values like `'False'` as truthy, and improved numeric final metric checks to avoid treating `'nan'` strings as valid metrics. Added tests for these edge cases. (src/core/resume_utils.py, tests/test_resume_behavior_extended.py)
 - **Runtime backups**: Unified atomic lock acquisition in `run_all_kaggle.py` to match `CheckpointManager` behavior and added stale-lock removal tests (tests/test_backup_lock_stale.py).
 - **MLflow robustness**: Fail-safe ExperimentTracker creation (no longer crashes on MLflow DB/schema errors); logs remediation steps (e.g., `mlflow db upgrade <database_uri>`) and disables tracking when initialization fails. Added unit test to validate safe behavior. (run_all_kaggle.py, tests/test_mlflow_tracker_creation.py)
-- **Notebooks**: Added `scripts/validate_notebooks.py` to scan notebooks for trailing backslashes and common syntax pitfalls that cause papermill execution errors. (scripts/validate_notebooks.py)
+- **Notebooks**: Added `scripts/validate_notebooks.py` to scan notebooks for trailing backslashes and common syntax pitfalls that cause papermill execution errors, and `scripts/fix_and_validate_notebooks.py` to auto-fix literal '\\n' sequences and validate notebook structure before execution. (scripts/validate_notebooks.py, scripts/fix_and_validate_notebooks.py)
 - **Warnings**: Suppress noisy SyntaxWarning messages from third-party Markdown/renderers during notebook conversion to reduce spurious logs. (run_all_kaggle.py)
 
 ### Testing
