@@ -171,7 +171,7 @@ class RobustCheckpointManager:
                     # Fallback: call without serialization flag
                     try:
                         torch_save_safe(checkpoint_data, str(tmp_path), use_new_zipfile_serialization=False)
-                    except Exception:
+                    except (RuntimeError, OSError):
                         # Final fallback: use direct torch.save to path
                         torch.save(checkpoint_data, str(tmp_path))
 
@@ -247,10 +247,10 @@ class RobustCheckpointManager:
                 # Use centralized loader to handle versions that lack `weights_only` gracefully
                 try:
                     checkpoint = torch_load_safe(ckpt_path, map_location='cpu', weights_only=False)
-                except Exception:
+                except (TypeError, AttributeError) as e:
                     # Fallback to direct torch.load without weights_only
                     logging.warning(
-                        "torch_load_safe failed or 'weights_only' unsupported; falling back to torch.load without weights_only"
+                        "torch_load_safe failed or 'weights_only' unsupported; falling back to torch.load without weights_only: %s", e
                     )
                     checkpoint = torch.load(ckpt_path, map_location='cpu')
                 logging.info("Loaded checkpoint: %s", ckpt_path)
@@ -306,15 +306,15 @@ class RobustCheckpointManager:
             if torch_cpu_state is not None:
                 try:
                     torch.set_rng_state(torch_cpu_state)
-                except Exception as e:
+                except (RuntimeError, ValueError, TypeError) as e:
                     logging.warning("Failed to restore CPU RNG state: %s", e)
 
             if 'torch_cuda_rng_state_all' in rng and rng['torch_cuda_rng_state_all'] is not None and torch.cuda.is_available():
                 try:
                     torch.cuda.set_rng_state_all(rng['torch_cuda_rng_state_all'])
-                except Exception as e:
+                except (RuntimeError, ValueError, TypeError) as e:
                     logging.warning("Failed to restore CUDA RNG state: %s", e)
-        except Exception as e:
+        except (OSError, RuntimeError, ValueError, TypeError) as e:
             logging.warning("Failed to restore RNG states: %s", e)
 
     def _create_backup(self, ckpt_path: Path, _experiment_name: Optional[str]):
@@ -339,12 +339,19 @@ class RobustCheckpointManager:
             try:
                 if lock_file.exists():
                     age = time.time() - lock_file.stat().st_mtime
-                    if age > self.stale_lock_seconds:
+                    if age > (self.stale_lock_seconds + 1):
                         logging.warning("Removing stale backup lock (age %.0fs): %s", age, lock_file)
                         try:
                             lock_file.unlink()
                         except (OSError, PermissionError) as e:
                             logging.debug("Failed to unlink stale lock (%s): %s", lock_file, e)
+                            # Best-effort fallback: try moving the stale lock aside to allow progress
+                            try:
+                                aside = lock_file.with_name(lock_file.name + f".stale.{uuid.uuid4()}")
+                                lock_file.replace(aside)
+                                logging.debug("Moved stale lock aside: %s -> %s", lock_file, aside)
+                            except (OSError, PermissionError) as e2:
+                                logging.debug("Failed to move stale lock aside: %s", e2)
             except OSError as e:
                 logging.debug("Non-fatal error checking stale lock: %s", e, exc_info=True)
 
@@ -360,12 +367,13 @@ class RobustCheckpointManager:
                         os.fsync(lf.fileno())
                     acquired = True
                     logging.debug("Acquired backup lock %s (token=%s)", lock_file, token)
+                    logging.info("Acquired backup lock; proceeding to rotate/copy backups for %s", ckpt_path.name)
                     break
                 except FileExistsError:
                     # Lock held by someone else; re-check for staleness
                     try:
                         age = time.time() - lock_file.stat().st_mtime
-                        if age > self.stale_lock_seconds:
+                        if age > (self.stale_lock_seconds + 1):
                             logging.warning("Lock appears stale (age %.0fs), removing: %s", age, lock_file)
                             try:
                                 lock_file.unlink()
@@ -376,53 +384,75 @@ class RobustCheckpointManager:
                                 continue
                             except (OSError, PermissionError) as e:
                                 logging.debug("Failed to remove stale lock: %s", e)
+                                # Best-effort fallback: try moving the stale lock aside so we can acquire
+                                try:
+                                    aside = lock_file.with_name(lock_file.name + f".stale.{uuid.uuid4()}")
+                                    lock_file.replace(aside)
+                                    logging.debug("Moved stale lock aside: %s -> %s", lock_file, aside)
+                                except (OSError, PermissionError) as e2:
+                                    logging.debug("Failed to move stale lock aside: %s", e2)
                     except OSError:
                         # If stat fails, treat as transient and retry
                         pass
 
+                    # Lock is held and not stale; wait a bit and increment wait_time to respect configured timeout
+                    time.sleep(0.05)
+                    wait_time += 0.05
+
+            if not acquired:
+                logging.warning("Backup lock timeout for %s, could not acquire %s", ckpt_path.name, lock_file)
+                return
+
+            # We have acquired the lock. Perform rotation + copy within a try/finally so it will be released.
+            try:
+                # Roll backups: backup_n-1 -> backup_n
                 try:
-                    # Roll backups: backup_n-1 -> backup_n
-                    try:
-                        for i in range(self.max_backups - 1, 0, -1):
-                            old_backup = self.base_dir / f"{ckpt_path.name}.backup_{i-1}"
-                            new_backup = self.base_dir / f"{ckpt_path.name}.backup_{i}"
-                            if old_backup.exists():
-                                try:
-                                    if new_backup.exists():
-                                        new_backup.unlink()
-                                    old_backup.rename(new_backup)
-                                except (OSError, PermissionError) as e:
-                                    logging.warning("Failed to roll backup %d: %s", i, e)
-                    except (OSError, RuntimeError) as e:
-                        logging.debug("Failed during backup rotation: %s", e, exc_info=True)
-
-                    # Copy current checkpoint to backup_0
-                    backup_0 = self.base_dir / f"{ckpt_path.name}.backup_0"
-                    try:
-                        import shutil
-                        shutil.copy2(str(ckpt_path), str(backup_0))
-                        logging.info("Created backup: %s", backup_0)
-                    except (OSError, PermissionError) as e:
-                        logging.warning("Failed to create backup_0: %s", e)
-                finally:
-                    # Release lock but only if the token still matches
-                    try:
-                        try:
-                            with open(lock_file, 'r') as lf:
-                                existing = lf.read().strip()
-                        except (OSError, FileNotFoundError):
-                            existing = None
-                        if existing == token:
+                    for i in range(self.max_backups - 1, 0, -1):
+                        old_backup = self.base_dir / f"{ckpt_path.name}.backup_{i-1}"
+                        new_backup = self.base_dir / f"{ckpt_path.name}.backup_{i}"
+                        if old_backup.exists():
                             try:
-                                lock_file.unlink()
-                                logging.debug("Released backup lock %s", lock_file)
+                                if new_backup.exists():
+                                    new_backup.unlink()
+                                old_backup.rename(new_backup)
                             except (OSError, PermissionError) as e:
-                                logging.debug("Failed to unlink lock file on release: %s", e)
-                        else:
-                            logging.warning("Lock token mismatch on release: expected %s, found %s. Not unlinking %s", token, existing, lock_file)
-                    except (OSError, RuntimeError) as e:
-                        logging.debug("Error during lock release: %s", e, exc_info=True)
+                                logging.warning("Failed to roll backup %d: %s", i, e)
+                except (OSError, RuntimeError) as e:
+                    logging.debug("Failed during backup rotation: %s", e, exc_info=True)
 
+                # Copy current checkpoint to backup_0
+                backup_0 = self.base_dir / f"{ckpt_path.name}.backup_0"
+                try:
+                    import shutil
+                    logging.info("Creating backup_0 -> %s", backup_0)
+                    shutil.copy2(str(ckpt_path), str(backup_0))
+                    logging.info("Created backup: %s", backup_0)
+                except (OSError, PermissionError) as e:
+                    logging.warning("Failed to create backup_0: %s", e)
+                except (shutil.Error, RuntimeError, TypeError) as e:
+                    # Unexpected errors are logged explicitly; re-raise only if running in strict mode
+                    logging.error("Unexpected error during backup copy: %s", e, exc_info=True)
+                    if self.strict:
+                        raise
+                    return
+            finally:
+                # Release lock but only if the token still matches
+                try:
+                    try:
+                        with open(lock_file, 'r') as lf:
+                            existing = lf.read().strip()
+                    except (OSError, FileNotFoundError):
+                        existing = None
+                    if existing == token:
+                        try:
+                            lock_file.unlink()
+                            logging.debug("Released backup lock %s", lock_file)
+                        except (OSError, PermissionError) as e:
+                            logging.debug("Failed to unlink lock file on release: %s", e)
+                    else:
+                        logging.warning("Lock token mismatch on release: expected %s, found %s. Not unlinking %s", token, existing, lock_file)
+                except (OSError, RuntimeError) as e:
+                    logging.debug("Error during lock release: %s", e, exc_info=True)
         except (OSError, RuntimeError, PermissionError) as e:
             logging.warning("Backup creation failed: %s", e, exc_info=True)
 
@@ -443,11 +473,11 @@ class RobustCheckpointManager:
             try:
                 from src.core.io_utils import torch_load_safe
                 loaded = torch_load_safe(ckpt_path, map_location='cpu', weights_only=False)
-            except Exception:
+            except (ImportError, AttributeError, TypeError) as e:
                 # Fallback to direct torch.load without weights_only
                 try:
                     loaded = torch.load(ckpt_path, map_location='cpu')
-                except Exception as e:
+                except (FileNotFoundError, OSError, RuntimeError) as e:
                     logging.debug("Failed to load checkpoint during validation: %s", e)
                     return False
             # Basic validation: check that it's a dict and has some keys
@@ -456,6 +486,7 @@ class RobustCheckpointManager:
             if len(loaded) == 0:
                 return False
             return True
-        except Exception as e:
+        except (OSError, RuntimeError, ValueError, TypeError) as e:
             logging.debug("Failed to validate checkpoint %s: %s", ckpt_path, e, exc_info=True)
             return False
+

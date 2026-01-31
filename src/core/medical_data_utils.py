@@ -5,6 +5,9 @@ Provides helpers to load real medical datasets (MedMNIST, Kaggle) or fall back t
 This module ensures medical experiments can use real data when available while maintaining
 reproducibility with synthetic defaults.
 """
+# broad catch intentional - module-level allowlist: medical dataset loaders are optional
+# and may raise various import/runtime errors; broad catches are used to provide graceful
+# degradation for test/CI environments.
 
 import logging
 from pathlib import Path

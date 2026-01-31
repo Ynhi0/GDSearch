@@ -58,9 +58,12 @@ def safe_read_csv(path: str | Path, *, header_required: bool = True, **kwargs) -
     except pd.errors.ParserError as e:
         logging.exception("CSV file '%s' parser error on sample read: %s", p, e)
         raise CSVReadError(f"Parser error while reading CSV '{p}': {e}") from e
-    except Exception as e:
+    except (OSError, UnicodeDecodeError, ValueError) as e:
         logging.exception("Unexpected error while sampling CSV '%s': %s", p, e)
         raise CSVReadError(f"Unexpected error while sampling CSV '{p}': {e}") from e
+    except Exception:
+        # Surface unexpected exceptions during development
+        raise
 
     # If header is required but sample has no columns, treat as invalid
     if header_required and (sample.columns is None or len(sample.columns) == 0):
@@ -103,6 +106,9 @@ def cleanup_empty_csvs(results_dir: str | Path, pattern: str = "*.csv") -> list:
     corrupt_dir.mkdir(parents=True, exist_ok=True)
 
     for p in base.rglob(pattern):
+        # Skip files that are already in the corrupt quarantine to avoid re-processing
+        if corrupt_dir in p.parents:
+            continue
         # Only process files
         if not p.is_file():
             continue
@@ -127,6 +133,6 @@ def cleanup_empty_csvs(results_dir: str | Path, pattern: str = "*.csv") -> list:
                 shutil.move(str(p), str(target))
                 logging.warning("Moved CSV with read error '%s' to corrupt folder", p)
                 moved.append(str(target))
-        except Exception:
-            logging.exception("Failed while inspecting '%s'", p)
+        except (OSError, shutil.Error, PermissionError) as e:
+            logging.exception("Failed while inspecting '%s': %s", p, e)
     return moved

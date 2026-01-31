@@ -3,6 +3,9 @@
 """
 GDSearch Complete Benchmark Suite - Kaggle Edition
 Runs all experiments: MNIST, CIFAR-10, NLP, Medical Segmentation
+
+broad catch intentional - file allowlist: This entrypoint contains many guarded blocks that
+intentionally catch broad exceptions to log and continue running large experiment sweeps.
 """
 # Delay HuggingFace imports to avoid early loading in environments without transformers
 
@@ -29,7 +32,7 @@ def import_optional_nlp_dependencies():
         _optional_modules['AutoTokenizer'] = AutoTokenizer
         _optional_modules['AutoModelForSequenceClassification'] = AutoModelForSequenceClassification
         _optional_modules['load_dataset'] = load_dataset
-    except Exception as e:
+    except Exception as e:  # broad catch intentional: optional NLP imports may raise many error types
         # Use conditional import for logging to ensure availability
         try:
             import logging  # noqa: F811  # Reimport in exception handler is intentional for robustness
@@ -119,7 +122,7 @@ from pathlib import Path
 # Use centralized helper to compute gradient norms for consistency
 try:
     from src.runners.training import compute_gradient_norm
-except Exception:
+except (ImportError, ModuleNotFoundError, AttributeError):
     # Fallback: will use inline computation if import fails
     compute_gradient_norm = None  # type: ignore
 
@@ -154,7 +157,8 @@ def parse_opt_seed_from_stem(stem: str):
         from src.utils.filename import parse_experiment_filename
         parsed = parse_experiment_filename(stem)
         return parsed.get('optimizer'), parsed.get('seed')
-    except Exception:
+    except (ImportError, ModuleNotFoundError, AttributeError, ValueError, TypeError):
+        # Parsing failed or filename util unavailable — return None for backward compatibility
         return None, None
 
     # numpy arrays
@@ -3342,12 +3346,16 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                                         }
                                     }
                                     try:
-                                        checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"MNIST_{opt_name}_seed{seed}")
-                                    except Exception as e:
+                                        saved = checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"MNIST_{opt_name}_seed{seed}")
+                                        if not saved:
+                                            run_tainted = True
+                                            logging.warning("INTEGRITY: Checkpoint save returned False for %s seed %s; results may be incomplete or non-reproducible.", opt_name, seed)
+                                    except (OSError, RuntimeError, ValueError) as e:
                                         logging.error("Checkpoint save failed for %s seed %s: %s", opt_name, seed, e, exc_info=True)
-                                        # Mark run as tainted due to checkpoint I/O failure
                                         run_tainted = True
-                                        logging.warning("INTEGRITY: Marking run as TAINTED due to checkpoint save failure; results may be incomplete or non-reproducible.")
+                                    except Exception as e:
+                                        logging.exception("Unexpected error during checkpoint save for %s seed %s: %s", opt_name, seed, e)
+                                        raise
 
                         except RuntimeError as e:
                             if "out of memory" in str(e).lower():
@@ -3885,11 +3893,16 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
                             }
                         }
                         try:
-                            checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"CIFAR10_{opt_name}_seed{seed}")
-                        except Exception as e:
+                            saved = checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"CIFAR10_{opt_name}_seed{seed}")
+                            if not saved:
+                                run_tainted = True
+                                logging.warning("INTEGRITY: Checkpoint save returned False for %s seed %s; results may be incomplete or non-reproducible.", opt_name, seed)
+                        except (OSError, RuntimeError, ValueError) as e:
                             logging.error("Checkpoint save failed for %s seed %s: %s", opt_name, seed, e, exc_info=True)
                             run_tainted = True
-                            logging.warning("INTEGRITY: Marking run as TAINTED due to checkpoint save failure; results may be incomplete or non-reproducible." )
+                        except Exception as e:
+                            logging.exception("Unexpected error during checkpoint save for %s seed %s: %s", opt_name, seed, e)
+                            raise
 
                 # Restore best model before final evaluation
                 # If training completed without early stopping, model may not be at best checkpoint
@@ -4518,11 +4531,16 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                             }
                         }
                         try:
-                            checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"IMDB_{model_name.replace('/', '_')}_{opt_name}_lr{lr}_seed{seed}")
-                        except Exception as e:
+                            saved = checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"IMDB_{model_name.replace('/', '_')}_{opt_name}_lr{lr}_seed{seed}")
+                            if not saved:
+                                run_tainted = True
+                                logging.warning("INTEGRITY: Checkpoint save returned False for %s seed %s; results may be incomplete or non-reproducible.", opt_name, seed)
+                        except (OSError, RuntimeError, ValueError) as e:
                             logging.error("Checkpoint save failed for %s seed %s: %s", opt_name, seed, e, exc_info=True)
                             run_tainted = True
-                            logging.warning("INTEGRITY: Marking run as TAINTED due to checkpoint save failure; results may be incomplete or non-reproducible.")
+                        except Exception as e:
+                            logging.exception("Unexpected error during checkpoint save for %s seed %s: %s", opt_name, seed, e)
+                            raise
 
                 # Restore best model before final evaluation
                 # If training completed without early stopping, model may not be at best checkpoint
@@ -5383,11 +5401,16 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                         }
                     }
                     try:
-                        checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"Medical_UNet_{opt_name}_lr{lr}_seed{seed}")
-                    except Exception as e:
+                        saved = checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"Medical_UNet_{opt_name}_lr{lr}_seed{seed}")
+                        if not saved:
+                            run_tainted = True
+                            logging.warning("INTEGRITY: Checkpoint save returned False for %s seed %s; results may be incomplete or non-reproducible.", opt_name, seed)
+                    except (OSError, RuntimeError, ValueError) as e:
                         logging.error("Checkpoint save failed for %s seed %s: %s", opt_name, seed, e, exc_info=True)
                         run_tainted = True
-                        logging.warning("INTEGRITY: Marking run as TAINTED due to checkpoint save failure; results may be incomplete or non-reproducible.")
+                    except Exception as e:
+                        logging.exception("Unexpected error during checkpoint save for %s seed %s: %s", opt_name, seed, e)
+                        raise
 
             # Restore best model before final evaluation
             # If training completed without early stopping, model may not be at best checkpoint

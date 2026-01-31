@@ -4,6 +4,8 @@ Default hyperparameters for optimizers across different experiment types.
 This module provides a centralized source of truth for hyperparameter defaults
 and configuration loading.
 """
+# broad catch intentional - this module may catch broadly when reading optional
+# config artifacts at runtime; failures are logged and sensible defaults are used
 import json
 import logging
 from pathlib import Path

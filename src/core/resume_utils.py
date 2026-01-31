@@ -15,7 +15,8 @@ def compute_run_signature(config: Dict[str, Any]) -> str:
     try:
         # Ensure the object is JSON-serializable; ignore failures and coerce to string
         canonical = json.dumps(config, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    except Exception:
+    except (TypeError, ValueError):
+        # Non-serializable types: fall back to str coercion for stability
         canonical = json.dumps({k: str(v) for k, v in sorted(config.items())}, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     digest = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
     return digest
@@ -47,9 +48,12 @@ def results_exist(results_dir: Path, signature: str) -> bool:
 
     try:
         df = pd.read_csv(summary_path)
-    except Exception as e:
+    except (pd.errors.EmptyDataError, pd.errors.ParserError, OSError, UnicodeDecodeError) as e:
         logging.warning("Could not read summary file %s: %s", summary_path, e)
         return False
+    except Exception:  # broad catch intentional: re-raise unexpected errors so they surface during development
+        # Unexpected exceptions should surface during development
+        raise
 
     if 'run_signature' not in df.columns:
         logging.debug("Summary file %s does not contain 'run_signature' column", summary_path)
@@ -88,7 +92,7 @@ def results_exist(results_dir: Path, signature: str) -> bool:
                     num = pd.to_numeric(val, errors='coerce')
                     if pd.notna(num):
                         return True
-                except Exception:
+                except (TypeError, ValueError):
                     continue
     return False
 

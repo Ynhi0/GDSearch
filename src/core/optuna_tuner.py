@@ -15,6 +15,7 @@ Supports:
 
 import os
 # Optuna is an optional dependency. Import lazily to avoid import-time failures
+# broad catch intentional - optuna import may raise various errors at import-time; mark unavailable rather than failing
 try:
     import optuna
     from optuna.pruners import MedianPruner, PercentilePruner

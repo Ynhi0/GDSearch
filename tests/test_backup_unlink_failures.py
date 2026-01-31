@@ -25,7 +25,8 @@ def test_stale_lock_unlink_permission_error(tmp_path, monkeypatch):
             raise PermissionError("permission denied for unlink")
         return orig_unlink(self, *args, **kwargs)
 
-    monkeypatch.setattr(Path, 'unlink', fake_unlink)
+    # Patch os.unlink to raise for this path only (safer than patching Path.unlink directly)
+    monkeypatch.setattr(os, 'unlink', lambda p, *args, **kwargs: fake_unlink(Path(p), *args, **kwargs))
 
     # Should not raise despite unlink failure; backup should still be attempted
     mgr._create_backup(ckpt, 'exp')
@@ -54,7 +55,8 @@ def test_release_lock_unlink_permission_error(tmp_path, monkeypatch):
             raise PermissionError("cannot unlink lock on release")
         return orig_unlink(self, *args, **kwargs)
 
-    monkeypatch.setattr(Path, 'unlink', fake_unlink)
+    # Patch os.unlink to raise for this path only (safer than patching Path.unlink directly)
+    monkeypatch.setattr(os, 'unlink', lambda p, *args, **kwargs: fake_unlink(Path(p), *args, **kwargs))
 
     # Should not raise despite unlink failure at release
     mgr._create_backup(ckpt, 'exp')

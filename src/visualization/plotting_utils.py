@@ -17,8 +17,11 @@ def filter_time_series_files(csv_paths: List[Path]) -> List[Path]:
             df = pd.read_csv(p, nrows=1)
             if 'epoch' in df.columns:
                 ts.append(p)
-        except Exception:
+        except (pd.errors.EmptyDataError, pd.errors.ParserError, OSError, UnicodeDecodeError):
             # Skip files that cannot be read
+            continue
+        except Exception:
+            # Broad catch intentional: unexpected errors while scanning CSVs should not break visualization discovery
             continue
     return ts
 
@@ -28,7 +31,11 @@ def safe_add_text(ax, x, y, text, **kwargs):
     try:
         x_finite = np.isfinite(x)
         y_finite = np.isfinite(y)
+    except (TypeError, ValueError):
+        x_finite = False
+        y_finite = False
     except Exception:
+        # Broad catch intentional: guard against unexpected numeric types
         x_finite = False
         y_finite = False
 

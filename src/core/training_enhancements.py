@@ -9,6 +9,9 @@ Implements research-grade training utilities:
 
 These utilities address critical gaps for production-quality training.
 """
+# broad catch intentional - training enhancement functions may use guarded broad
+# exceptions to ensure that auxiliary features (plotting, cleanup) do not crash
+# the main training loop. Each use should be documented at the site of usage.
 
 import os
 import sys

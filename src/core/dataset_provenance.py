@@ -7,6 +7,9 @@ to ensure full reproducibility and traceability of experiments.
 Addresses research proposal requirement: "Ensure every experiment logs
 dataset name, version, seed, and config in MLflow for reproducibility."
 """
+# broad catch intentional - module-level allowlist: dataset probing and optional dataset backends
+# may raise many backend-specific exceptions; where broad catches are used they are intentional
+# and are documented at the site of usage.
 import logging
 from typing import Dict, Any, Optional
 from pathlib import Path

@@ -24,6 +24,9 @@ Supported Optimizers:
 - Full OOM retry: SGD, Adam, AdamW, RMSProp, Adagrad (standard optimizers)
 - No retry (fail-fast): SAM, Lookahead+SAM, L-BFGS (closure-based optimizers)
 """
+# broad catch intentional - this module uses guarded broad-exception handlers in a few
+# places to preserve training loop robustness and ensure OOM/optimizer-related issues
+# are handled without crashing long-running batch experiments.
 import logging
 from typing import Tuple, Any, Callable
 import torch

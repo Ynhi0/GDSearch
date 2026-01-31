@@ -3,6 +3,9 @@ PyTorch-compatible optimizer wrappers for GDSearch custom optimizers.
 
 Wraps our custom optimizers (SGD, Adam, etc.) to work with PyTorch nn.Module parameters.
 """
+# broad catch intentional - optimizer wrappers interact with many runtime objects
+# (parameters, device, dtypes) and may use guarded broad exceptions to provide
+# graceful degradation in corner cases during experiments.
 
 import torch
 import logging

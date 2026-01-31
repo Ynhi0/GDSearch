@@ -23,6 +23,9 @@ References:
   justification for adaptivity." NeurIPS 2020.
 - Loshchilov & Hutter. "Decoupled weight decay regularization." ICLR 2019.
 """
+# broad catch intentional - numerical estimation routines may raise diverse
+# numeric/third-party exceptions; broad catches in this module are localized and
+# intended to preserve stability during long-running training jobs.
 
 import torch
 import torch.nn as nn

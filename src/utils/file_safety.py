@@ -53,8 +53,8 @@ def safe_to_csv(df: pd.DataFrame, filepath: Union[str, Path], **kwargs) -> Path:
     try:
         df.to_csv(path, **kwargs)
         return path
-    except Exception as e:
-        logging.error(f"Failed to save CSV to {path}: {e}")
+    except (OSError, PermissionError, ValueError) as e:
+        logging.exception("Failed to save CSV to %s: %s", path, e)
         raise
 
 
@@ -74,6 +74,6 @@ def safe_write_text(content: str, filepath: Union[str, Path], encoding: str = 'u
     try:
         path.write_text(content, encoding=encoding)
         return path
-    except Exception as e:
-        logging.error(f"Failed to write text to {path}: {e}")
+    except (OSError, PermissionError, ValueError) as e:
+        logging.exception("Failed to write text to %s: %s", path, e)
         raise

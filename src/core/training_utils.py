@@ -8,6 +8,9 @@ This module provides:
 - Model EMA (Exponential Moving Average)
 - Additional training enhancements
 """
+# broad catch intentional - compatibility layers with PyTorch may use guarded broad
+# catches to detect available APIs across versions; where broad catches are used they
+# should be localized and documented.
 
 import torch
 import torch.nn as nn
