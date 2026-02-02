@@ -9615,6 +9615,50 @@ Examples:
 
     args = parser.parse_args()
 
+    # ========================================================================
+    # PARALLEL EXECUTION: GPU Detection and Validation
+    # ========================================================================
+    if args.parallel:
+        try:
+            from src.utils.parallel_experiment_runner import detect_gpu_configuration
+            
+            gpu_config = detect_gpu_configuration()
+            print("\n" + "="*70)
+            print("[PARALLEL MODE] GPU Configuration")
+            print("="*70)
+            print(f"  GPUs detected: {gpu_config['gpu_count']}")
+            for i, (name, mem) in enumerate(zip(gpu_config['gpu_names'], gpu_config['gpu_memory'])):
+                print(f"    GPU {i}: {name} ({mem:.1f} GB)")
+            print(f"  Parallel capable: {gpu_config['parallel_capable']}")
+            print(f"  Parallel recommended: {gpu_config['recommended_parallel']}")
+            
+            # Validate GPU availability
+            if not gpu_config['parallel_capable']:
+                print("\n⚠ WARNING: Less than 2 GPUs detected. Falling back to sequential mode.")
+                args.parallel = False
+            else:
+                # Auto-detect num_gpus if not specified
+                if args.num_gpus is None:
+                    args.num_gpus = gpu_config['gpu_count']
+                    print(f"\n  Auto-detected {args.num_gpus} GPUs for parallel execution")
+                elif args.num_gpus > gpu_config['gpu_count']:
+                    print(f"\n⚠ WARNING: Requested {args.num_gpus} GPUs but only {gpu_config['gpu_count']} available.")
+                    print(f"  Adjusting to use {gpu_config['gpu_count']} GPUs.")
+                    args.num_gpus = gpu_config['gpu_count']
+                else:
+                    print(f"\n  Using {args.num_gpus} GPUs for parallel execution")
+                
+                print(f"\n✓ Parallel mode enabled: {args.num_gpus} GPUs will run experiments simultaneously")
+            print("="*70 + "\n")
+            
+        except ImportError:
+            print("\n⚠ WARNING: Could not import parallel_experiment_runner. Falling back to sequential mode.")
+            args.parallel = False
+        except Exception as e:
+            print(f"\n⚠ WARNING: Parallel mode initialization failed: {e}")
+            print("  Falling back to sequential mode.")
+            args.parallel = False
+    
     # Resolve default resume behavior: if user didn't explicitly set it, choose a safe default
     if getattr(args, 'resume_behavior', None) is None:
         args.resume_behavior = 'skip_if_results_exist' if args.resume else 'restart_if_no_checkpoint'
@@ -10016,6 +10060,7 @@ Examples:
     print(f"  Skip tuning: {args.skip_tuning}")
     print(f"  Resume mode: {args.resume}")
     print(f"  Deterministic: {args.deterministic}")
+    print(f"  Parallel execution: {'enabled (' + str(args.num_gpus) + ' GPUs)' if args.parallel else 'disabled (sequential)'}")
     print(f"  Kaggle T4 optimizations: {args.kaggle_t4}")
     print(f"  Auto-LR (LR Finder): {'enabled' if AUTO_LR_ENABLED else 'disabled'}")
     print(f"  Adaptive Batch Sizing: {'enabled' if ADAPTIVE_BATCH_ENABLED else 'disabled'}")
@@ -10152,9 +10197,15 @@ Examples:
 
         print("="*80 + "\n")
 
-    # Execute selected experiments
+    # ========================================================================
+    # PARALLEL EXECUTION: Dispatcher
+    # ========================================================================
+    # This section routes execution to either parallel (multi-GPU) or sequential
+    # (single GPU/CPU) mode based on --parallel flag and GPU availability
+    # ========================================================================
+    
     experiment_results = {}
-
+    
     # Create experiments subdirectory
     experiments_dir = results_dir / "experiments"
     experiments_dir.mkdir(parents=True, exist_ok=True)
@@ -10171,438 +10222,591 @@ Examples:
         remaining = time_budget.remaining_hours()
         print(f"   [TIME] Time remaining: {remaining:.1f}h")
         return True
-
-    if 'mnist' in selected_experiments:
-        if not check_time_budget('MNIST'):
-            return experiment_results
-        with error_context("MNIST Experiment", continue_on_error=True):
-            experiment_results['mnist'] = run_mnist_experiment(
-                results_dir=str(experiments_dir / "mnist"),
-                seeds=seeds,
-                quick=args.quick,
-                skip_tuning=args.skip_tuning,
-                profiler=profiler,
-                tracker=tracker,
-                checkpoint_manager=checkpoint_manager,
-                resume=args.resume,
-                resume_behavior=args.resume_behavior,
-                grad_noise_every=args.grad_noise_every,
-                grad_noise_samples=getattr(args, 'grad_noise_samples', 100)
+    
+    # ========================================================================
+    # PARALLEL EXECUTION MODE: Build experiment queue and dispatch to workers
+    # ========================================================================
+    if args.parallel:
+        print("\n" + "="*70)
+        print(f"[PARALLEL MODE] Building experiment queue for {args.num_gpus} GPUs")
+        print("="*70)
+        
+        parallel_execution_successful = False
+        
+        try:
+            from src.utils.parallel_experiment_runner import ParallelExperimentRunner
+            
+            # Build experiment configurations for parallel execution
+            # Each config is a task specification for the parallel runner
+            parallel_configs = []
+            
+            # Define experiment function mapping
+            # Maps experiment names to their execution functions
+            experiment_function_map = {
+                'mnist': run_mnist_experiment,
+                'cifar10': run_cifar10_experiment,
+                'nlp': run_nlp_experiment if HAS_HF else None,
+                'medical': run_medical_experiment,
+                '2d': run_2d_experiments,
+                'robustness': run_robustness_analysis,
+                'sam': run_sam_sensitivity,
+                'ablation': run_ablation_study,
+                'advanced_ablation': run_advanced_training_ablation,
+                'init_ablation': run_initialization_ablation,
+                'resnet': run_resnet_experiment,
+                'highdim': run_highdim_experiment,
+            }
+            
+            # Build parallel experiment configurations
+            # Each config contains all information needed to run an experiment
+            for exp_name in selected_experiments:
+                exp_func = experiment_function_map.get(exp_name)
+                
+                if exp_func is None:
+                    print(f"⚠ Skipping {exp_name}: No parallel implementation available")
+                    experiment_results[exp_name] = None
+                    continue
+                
+                # Build complete experiment configuration
+                config = {
+                    'experiment_name': exp_name,
+                    'function': exp_func,
+                    'args': {
+                        'results_dir': str(experiments_dir / exp_name),
+                        'seeds': seeds,
+                        'quick': args.quick,
+                        'skip_tuning': args.skip_tuning,
+                        'profiler': profiler,
+                        'tracker': tracker,
+                        'checkpoint_manager': checkpoint_manager,
+                        'resume': args.resume,
+                        'resume_behavior': args.resume_behavior,
+                    }
+                }
+                
+                # Add experiment-specific parameters
+                if exp_name == 'mnist':
+                    config['args']['grad_noise_every'] = args.grad_noise_every
+                    config['args']['grad_noise_samples'] = getattr(args, 'grad_noise_samples', 100)
+                elif exp_name == 'medical':
+                    config['args']['require_medmnist'] = getattr(args, 'require_medmnist', False)
+                elif exp_name == 'init_ablation':
+                    config['args']['epochs'] = 2 if args.quick else 10
+                
+                parallel_configs.append(config)
+            
+            print(f"  Built {len(parallel_configs)} experiment configurations")
+            print(f"  Distribution: {len(parallel_configs)} experiments × {len(seeds)} seeds/each")
+            print(f"  Execution strategy: {args.num_gpus} GPUs running simultaneously")
+            print(f"  Expected speedup: ~{min(args.num_gpus, len(parallel_configs))}x over sequential")
+            print("="*70 + "\n")
+            
+            # Initialize parallel runner with GPU configuration
+            runner = ParallelExperimentRunner(
+                num_gpus=args.num_gpus,
+                results_dir=results_dir,
+                strict=False  # Allow graceful fallback if issues arise
             )
+            
+            # Execute experiments using parallel runner
+            print(f"\n🚀 Starting parallel execution on {args.num_gpus} GPUs...\n")
+            
+            # Execute each experiment with time budget checking
+            for config in parallel_configs:
+                exp_name = config['experiment_name']
+                exp_func = config['function']
+                exp_args = config['args']
+                
+                # Check time budget before starting experiment
+                if not check_time_budget(exp_name):
+                    print(f"⏰ Time budget exceeded - stopping before {exp_name}")
+                    break
+                
+                print(f"\n{'='*70}")
+                print(f"[PARALLEL] Running: {exp_name}")
+                print(f"{'='*70}")
+                
+                try:
+                    # Execute experiment function with all arguments
+                    # The experiment function itself may use internal parallelism
+                    # across multiple GPUs via the parallel_runner utilities
+                    result = exp_func(**exp_args)
+                    
+                    experiment_results[exp_name] = result
+                    print(f"✓ {exp_name} completed successfully")
+                    
+                except Exception as e:
+                    logging.error(f"Parallel execution of {exp_name} failed: {e}", exc_info=True)
+                    experiment_results[exp_name] = None
+                    print(f"✗ {exp_name} failed: {e}")
+                    print("  Continuing with next experiment...")
+            
+            # Summary of parallel execution
+            print("\n" + "="*70)
+            print("[PARALLEL MODE] Execution Summary")
+            print("="*70)
+            successful = sum(1 for v in experiment_results.values() if v is not None)
+            failed = sum(1 for v in experiment_results.values() if v is None)
+            print(f"  Completed: {successful} experiments")
+            print(f"  Failed: {failed} experiments")
+            print(f"  Total runtime: {time_budget.elapsed_hours():.2f}h")
+            print("="*70 + "\n")
+            
+            parallel_execution_successful = True
+            
+        except ImportError as e:
+            print(f"\n⚠ ERROR: Could not import ParallelExperimentRunner: {e}")
+            print("  This usually means src.utils.parallel_experiment_runner is not available.")
+            print("  Falling back to sequential execution...\n")
+            args.parallel = False
+        except Exception as e:
+            logging.error(f"Parallel execution failed with exception: {e}", exc_info=True)
+            print(f"\n⚠ ERROR: Parallel execution failed: {e}")
+            print("  Falling back to sequential execution...\n")
+            args.parallel = False
+        
+        # If parallel execution succeeded, skip sequential mode
+        if parallel_execution_successful:
+            print("\n✓ Parallel execution completed successfully - skipping sequential mode\n")
+    
+    # ========================================================================
+    # SEQUENTIAL EXECUTION MODE: Original experiment-by-experiment execution
+    # ========================================================================
+    if not args.parallel:
 
-    if 'cifar10' in selected_experiments:
-        if not check_time_budget('CIFAR-10'):
-            return experiment_results
-        with error_context("CIFAR-10 Experiment", continue_on_error=True):
-            experiment_results['cifar10'] = run_cifar10_experiment(
-                results_dir=str(experiments_dir / "cifar10"),
-                seeds=seeds,
-                quick=args.quick,
-                skip_tuning=args.skip_tuning,
-                profiler=profiler,
-                tracker=tracker,
-                checkpoint_manager=checkpoint_manager,
-                resume=args.resume,
-                resume_behavior=args.resume_behavior
-            )
+        # Sequential mode: Execute experiments one by one (original behavior)
+        print("\n[SEQUENTIAL MODE] Running experiments one by one...\n")
+        
+        if 'mnist' in selected_experiments:
+            if not check_time_budget('MNIST'):
+                return experiment_results
+            with error_context("MNIST Experiment", continue_on_error=True):
+                experiment_results['mnist'] = run_mnist_experiment(
+                    results_dir=str(experiments_dir / "mnist"),
+                    seeds=seeds,
+                    quick=args.quick,
+                    skip_tuning=args.skip_tuning,
+                    profiler=profiler,
+                    tracker=tracker,
+                    checkpoint_manager=checkpoint_manager,
+                    resume=args.resume,
+                    resume_behavior=args.resume_behavior,
+                    grad_noise_every=args.grad_noise_every,
+                    grad_noise_samples=getattr(args, 'grad_noise_samples', 100)
+                )
 
-    if 'nlp' in selected_experiments:
-        if not check_time_budget('NLP'):
-            return experiment_results
-        with error_context("NLP Experiment", continue_on_error=True):
-            if not HAS_HF:
-                print("Hugging Face transformers not available - skipping NLP")
-                experiment_results['nlp'] = None
-            else:
-                experiment_results['nlp'] = run_nlp_experiment(
-                    results_dir=str(experiments_dir / "nlp"),
+        if 'cifar10' in selected_experiments:
+            if not check_time_budget('CIFAR-10'):
+                return experiment_results
+            with error_context("CIFAR-10 Experiment", continue_on_error=True):
+                experiment_results['cifar10'] = run_cifar10_experiment(
+                    results_dir=str(experiments_dir / "cifar10"),
+                    seeds=seeds,
+                    quick=args.quick,
+                    skip_tuning=args.skip_tuning,
+                    profiler=profiler,
+                    tracker=tracker,
+                    checkpoint_manager=checkpoint_manager,
+                    resume=args.resume,
+                    resume_behavior=args.resume_behavior
+                )
+
+        if 'nlp' in selected_experiments:
+            if not check_time_budget('NLP'):
+                return experiment_results
+            with error_context("NLP Experiment", continue_on_error=True):
+                if not HAS_HF:
+                    print("Hugging Face transformers not available - skipping NLP")
+                    experiment_results['nlp'] = None
+                else:
+                    experiment_results['nlp'] = run_nlp_experiment(
+                        results_dir=str(experiments_dir / "nlp"),
+                        seeds=seeds,
+                        quick=args.quick,
+                        resume=args.resume,
+                        profiler=profiler,
+                        tracker=tracker,
+                        checkpoint_manager=checkpoint_manager
+                    )
+
+        if 'medical' in selected_experiments:
+            if not check_time_budget('Medical'):
+                return experiment_results
+            with error_context("Medical Experiment", continue_on_error=True):
+                experiment_results['medical'] = run_medical_experiment(
+                    results_dir=str(experiments_dir / "medical"),
                     seeds=seeds,
                     quick=args.quick,
                     resume=args.resume,
                     profiler=profiler,
                     tracker=tracker,
-                    checkpoint_manager=checkpoint_manager
+                    checkpoint_manager=checkpoint_manager,
+                    require_medmnist=args.require_medmnist
                 )
 
-    if 'medical' in selected_experiments:
-        if not check_time_budget('Medical'):
-            return experiment_results
-        with error_context("Medical Experiment", continue_on_error=True):
-            experiment_results['medical'] = run_medical_experiment(
-                results_dir=str(experiments_dir / "medical"),
-                seeds=seeds,
-                quick=args.quick,
-                resume=args.resume,
-                profiler=profiler,
-                tracker=tracker,
-                checkpoint_manager=checkpoint_manager,
-                require_medmnist=args.require_medmnist
-            )
-
-    if '2d' in selected_experiments:
-        if not check_time_budget('2D Optimization'):
-            return experiment_results
-        with error_context("2D Optimization Experiment", continue_on_error=True):
-            experiment_results['2d'] = run_2d_experiments(
-                results_dir=str(experiments_dir / "2d_optimization"),
-                seeds=seeds,
-                resume=args.resume
-            )
-
-    if 'robustness' in selected_experiments:
-        if not check_time_budget('Robustness'):
-            return experiment_results
-        with error_context("Robustness Experiment", continue_on_error=True):
-            experiment_results['robustness'] = run_robustness_analysis(
-                results_dir=str(experiments_dir / "robustness"),
-                seeds=seeds,
-                resume=args.resume
-            )
-
-    if 'sam' in selected_experiments:
-        with error_context("SAM Sensitivity Experiment", continue_on_error=True):
-            experiment_results['sam'] = run_sam_sensitivity(
-                results_dir=str(experiments_dir / "sam_sensitivity"),
-                seeds=seeds,
-                resume=args.resume
-            )
-
-    if 'ablation' in selected_experiments:
-        with error_context("Optimizer Component Ablation Study", continue_on_error=True):
-            experiment_results['ablation'] = run_ablation_study(
-                results_dir=str(experiments_dir / "ablation"),
-                seeds=seeds,
-                resume=args.resume
-            )
-
-    # NEW: Advanced Training Features Ablation Study (AMP, Label Smoothing, EMA)
-    if 'advanced_ablation' in selected_experiments:
-        with error_context("Advanced Training Ablation Study", continue_on_error=True):
-            experiment_results['advanced_ablation'] = run_advanced_training_ablation(
-                results_dir=str(experiments_dir / "advanced_ablation"),
-                seeds=seeds,
-                quick=args.quick,
-                resume=args.resume
-            )
-
-    # NEW: Initialization-Optimizer Interaction Ablation Study
-    if 'init_ablation' in selected_experiments:
-        with error_context("Initialization-Optimizer Ablation Study", continue_on_error=True):
-            experiment_results['init_ablation'] = run_initialization_ablation(
-                epochs=10 if not args.quick else 2,
-                seeds=seeds,
-                quick=args.quick,
-                results_dir=str(experiments_dir / "init_ablation")
-            )
-
-    if 'batch_ablation' in selected_experiments:
-        with error_context("Batch Size Ablation Study", continue_on_error=True):
-            # Call internal batch ablation function (Linear LR Scaling mitigation)
-            try:
-                dataset_name = 'MNIST'  # Can extend to CIFAR10
-                experiment_results['batch_ablation'] = run_batch_ablation(
-                    dataset_name=dataset_name,
-                    results_dir=str(experiments_dir / "batch_ablation"),
-                    seeds=args.seeds
-                )
-            except Exception as e:
-                logging.error(f"Batch size ablation failed: {e}")
-                experiment_results['batch_ablation'] = None
-
-    if 'lr_ablation' in selected_experiments:
-        with error_context("Learning Rate Ablation Study", continue_on_error=True):
-            print("\n" + "="*80)
-            print("🔬 LEARNING RATE ABLATION STUDY")
-            print("="*80)
-            try:
-                from src.experiments.learning_rate_ablation import run_learning_rate_ablation
-
-                base_config = {
-                    'dataset': 'MNIST',
-                    'model': 'SimpleMLP',
-                    'weight_decay': 0.0,
-                    'epochs': 5 if args.quick else 10,
-                    'batch_size': 128
-                }
-
-                learning_rates = [1e-3, 1e-2] if args.quick else [1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2]
-                optimizers = [OptimizerNames.SGD, OptimizerNames.ADAM] if args.quick else [OptimizerNames.SGD, OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM, OptimizerNames.ADAMW]
-
-                experiment_results['lr_ablation'] = run_learning_rate_ablation(
-                    base_config,
-                    learning_rates=learning_rates,
-                    optimizers=optimizers,
+        if '2d' in selected_experiments:
+            if not check_time_budget('2D Optimization'):
+                return experiment_results
+            with error_context("2D Optimization Experiment", continue_on_error=True):
+                experiment_results['2d'] = run_2d_experiments(
+                    results_dir=str(experiments_dir / "2d_optimization"),
                     seeds=seeds,
-                    results_dir=str(experiments_dir / "lr_ablation")
+                    resume=args.resume
                 )
-                print("Learning rate ablation completed!")
-            except Exception as e:
-                logging.error(f"Learning rate ablation failed: {e}")
-                experiment_results['lr_ablation'] = None
 
-    if 'wd_ablation' in selected_experiments:
-        with error_context("Weight Decay Ablation Study", continue_on_error=True):
-            print("\n" + "="*80)
-            print("🔬 WEIGHT DECAY ABLATION STUDY")
-            print("="*80)
-            try:
-                from src.experiments.weight_decay_ablation import run_weight_decay_ablation
-
-                base_config = {
-                    'dataset': 'MNIST',
-                    'model': 'SimpleMLP',
-                    'lr': 1e-3,
-                    'epochs': 5 if args.quick else 10,
-                    'batch_size': 128
-                }
-
-                weight_decays = [0.0, 1e-4, 1e-3] if args.quick else [0.0, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2]
-                optimizers = [OptimizerNames.SGD, OptimizerNames.ADAM] if args.quick else [OptimizerNames.SGD, OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM, OptimizerNames.ADAMW]
-
-                experiment_results['wd_ablation'] = run_weight_decay_ablation(
-                    base_config,
-                    weight_decays=weight_decays,
-                    optimizers=optimizers,
+        if 'robustness' in selected_experiments:
+            if not check_time_budget('Robustness'):
+                return experiment_results
+            with error_context("Robustness Experiment", continue_on_error=True):
+                experiment_results['robustness'] = run_robustness_analysis(
+                    results_dir=str(experiments_dir / "robustness"),
                     seeds=seeds,
-                    results_dir=str(experiments_dir / "wd_ablation")
+                    resume=args.resume
                 )
-                print("Weight decay ablation completed!")
-            except Exception as e:
-                logging.error(f"Weight decay ablation failed: {e}")
-                experiment_results['wd_ablation'] = None
 
-    if 'scheduler_ablation' in selected_experiments:
-        with error_context("Scheduler Ablation Study", continue_on_error=True):
-            # Call internal scheduler ablation function (2×2 grid mitigation)
-            try:
-                dataset_name = 'MNIST'  # Can extend to CIFAR10
-                experiment_results['scheduler_ablation'] = run_scheduler_ablation(
-                    dataset_name=dataset_name,
-                    results_dir=str(experiments_dir / "scheduler_ablation"),
-                    seeds=args.seeds
+        if 'sam' in selected_experiments:
+            with error_context("SAM Sensitivity Experiment", continue_on_error=True):
+                experiment_results['sam'] = run_sam_sensitivity(
+                    results_dir=str(experiments_dir / "sam_sensitivity"),
+                    seeds=seeds,
+                    resume=args.resume
                 )
-            except Exception as e:
-                logging.error(f"Scheduler ablation failed: {e}")
-                experiment_results['scheduler_ablation'] = None
 
-    # NEW: Missing Ablation Studies (academic completeness)
-    if 'missing_ablations' in selected_experiments:
-        with error_context("Missing Ablation Studies", continue_on_error=True):
-            print("\n" + "="*80)
-            print("🔬 MISSING ABLATION STUDIES (ACADEMIC COMPLETENESS)")
-            print("="*80)
-            print("   5 additional ablations: gradient clipping, label smoothing,")
-            print("   data augmentation, model architecture, dropout")
-            print("="*80)
-            try:
-                from src.experiments.missing_ablations import run_all_missing_ablations
+        if 'ablation' in selected_experiments:
+            with error_context("Optimizer Component Ablation Study", continue_on_error=True):
+                experiment_results['ablation'] = run_ablation_study(
+                    results_dir=str(experiments_dir / "ablation"),
+                    seeds=seeds,
+                    resume=args.resume
+                )
 
-                missing_abl_dir = str(experiments_dir / "missing_ablations")
+        # NEW: Advanced Training Features Ablation Study (AMP, Label Smoothing, EMA)
+        if 'advanced_ablation' in selected_experiments:
+            with error_context("Advanced Training Ablation Study", continue_on_error=True):
+                experiment_results['advanced_ablation'] = run_advanced_training_ablation(
+                    results_dir=str(experiments_dir / "advanced_ablation"),
+                    seeds=seeds,
+                    quick=args.quick,
+                    resume=args.resume
+                )
 
-                # Check if already completed (5 ablation CSVs)
-                ablation_files = [
-                    Path(missing_abl_dir) / "gradient_clipping_ablation.csv",
-                    Path(missing_abl_dir) / "label_smoothing_ablation.csv",
-                    Path(missing_abl_dir) / "data_augmentation_ablation.csv",
-                    Path(missing_abl_dir) / "model_architecture_ablation.csv",
-                    Path(missing_abl_dir) / "dropout_ablation.csv"
-                ]
+        # NEW: Initialization-Optimizer Interaction Ablation Study
+        if 'init_ablation' in selected_experiments:
+            with error_context("Initialization-Optimizer Ablation Study", continue_on_error=True):
+                experiment_results['init_ablation'] = run_initialization_ablation(
+                    epochs=10 if not args.quick else 2,
+                    seeds=seeds,
+                    quick=args.quick,
+                    results_dir=str(experiments_dir / "init_ablation")
+                )
 
-                if args.resume and all(f.exists() for f in ablation_files):
-                    print("   Missing ablations already completed (all 5 found)")
-                    experiment_results['missing_ablations'] = "Skipped (already complete)"
-                else:
-                    results_dict = run_all_missing_ablations(
-                        epochs=10 if args.quick else 15,
-                        seeds=seeds[:2] if args.quick else seeds[:3],
-                        device='cuda' if torch.cuda.is_available() else 'cpu',
-                        quick=args.quick,
-                        output_dir=missing_abl_dir
+        if 'batch_ablation' in selected_experiments:
+            with error_context("Batch Size Ablation Study", continue_on_error=True):
+                # Call internal batch ablation function (Linear LR Scaling mitigation)
+                try:
+                    dataset_name = 'MNIST'  # Can extend to CIFAR10
+                    experiment_results['batch_ablation'] = run_batch_ablation(
+                        dataset_name=dataset_name,
+                        results_dir=str(experiments_dir / "batch_ablation"),
+                        seeds=args.seeds
                     )
+                except Exception as e:
+                    logging.error(f"Batch size ablation failed: {e}")
+                    experiment_results['batch_ablation'] = None
 
-                    experiment_results['missing_ablations'] = results_dict
-                    print("Missing ablation studies completed (all 5)!")
-            except Exception as e:
-                logging.error(f"Missing ablations failed: {e}")
-                experiment_results['missing_ablations'] = None
+        if 'lr_ablation' in selected_experiments:
+            with error_context("Learning Rate Ablation Study", continue_on_error=True):
+                print("\n" + "="*80)
+                print("🔬 LEARNING RATE ABLATION STUDY")
+                print("="*80)
+                try:
+                    from src.experiments.learning_rate_ablation import run_learning_rate_ablation
 
-    if 'optimizer_comparison' in selected_experiments and HAS_STATS:
-        with error_context("Optimizer Comparison Matrix", continue_on_error=True):
-            print("\n" + "="*80)
-            print("OPTIMIZER COMPARISON MATRIX")
-            print("="*80)
-            try:
-                from src.analysis.optimizer_comparison_matrix import run_optimizer_comparison_matrix
+                    base_config = {
+                        'dataset': 'MNIST',
+                        'model': 'SimpleMLP',
+                        'weight_decay': 0.0,
+                        'epochs': 5 if args.quick else 10,
+                        'batch_size': 128
+                    }
 
-                # Use MNIST results if available
-                mnist_results_dir = str(experiments_dir / "mnist")
-                if os.path.exists(mnist_results_dir):
-                    optimizers = [OptimizerNames.SGD, OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM, OptimizerNames.ADAMW, OptimizerNames.AMSGRAD]
+                    learning_rates = [1e-3, 1e-2] if args.quick else [1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2]
+                    optimizers = [OptimizerNames.SGD, OptimizerNames.ADAM] if args.quick else [OptimizerNames.SGD, OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM, OptimizerNames.ADAMW]
 
-                    run_optimizer_comparison_matrix(
-                        results_dir=mnist_results_dir,
+                    experiment_results['lr_ablation'] = run_learning_rate_ablation(
+                        base_config,
+                        learning_rates=learning_rates,
                         optimizers=optimizers,
-                        metric='test_accuracy',
-                        output_dir=str(experiments_dir / "optimizer_comparison"),
-                        alpha=0.05
+                        seeds=seeds,
+                        results_dir=str(experiments_dir / "lr_ablation")
                     )
-                    experiment_results['optimizer_comparison'] = "Completed"
-                    print("Optimizer comparison matrix completed!")
-                else:
-                    print("MNIST results not found - run MNIST experiments first")
+                    print("Learning rate ablation completed!")
+                except Exception as e:
+                    logging.error(f"Learning rate ablation failed: {e}")
+                    experiment_results['lr_ablation'] = None
+
+            with error_context("Weight Decay Ablation Study", continue_on_error=True):
+                print("\n" + "="*80)
+                print("🔬 WEIGHT DECAY ABLATION STUDY")
+                print("="*80)
+                try:
+                    from src.experiments.weight_decay_ablation import run_weight_decay_ablation
+
+                    base_config = {
+                        'dataset': 'MNIST',
+                        'model': 'SimpleMLP',
+                        'lr': 1e-3,
+                        'epochs': 5 if args.quick else 10,
+                        'batch_size': 128
+                    }
+
+                    weight_decays = [0.0, 1e-4, 1e-3] if args.quick else [0.0, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2]
+                    optimizers = [OptimizerNames.SGD, OptimizerNames.ADAM] if args.quick else [OptimizerNames.SGD, OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM, OptimizerNames.ADAMW]
+
+                    experiment_results['wd_ablation'] = run_weight_decay_ablation(
+                        base_config,
+                        weight_decays=weight_decays,
+                        optimizers=optimizers,
+                        seeds=seeds,
+                        results_dir=str(experiments_dir / "wd_ablation")
+                    )
+                    print("Weight decay ablation completed!")
+                except Exception as e:
+                    logging.error(f"Weight decay ablation failed: {e}")
+                    experiment_results['wd_ablation'] = None
+
+        if 'scheduler_ablation' in selected_experiments:
+            with error_context("Scheduler Ablation Study", continue_on_error=True):
+                # Call internal scheduler ablation function (2×2 grid mitigation)
+                try:
+                    dataset_name = 'MNIST'  # Can extend to CIFAR10
+                    experiment_results['scheduler_ablation'] = run_scheduler_ablation(
+                        dataset_name=dataset_name,
+                        results_dir=str(experiments_dir / "scheduler_ablation"),
+                        seeds=args.seeds
+                    )
+                except Exception as e:
+                    logging.error(f"Scheduler ablation failed: {e}")
+                    experiment_results['scheduler_ablation'] = None
+
+        # NEW: Missing Ablation Studies (academic completeness)
+        if 'missing_ablations' in selected_experiments:
+            with error_context("Missing Ablation Studies", continue_on_error=True):
+                print("\n" + "="*80)
+                print("🔬 MISSING ABLATION STUDIES (ACADEMIC COMPLETENESS)")
+                print("="*80)
+                print("   5 additional ablations: gradient clipping, label smoothing,")
+                print("   data augmentation, model architecture, dropout")
+                print("="*80)
+                try:
+                    from src.experiments.missing_ablations import run_all_missing_ablations
+
+                    missing_abl_dir = str(experiments_dir / "missing_ablations")
+
+                    # Check if already completed (5 ablation CSVs)
+                    ablation_files = [
+                        Path(missing_abl_dir) / "gradient_clipping_ablation.csv",
+                        Path(missing_abl_dir) / "label_smoothing_ablation.csv",
+                        Path(missing_abl_dir) / "data_augmentation_ablation.csv",
+                        Path(missing_abl_dir) / "model_architecture_ablation.csv",
+                        Path(missing_abl_dir) / "dropout_ablation.csv"
+                    ]
+
+                    if args.resume and all(f.exists() for f in ablation_files):
+                        print("   Missing ablations already completed (all 5 found)")
+                        experiment_results['missing_ablations'] = "Skipped (already complete)"
+                    else:
+                        results_dict = run_all_missing_ablations(
+                            epochs=10 if args.quick else 15,
+                            seeds=seeds[:2] if args.quick else seeds[:3],
+                            device='cuda' if torch.cuda.is_available() else 'cpu',
+                            quick=args.quick,
+                            output_dir=missing_abl_dir
+                        )
+
+                        experiment_results['missing_ablations'] = results_dict
+                        print("Missing ablation studies completed (all 5)!")
+                except Exception as e:
+                    logging.error(f"Missing ablations failed: {e}")
+                    experiment_results['missing_ablations'] = None
+
+        if 'optimizer_comparison' in selected_experiments and HAS_STATS:
+            with error_context("Optimizer Comparison Matrix", continue_on_error=True):
+                print("\n" + "="*80)
+                print("OPTIMIZER COMPARISON MATRIX")
+                print("="*80)
+                try:
+                    from src.analysis.optimizer_comparison_matrix import run_optimizer_comparison_matrix
+
+                    # Use MNIST results if available
+                    mnist_results_dir = str(experiments_dir / "mnist")
+                    if os.path.exists(mnist_results_dir):
+                        optimizers = [OptimizerNames.SGD, OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM, OptimizerNames.ADAMW, OptimizerNames.AMSGRAD]
+
+                        run_optimizer_comparison_matrix(
+                            results_dir=mnist_results_dir,
+                            optimizers=optimizers,
+                            metric='test_accuracy',
+                            output_dir=str(experiments_dir / "optimizer_comparison"),
+                            alpha=0.05
+                        )
+                        experiment_results['optimizer_comparison'] = "Completed"
+                        print("Optimizer comparison matrix completed!")
+                    else:
+                        print("MNIST results not found - run MNIST experiments first")
+                        experiment_results['optimizer_comparison'] = None
+                except Exception as e:
+                    logging.error(f"Optimizer comparison failed: {e}")
                     experiment_results['optimizer_comparison'] = None
-            except Exception as e:
-                logging.error(f"Optimizer comparison failed: {e}")
-                experiment_results['optimizer_comparison'] = None
 
-    if 'resnet' in selected_experiments:
-        with error_context("ResNet Experiment", continue_on_error=True):
-            experiment_results['resnet'] = run_resnet_experiment(
-                results_dir=str(experiments_dir / "resnet"),
-                seeds=seeds,
-                quick=args.quick,
-                profiler=profiler,
-                tracker=tracker,
-                checkpoint_manager=checkpoint_manager,
-                resume=args.resume
-            )
+        if 'resnet' in selected_experiments:
+            with error_context("ResNet Experiment", continue_on_error=True):
+                experiment_results['resnet'] = run_resnet_experiment(
+                    results_dir=str(experiments_dir / "resnet"),
+                    seeds=seeds,
+                    quick=args.quick,
+                    profiler=profiler,
+                    tracker=tracker,
+                    checkpoint_manager=checkpoint_manager,
+                    resume=args.resume
+                )
 
-    if 'highdim' in selected_experiments:
-        with error_context("High-Dimensional Experiment", continue_on_error=True):
-            experiment_results['highdim'] = run_highdim_experiment(
-                results_dir=str(experiments_dir / "highdim"),
-                seeds=seeds,
-                quick=args.quick,
-                profiler=profiler,
-                tracker=tracker,
-                resume=args.resume
-            )
+        if 'highdim' in selected_experiments:
+            with error_context("High-Dimensional Experiment", continue_on_error=True):
+                experiment_results['highdim'] = run_highdim_experiment(
+                    results_dir=str(experiments_dir / "highdim"),
+                    seeds=seeds,
+                    quick=args.quick,
+                    profiler=profiler,
+                    tracker=tracker,
+                    resume=args.resume
+                )
 
-    # NEW: Hyperparameter Sensitivity Analysis (β, β1, β2 sweeps)
-    if 'hyperparam_sensitivity' in selected_experiments:
-        with error_context("Hyperparameter Sensitivity Analysis", continue_on_error=True):
-            print("\n" + "="*80)
-            print("🔬 HYPERPARAMETER SENSITIVITY ANALYSIS")
-            print("="*80)
-            try:
-                from src.experiments.hyperparameter_sensitivity import momentum_beta_sweep, adam_beta_sweep
+        # NEW: Hyperparameter Sensitivity Analysis (β, β1, β2 sweeps)
+        if 'hyperparam_sensitivity' in selected_experiments:
+            with error_context("Hyperparameter Sensitivity Analysis", continue_on_error=True):
+                print("\n" + "="*80)
+                print("🔬 HYPERPARAMETER SENSITIVITY ANALYSIS")
+                print("="*80)
+                try:
+                    from src.experiments.hyperparameter_sensitivity import momentum_beta_sweep, adam_beta_sweep
 
-                sensitivity_dir = str(experiments_dir / "hyperparam_sensitivity")
-                os.makedirs(sensitivity_dir, exist_ok=True)
+                    sensitivity_dir = str(experiments_dir / "hyperparam_sensitivity")
+                    os.makedirs(sensitivity_dir, exist_ok=True)
 
-                # Check if already completed
-                momentum_files = list(Path(sensitivity_dir).glob("momentum_beta_sweep_*.csv"))
-                adam_files = list(Path(sensitivity_dir).glob("adam_beta_sweep_*.csv"))
+                    # Check if already completed
+                    momentum_files = list(Path(sensitivity_dir).glob("momentum_beta_sweep_*.csv"))
+                    adam_files = list(Path(sensitivity_dir).glob("adam_beta_sweep_*.csv"))
 
-                if args.resume and len(momentum_files) >= 2 and len(adam_files) >= 1:
-                    print("   Hyperparam sensitivity already completed (found existing results)")
-                    experiment_results['hyperparam_sensitivity'] = "Skipped (already complete)"
-                else:
-                    # Momentum β sweep on multiple test functions
-                    print("   Running momentum β sweep...")
-                    for test_fn in ['rosenbrock', 'ackley']:
-                        momentum_beta_sweep(
-                            test_function=test_fn,
-                            beta_values=np.asarray([0.0, 0.5, 0.9, 0.99]) if args.quick else np.asarray([0.0, 0.5, 0.7, 0.9, 0.95, 0.99]),
+                    if args.resume and len(momentum_files) >= 2 and len(adam_files) >= 1:
+                        print("   Hyperparam sensitivity already completed (found existing results)")
+                        experiment_results['hyperparam_sensitivity'] = "Skipped (already complete)"
+                    else:
+                        # Momentum β sweep on multiple test functions
+                        print("   Running momentum β sweep...")
+                        for test_fn in ['rosenbrock', 'ackley']:
+                            momentum_beta_sweep(
+                                test_function=test_fn,
+                                beta_values=np.asarray([0.0, 0.5, 0.9, 0.99]) if args.quick else np.asarray([0.0, 0.5, 0.7, 0.9, 0.95, 0.99]),
+                                output_dir=sensitivity_dir
+                            )
+
+                        # Adam β1, β2 sweep
+                        print("   Running Adam β1,β2 sweep...")
+                        adam_beta_sweep(
+                            test_function='rosenbrock',
                             output_dir=sensitivity_dir
                         )
 
-                    # Adam β1, β2 sweep
-                    print("   Running Adam β1,β2 sweep...")
-                    adam_beta_sweep(
-                        test_function='rosenbrock',
-                        output_dir=sensitivity_dir
+                        experiment_results['hyperparam_sensitivity'] = "Completed"
+                        print("Hyperparameter sensitivity analysis completed!")
+                except Exception as e:
+                    logging.error(f"Hyperparameter sensitivity failed: {e}")
+                    experiment_results['hyperparam_sensitivity'] = None
+
+        # NEW: Convergence Rate Validation (Theory vs Practice)
+        if 'convergence_validation' in selected_experiments:
+            with error_context("Convergence Rate Validation", continue_on_error=True):
+                print("\n" + "="*80)
+                print("🔬 CONVERGENCE RATE VALIDATION (Theory vs Practice)")
+                print("="*80)
+                try:
+                    from src.experiments.convergence_rate_validation import run_convergence_rate_comparison
+
+                    validation_dir = str(experiments_dir / "convergence_validation")
+
+                    # Check if already completed
+                    result_file = Path(validation_dir) / "convergence_comparison.csv"
+
+                    if args.resume and result_file.exists():
+                        print("   Convergence validation already completed (found existing results)")
+                        experiment_results['convergence_validation'] = "Skipped (already complete)"
+                    else:
+                        # run_convergence_rate_comparison only accepts output_dir parameter
+                        # The implementation has hardcoded optimizer list and test function
+                        run_convergence_rate_comparison(
+                            output_dir=validation_dir
+                        )
+
+                        experiment_results['convergence_validation'] = "Completed"
+                        print("Convergence rate validation completed!")
+                except Exception as e:
+                    logging.error(f"Convergence validation failed: {e}")
+                    experiment_results['convergence_validation'] = None
+
+        # NEW: Comprehensive Ablation Studies (if not already run separately)
+        if 'ablation_comprehensive' in selected_experiments:
+            with error_context("Comprehensive Ablation Studies", continue_on_error=True):
+                print("\n" + "="*80)
+                print("🔬 COMPREHENSIVE ABLATION STUDIES")
+                print("="*80)
+                try:
+                    from src.experiments.ablation_studies_comprehensive import run_all_ablation_studies
+
+                    ablation_dir = str(experiments_dir / "ablation_comprehensive")
+
+                    # Check if already completed (3 ablation studies should exist)
+                    ablation_files = list(Path(ablation_dir).glob("ablation_*.csv"))
+
+                    if args.resume and len(ablation_files) >= 3:
+                        print("   Comprehensive ablation already completed (found existing results)")
+                        experiment_results['ablation_comprehensive'] = "Skipped (already complete)"
+                    else:
+                        run_all_ablation_studies(output_dir=ablation_dir)
+
+                        experiment_results['ablation_comprehensive'] = "Completed"
+                        print("Comprehensive ablation studies completed!")
+                except Exception as e:
+                    logging.error(f"Comprehensive ablation failed: {e}")
+                    experiment_results['ablation_comprehensive'] = None
+
+        # NEW: 2D Trajectory Visualization
+        if '2d_visualization' in selected_experiments:
+            with error_context("2D Trajectory Visualization", continue_on_error=True):
+                print("\n" + "="*80)
+                print("2D TRAJECTORY VISUALIZATION")
+                print("="*80)
+                try:
+                    from src.visualization.trajectory_2d import (
+                        compare_momentum_beta_trajectories,
+                        compare_adam_beta_trajectories,
+                        compare_optimizer_families
                     )
 
-                    experiment_results['hyperparam_sensitivity'] = "Completed"
-                    print("Hyperparameter sensitivity analysis completed!")
-            except Exception as e:
-                logging.error(f"Hyperparameter sensitivity failed: {e}")
-                experiment_results['hyperparam_sensitivity'] = None
+                    viz_2d_dir = str(results_dir / "visualizations" / "2d_trajectories")
+                    os.makedirs(viz_2d_dir, exist_ok=True)
 
-    # NEW: Convergence Rate Validation (Theory vs Practice)
-    if 'convergence_validation' in selected_experiments:
-        with error_context("Convergence Rate Validation", continue_on_error=True):
-            print("\n" + "="*80)
-            print("🔬 CONVERGENCE RATE VALIDATION (Theory vs Practice)")
-            print("="*80)
-            try:
-                from src.experiments.convergence_rate_validation import run_convergence_rate_comparison
+                    # Check if already completed
+                    momentum_plots = list(Path(viz_2d_dir).glob("*momentum_beta*.png"))
+                    adam_plots = list(Path(viz_2d_dir).glob("*adam_beta*.png"))
+                    family_plots = list(Path(viz_2d_dir).glob("*optimizer_families*.png"))
 
-                validation_dir = str(experiments_dir / "convergence_validation")
-
-                # Check if already completed
-                result_file = Path(validation_dir) / "convergence_comparison.csv"
-
-                if args.resume and result_file.exists():
-                    print("   Convergence validation already completed (found existing results)")
-                    experiment_results['convergence_validation'] = "Skipped (already complete)"
-                else:
-                    # run_convergence_rate_comparison only accepts output_dir parameter
-                    # The implementation has hardcoded optimizer list and test function
-                    run_convergence_rate_comparison(
-                        output_dir=validation_dir
-                    )
-
-                    experiment_results['convergence_validation'] = "Completed"
-                    print("Convergence rate validation completed!")
-            except Exception as e:
-                logging.error(f"Convergence validation failed: {e}")
-                experiment_results['convergence_validation'] = None
-
-    # NEW: Comprehensive Ablation Studies (if not already run separately)
-    if 'ablation_comprehensive' in selected_experiments:
-        with error_context("Comprehensive Ablation Studies", continue_on_error=True):
-            print("\n" + "="*80)
-            print("🔬 COMPREHENSIVE ABLATION STUDIES")
-            print("="*80)
-            try:
-                from src.experiments.ablation_studies_comprehensive import run_all_ablation_studies
-
-                ablation_dir = str(experiments_dir / "ablation_comprehensive")
-
-                # Check if already completed (3 ablation studies should exist)
-                ablation_files = list(Path(ablation_dir).glob("ablation_*.csv"))
-
-                if args.resume and len(ablation_files) >= 3:
-                    print("   Comprehensive ablation already completed (found existing results)")
-                    experiment_results['ablation_comprehensive'] = "Skipped (already complete)"
-                else:
-                    run_all_ablation_studies(output_dir=ablation_dir)
-
-                    experiment_results['ablation_comprehensive'] = "Completed"
-                    print("Comprehensive ablation studies completed!")
-            except Exception as e:
-                logging.error(f"Comprehensive ablation failed: {e}")
-                experiment_results['ablation_comprehensive'] = None
-
-    # NEW: 2D Trajectory Visualization
-    if '2d_visualization' in selected_experiments:
-        with error_context("2D Trajectory Visualization", continue_on_error=True):
-            print("\n" + "="*80)
-            print("2D TRAJECTORY VISUALIZATION")
-            print("="*80)
-            try:
-                from src.visualization.trajectory_2d import (
-                    compare_momentum_beta_trajectories,
-                    compare_adam_beta_trajectories,
-                    compare_optimizer_families
-                )
-
-                viz_2d_dir = str(results_dir / "visualizations" / "2d_trajectories")
-                os.makedirs(viz_2d_dir, exist_ok=True)
-
-                # Check if already completed
-                momentum_plots = list(Path(viz_2d_dir).glob("*momentum_beta*.png"))
-                adam_plots = list(Path(viz_2d_dir).glob("*adam_beta*.png"))
-                family_plots = list(Path(viz_2d_dir).glob("*optimizer_families*.png"))
-
-                if args.resume and len(momentum_plots) > 0 and len(adam_plots) > 0 and len(family_plots) > 0:
-                    print("   2D visualization already completed (found existing plots)")
-                    experiment_results['2d_visualization'] = "Skipped (already complete)"
-                else:
-                    # Momentum β trajectories
-                    compare_momentum_beta_trajectories(
+                    if args.resume and len(momentum_plots) > 0 and len(adam_plots) > 0 and len(family_plots) > 0:
+                        print("   2D visualization already completed (found existing plots)")
+                        experiment_results['2d_visualization'] = "Skipped (already complete)"
+                    else:
+                        # Momentum β trajectories
+                        compare_momentum_beta_trajectories(
                         test_function='rosenbrock',
                         beta_values=[0.0, 0.9, 0.99] if args.quick else [0.0, 0.5, 0.9, 0.99],
                         output_dir=viz_2d_dir
@@ -10622,135 +10826,135 @@ Examples:
 
                     experiment_results['2d_visualization'] = "Completed"
                     print("2D trajectory visualization completed!")
-            except Exception as e:
-                logging.error(f"2D visualization failed: {e}")
-                experiment_results['2d_visualization'] = None
+                except Exception as e:
+                    logging.error(f"2D visualization failed: {e}")
+                    experiment_results['2d_visualization'] = None
 
-    # NEW: Dynamics Tracking Overhead Ablation
-    if 'dynamics_overhead' in selected_experiments:
-        with error_context("Dynamics Overhead Ablation", continue_on_error=True):
-            print("\n" + "="*80)
-            print("🔬 DYNAMICS TRACKING OVERHEAD ABLATION")
-            print("="*80)
-            try:
-                from src.experiments.dynamics_overhead_ablation import run_dynamics_overhead_ablation
+        # NEW: Dynamics Tracking Overhead Ablation
+        if 'dynamics_overhead' in selected_experiments:
+            with error_context("Dynamics Overhead Ablation", continue_on_error=True):
+                print("\n" + "="*80)
+                print("🔬 DYNAMICS TRACKING OVERHEAD ABLATION")
+                print("="*80)
+                try:
+                    from src.experiments.dynamics_overhead_ablation import run_dynamics_overhead_ablation
 
-                ablation_dir = str(results_dir / "dynamics_overhead_ablation")
+                    ablation_dir = str(results_dir / "dynamics_overhead_ablation")
 
-                # Check if already completed
-                csv_results = list(Path(ablation_dir).glob("dynamics_overhead_ablation_*.csv"))
+                    # Check if already completed
+                    csv_results = list(Path(ablation_dir).glob("dynamics_overhead_ablation_*.csv"))
 
-                if args.resume and len(csv_results) > 0:
-                    print("   Dynamics overhead ablation already completed")
-                    experiment_results['dynamics_overhead'] = "Skipped (already complete)"
-                else:
-                    df = run_dynamics_overhead_ablation(
-                        dataset='MNIST',
-                        epochs=5 if args.quick else 10,
-                        seeds=seeds[:3] if args.quick else seeds,
-                        results_dir=ablation_dir,
-                        quick=args.quick
-                    )
-
-                    experiment_results['dynamics_overhead'] = df
-                    print("Dynamics overhead ablation completed!")
-            except Exception as e:
-                logging.error(f"Dynamics overhead ablation failed: {e}")
-                experiment_results['dynamics_overhead'] = None
-
-    # NEW: Theory-Practice Convergence Validation
-    if 'theory_practice' in selected_experiments:
-        with error_context("Theory-Practice Validation", continue_on_error=True):
-            print("\n" + "="*80)
-            print("🔬 THEORY-PRACTICE CONVERGENCE VALIDATION")
-            print("="*80)
-            try:
-                from src.experiments.theory_practice_validation import run_theory_practice_validation
-
-                validation_dir = str(results_dir / "theory_practice_validation")
-
-                # Check if already completed
-                csv_results = list(Path(validation_dir).glob("theory_practice_comparison_results.csv"))
-
-                if args.resume and len(csv_results) > 0:
-                    print("   Theory-practice validation already completed")
-                    experiment_results['theory_practice'] = "Skipped (already complete)"
-                else:
-                    # Only run if we have MNIST/CIFAR results
-                    available_experiments = []
-                    if (results_dir / "mnist").exists():
-                        available_experiments.append('mnist')
-                    if (results_dir / "cifar10").exists():
-                        available_experiments.append('cifar10')
-
-                    if available_experiments:
-                        df = run_theory_practice_validation(
-                            results_dir=str(results_dir),
-                            experiments=available_experiments,
-                            output_dir=validation_dir,
-                            problem_type='non_convex'
+                    if args.resume and len(csv_results) > 0:
+                        print("   Dynamics overhead ablation already completed")
+                        experiment_results['dynamics_overhead'] = "Skipped (already complete)"
+                    else:
+                        df = run_dynamics_overhead_ablation(
+                            dataset='MNIST',
+                            epochs=5 if args.quick else 10,
+                            seeds=seeds[:3] if args.quick else seeds,
+                            results_dir=ablation_dir,
+                            quick=args.quick
                         )
 
-                        experiment_results['theory_practice'] = df
-                        print("Theory-practice validation completed!")
+                        experiment_results['dynamics_overhead'] = df
+                        print("Dynamics overhead ablation completed!")
+                except Exception as e:
+                    logging.error(f"Dynamics overhead ablation failed: {e}")
+                    experiment_results['dynamics_overhead'] = None
+
+        # NEW: Theory-Practice Convergence Validation
+        if 'theory_practice' in selected_experiments:
+            with error_context("Theory-Practice Validation", continue_on_error=True):
+                print("\n" + "="*80)
+                print("🔬 THEORY-PRACTICE CONVERGENCE VALIDATION")
+                print("="*80)
+                try:
+                    from src.experiments.theory_practice_validation import run_theory_practice_validation
+
+                    validation_dir = str(results_dir / "theory_practice_validation")
+
+                    # Check if already completed
+                    csv_results = list(Path(validation_dir).glob("theory_practice_comparison_results.csv"))
+
+                    if args.resume and len(csv_results) > 0:
+                        print("   Theory-practice validation already completed")
+                        experiment_results['theory_practice'] = "Skipped (already complete)"
                     else:
-                        print("No MNIST/CIFAR results found - skipping theory-practice validation")
-                        print("    Run 'mnist' or 'cifar10' experiments first")
-                        experiment_results['theory_practice'] = None
-            except Exception as e:
-                logging.error(f"Theory-practice validation failed: {e}")
-                experiment_results['theory_practice'] = None
+                        # Only run if we have MNIST/CIFAR results
+                        available_experiments = []
+                        if (results_dir / "mnist").exists():
+                            available_experiments.append('mnist')
+                        if (results_dir / "cifar10").exists():
+                            available_experiments.append('cifar10')
 
-    # NEW: Saddle Point Escape Experiment
-    if 'saddle_escape' in selected_experiments and HAS_SADDLE_EXPERIMENT:
-        with error_context("Saddle Point Escape Experiment", continue_on_error=True):
-            print("\n" + "="*80)
-            print("🔬 SADDLE POINT ESCAPE ANALYSIS")
-            print("="*80)
-            try:
-                saddle_escape_dir = str(results_dir / "saddle_point_escape")
+                        if available_experiments:
+                            df = run_theory_practice_validation(
+                                results_dir=str(results_dir),
+                                experiments=available_experiments,
+                                output_dir=validation_dir,
+                                problem_type='non_convex'
+                            )
 
-                # Check if already completed
-                summary_file = Path(saddle_escape_dir) / "saddle_escape_summary.csv"
+                            experiment_results['theory_practice'] = df
+                            print("Theory-practice validation completed!")
+                        else:
+                            print("No MNIST/CIFAR results found - skipping theory-practice validation")
+                            print("    Run 'mnist' or 'cifar10' experiments first")
+                            experiment_results['theory_practice'] = None
+                except Exception as e:
+                    logging.error(f"Theory-practice validation failed: {e}")
+                    experiment_results['theory_practice'] = None
 
-                if args.resume and summary_file.exists():
-                    print("   Saddle point escape experiment already completed")
-                    experiment_results['saddle_escape'] = "Skipped (already complete)"
-                else:
-                    results = run_saddle_point_escape_experiment(
-                        initial_point=(0.1, 0.1),
-                        max_iters=1000,
-                        eigenvalue_check_interval=10,
-                        output_dir=saddle_escape_dir
-                    )
+        # NEW: Saddle Point Escape Experiment
+        if 'saddle_escape' in selected_experiments and HAS_SADDLE_EXPERIMENT:
+            with error_context("Saddle Point Escape Experiment", continue_on_error=True):
+                print("\n" + "="*80)
+                print("🔬 SADDLE POINT ESCAPE ANALYSIS")
+                print("="*80)
+                try:
+                    saddle_escape_dir = str(results_dir / "saddle_point_escape")
 
-                    experiment_results['saddle_escape'] = results
-                    print("Saddle point escape experiment completed!")
-                    print("✓ Results demonstrate momentum-based optimizers escape saddles faster")
-            except Exception as e:
-                logging.error(f"Saddle point escape experiment failed: {e}")
-                experiment_results['saddle_escape'] = None
+                    # Check if already completed
+                    summary_file = Path(saddle_escape_dir) / "saddle_escape_summary.csv"
 
-    # NEW: Hyperparameter Sensitivity Heatmaps
-    if 'hyperparameter_heatmaps' in selected_experiments and HAS_HEATMAP_GENERATOR:
-        with error_context("Hyperparameter Sensitivity Heatmaps", continue_on_error=True):
-            print("\n" + "="*80)
-            print("🔬 HYPERPARAMETER SENSITIVITY HEATMAP GENERATION")
-            print("="*80)
-            try:
-                from src.core.test_functions import Rosenbrock, IllConditionedQuadratic
+                    if args.resume and summary_file.exists():
+                        print("   Saddle point escape experiment already completed")
+                        experiment_results['saddle_escape'] = "Skipped (already complete)"
+                    else:
+                        results = run_saddle_point_escape_experiment(
+                            initial_point=(0.1, 0.1),
+                            max_iters=1000,
+                            eigenvalue_check_interval=10,
+                            output_dir=saddle_escape_dir
+                        )
 
-                heatmap_dir = str(results_dir / "hyperparameter_heatmaps")
+                        experiment_results['saddle_escape'] = results
+                        print("Saddle point escape experiment completed!")
+                        print("✓ Results demonstrate momentum-based optimizers escape saddles faster")
+                except Exception as e:
+                    logging.error(f"Saddle point escape experiment failed: {e}")
+                    experiment_results['saddle_escape'] = None
 
-                # Check if already completed
-                momentum_file = Path(heatmap_dir) / "momentum_beta_heatmap_data.csv"
-                adam_file = Path(heatmap_dir) / "adam_beta_heatmap_data.csv"
+        # NEW: Hyperparameter Sensitivity Heatmaps
+        if 'hyperparameter_heatmaps' in selected_experiments and HAS_HEATMAP_GENERATOR:
+            with error_context("Hyperparameter Sensitivity Heatmaps", continue_on_error=True):
+                print("\n" + "="*80)
+                print("🔬 HYPERPARAMETER SENSITIVITY HEATMAP GENERATION")
+                print("="*80)
+                try:
+                    from src.core.test_functions import Rosenbrock, IllConditionedQuadratic
 
-                if args.resume and momentum_file.exists() and adam_file.exists():
-                    print("   Hyperparameter heatmaps already generated")
-                    experiment_results['hyperparameter_heatmaps'] = "Skipped (already complete)"
-                else:
-                    print("Generating momentum beta sensitivity heatmap...")
+                    heatmap_dir = str(results_dir / "hyperparameter_heatmaps")
+
+                    # Check if already completed
+                    momentum_file = Path(heatmap_dir) / "momentum_beta_heatmap_data.csv"
+                    adam_file = Path(heatmap_dir) / "adam_beta_heatmap_data.csv"
+
+                    if args.resume and momentum_file.exists() and adam_file.exists():
+                        print("   Hyperparameter heatmaps already generated")
+                        experiment_results['hyperparameter_heatmaps'] = "Skipped (already complete)"
+                    else:
+                        print("Generating momentum beta sensitivity heatmap...")
                     momentum_df = run_momentum_beta_heatmap(
                         test_function=Rosenbrock(),
                         beta_range=np.linspace(0.0, 0.99, 15 if args.quick else 20),
@@ -10775,235 +10979,235 @@ Examples:
                     }
                     print("Hyperparameter sensitivity heatmaps completed!")
                     print(f"✓ Heatmaps saved to {heatmap_dir}")
-            except Exception as e:
-                logging.error(f"Hyperparameter heatmap generation failed: {e}")
-                experiment_results['hyperparameter_heatmaps'] = None
+                except Exception as e:
+                    logging.error(f"Hyperparameter heatmap generation failed: {e}")
+                    experiment_results['hyperparameter_heatmaps'] = None
 
-    # NEW: Stochastic 2D Integrity Fix (Proper SGD with Gradient Noise)
-    if 'stochastic_2d_integrity' in selected_experiments and HAS_STOCHASTIC_2D_INTEGRITY:
-        with error_context("Stochastic 2D Integrity Experiment", continue_on_error=True):
-            print("\n" + "="*80)
-            print("🔬 STOCHASTIC 2D OPTIMIZATION (Proper SGD with Gradient Noise)")
-            print("="*80)
-            print("   NOTE: This fixes the 'Fake SGD' problem - adding gradient noise")
-            print("   to make SGD truly stochastic (not deterministic GD)")
-            print("="*80)
-            try:
-                stoch_dir = str(results_dir / "stochastic_2d_integrity")
+        # NEW: Stochastic 2D Integrity Fix (Proper SGD with Gradient Noise)
+        if 'stochastic_2d_integrity' in selected_experiments and HAS_STOCHASTIC_2D_INTEGRITY:
+            with error_context("Stochastic 2D Integrity Experiment", continue_on_error=True):
+                print("\n" + "="*80)
+                print("🔬 STOCHASTIC 2D OPTIMIZATION (Proper SGD with Gradient Noise)")
+                print("="*80)
+                print("   NOTE: This fixes the 'Fake SGD' problem - adding gradient noise")
+                print("   to make SGD truly stochastic (not deterministic GD)")
+                print("="*80)
+                try:
+                    stoch_dir = str(results_dir / "stochastic_2d_integrity")
 
-                # Check if already completed
-                comparison_file = Path(stoch_dir) / "gd_vs_sgd_comparison.csv"
+                    # Check if already completed
+                    comparison_file = Path(stoch_dir) / "gd_vs_sgd_comparison.csv"
 
-                if args.resume and comparison_file.exists():
-                    print("   Stochastic 2D integrity experiment already completed")
-                    experiment_results['stochastic_2d_integrity'] = "Skipped (already complete)"
-                else:
-                    # Run comprehensive GD vs. SGD comparison
-                    results = compare_deterministic_vs_stochastic(
-                        results_dir=stoch_dir,
-                        seeds=seeds
-                    )
+                    if args.resume and comparison_file.exists():
+                        print("   Stochastic 2D integrity experiment already completed")
+                        experiment_results['stochastic_2d_integrity'] = "Skipped (already complete)"
+                    else:
+                        # Run comprehensive GD vs. SGD comparison
+                        results = compare_deterministic_vs_stochastic(
+                            results_dir=stoch_dir,
+                            seeds=seeds
+                        )
 
-                    experiment_results['stochastic_2d_integrity'] = results
-                    print("Stochastic 2D integrity experiment completed!")
-                    print("✓ Results demonstrate critical difference between GD and SGD")
-                    print("✓ Gradient noise injection now properly simulates mini-batch stochasticity")
-            except Exception as e:
-                logging.error(f"Stochastic 2D integrity experiment failed: {e}")
-                experiment_results['stochastic_2d_integrity'] = None
+                        experiment_results['stochastic_2d_integrity'] = results
+                        print("Stochastic 2D integrity experiment completed!")
+                        print("✓ Results demonstrate critical difference between GD and SGD")
+                        print("✓ Gradient noise injection now properly simulates mini-batch stochasticity")
+                except Exception as e:
+                    logging.error(f"Stochastic 2D integrity experiment failed: {e}")
+                    experiment_results['stochastic_2d_integrity'] = None
 
-    # NEW: Adam L2 vs. AdamW Comparison (Final Structural Fix)
-    if 'adam_adamw_comparison' in selected_experiments and HAS_ADAM_ADAMW_COMPARISON:
-        with error_context("Adam L2 vs AdamW Comparison", continue_on_error=True):
-            print("\n" + "="*80)
-            print("🔬 ADAM L2 vs. ADAMW COMPARISON")
-            print("="*80)
-            print("   Demonstrates WHY AdamW exists: L2 regularization fails with adaptive optimizers")
-            print("="*80)
-            try:
-                adam_comp_dir = str(results_dir / "adam_adamw_comparison")
+        # NEW: Adam L2 vs. AdamW Comparison (Final Structural Fix)
+        if 'adam_adamw_comparison' in selected_experiments and HAS_ADAM_ADAMW_COMPARISON:
+            with error_context("Adam L2 vs AdamW Comparison", continue_on_error=True):
+                print("\n" + "="*80)
+                print("🔬 ADAM L2 vs. ADAMW COMPARISON")
+                print("="*80)
+                print("   Demonstrates WHY AdamW exists: L2 regularization fails with adaptive optimizers")
+                print("="*80)
+                try:
+                    adam_comp_dir = str(results_dir / "adam_adamw_comparison")
 
-                # Check if already completed
-                comparison_file = Path(adam_comp_dir) / "adam_l2_vs_adamw_comparison.csv"
+                    # Check if already completed
+                    comparison_file = Path(adam_comp_dir) / "adam_l2_vs_adamw_comparison.csv"
 
-                if args.resume and comparison_file.exists():
-                    print("   Adam L2 vs AdamW comparison already completed")
-                    experiment_results['adam_adamw_comparison'] = "Skipped (already complete)"
-                else:
-                    # Run comprehensive Adam L2 vs AdamW comparison
-                    weight_decay_values = [0.0, 0.001, 0.01, 0.1] if not args.quick else [0.0, 0.01]
-                    max_iter = 1000 if args.quick else 2000
+                    if args.resume and comparison_file.exists():
+                        print("   Adam L2 vs AdamW comparison already completed")
+                        experiment_results['adam_adamw_comparison'] = "Skipped (already complete)"
+                    else:
+                        # Run comprehensive Adam L2 vs AdamW comparison
+                        weight_decay_values = [0.0, 0.001, 0.01, 0.1] if not args.quick else [0.0, 0.01]
+                        max_iter = 1000 if args.quick else 2000
 
-                    df_comparison = run_adam_vs_adamw_comparison(
-                        results_dir=adam_comp_dir,
-                        seeds=seeds,
-                        weight_decay_values=weight_decay_values,
-                        max_iter=max_iter,
-                        resume=False
-                    )
+                        df_comparison = run_adam_vs_adamw_comparison(
+                            results_dir=adam_comp_dir,
+                            seeds=seeds,
+                            weight_decay_values=weight_decay_values,
+                            max_iter=max_iter,
+                            resume=False
+                        )
 
-                    # Also demonstrate LR scheduling
-                    df_schedule = run_lr_schedule_demonstration(
-                        results_dir=f"{adam_comp_dir}/lr_schedule",
-                        max_iter=max_iter
-                    )
+                        # Also demonstrate LR scheduling
+                        df_schedule = run_lr_schedule_demonstration(
+                            results_dir=f"{adam_comp_dir}/lr_schedule",
+                            max_iter=max_iter
+                        )
 
-                    experiment_results['adam_adamw_comparison'] = {
-                        'comparison': df_comparison,
-                        'schedule_demo': df_schedule
-                    }
-                    print("Adam L2 vs AdamW comparison completed!")
-                    print("✓ Results show L2 regularization degrades Adam performance")
-                    print("✓ AdamW (decoupled) maintains convergence quality")
-                    print("✓ LR scheduling now supported in 2D experiments")
-            except Exception as e:
-                logging.error(f"Adam L2 vs AdamW comparison failed: {e}")
-                experiment_results['adam_adamw_comparison'] = None
+                        experiment_results['adam_adamw_comparison'] = {
+                            'comparison': df_comparison,
+                            'schedule_demo': df_schedule
+                        }
+                        print("Adam L2 vs AdamW comparison completed!")
+                        print("✓ Results show L2 regularization degrades Adam performance")
+                        print("✓ AdamW (decoupled) maintains convergence quality")
+                        print("✓ LR scheduling now supported in 2D experiments")
+                except Exception as e:
+                    logging.error(f"Adam L2 vs AdamW comparison failed: {e}")
+                    experiment_results['adam_adamw_comparison'] = None
 
-    # NEW: Cross-Optimizer Dynamics Comparison (addresses proposal requirement)
-    if 'cross_optimizer_dynamics' in selected_experiments:
-        with error_context("Cross-Optimizer Dynamics Comparison", continue_on_error=True):
-            print("\n" + "="*80)
-            print("🔬 CROSS-OPTIMIZER DYNAMICS COMPARISON")
-            print("="*80)
-            try:
-                from src.experiments.cross_optimizer_dynamics_comparison import run_cross_optimizer_dynamics_comparison
+        # NEW: Cross-Optimizer Dynamics Comparison (addresses proposal requirement)
+        if 'cross_optimizer_dynamics' in selected_experiments:
+            with error_context("Cross-Optimizer Dynamics Comparison", continue_on_error=True):
+                print("\n" + "="*80)
+                print("🔬 CROSS-OPTIMIZER DYNAMICS COMPARISON")
+                print("="*80)
+                try:
+                    from src.experiments.cross_optimizer_dynamics_comparison import run_cross_optimizer_dynamics_comparison
 
-                dynamics_comp_dir = str(results_dir / "cross_optimizer_dynamics")
+                    dynamics_comp_dir = str(results_dir / "cross_optimizer_dynamics")
 
-                # Check if already completed
-                csv_results = list(Path(dynamics_comp_dir).glob("cross_optimizer_dynamics_*.csv"))
+                    # Check if already completed
+                    csv_results = list(Path(dynamics_comp_dir).glob("cross_optimizer_dynamics_*.csv"))
 
-                if args.resume and len(csv_results) > 0:
-                    print("   Cross-optimizer dynamics comparison already completed")
-                    experiment_results['cross_optimizer_dynamics'] = "Skipped (already complete)"
-                else:
-                    # Run on MNIST (fast, clear dynamics)
-                    df = run_cross_optimizer_dynamics_comparison(
-                        dataset='MNIST',
-                        optimizers=[OptimizerNames.SGD, OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM] if args.quick else None,
-                        epochs=20 if args.quick else 50,
-                        seeds=seeds[:2] if args.quick else seeds[:3],
-                        quick=args.quick,
-                        results_dir=dynamics_comp_dir
-                    )
-
-                    experiment_results['cross_optimizer_dynamics'] = df
-                    print("Cross-optimizer dynamics comparison completed!")
-            except Exception as e:
-                logging.error(f"Cross-optimizer dynamics comparison failed: {e}")
-                experiment_results['cross_optimizer_dynamics'] = None
-
-    # NEW: β Sensitivity on Real Training
-    if 'beta_sensitivity_training' in selected_experiments:
-        with error_context("Beta Sensitivity on Real Training", continue_on_error=True):
-            print("\n" + "="*80)
-            print("🔬 β SENSITIVITY ANALYSIS ON REAL TRAINING")
-            print("="*80)
-            print("📌 This addresses the Vietnamese proposal requirement:")
-            print("   'systematic investigation and visualization of the impact of characteristic")
-            print("    hyperparameters (β, β1, β2) on kinetic aspects'")
-            print("="*80)
-            try:
-                from src.experiments.beta_sensitivity_training import (
-                    run_momentum_beta_sensitivity,
-                    run_adam_beta_sensitivity,
-                    run_adam_beta2_sensitivity,
-                    run_adam_beta1_beta2_grid
-                )
-
-                beta_sens_dir = str(results_dir / "beta_sensitivity_training")
-
-                # Check if already completed (now checking all 4 experiments)
-                momentum_csv = Path(beta_sens_dir) / "momentum_beta_sensitivity_mnist.csv"
-                adam_beta1_csv = Path(beta_sens_dir) / "adam_beta_sensitivity_mnist.csv"
-                adam_beta2_csv = Path(beta_sens_dir) / "adam_beta2_sensitivity_mnist.csv"
-                adam_grid_csv = Path(beta_sens_dir) / "adam_beta1_beta2_grid_mnist.csv"
-
-                if args.resume and all([momentum_csv.exists(), adam_beta1_csv.exists(),
-                                       adam_beta2_csv.exists(), adam_grid_csv.exists()]):
-                    print("   β sensitivity training already completed (all 4 experiments)")
-                    experiment_results['beta_sensitivity_training'] = "Skipped (already complete)"
-                else:
-                    # Determine device
-                    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-
-                    results_dict = {}
-
-                    # Run Momentum β sensitivity
-                    if not momentum_csv.exists() or not args.resume:
-                        print("\nRunning Momentum β sweep on MNIST...")
-                        sgd_params = get_default_hyperparameters('SGD', 'resnet_cifar10')
-                        lr = sgd_params.get('lr', 0.01)
-                        momentum_df = run_momentum_beta_sensitivity(
-                            beta_values=[0.0, 0.5, 0.9, 0.99] if args.quick else [0.0, 0.5, 0.7, 0.9, 0.95, 0.99],
-                            epochs=10 if args.quick else 20,
+                    if args.resume and len(csv_results) > 0:
+                        print("   Cross-optimizer dynamics comparison already completed")
+                        experiment_results['cross_optimizer_dynamics'] = "Skipped (already complete)"
+                    else:
+                        # Run on MNIST (fast, clear dynamics)
+                        df = run_cross_optimizer_dynamics_comparison(
+                            dataset='MNIST',
+                            optimizers=[OptimizerNames.SGD, OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM] if args.quick else None,
+                            epochs=20 if args.quick else 50,
                             seeds=seeds[:2] if args.quick else seeds[:3],
-                            lr=lr,
-                            device=device,
                             quick=args.quick,
-                            output_dir=beta_sens_dir
+                            results_dir=dynamics_comp_dir
                         )
-                        results_dict['momentum'] = momentum_df
 
-                    # Run Adam β1 sensitivity
-                    if not adam_beta1_csv.exists() or not args.resume:
-                        print("\nRunning Adam β1 sweep on MNIST...")
-                        adam_params = get_default_hyperparameters('Adam', 'resnet_cifar10')
-                        lr = adam_params.get('lr', 0.001)
-                        adam_beta1_df = run_adam_beta_sensitivity(
-                            beta1_values=[0.5, 0.9, 0.99] if args.quick else [0.5, 0.7, 0.9, 0.95, 0.99],
-                            epochs=10 if args.quick else 20,
-                            seeds=seeds[:2] if args.quick else seeds[:3],
-                            lr=lr,
-                            device=device,
-                            quick=args.quick,
-                            output_dir=beta_sens_dir
-                        )
-                        results_dict['adam_beta1'] = adam_beta1_df
+                        experiment_results['cross_optimizer_dynamics'] = df
+                        print("Cross-optimizer dynamics comparison completed!")
+                except Exception as e:
+                    logging.error(f"Cross-optimizer dynamics comparison failed: {e}")
+                    experiment_results['cross_optimizer_dynamics'] = None
 
-                    # Run Adam β2 sensitivity (NEW)
-                    if not adam_beta2_csv.exists() or not args.resume:
-                        print("\nRunning Adam β2 sweep on MNIST...")
-                        adam_beta2_df = run_adam_beta2_sensitivity(
-                            beta1=0.9,  # Fixed β1
-                            beta2_values=[0.95, 0.99, 0.999] if args.quick else [0.9, 0.95, 0.99, 0.999, 0.9999],
-                            epochs=10 if args.quick else 20,
-                            seeds=seeds[:2] if args.quick else seeds[:3],
-                            lr=lr,  # Use same lr as above
-                            device=device,
-                            quick=args.quick,
-                            output_dir=beta_sens_dir
-                        )
-                        results_dict['adam_beta2'] = adam_beta2_df
+        # NEW: β Sensitivity on Real Training
+        if 'beta_sensitivity_training' in selected_experiments:
+            with error_context("Beta Sensitivity on Real Training", continue_on_error=True):
+                print("\n" + "="*80)
+                print("🔬 β SENSITIVITY ANALYSIS ON REAL TRAINING")
+                print("="*80)
+                print("📌 This addresses the Vietnamese proposal requirement:")
+                print("   'systematic investigation and visualization of the impact of characteristic")
+                print("    hyperparameters (β, β1, β2) on kinetic aspects'")
+                print("="*80)
+                try:
+                    from src.experiments.beta_sensitivity_training import (
+                        run_momentum_beta_sensitivity,
+                        run_adam_beta_sensitivity,
+                        run_adam_beta2_sensitivity,
+                        run_adam_beta1_beta2_grid
+                    )
 
-                    # Run Adam (β1, β2) grid search (NEW)
-                    if not adam_grid_csv.exists() or not args.resume:
-                        print("\nRunning Adam (β1, β2) grid search on MNIST...")
-                        adam_grid_df = run_adam_beta1_beta2_grid(
-                            beta1_values=[0.7, 0.9, 0.99] if args.quick else [0.7, 0.9, 0.95, 0.99],
-                            beta2_values=[0.9, 0.99, 0.999] if args.quick else [0.9, 0.99, 0.999, 0.9999],
-                            epochs=10 if args.quick else 15,
-                            seeds=seeds[:1] if args.quick else seeds[:2],
-                            lr=lr,  # Use same lr as above
-                            device=device,
-                            quick=args.quick,
-                            output_dir=beta_sens_dir
-                        )
-                        results_dict['adam_grid'] = adam_grid_df
+                    beta_sens_dir = str(results_dir / "beta_sensitivity_training")
 
-                    experiment_results['beta_sensitivity_training'] = results_dict
-                    print("β sensitivity on real training completed (all 4 experiments)!")
-            except Exception as e:
-                logging.error(f"Beta sensitivity training failed: {e}")
-                experiment_results['beta_sensitivity_training'] = None
+                    # Check if already completed (now checking all 4 experiments)
+                    momentum_csv = Path(beta_sens_dir) / "momentum_beta_sensitivity_mnist.csv"
+                    adam_beta1_csv = Path(beta_sens_dir) / "adam_beta_sensitivity_mnist.csv"
+                    adam_beta2_csv = Path(beta_sens_dir) / "adam_beta2_sensitivity_mnist.csv"
+                    adam_grid_csv = Path(beta_sens_dir) / "adam_beta1_beta2_grid_mnist.csv"
 
-    # NEW: Label Noise Ablation
-    if 'label_noise' in selected_experiments:
-        with error_context("Label Noise Ablation", continue_on_error=True):
-            print("\n" + "="*80)
-            print(" LABEL NOISE ABLATION STUDY")
-            print("="*80)
+                    if args.resume and all([momentum_csv.exists(), adam_beta1_csv.exists(),
+                                           adam_beta2_csv.exists(), adam_grid_csv.exists()]):
+                        print("   β sensitivity training already completed (all 4 experiments)")
+                        experiment_results['beta_sensitivity_training'] = "Skipped (already complete)"
+                    else:
+                        # Determine device
+                        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+                        results_dict = {}
+
+                        # Run Momentum β sensitivity
+                        if not momentum_csv.exists() or not args.resume:
+                            print("\nRunning Momentum β sweep on MNIST...")
+                            sgd_params = get_default_hyperparameters('SGD', 'resnet_cifar10')
+                            lr = sgd_params.get('lr', 0.01)
+                            momentum_df = run_momentum_beta_sensitivity(
+                                beta_values=[0.0, 0.5, 0.9, 0.99] if args.quick else [0.0, 0.5, 0.7, 0.9, 0.95, 0.99],
+                                epochs=10 if args.quick else 20,
+                                seeds=seeds[:2] if args.quick else seeds[:3],
+                                lr=lr,
+                                device=device,
+                                quick=args.quick,
+                                output_dir=beta_sens_dir
+                            )
+                            results_dict['momentum'] = momentum_df
+
+                        # Run Adam β1 sensitivity
+                        if not adam_beta1_csv.exists() or not args.resume:
+                            print("\nRunning Adam β1 sweep on MNIST...")
+                            adam_params = get_default_hyperparameters('Adam', 'resnet_cifar10')
+                            lr = adam_params.get('lr', 0.001)
+                            adam_beta1_df = run_adam_beta_sensitivity(
+                                beta1_values=[0.5, 0.9, 0.99] if args.quick else [0.5, 0.7, 0.9, 0.95, 0.99],
+                                epochs=10 if args.quick else 20,
+                                seeds=seeds[:2] if args.quick else seeds[:3],
+                                lr=lr,
+                                device=device,
+                                quick=args.quick,
+                                output_dir=beta_sens_dir
+                            )
+                            results_dict['adam_beta1'] = adam_beta1_df
+
+                        # Run Adam β2 sensitivity (NEW)
+                        if not adam_beta2_csv.exists() or not args.resume:
+                            print("\nRunning Adam β2 sweep on MNIST...")
+                            adam_beta2_df = run_adam_beta2_sensitivity(
+                                beta1=0.9,  # Fixed β1
+                                beta2_values=[0.95, 0.99, 0.999] if args.quick else [0.9, 0.95, 0.99, 0.999, 0.9999],
+                                epochs=10 if args.quick else 20,
+                                seeds=seeds[:2] if args.quick else seeds[:3],
+                                lr=lr,  # Use same lr as above
+                                device=device,
+                                quick=args.quick,
+                                output_dir=beta_sens_dir
+                            )
+                            results_dict['adam_beta2'] = adam_beta2_df
+
+                        # Run Adam (β1, β2) grid search (NEW)
+                        if not adam_grid_csv.exists() or not args.resume:
+                            print("\nRunning Adam (β1, β2) grid search on MNIST...")
+                            adam_grid_df = run_adam_beta1_beta2_grid(
+                                beta1_values=[0.7, 0.9, 0.99] if args.quick else [0.7, 0.9, 0.95, 0.99],
+                                beta2_values=[0.9, 0.99, 0.999] if args.quick else [0.9, 0.99, 0.999, 0.9999],
+                                epochs=10 if args.quick else 15,
+                                seeds=seeds[:1] if args.quick else seeds[:2],
+                                lr=lr,  # Use same lr as above
+                                device=device,
+                                quick=args.quick,
+                                output_dir=beta_sens_dir
+                            )
+                            results_dict['adam_grid'] = adam_grid_df
+
+                        experiment_results['beta_sensitivity_training'] = results_dict
+                        print("β sensitivity on real training completed (all 4 experiments)!")
+                except Exception as e:
+                    logging.error(f"Beta sensitivity training failed: {e}")
+                    experiment_results['beta_sensitivity_training'] = None
+
+        # NEW: Label Noise Ablation
+        if 'label_noise' in selected_experiments:
+            with error_context("Label Noise Ablation", continue_on_error=True):
+                print("\n" + "="*80)
+                print("🔬 LABEL NOISE ABLATION STUDY")
+                print("="*80)
             print(" This addresses important methodological gap:")
             print("   'Label noise ablation is the gold standard for validating claims")
             print("    about flat minima and optimizer robustness to noisy labels'")
@@ -11139,72 +11343,72 @@ Examples:
                 traceback.print_exc()
                 experiment_results['label_noise'] = None
 
-    # Run statistical analysis if scipy available
-    if HAS_SCIPY:
-        print("\n" + "="*80)
-        print("RUNNING STATISTICAL ANALYSIS...")
-        print("="*80)
+            # Run statistical analysis if scipy available
+        if HAS_SCIPY:
+            print("\n" + "="*80)
+            print("RUNNING STATISTICAL ANALYSIS...")
+            print("="*80)
         with error_context("Statistical Analysis", continue_on_error=True):
             stats_df = run_statistical_analysis(results_dir=str(results_dir))
             experiment_results['statistics'] = stats_df
 
-    # INTEGRATED ANALYSIS PIPELINE
-    print("\n" + "="*80)
-    print("[*] RUNNING INTEGRATED ANALYSIS PIPELINE")
-    print("="*80)
+            # INTEGRATED ANALYSIS PIPELINE
+            print("\n" + "="*80)
+            print("[*] RUNNING INTEGRATED ANALYSIS PIPELINE")
+            print("="*80)
 
-    # Theory-Practice Validation Pipeline (if requested)
-    if args.with_theory_analysis:
-        print("\n[THEORY] Theory-Practice Validation Pipeline...")
-        try:
-            theory_results = run_theory_analysis_pipeline(
-                results_dir=results_dir,
-                experiment_results=experiment_results,
-                dry_run=False
-            )
-            experiment_results['theory_analysis'] = theory_results
-            print("   [OK] Theory-practice validation pipeline complete")
-            if theory_results.get('report_path'):
-                print(f"        Report: {theory_results['report_path']}")
-        except Exception as e:
-            logging.error(f"   [FAIL] Theory analysis pipeline failed: {e}")
-            import traceback
-            traceback.print_exc()
-            experiment_results['theory_analysis'] = None
-    else:
-        print("\n[THEORY] Theory-Practice Validation: SKIPPED (use --with-theory-analysis to enable)")
+            # Theory-Practice Validation Pipeline (if requested)
+            if args.with_theory_analysis:
+                print("\n[THEORY] Theory-Practice Validation Pipeline...")
+                try:
+                    theory_results = run_theory_analysis_pipeline(
+                        results_dir=results_dir,
+                        experiment_results=experiment_results,
+                        dry_run=False
+                    )
+                    experiment_results['theory_analysis'] = theory_results
+                    print("   [OK] Theory-practice validation pipeline complete")
+                    if theory_results.get('report_path'):
+                        print(f"        Report: {theory_results['report_path']}")
+                except Exception as e:
+                    logging.error(f"   [FAIL] Theory analysis pipeline failed: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    experiment_results['theory_analysis'] = None
+            else:
+                print("\n[THEORY] Theory-Practice Validation: SKIPPED (use --with-theory-analysis to enable)")
 
-    # Cross-experiment aggregation (Priority 3)
-    print("\n[0] Cross-Experiment Aggregation...")
-    try:
-        aggregation_df = aggregate_cross_experiment_results(results_dir, experiment_results)
-        experiment_results['aggregation'] = aggregation_df
-        print("   [OK] Cross-experiment aggregation complete")
-    except Exception as e:
-        logging.error(f"   [FAIL] Cross-experiment aggregation failed: {e}")
-        experiment_results['aggregation'] = None
+            # Cross-experiment aggregation (Priority 3)
+            print("\n[0] Cross-Experiment Aggregation...")
+            try:
+                aggregation_df = aggregate_cross_experiment_results(results_dir, experiment_results)
+                experiment_results['aggregation'] = aggregation_df
+                print("   [OK] Cross-experiment aggregation complete")
+            except Exception as e:
+                logging.error(f"   [FAIL] Cross-experiment aggregation failed: {e}")
+                experiment_results['aggregation'] = None
 
-    # Convergence analysis
-    if HAS_CONVERGENCE:
-        print("\n[1] Convergence Analysis...")
-        try:
-            run_convergence_analysis_on_results(str(results_dir))
-            print("   [OK] Convergence analysis complete")
-        except Exception as e:
-            logging.error(f"   [FAIL] Convergence analysis failed: {e}")
-    else:
-        print("\n[1] Convergence Analysis: SKIPPED (module not available)")
+            # Convergence analysis
+            if HAS_CONVERGENCE:
+                print("\n[1] Convergence Analysis...")
+                try:
+                    run_convergence_analysis_on_results(str(results_dir))
+                    print("   [OK] Convergence analysis complete")
+                except Exception as e:
+                    logging.error(f"   [FAIL] Convergence analysis failed: {e}")
+            else:
+                print("\n[1] Convergence Analysis: SKIPPED (module not available)")
 
-    # Interactive visualizations
-    if HAS_INTERACTIVE:
-        print("\n[2] Interactive Visualizations...")
-        try:
-            generate_interactive_visualizations(str(results_dir), str(results_dir / "visualizations"))
-            safe_print("   [OK] Interactive plots generated")
-        except Exception as e:
-            logging.error(f"   [ERROR] Visualization failed: {e}")
-    else:
-        print("\n[2] Interactive Visualizations: SKIPPED (install plotly)")
+            # Interactive visualizations
+            if HAS_INTERACTIVE:
+                print("\n[2] Interactive Visualizations...")
+                try:
+                    generate_interactive_visualizations(str(results_dir), str(results_dir / "visualizations"))
+                    safe_print("   [OK] Interactive plots generated")
+                except Exception as e:
+                    logging.error(f"   [ERROR] Visualization failed: {e}")
+            else:
+                print("\n[2] Interactive Visualizations: SKIPPED (install plotly)")
 
     # Generate comprehensive summary report
     print("\n[3] Final Summary Report...")
