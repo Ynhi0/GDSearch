@@ -1757,7 +1757,6 @@ def find_optimal_lr(model, train_loader, criterion, device,
         model_copy = safe_device_transfer(model_copy, device, operation="LR finder model initialization")
 
         # Create temporary optimizer (be defensive in case optimizer_class has non-standard signature)
-        import inspect
         temp_optimizer = None
         try:
             # Inspect signature and call safely
