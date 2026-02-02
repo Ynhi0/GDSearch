@@ -235,6 +235,7 @@ from tqdm import tqdm
 import argparse
 import logging
 import json
+import inspect
 
 # Module-level logger (configured in main())
 logger = logging.getLogger(__name__)
