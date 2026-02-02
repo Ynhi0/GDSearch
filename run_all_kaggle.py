@@ -3208,7 +3208,6 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                     model, optimizer = None, None
                     try:
                         # Clear GPU memory between seeds to prevent contamination
-                        from src.core.device_utils import clear_gpu_memory
                         clear_gpu_memory(force=True)
                         
                         # Check if this specific experiment is already completed
@@ -3738,7 +3737,6 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                             del model
                         if optimizer is not None:
                             del optimizer
-                        from src.core.device_utils import clear_gpu_memory
                         clear_gpu_memory()
 
                 # Clean GPU memory between seeds to prevent accumulation and OOM
@@ -3749,8 +3747,6 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
             # AGGREGATE RESULTS ACROSS SEEDS
             # ========================================
             from src.experiments.run_multi_seed import aggregate_results
-            from pathlib import Path
-            import pandas as pd
 
             for opt_name in set(r['optimizer'] for r in results):
                 results_path = Path(results_dir)
@@ -3761,7 +3757,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                         # Aggregate across seeds
                         agg_results = aggregate_results(
                             [str(csv) for csv in seed_csvs],
-                            metric_name='test_acc',
+                            metric='test_acc',
                             exclude_tainted=True
                         )
                         
@@ -4350,7 +4346,6 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
     # AGGREGATE RESULTS ACROSS SEEDS
     # ========================================
     from src.experiments.run_multi_seed import aggregate_results
-    import pandas as pd
 
     for opt_name in set(r['optimizer'] for r in all_results) if all_results else []:
         seed_csvs = list(results_dir.glob(f"CIFAR10_ResNet18_{opt_name}_seed*.csv"))
@@ -4360,7 +4355,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
                 # Aggregate across seeds
                 agg_results = aggregate_results(
                     [str(csv) for csv in seed_csvs],
-                    metric_name='test_acc',
+                    metric='test_acc',
                     exclude_tainted=True
                 )
                 
@@ -5009,7 +5004,6 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
     # AGGREGATE RESULTS ACROSS SEEDS
     # ========================================
     from src.experiments.run_multi_seed import aggregate_results
-    from pathlib import Path
 
     for opt_name in set(r['optimizer'] for r in results) if results else []:
         results_path = Path(results_dir)
@@ -5021,7 +5015,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                 # Aggregate across seeds
                 agg_results = aggregate_results(
                     [str(csv) for csv in seed_csvs],
-                    metric_name='test_acc',
+                    metric='test_acc',
                     exclude_tainted=True
                 )
                 
@@ -5907,7 +5901,6 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
     # AGGREGATE RESULTS ACROSS SEEDS
     # ========================================
     from src.experiments.run_multi_seed import aggregate_results
-    from pathlib import Path
 
     for opt_name in set(r['optimizer'] for r in results) if results else []:
         results_path = Path(results_dir)
@@ -5918,7 +5911,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                 # Aggregate across seeds
                 agg_results = aggregate_results(
                     [str(csv) for csv in seed_csvs],
-                    metric_name='test_dice',
+                    metric='test_dice',
                     exclude_tainted=True
                 )
                 
