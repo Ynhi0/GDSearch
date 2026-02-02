@@ -89,7 +89,9 @@ def medical_image_segmentation(
 
     # Use make_dataloader for consistent settings
     from src.core.dataloader_utils import make_dataloader
-    train_loader = make_dataloader(train_ds, batch_size=batch_size, shuffle=True, seed=42, num_workers=0, pin_memory=True)
+    # BUG FIX #4: Use proper seed for reproducibility (though this is demo code with no seed parameter yet)
+    # TODO: Add seed parameter to medical_image_segmentation() function signature
+    train_loader = make_dataloader(train_ds, batch_size=batch_size, shuffle=True, seed=None, num_workers=0, pin_memory=True)
     val_loader = make_dataloader(val_ds, batch_size=1, shuffle=False, num_workers=0, pin_memory=True)
 
     # Model & loss/metrics

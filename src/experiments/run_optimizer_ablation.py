@@ -710,7 +710,29 @@ def main():
     parser.add_argument('--initial-point', nargs=2, type=float, default=[-1.5, 2.0], help='Initial point x y for test function.')
     parser.add_argument('--lr-sgd', type=float, help='Override LR for SGD.')
     parser.add_argument('--lr-adam', type=float, help='Override LR for Adam.')
+    parser.add_argument('--seeds', type=str, default='42,123,456',
+                       help='Comma-separated random seeds for multi-seed experiments (e.g., "42,123,456")')
+    parser.add_argument('--seed', type=int, default=None,
+                       help='DEPRECATED: Use --seeds instead. Single seed for backward compatibility.')
     args = parser.parse_args()
+    
+    # Handle seed parameters with deprecation warning
+    import warnings
+    if args.seed is not None:
+        warnings.warn(
+            "--seed is deprecated. Use --seeds with comma-separated values (e.g., --seeds 42,123,456)",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        seeds = [args.seed]
+    else:
+        seeds = [int(s.strip()) for s in args.seeds.split(',')]
+    
+    # Minimum seed validation
+    if len(seeds) < 3:
+        logging.warning(
+            f"Only {len(seeds)} seeds provided. Minimum 3 seeds recommended for statistical validity."
+        )
 
     print("="*70)
     print("Optimizer Ablation Study")

@@ -69,9 +69,12 @@ def plot_training_curves(csv_files: List[str], output_dir: Path, title: str = "T
         # Strategy: search for known optimizer tokens in the filename (handles hyphens and variants)
         norm_name = basename.replace('.csv', '').replace('-', '').replace('+', '_').upper()
         known_opts = [
-            'SGD_MOMENTUM', 'SGD', 'SGDMOMENTUM', 'ADAMW', 'ADAM', 'RMSPROP', 'AMSgrad'.upper(),
-            'SAM_SGD', 'SAM_ADAM', 'LOOKAHEAD_SGD', 'LOOKAHEAD_ADAM', 'ADABOUND', 'RADAM', 'LAMB'
+            'SGD_MOMENTUM', 'SGDMOMENTUM', 'ADAMW', 'ADAM', 'RMSPROP', 'AMSGRAD',
+            'SAM_SGD', 'SAM_ADAM', 'LOOKAHEAD_SGD', 'LOOKAHEAD_ADAM', 'ADABOUND', 'RADAM', 'LAMB', 'SGD'
         ]
+        # Sort by length descending to match longest patterns first (e.g., SGD_MOMENTUM before SGD)
+        known_opts.sort(key=len, reverse=True)
+        
         optimizer = None
         for opt in known_opts:
             if opt.upper() in norm_name:

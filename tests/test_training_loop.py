@@ -125,10 +125,10 @@ def test_division_by_zero_protection(model_and_optimizer):
 
 
 def test_gradient_nan_detection(model_and_optimizer):
-    """Test gradient health monitoring"""
+    """Test gradient health monitoring - verify NaN injection produces detectable NaN."""
     model, optimizer, criterion = model_and_optimizer
 
-    # Create input that might cause NaN
+    # Create input with injected NaN
     X = torch.randn(10, 10)
     X[0, 0] = float('nan')  # Inject NaN
     y = torch.randint(0, 2, (10,))
@@ -137,23 +137,27 @@ def test_gradient_nan_detection(model_and_optimizer):
     outputs = model(X)
     loss = criterion(outputs, y)
 
+    # NaN input should propagate to either loss or gradients
+    nan_detected = False
+
     # Check if loss is NaN
     if torch.isnan(loss) or torch.isinf(loss):
-        # Should detect this condition
-        assert True, "NaN/Inf loss detected correctly"
+        nan_detected = True
     else:
         # If loss is OK, check gradients
         loss.backward()
 
-        has_nan = False
         for param in model.parameters():
             if param.grad is not None:
                 if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
-                    has_nan = True
+                    nan_detected = True
                     break
 
-        # Should detect NaN gradient
-        assert has_nan or not has_nan, "Gradient health check completed"
+    # CRITICAL: Must detect NaN somewhere when we inject NaN input
+    assert nan_detected, (
+        "NaN detection failed! Injected NaN into input but neither loss nor gradients "
+        "contained NaN/Inf. NaN handling is broken."
+    )
 
 
 def test_accuracy_sanity_check(dummy_data, model_and_optimizer):

@@ -2,7 +2,7 @@ import os
 import pandas as pd
 import pytest
 
-from src.utils.csv_utils import safe_read_csv
+from src.utils.csv_utils import safe_read_csv, cleanup_empty_csvs
 
 
 def test_safe_read_csv_empty(tmp_path, caplog):

@@ -1,11 +1,10 @@
-# -*- coding: utf-8 -*-
-"""
+"""                                  
 Module defining optimization algorithms (optimizers).
 """
 
 import numpy as np
 import logging
-from typing import Tuple, Union, Any
+from typing import Tuple, Union, Any, Callable
 
 
 class Optimizer:
@@ -85,6 +84,42 @@ class Optimizer:
         # Default: no state to reset
         self.history_params = []
 
+    def _dispatch_step(
+        self,
+        params: Union[Tuple[float, float], np.ndarray],
+        gradients: Union[Tuple[float, float], np.ndarray],
+        tuple_handler: Callable[[Tuple[float, float], Tuple[float, float]], Tuple[float, float]],
+        array_handler: Callable[[np.ndarray, np.ndarray], np.ndarray]
+    ) -> Union[Tuple[float, float], np.ndarray]:
+        """
+        Generic dispatcher for tuple vs array params (M1: Code Deduplication).
+        
+        This helper method eliminates boilerplate in optimizer step() implementations
+        by providing a single dispatch point for handling both tuple (x, y) and
+        array-based parameter formats.
+        
+        Args:
+            params: Parameters (tuple or array)
+            gradients: Gradients (tuple or array)
+            tuple_handler: Callable to handle tuple case (x, y) -> (new_x, new_y)
+            array_handler: Callable to handle array case
+            
+        Returns:
+            Updated parameters in same format as input
+            
+        Example:
+            def step(self, params, gradients, **kwargs):
+                return self._dispatch_step(
+                    params, gradients,
+                    self._step_tuple,
+                    self._step_array
+                )
+        """
+        if isinstance(params, tuple):
+            return tuple_handler(params, gradients)
+        else:
+            return array_handler(params, gradients)
+
 
 class SGD(Optimizer):
     """
@@ -115,33 +150,40 @@ class SGD(Optimizer):
             self.name = f"SGD(lr={lr})"
 
     def step(self, params: Union[Tuple[float, float], Any], gradients: Union[Tuple[float, float], Any], **kwargs: Any) -> Union[Tuple[float, float], Any]:
-        """Perform one SGD step with optional weight decay."""
-        # Supports both tuple (x,y) and numpy array
-        if isinstance(params, tuple):
-            x, y = params
-            grad_x, grad_y = gradients
+        """Perform one SGD step with optional weight decay.
+        
+        Returns:
+            Updated parameters (same type as input)
+        """
+        return self._dispatch_step(params, gradients, self._step_tuple, self._step_array)
+    
+    def _step_tuple(self, params: Tuple[float, float], gradients: Tuple[float, float]) -> Tuple[float, float]:
+        """SGD step for tuple (x, y) parameters."""
+        x, y = params
+        grad_x, grad_y = gradients
 
-            # Apply weight decay (L2 regularization)
-            if self.weight_decay > 0:
-                grad_x += self.weight_decay * x
-                grad_y += self.weight_decay * y
+        # Apply weight decay (L2 regularization)
+        if self.weight_decay > 0:
+            grad_x += self.weight_decay * x
+            grad_y += self.weight_decay * y
 
-            new_x = x - self.lr * grad_x
-            new_y = y - self.lr * grad_y
-            # Track history
-            self._append_history((new_x, new_y))
-            return new_x, new_y
-        else:
-            # Handle array (for neural networks)
-            effective_grad = np.array(gradients) if isinstance(gradients, (tuple, list)) else gradients.copy()
+        new_x = x - self.lr * grad_x
+        new_y = y - self.lr * grad_y
+        self._append_history((new_x, new_y))
+        return new_x, new_y
+    
+    def _step_array(self, params: Any, gradients: Any) -> Any:
+        """SGD step for array parameters."""
+        # Handle array (for neural networks)
+        effective_grad = np.array(gradients) if isinstance(gradients, (tuple, list)) else gradients.copy()
 
-            # Apply weight decay (L2 regularization)
-            if self.weight_decay > 0:
-                effective_grad += self.weight_decay * params
+        # Apply weight decay (L2 regularization)
+        if self.weight_decay > 0:
+            effective_grad += self.weight_decay * params
 
-            updated = params - self.lr * effective_grad
-            self._append_history(updated)
-            return updated
+        updated = params - self.lr * effective_grad
+        self._append_history(updated)
+        return updated
 
     def reset(self) -> None:
         """SGD has no internal state - no action needed."""
@@ -161,7 +203,7 @@ class SGDMomentum(Optimizer):
     used in AdamW.
     """
 
-    def __init__(self, lr=0.01, beta=0.9, weight_decay=0.0):
+    def __init__(self, lr: float = 0.01, beta: float = 0.9, weight_decay: float = 0.0) -> None:
         """
         Initialize SGD with Momentum optimizer.
 
@@ -184,59 +226,91 @@ class SGDMomentum(Optimizer):
         self.v_y = 0.0
         self.v = None  # For neural networks
 
-    def step(self, params, gradients, **kwargs) -> Union[Tuple[float, float], Any]:
+    def step(
+        self,
+        params: Union[Tuple[float, float], Any],
+        gradients: Union[Tuple[float, float], Any],
+        **kwargs: Any
+    ) -> Union[Tuple[float, float], Any]:
         """Perform one SGD with Momentum step with optional weight decay."""
-        # Supports both tuple (x,y) and numpy array
-        if isinstance(params, tuple):
-            x, y = params
-            grad_x, grad_y = gradients
+        return self._dispatch_step(params, gradients, self._step_tuple, self._step_array)
 
-            # Apply weight decay (L2 regularization) to gradients
-            if self.weight_decay > 0:
-                grad_x += self.weight_decay * x
-                grad_y += self.weight_decay * y
+    def _step_tuple(
+        self,
+        params: Tuple[float, float],
+        gradients: Tuple[float, float]
+    ) -> Tuple[float, float]:
+        """Handle tuple parameters (2D test functions)."""
+        x, y = params
+        grad_x, grad_y = gradients
 
-            # Update velocity
-            self.v_x = self.beta * self.v_x + grad_x
-            self.v_y = self.beta * self.v_y + grad_y
+        # Apply weight decay (L2 regularization) to gradients
+        if self.weight_decay > 0:
+            grad_x += self.weight_decay * x
+            grad_y += self.weight_decay * y
 
-            # Update parameters
-            new_x = x - self.lr * self.v_x
-            new_y = y - self.lr * self.v_y
-            # Track history
-            self._append_history((new_x, new_y))
-            return new_x, new_y
-        else:
-            # Handle array (for neural networks)
-            if self.v is None:
-                self.v = np.zeros_like(params)
+        # Update velocity
+        self.v_x = self.beta * self.v_x + grad_x
+        self.v_y = self.beta * self.v_y + grad_y
 
-            # Skip updates when gradients contain NaN or Inf
-            if not np.isfinite(gradients).all():
-                logging.warning("SGDMomentum: Non-finite gradients detected, skipping update")
-                return params
+        # Update parameters
+        new_x = x - self.lr * self.v_x
+        new_y = y - self.lr * self.v_y
+        self._append_history((new_x, new_y))
+        return new_x, new_y
 
-            # Apply weight decay (L2 regularization)
-            # Type safety: gradients is array-like here (not tuple)
-            grad_array = np.asarray(gradients)
-            effective_grad = grad_array.copy()
-            if self.weight_decay > 0:
-                effective_grad += self.weight_decay * params
+    def _step_array(self, params: Any, gradients: Any) -> Any:
+        """Handle array parameters (neural networks)."""
+        # Initialize velocity on first call
+        if self.v is None:
+            self.v = np.zeros_like(params)
 
-            # Update velocity
-            self.v = self.beta * self.v + effective_grad
+        # Skip updates when gradients contain NaN or Inf
+        if not np.isfinite(gradients).all():
+            logging.warning("SGDMomentum: Non-finite gradients detected, skipping update")
+            return params
 
-            # Update parameters
-            updated = params - self.lr * self.v
-            self._append_history(updated)
-            return updated
+        # Apply weight decay (L2 regularization)
+        grad_array = np.asarray(gradients)
+        effective_grad = grad_array.copy()
+        if self.weight_decay > 0:
+            effective_grad += self.weight_decay * params
 
-    def reset(self):
+        # Update velocity
+        self.v = self.beta * self.v + effective_grad
+
+        # Update parameters
+        updated = params - self.lr * self.v
+        self._append_history(updated)
+        return updated
+
+    def reset(self) -> None:
         """Reset velocity to 0."""
         self.v_x = 0.0
         self.v_y = 0.0
         self.v = None
         super().reset()
+
+    def state_dict(self) -> dict:
+        """Save optimizer state for checkpointing."""
+        return {
+            'v_x': self.v_x,
+            'v_y': self.v_y,
+            'v': self.v.copy() if self.v is not None else None,
+        }
+
+    def load_state_dict(self, state_dict: dict) -> None:
+        """Restore optimizer state from checkpoint."""
+        if not isinstance(state_dict, dict):
+            raise TypeError(f"Expected dict, got {type(state_dict)}")
+        
+        try:
+            self.v_x = float(state_dict.get('v_x', 0.0))
+            self.v_y = float(state_dict.get('v_y', 0.0))
+            v_state = state_dict.get('v')
+            self.v = np.array(v_state, dtype=np.float32) if v_state is not None else None
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"Invalid state_dict values: {e}") from e
 
 
 class SGDNesterov(Optimizer):
@@ -251,7 +325,7 @@ class SGDNesterov(Optimizer):
     This approximates the lookahead gradient without requiring function access.
     """
 
-    def __init__(self, lr=0.01, beta=0.9):
+    def __init__(self, lr: float = 0.01, beta: float = 0.9) -> None:
         super().__init__()
         self.lr = lr
         self.beta = beta
@@ -262,36 +336,70 @@ class SGDNesterov(Optimizer):
         self.v_y = 0.0
         self.v = None  # array state for NN
 
-    def step(self, params, gradients, **kwargs) -> Union[Tuple[float, float], Any]:
-        if isinstance(params, tuple):
-            x, y = params
-            grad_x, grad_y = gradients
-            # update velocity
-            self.v_x = self.beta * self.v_x + grad_x
-            self.v_y = self.beta * self.v_y + grad_y
-            # nesterov accelerated gradient
-            d_x = grad_x + self.beta * self.v_x
-            d_y = grad_y + self.beta * self.v_y
-            new_x = x - self.lr * d_x
-            new_y = y - self.lr * d_y
-            self._append_history((new_x, new_y))
-            return new_x, new_y
-        else:
-            if self.v is None:
-                self.v = np.zeros_like(params)
-            elif self.v.shape != params.shape:
-                logging.warning("SGDNesterov: Parameter shape changed from %s to %s. Resizing state.", self.v.shape, params.shape)
-                self.v = np.zeros_like(params)
-            self.v = self.beta * self.v + gradients
-            d = gradients + self.beta * self.v
-            updated = params - self.lr * d
-            self._append_history(updated)
-            return updated
+    def step(
+        self,
+        params: Union[Tuple[float, float], Any],
+        gradients: Union[Tuple[float, float], Any],
+        **kwargs: Any
+    ) -> Union[Tuple[float, float], Any]:
+        """Perform one Nesterov Accelerated Gradient step."""
+        return self._dispatch_step(params, gradients, self._step_tuple, self._step_array)
 
-    def reset(self):
+    def _step_tuple(
+        self,
+        params: Tuple[float, float],
+        gradients: Tuple[float, float]
+    ) -> Tuple[float, float]:
+        """Handle tuple parameters (2D test functions)."""
+        x, y = params
+        grad_x, grad_y = gradients
+        
+        # Update velocity
+        self.v_x = self.beta * self.v_x + grad_x
+        self.v_y = self.beta * self.v_y + grad_y
+        
+        # Nesterov accelerated gradient
+        d_x = grad_x + self.beta * self.v_x
+        d_y = grad_y + self.beta * self.v_y
+        
+        new_x = x - self.lr * d_x
+        new_y = y - self.lr * d_y
+        self._append_history((new_x, new_y))
+        return new_x, new_y
+
+    def _step_array(self, params: Any, gradients: Any) -> Any:
+        """Handle array parameters (neural networks)."""
+        if self.v is None:
+            self.v = np.zeros_like(params)
+        elif self.v.shape != params.shape:
+            logging.warning("SGDNesterov: Parameter shape changed from %s to %s. Resizing state.", self.v.shape, params.shape)
+            self.v = np.zeros_like(params)
+        
+        self.v = self.beta * self.v + gradients
+        d = gradients + self.beta * self.v
+        updated = params - self.lr * d
+        self._append_history(updated)
+        return updated
+
+    def reset(self) -> None:
         self.v_x = 0.0
         self.v_y = 0.0
         self.v = None
+
+    def state_dict(self) -> dict:
+        """Save optimizer state for checkpointing."""
+        return {
+            'v_x': self.v_x,
+            'v_y': self.v_y,
+            'v': self.v.copy() if self.v is not None else None,
+        }
+
+    def load_state_dict(self, state_dict: dict) -> None:
+        """Restore optimizer state from checkpoint."""
+        self.v_x = state_dict.get('v_x', 0.0)
+        self.v_y = state_dict.get('v_y', 0.0)
+        v_state = state_dict.get('v')
+        self.v = np.array(v_state, dtype=np.float32) if v_state is not None else None
 
 
 class RMSProp(Optimizer):
@@ -303,7 +411,7 @@ class RMSProp(Optimizer):
         θ_new = θ_old - lr * gradient / sqrt(s_new + epsilon)
     """
 
-    def __init__(self, lr=0.01, decay_rate=0.9, epsilon=1e-8):
+    def __init__(self, lr: float = 0.01, decay_rate: float = 0.9, epsilon: float = 1e-8) -> None:
         """
         Initialize RMSProp optimizer.
 
@@ -323,44 +431,78 @@ class RMSProp(Optimizer):
         self.s_y = 0.0
         self.s = None  # For neural networks
 
-    def step(self, params, gradients, **kwargs) -> Union[Tuple[float, float], Any]:
+    def step(
+        self,
+        params: Union[Tuple[float, float], Any],
+        gradients: Union[Tuple[float, float], Any],
+        **kwargs: Any
+    ) -> Union[Tuple[float, float], Any]:
         """Perform one RMSProp step."""
-        # Supports both tuple (x,y) and numpy array
-        if isinstance(params, tuple):
-            x, y = params
-            grad_x, grad_y = gradients
+        return self._dispatch_step(params, gradients, self._step_tuple, self._step_array)
 
-            # Update squared gradient accumulator
-            self.s_x = self.decay_rate * self.s_x + (1 - self.decay_rate) * grad_x**2
-            self.s_y = self.decay_rate * self.s_y + (1 - self.decay_rate) * grad_y**2
+    def _step_tuple(
+        self,
+        params: Tuple[float, float],
+        gradients: Tuple[float, float]
+    ) -> Tuple[float, float]:
+        """Handle tuple parameters (2D test functions)."""
+        x, y = params
+        grad_x, grad_y = gradients
 
-            # Update parameters with adaptive learning rate
-            new_x = x - self.lr * grad_x / (np.sqrt(self.s_x) + self.epsilon)
-            new_y = y - self.lr * grad_y / (np.sqrt(self.s_y) + self.epsilon)
-            self._append_history((new_x, new_y))
-            return new_x, new_y
-        else:
-            # Handle array (for neural networks)
-            if self.s is None:
-                self.s = np.zeros_like(params)
-            elif self.s.shape != params.shape:
-                logging.warning("RMSProp: Parameter shape changed from %s to %s. Resizing state.", self.s.shape, params.shape)
-                self.s = np.zeros_like(params)
+        # Update squared gradient accumulator
+        self.s_x = self.decay_rate * self.s_x + (1 - self.decay_rate) * grad_x**2
+        self.s_y = self.decay_rate * self.s_y + (1 - self.decay_rate) * grad_y**2
 
-            # Update squared gradient accumulator
-            grad_array = np.asarray(gradients)
-            self.s = self.decay_rate * self.s + (1 - self.decay_rate) * grad_array**2
+        # Update parameters with adaptive learning rate
+        new_x = x - self.lr * grad_x / (np.sqrt(self.s_x) + self.epsilon)
+        new_y = y - self.lr * grad_y / (np.sqrt(self.s_y) + self.epsilon)
+        self._append_history((new_x, new_y))
+        return new_x, new_y
 
-            # Update parameters with adaptive learning rate
-            updated = params - self.lr * grad_array / (np.sqrt(self.s) + self.epsilon)
-            self._append_history(updated)
-            return updated
+    def _step_array(self, params: Any, gradients: Any) -> Any:
+        """Handle array parameters (neural networks)."""
+        # Initialize state on first call
+        if self.s is None:
+            self.s = np.zeros_like(params)
+        elif self.s.shape != params.shape:
+            logging.warning("RMSProp: Parameter shape changed from %s to %s. Resizing state.", self.s.shape, params.shape)
+            self.s = np.zeros_like(params)
 
-    def reset(self):
+        # Update squared gradient accumulator
+        grad_array = np.asarray(gradients)
+        self.s = self.decay_rate * self.s + (1 - self.decay_rate) * grad_array**2
+
+        # Update parameters with adaptive learning rate
+        updated = params - self.lr * grad_array / (np.sqrt(self.s) + self.epsilon)
+        self._append_history(updated)
+        return updated
+
+    def reset(self) -> None:
         """Reset squared gradient accumulator to 0."""
         self.s_x = 0.0
         self.s_y = 0.0
         self.s = None
+
+    def state_dict(self) -> dict:
+        """Save optimizer state for checkpointing."""
+        return {
+            's_x': self.s_x,
+            's_y': self.s_y,
+            's': self.s.copy() if self.s is not None else None,
+        }
+
+    def load_state_dict(self, state_dict: dict) -> None:
+        """Restore optimizer state from checkpoint."""
+        if not isinstance(state_dict, dict):
+            raise TypeError(f"Expected dict, got {type(state_dict)}")
+        
+        try:
+            self.s_x = float(state_dict.get('s_x', 0.0))
+            self.s_y = float(state_dict.get('s_y', 0.0))
+            s_state = state_dict.get('s')
+            self.s = np.array(s_state, dtype=np.float32) if s_state is not None else None
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"Invalid state_dict values: {e}") from e
 
 
 class Adam(Optimizer):
@@ -384,7 +526,14 @@ class Adam(Optimizer):
     For proper weight decay with Adam, use AdamW instead.
     """
 
-    def __init__(self, lr=0.001, beta1=0.9, beta2=0.999, epsilon=1e-8, weight_decay=0.0):
+    def __init__(
+        self,
+        lr: float = 0.001,
+        beta1: float = 0.9,
+        beta2: float = 0.999,
+        epsilon: float = 1e-8,
+        weight_decay: float = 0.0
+    ) -> None:
         """
         Initialize Adam optimizer.
 
@@ -419,78 +568,113 @@ class Adam(Optimizer):
         # Timestep counter
         self.t = 0
 
-    def step(self, params, gradients, **kwargs) -> Union[Tuple[float, float], Any]:
+    def step(
+        self,
+        params: Union[Tuple[float, float], Any],
+        gradients: Union[Tuple[float, float], Any],
+        **kwargs: Any
+    ) -> Union[Tuple[float, float], Any]:
         """Perform one Adam step with optional L2 regularization."""
-        # Increment timestep
         self.t += 1
+        return self._dispatch_step(params, gradients, self._step_tuple, self._step_array)
 
-        # Supports both tuple (x,y) and numpy array
-        if isinstance(params, tuple):
-            x, y = params
-            grad_x, grad_y = gradients
+    def _step_tuple(
+        self,
+        params: Tuple[float, float],
+        gradients: Tuple[float, float]
+    ) -> Tuple[float, float]:
+        """Handle tuple parameters (2D test functions)."""
+        x, y = params
+        grad_x, grad_y = gradients
 
-            # Apply L2 regularization (coupled to gradient, the 'wrong' way)
-            if self.weight_decay > 0:
-                grad_x = grad_x + self.weight_decay * x
-                grad_y = grad_y + self.weight_decay * y
+        # Apply L2 regularization (coupled to gradient, the 'wrong' way)
+        if self.weight_decay > 0:
+            grad_x = grad_x + self.weight_decay * x
+            grad_y = grad_y + self.weight_decay * y
 
-            # Update biased first moment estimate
-            self.m_x = self.beta1 * self.m_x + (1 - self.beta1) * grad_x
-            self.m_y = self.beta1 * self.m_y + (1 - self.beta1) * grad_y
+        # Update biased first moment estimate
+        self.m_x = self.beta1 * self.m_x + (1 - self.beta1) * grad_x
+        self.m_y = self.beta1 * self.m_y + (1 - self.beta1) * grad_y
 
-            # Update biased second moment estimate
-            self.v_x = self.beta2 * self.v_x + (1 - self.beta2) * grad_x**2
-            self.v_y = self.beta2 * self.v_y + (1 - self.beta2) * grad_y**2
+        # Update biased second moment estimate
+        self.v_x = self.beta2 * self.v_x + (1 - self.beta2) * grad_x**2
+        self.v_y = self.beta2 * self.v_y + (1 - self.beta2) * grad_y**2
 
-            # Compute bias-corrected moment estimates
-            m_x_hat = self.m_x / max(1 - self.beta1**self.t, 1e-8)
-            m_y_hat = self.m_y / max(1 - self.beta1**self.t, 1e-8)
-            v_x_hat = self.v_x / max(1 - self.beta2**self.t, 1e-8)
-            v_y_hat = self.v_y / max(1 - self.beta2**self.t, 1e-8)
+        # Robust bias correction with timestep capping
+        effective_t = min(self.t, 1_000_000)
+        bias_correction1 = max(1.0 - self.beta1**effective_t, 1e-8)
+        bias_correction2 = max(1.0 - self.beta2**effective_t, 1e-8)
+        
+        # Warn if bias correction approaches numerical limits
+        if self.t <= 10 and (bias_correction1 < 1e-6 or bias_correction2 < 1e-6):
+            logging.warning(
+                "Adam: Bias correction approaching zero at t=%d (beta1=%.4f, beta2=%.4f). "
+                "Consider beta values < 1.0 for numerical stability.",
+                self.t, self.beta1, self.beta2
+            )
+        
+        # Compute bias-corrected moment estimates
+        m_x_hat = self.m_x / bias_correction1
+        m_y_hat = self.m_y / bias_correction1
+        v_x_hat = self.v_x / bias_correction2
+        v_y_hat = self.v_y / bias_correction2
 
-            # Update parameters
-            new_x = x - self.lr * m_x_hat / (np.sqrt(v_x_hat) + self.epsilon)
-            new_y = y - self.lr * m_y_hat / (np.sqrt(v_y_hat) + self.epsilon)
-            self._append_history((new_x, new_y))
-            return new_x, new_y
-        else:
-            # Handle array (for neural networks)
-            if self.m is None:
-                self.m = np.zeros_like(params)
-                self.v = np.zeros_like(params)
-            elif self.m.shape != params.shape:
-                logging.warning("Adam: Parameter shape changed from %s to %s. Resizing state.", self.m.shape, params.shape)
-                self.m = np.zeros_like(params)
-                self.v = np.zeros_like(params)
+        # Update parameters
+        new_x = x - self.lr * m_x_hat / (np.sqrt(v_x_hat) + self.epsilon)
+        new_y = y - self.lr * m_y_hat / (np.sqrt(v_y_hat) + self.epsilon)
+        self._append_history((new_x, new_y))
+        return new_x, new_y
 
-            # Skip updates when gradients contain NaN or Inf
-            if not np.isfinite(gradients).all():
-                logging.warning("Adam: Non-finite gradients detected, skipping update")
-                return params
+    def _step_array(self, params: Any, gradients: Any) -> Any:
+        """Handle array parameters (neural networks)."""
+        # Initialize state on first call
+        if self.m is None:
+            self.m = np.zeros_like(params)
+            self.v = np.zeros_like(params)
+        elif self.m.shape != params.shape:
+            logging.warning("Adam: Parameter shape changed from %s to %s. Resizing state.", self.m.shape, params.shape)
+            self.m = np.zeros_like(params)
+            self.v = np.zeros_like(params)
 
-            # Apply L2 regularization (coupled to gradient)
-            grad_array = np.asarray(gradients)
-            if self.weight_decay > 0:
-                grad_array = grad_array + self.weight_decay * params
+        # Skip updates when gradients contain NaN or Inf
+        if not np.isfinite(gradients).all():
+            logging.warning("Adam: Non-finite gradients detected, skipping update")
+            return params
 
-            # Update biased first moment estimate
-            assert self.m is not None
-            self.m = self.beta1 * self.m + (1 - self.beta1) * grad_array
+        # Apply L2 regularization (coupled to gradient)
+        grad_array = np.asarray(gradients)
+        if self.weight_decay > 0:
+            grad_array = grad_array + self.weight_decay * params
 
-            # Update biased second moment estimate
-            assert self.v is not None
-            self.v = self.beta2 * self.v + (1 - self.beta2) * grad_array**2
+        # Type safety check
+        if self.m is None or self.v is None:
+            raise TypeError("Optimizer state not initialized properly. This should not happen after initialization check.")
+        
+        # Update biased first moment estimate
+        self.m = self.beta1 * self.m + (1 - self.beta1) * grad_array
 
-            # Compute bias-corrected moment estimates
-            m_hat = self.m / max(1 - self.beta1**self.t, 1e-8)
-            v_hat = self.v / max(1 - self.beta2**self.t, 1e-8)
+        # Update biased second moment estimate
+        self.v = self.beta2 * self.v + (1 - self.beta2) * grad_array**2
 
-            # Update parameters
-            updated = params - self.lr * m_hat / (np.sqrt(v_hat) + self.epsilon)
-            self._append_history(updated)
-            return updated
+        # Robust bias correction with adaptive timestep capping
+        # Cap timestep based on beta values to prevent underflow
+        # When (1 - beta^t) < 1e-6, bias correction becomes numerically unstable
+        max_safe_t_beta1 = int(-np.log(1e-6) / max(np.log(self.beta1), 1e-10))
+        max_safe_t_beta2 = int(-np.log(1e-6) / max(np.log(self.beta2), 1e-10))
+        effective_t = min(self.t, max_safe_t_beta1, max_safe_t_beta2, 1_000_000)
+        bias_correction1 = max(1.0 - self.beta1**effective_t, 1e-6)
+        bias_correction2 = max(1.0 - self.beta2**effective_t, 1e-6)
+        
+        # Compute bias-corrected moment estimates
+        m_hat = self.m / bias_correction1
+        v_hat = self.v / bias_correction2
 
-    def reset(self):
+        # Update parameters
+        updated = params - self.lr * m_hat / (np.sqrt(v_hat) + self.epsilon)
+        self._append_history(updated)
+        return updated
+
+    def reset(self) -> None:
         """Reset moment estimates and timestep to 0."""
         self.m_x = 0.0
         self.m_y = 0.0
@@ -499,6 +683,36 @@ class Adam(Optimizer):
         self.m = None
         self.v = None
         self.t = 0
+
+    def state_dict(self) -> dict:
+        """Save optimizer state for checkpointing."""
+        return {
+            'm_x': self.m_x,
+            'm_y': self.m_y,
+            'v_x': self.v_x,
+            'v_y': self.v_y,
+            'm': self.m.copy() if self.m is not None else None,
+            'v': self.v.copy() if self.v is not None else None,
+            't': self.t,
+        }
+
+    def load_state_dict(self, state_dict: dict) -> None:
+        """Restore optimizer state from checkpoint."""
+        if not isinstance(state_dict, dict):
+            raise TypeError(f"Expected dict, got {type(state_dict)}")
+        
+        try:
+            self.m_x = float(state_dict.get('m_x', 0.0))
+            self.m_y = float(state_dict.get('m_y', 0.0))
+            self.v_x = float(state_dict.get('v_x', 0.0))
+            self.v_y = float(state_dict.get('v_y', 0.0))
+            m_state = state_dict.get('m')
+            v_state = state_dict.get('v')
+            self.m = np.array(m_state, dtype=np.float32) if m_state is not None else None
+            self.v = np.array(v_state, dtype=np.float32) if v_state is not None else None
+            self.t = int(state_dict.get('t', 0))
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"Invalid state_dict values: {e}") from e
 
 
 class AdamW(Optimizer):
@@ -509,7 +723,14 @@ class AdamW(Optimizer):
         theta = theta - lr * ( m_hat / (sqrt(v_hat) + eps) ) - lr * weight_decay * theta
     """
 
-    def __init__(self, lr=0.001, beta1=0.9, beta2=0.999, epsilon=1e-8, weight_decay=0.0):
+    def __init__(
+        self,
+        lr: float = 0.001,
+        beta1: float = 0.9,
+        beta2: float = 0.999,
+        epsilon: float = 1e-8,
+        weight_decay: float = 0.0
+    ) -> None:
         super().__init__()
         self.lr = lr
         self.beta1 = beta1
@@ -527,58 +748,93 @@ class AdamW(Optimizer):
         self.v = None
         self.t = 0
 
-    def step(self, params, gradients, **kwargs) -> Union[Tuple[float, float], Any]:
+    def step(
+        self,
+        params: Union[Tuple[float, float], Any],
+        gradients: Union[Tuple[float, float], Any],
+        **kwargs: Any
+    ) -> Union[Tuple[float, float], Any]:
+        """Perform one AdamW step with decoupled weight decay."""
         self.t += 1
-        if isinstance(params, tuple):
-            x, y = params
-            grad_x, grad_y = gradients
+        return self._dispatch_step(params, gradients, self._step_tuple, self._step_array)
 
-            # update moments
-            self.m_x = self.beta1 * self.m_x + (1 - self.beta1) * grad_x
-            self.m_y = self.beta1 * self.m_y + (1 - self.beta1) * grad_y
-            self.v_x = self.beta2 * self.v_x + (1 - self.beta2) * (grad_x ** 2)
-            self.v_y = self.beta2 * self.v_y + (1 - self.beta2) * (grad_y ** 2)
+    def _step_tuple(
+        self,
+        params: Tuple[float, float],
+        gradients: Tuple[float, float]
+    ) -> Tuple[float, float]:
+        """Handle tuple parameters (2D test functions)."""
+        x, y = params
+        grad_x, grad_y = gradients
 
-            m_x_hat = self.m_x / max(1 - self.beta1 ** self.t, 1e-8)
-            m_y_hat = self.m_y / max(1 - self.beta1 ** self.t, 1e-8)
-            v_x_hat = self.v_x / max(1 - self.beta2 ** self.t, 1e-8)
-            v_y_hat = self.v_y / max(1 - self.beta2 ** self.t, 1e-8)
+        # Update moments
+        self.m_x = self.beta1 * self.m_x + (1 - self.beta1) * grad_x
+        self.m_y = self.beta1 * self.m_y + (1 - self.beta1) * grad_y
+        self.v_x = self.beta2 * self.v_x + (1 - self.beta2) * (grad_x ** 2)
+        self.v_y = self.beta2 * self.v_y + (1 - self.beta2) * (grad_y ** 2)
 
-            # Adam step (computed from original params)
-            step_x = self.lr * m_x_hat / (np.sqrt(v_x_hat) + self.epsilon)
-            step_y = self.lr * m_y_hat / (np.sqrt(v_y_hat) + self.epsilon)
+        m_x_hat = self.m_x / max(1 - self.beta1 ** self.t, 1e-8)
+        m_y_hat = self.m_y / max(1 - self.beta1 ** self.t, 1e-8)
+        v_x_hat = self.v_x / max(1 - self.beta2 ** self.t, 1e-8)
+        v_y_hat = self.v_y / max(1 - self.beta2 ** self.t, 1e-8)
 
-            # Decoupled weight decay: apply to original params
-            new_x = x - step_x - self.lr * self.weight_decay * x
-            new_y = y - step_y - self.lr * self.weight_decay * y
-            self._append_history((new_x, new_y))
-            return new_x, new_y
-        else:
-            if self.m is None:
-                self.m = np.zeros_like(params)
-                self.v = np.zeros_like(params)
-            elif self.m.shape != params.shape:
-                logging.warning("AdamW: Parameter shape changed from %s to %s. Resizing state.", self.m.shape, params.shape)
-                self.m = np.zeros_like(params)
-                self.v = np.zeros_like(params)
+        # Adam step (computed from original params)
+        step_x = self.lr * m_x_hat / (np.sqrt(v_x_hat) + self.epsilon)
+        step_y = self.lr * m_y_hat / (np.sqrt(v_y_hat) + self.epsilon)
 
-            # Skip updates when gradients contain NaN or Inf
-            if not np.isfinite(gradients).all():
-                logging.warning("AdamW: Non-finite gradients detected, skipping update")
-                return params
+        # Decoupled weight decay: apply to original params
+        new_x = x - step_x - self.lr * self.weight_decay * x
+        new_y = y - step_y - self.lr * self.weight_decay * y
+        self._append_history((new_x, new_y))
+        return new_x, new_y
 
-            assert self.m is not None
-            assert self.v is not None
-            grad_array = np.asarray(gradients)
-            self.m = self.beta1 * self.m + (1 - self.beta1) * grad_array
-            self.v = self.beta2 * self.v + (1 - self.beta2) * (grad_array ** 2)
-            m_hat = self.m / max(1 - self.beta1 ** self.t, 1e-8)
-            v_hat = self.v / max(1 - self.beta2 ** self.t, 1e-8)
-            step = self.lr * m_hat / (np.sqrt(v_hat) + self.epsilon)
-            # Decoupled weight decay: apply to original params
-            return params - step - self.lr * self.weight_decay * params
+    def _step_array(self, params: Any, gradients: Any) -> Any:
+        """Handle array parameters (neural networks)."""
+        if self.m is None:
+            self.m = np.zeros_like(params)
+            self.v = np.zeros_like(params)
+        elif self.m.shape != params.shape:
+            logging.warning("AdamW: Parameter shape changed from %s to %s. Resizing state.", self.m.shape, params.shape)
+            self.m = np.zeros_like(params)
+            self.v = np.zeros_like(params)
 
-    def reset(self):
+        # Skip updates when gradients contain NaN or Inf
+        if not np.isfinite(gradients).all():
+            logging.warning("AdamW: Non-finite gradients detected, skipping update")
+            return params
+
+        # Type safety check
+        if self.m is None or self.v is None:
+            raise TypeError(
+                "AdamW optimizer state not initialized properly. This should not happen after initialization check.\n"
+                f"Debug info: m={type(self.m).__name__ if self.m is not None else 'None'}, "
+                f"v={type(self.v).__name__ if self.v is not None else 'None'}, "
+                f"params shape={getattr(params, 'shape', 'unknown')}"
+            )
+        
+        grad_array = np.asarray(gradients)
+        self.m = self.beta1 * self.m + (1 - self.beta1) * grad_array
+        self.v = self.beta2 * self.v + (1 - self.beta2) * (grad_array ** 2)
+        
+        # Robust bias correction with adaptive timestep capping
+        # Cap timestep based on beta values to prevent underflow
+        # When (1 - beta^t) < 1e-6, bias correction becomes numerically unstable
+        max_safe_t_beta1 = int(-np.log(1e-6) / max(np.log(self.beta1), 1e-10))
+        max_safe_t_beta2 = int(-np.log(1e-6) / max(np.log(self.beta2), 1e-10))
+        effective_t = min(self.t, max_safe_t_beta1, max_safe_t_beta2, 1_000_000)
+        bias_correction1 = max(1.0 - self.beta1**effective_t, 1e-6)
+        bias_correction2 = max(1.0 - self.beta2**effective_t, 1e-6)
+        
+        m_hat = self.m / bias_correction1
+        v_hat = self.v / bias_correction2
+        step = self.lr * m_hat / (np.sqrt(v_hat) + self.epsilon)
+        
+        # Decoupled weight decay: apply to original params
+        updated = params - step - self.lr * self.weight_decay * params
+        self._append_history(updated)
+        return updated
+
+    def reset(self) -> None:
         self.m_x = 0.0
         self.m_y = 0.0
         self.v_x = 0.0
@@ -587,6 +843,30 @@ class AdamW(Optimizer):
         self.v = None
         self.t = 0
 
+    def state_dict(self) -> dict:
+        """Save optimizer state for checkpointing."""
+        return {
+            'm_x': self.m_x,
+            'm_y': self.m_y,
+            'v_x': self.v_x,
+            'v_y': self.v_y,
+            'm': self.m.copy() if self.m is not None else None,
+            'v': self.v.copy() if self.v is not None else None,
+            't': self.t,
+        }
+
+    def load_state_dict(self, state_dict: dict) -> None:
+        """Restore optimizer state from checkpoint."""
+        self.m_x = state_dict.get('m_x', 0.0)
+        self.m_y = state_dict.get('m_y', 0.0)
+        self.v_x = state_dict.get('v_x', 0.0)
+        self.v_y = state_dict.get('v_y', 0.0)
+        m_state = state_dict.get('m')
+        v_state = state_dict.get('v')
+        self.m = np.array(m_state, dtype=np.float32) if m_state is not None else None
+        self.v = np.array(v_state, dtype=np.float32) if v_state is not None else None
+        self.t = state_dict.get('t', 0)
+
 
 class AMSGrad(Optimizer):
     """
@@ -594,7 +874,13 @@ class AMSGrad(Optimizer):
     to ensure non-increasing effective step sizes.
     """
 
-    def __init__(self, lr=0.001, beta1=0.9, beta2=0.999, epsilon=1e-8):
+    def __init__(
+        self,
+        lr: float = 0.001,
+        beta1: float = 0.9,
+        beta2: float = 0.999,
+        epsilon: float = 1e-8
+    ) -> None:
         super().__init__()
         self.lr = lr
         self.beta1 = beta1
@@ -617,52 +903,87 @@ class AMSGrad(Optimizer):
 
         self.t = 0
 
-    def step(self, params, gradients, **kwargs) -> Union[Tuple[float, float], Any]:
+    def step(
+        self,
+        params: Union[Tuple[float, float], Any],
+        gradients: Union[Tuple[float, float], Any],
+        **kwargs: Any
+    ) -> Union[Tuple[float, float], Any]:
+        """Perform one AMSGrad step."""
         self.t += 1
-        if isinstance(params, tuple):
-            x, y = params
-            grad_x, grad_y = gradients
-            self.m_x = self.beta1 * self.m_x + (1 - self.beta1) * grad_x
-            self.m_y = self.beta1 * self.m_y + (1 - self.beta1) * grad_y
-            self.v_x = self.beta2 * self.v_x + (1 - self.beta2) * (grad_x ** 2)
-            self.v_y = self.beta2 * self.v_y + (1 - self.beta2) * (grad_y ** 2)
+        return self._dispatch_step(params, gradients, self._step_tuple, self._step_array)
 
-            m_x_hat = self.m_x / max(1 - self.beta1 ** self.t, 1e-8)
-            m_y_hat = self.m_y / max(1 - self.beta1 ** self.t, 1e-8)
-            v_x_hat = self.v_x / max(1 - self.beta2 ** self.t, 1e-8)
-            v_y_hat = self.v_y / max(1 - self.beta2 ** self.t, 1e-8)
+    def _step_tuple(
+        self,
+        params: Tuple[float, float],
+        gradients: Tuple[float, float]
+    ) -> Tuple[float, float]:
+        """Handle tuple parameters (2D test functions)."""
+        x, y = params
+        grad_x, grad_y = gradients
+        
+        self.m_x = self.beta1 * self.m_x + (1 - self.beta1) * grad_x
+        self.m_y = self.beta1 * self.m_y + (1 - self.beta1) * grad_y
+        self.v_x = self.beta2 * self.v_x + (1 - self.beta2) * (grad_x ** 2)
+        self.v_y = self.beta2 * self.v_y + (1 - self.beta2) * (grad_y ** 2)
 
-            # Update running max of v_hat
-            self.vhat_max_x = max(self.vhat_max_x, v_x_hat)
-            self.vhat_max_y = max(self.vhat_max_y, v_y_hat)
+        m_x_hat = self.m_x / max(1 - self.beta1 ** self.t, 1e-8)
+        m_y_hat = self.m_y / max(1 - self.beta1 ** self.t, 1e-8)
+        v_x_hat = self.v_x / max(1 - self.beta2 ** self.t, 1e-8)
+        v_y_hat = self.v_y / max(1 - self.beta2 ** self.t, 1e-8)
 
-            new_x = x - self.lr * m_x_hat / (np.sqrt(self.vhat_max_x) + self.epsilon)
-            new_y = y - self.lr * m_y_hat / (np.sqrt(self.vhat_max_y) + self.epsilon)
-            self._append_history((new_x, new_y))
-            return new_x, new_y
-        else:
-            if self.m is None:
-                self.m = np.zeros_like(params)
-                self.v = np.zeros_like(params)
-                self.vhat_max = np.zeros_like(params)
-            elif self.m.shape != params.shape:
-                logging.warning("AMSGrad: Parameter shape changed from %s to %s. Resizing state.", self.m.shape, params.shape)
-                self.m = np.zeros_like(params)
-                self.v = np.zeros_like(params)
-                self.vhat_max = np.zeros_like(params)
-            assert self.m is not None
-            assert self.v is not None
-            assert self.vhat_max is not None
-            grad_array = np.asarray(gradients)
-            self.m = self.beta1 * self.m + (1 - self.beta1) * grad_array
-            self.v = self.beta2 * self.v + (1 - self.beta2) * (grad_array ** 2)
-            m_hat = self.m / max(1 - self.beta1 ** self.t, 1e-8)
-            v_hat = self.v / max(1 - self.beta2 ** self.t, 1e-8)
-            self.vhat_max = np.maximum(self.vhat_max, v_hat)
-            step = self.lr * m_hat / (np.sqrt(self.vhat_max) + self.epsilon)
-            return params - step
+        # Update running max of v_hat
+        self.vhat_max_x = max(self.vhat_max_x, v_x_hat)
+        self.vhat_max_y = max(self.vhat_max_y, v_y_hat)
 
-    def reset(self):
+        new_x = x - self.lr * m_x_hat / (np.sqrt(self.vhat_max_x) + self.epsilon)
+        new_y = y - self.lr * m_y_hat / (np.sqrt(self.vhat_max_y) + self.epsilon)
+        self._append_history((new_x, new_y))
+        return new_x, new_y
+
+    def _step_array(self, params: Any, gradients: Any) -> Any:
+        """Handle array parameters (neural networks)."""
+        if self.m is None:
+            self.m = np.zeros_like(params)
+            self.v = np.zeros_like(params)
+            self.vhat_max = np.zeros_like(params)
+        elif self.m.shape != params.shape:
+            # Parameter shape change violates AMSGrad convergence guarantees
+            raise RuntimeError(
+                f"AMSGrad CRITICAL ERROR: Parameter shape changed during training from {self.m.shape} to {params.shape}. "
+                f"Shape changes violate AMSGrad's convergence guarantees and indicate a bug in the model or training loop. "
+                f"AMSGrad requires vhat_max to track the maximum across ALL updates - resetting it breaks the convergence proof. "
+                f"ABORTING to prevent silent state corruption and invalid scientific results."
+            )
+        
+        # Type safety check
+        if self.m is None or self.v is None or self.vhat_max is None:
+            raise TypeError("AMSGrad optimizer state not initialized properly.")
+        
+        grad_array = np.asarray(gradients)
+        self.m = self.beta1 * self.m + (1 - self.beta1) * grad_array
+        self.v = self.beta2 * self.v + (1 - self.beta2) * (grad_array ** 2)
+        
+        # Robust bias correction with adaptive timestep capping
+        # Cap timestep based on beta values to prevent underflow
+        # When (1 - beta^t) < 1e-6, bias correction becomes numerically unstable
+        max_safe_t_beta1 = int(-np.log(1e-6) / max(np.log(self.beta1), 1e-10))
+        max_safe_t_beta2 = int(-np.log(1e-6) / max(np.log(self.beta2), 1e-10))
+        effective_t = min(self.t, max_safe_t_beta1, max_safe_t_beta2, 1_000_000)
+        bias_correction1 = max(1.0 - self.beta1**effective_t, 1e-6)
+        bias_correction2 = max(1.0 - self.beta2**effective_t, 1e-6)
+        
+        m_hat = self.m / bias_correction1
+        v_hat = self.v / bias_correction2
+        
+        # AMSGrad: use maximum of biased second moment
+        self.vhat_max = np.maximum(self.vhat_max, v_hat)
+        step = self.lr * m_hat / (np.sqrt(self.vhat_max) + self.epsilon)
+        updated = params - step
+        self._append_history(updated)
+        return updated
+
+    def reset(self) -> None:
         self.m_x = 0.0
         self.m_y = 0.0
         self.v_x = 0.0
@@ -673,6 +994,43 @@ class AMSGrad(Optimizer):
         self.v = None
         self.vhat_max = None
         self.t = 0
+
+    def state_dict(self) -> dict:
+        """Save optimizer state for checkpointing."""
+        return {
+            'm_x': self.m_x,
+            'm_y': self.m_y,
+            'v_x': self.v_x,
+            'v_y': self.v_y,
+            'vhat_max_x': self.vhat_max_x,
+            'vhat_max_y': self.vhat_max_y,
+            'm': self.m.copy() if self.m is not None else None,
+            'v': self.v.copy() if self.v is not None else None,
+            'vhat_max': self.vhat_max.copy() if self.vhat_max is not None else None,
+            't': self.t,
+        }
+
+    def load_state_dict(self, state_dict: dict) -> None:
+        """Restore optimizer state from checkpoint."""
+        if not isinstance(state_dict, dict):
+            raise TypeError(f"Expected dict, got {type(state_dict)}")
+        
+        try:
+            self.m_x = float(state_dict.get('m_x', 0.0))
+            self.m_y = float(state_dict.get('m_y', 0.0))
+            self.v_x = float(state_dict.get('v_x', 0.0))
+            self.v_y = float(state_dict.get('v_y', 0.0))
+            self.vhat_max_x = float(state_dict.get('vhat_max_x', 0.0))
+            self.vhat_max_y = float(state_dict.get('vhat_max_y', 0.0))
+            m_state = state_dict.get('m')
+            v_state = state_dict.get('v')
+            vhat_max_state = state_dict.get('vhat_max')
+            self.m = np.array(m_state, dtype=np.float32) if m_state is not None else None
+            self.v = np.array(v_state, dtype=np.float32) if v_state is not None else None
+            self.vhat_max = np.array(vhat_max_state, dtype=np.float32) if vhat_max_state is not None else None
+            self.t = int(state_dict.get('t', 0))
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"Invalid state_dict values: {e}") from e
 
 
 class SAM(Optimizer):
@@ -808,32 +1166,79 @@ class SAM(Optimizer):
 
         Returns:
             Updated parameters
+            
+        LOGIC REVIEW NOTE:
+            SAM update must be from ORIGINAL parameters, not adversarial ones.
+            The algorithm is:
+            1. Compute g(θ) at current θ
+            2. Compute adversarial point: θ_adv = θ + ρ*(g/||g||)
+            3. Compute g(θ_adv) at adversarial point
+            4. Update from ORIGINAL θ: θ_new = θ - lr*g(θ_adv)
+        
+        TYPE SAFETY FIX: Validate API contract - SAM requires either adversarial_gradients or loss_fn
         """
         if adversarial_gradients is not None:
-            # Use pre-computed adversarial gradients (for PyTorch integration)
+            # LOGIC FIX: When adversarial_gradients are pre-computed and passed in,
+            # the params argument is ALREADY at the original position (not perturbed).
+            # SAM algorithm: θ_new = θ_original - lr * g(θ_adv)
+            # The caller (e.g., SAMWrapper) computes g(θ_adv) and passes it here.
+            # DO NOT subtract perturbation - params are already correct.
             return self.base_opt.step(params, adversarial_gradients)
         elif loss_fn is not None:
             # Compute adversarial gradients for 2D case
             adv_params = self._compute_adversarial_step(params, gradients)
             adv_gradients = loss_fn(adv_params)  # loss_fn should return gradients
+            # Update from ORIGINAL params (not adv_params)
             return self.base_opt.step(params, adv_gradients)
         else:
-            # Fail-fast: SAM requires either pre-computed adversarial gradients
-            # (from a closure/second forward pass) or a loss function capable of
-            # computing gradients at the adversarial point. Silently falling back
-            # to the base optimizer can disable SAM undetected and break experiments.
-            raise RuntimeError(
-                "SAM.step requires `adversarial_gradients` or `loss_fn` to compute "
-                "the SAM adversarial update; refusing to proceed without them. "
-                "In PyTorch use SAMWrapper which provides the required closure/gradients."
+            # TYPE SAFETY FIX: Fail-fast with clear error message for SAM API contract
+            # SAM requires either pre-computed adversarial gradients (from a closure/second forward pass)
+            # or a loss function to compute gradients at the adversarial point.
+            raise ValueError(
+                "SAM optimizer requires either 'adversarial_gradients' or 'loss_fn' parameter.\n"
+                "For neural network training, use SAMWrapper from pytorch_optimizers.py.\n"
+                "Example usage:\n"
+                "  # With SAMWrapper (recommended for PyTorch):\n"
+                "  optimizer = SAMWrapper(model.parameters(), base_optimizer='SGD', lr=0.1)\n"
+                "  loss = optimizer.step(closure=lambda: loss_fn(model(data), targets))\n"
+                "\n"
+                "  # With custom optimizer (2D functions):\n"
+                "  new_params = sam.step(params, grads, loss_fn=gradient_function)\n"
+                "\n"
+                "Silently falling back to base optimizer would disable SAM and break experiments."
             )
 
-    def reset(self):
+    def reset(self) -> None:
         """Reset optimizer state."""
         self.base_opt.reset()
         self.perturbation_x = 0.0
         self.perturbation_y = 0.0
         self.perturbation = None
+
+    def state_dict(self) -> dict:
+        """Save SAM and base optimizer state for checkpointing."""
+        base_state = {}
+        if hasattr(self.base_opt, 'state_dict'):
+            base_state = self.base_opt.state_dict()
+        return {
+            'base_optimizer': base_state,
+            'rho': self.rho,
+            'base_optimizer_name': self.base_optimizer_name,
+            'perturbation_x': self.perturbation_x,
+            'perturbation_y': self.perturbation_y,
+            'perturbation': self.perturbation.copy() if self.perturbation is not None else None,
+        }
+
+    def load_state_dict(self, state_dict: dict) -> None:
+        """Restore SAM and base optimizer state from checkpoint."""
+        if hasattr(self.base_opt, 'load_state_dict'):
+            base_state = state_dict.get('base_optimizer', {})
+            self.base_opt.load_state_dict(base_state)
+        self.rho = state_dict.get('rho', self.rho)
+        self.perturbation_x = state_dict.get('perturbation_x', 0.0)
+        self.perturbation_y = state_dict.get('perturbation_y', 0.0)
+        pert_state = state_dict.get('perturbation')
+        self.perturbation = np.array(pert_state, dtype=np.float32) if pert_state is not None else None
 
 
 class Lookahead(Optimizer):
@@ -863,11 +1268,15 @@ class Lookahead(Optimizer):
         self.alpha = alpha
         self.name = f"Lookahead({base_optimizer.name}, k={k}, alpha={alpha})"
 
-        # Warning about adaptive optimizers
+        # Note: Lookahead was tested with Adam in the original paper and works well.
+        # However, slow weights don't accumulate momentum/adaptive state, which may
+        # affect convergence speed. Tune k and alpha for best results.
         if 'Adam' in base_optimizer.name or 'RMSProp' in base_optimizer.name:
-            logging.warning("Lookahead with %s may interfere with internal optimizer state (running averages).", base_optimizer.name)
-            logging.warning("Consider using Lookahead only with SGD for reliable behavior.")
-            logging.warning("This is mentioned in the thesis for educational purposes but not recommended for production use.")
+            logging.info(
+                "Lookahead wrapping %s: slow weights updated every k=%d steps with alpha=%.2f. "
+                "Note: slow weights don't benefit from adaptive LR. Tune k/alpha if needed.",
+                base_optimizer.name, self.k, self.alpha
+            )
 
         # State
         self.step_count = 0
@@ -913,10 +1322,12 @@ class Lookahead(Optimizer):
             Updated parameters (slow weights after k steps, fast weights otherwise)
         """
         # Initialize slow weights if needed
-        if self.slow_params_x is None and isinstance(params, tuple):
-            self._initialize_slow_weights(params)
-        elif self.slow_params is None:
-            self._initialize_slow_weights(params)
+        if isinstance(params, tuple):
+            if self.slow_params_x is None or self.slow_params_y is None:
+                self._initialize_slow_weights(params)
+        else:
+            if self.slow_params is None:
+                self._initialize_slow_weights(params)
 
         # Update fast weights with base optimizer
         fast_params = self.base_opt.step(params, gradients)
@@ -930,13 +1341,41 @@ class Lookahead(Optimizer):
         else:
             return fast_params
 
-    def reset(self):
+    def reset(self) -> None:
         """Reset optimizer state."""
         self.base_opt.reset()
         self.step_count = 0
         self.slow_params_x = None
         self.slow_params_y = None
         self.slow_params = None
+
+    def state_dict(self) -> dict:
+        """Save Lookahead and base optimizer state for checkpointing."""
+        base_state = {}
+        if hasattr(self.base_opt, 'state_dict'):
+            base_state = self.base_opt.state_dict()
+        return {
+            'base_optimizer': base_state,
+            'k': self.k,
+            'alpha': self.alpha,
+            'step_count': self.step_count,
+            'slow_params_x': self.slow_params_x,
+            'slow_params_y': self.slow_params_y,
+            'slow_params': self.slow_params.copy() if self.slow_params is not None else None,
+        }
+
+    def load_state_dict(self, state_dict: dict) -> None:
+        """Restore Lookahead and base optimizer state from checkpoint."""
+        if hasattr(self.base_opt, 'load_state_dict'):
+            base_state = state_dict.get('base_optimizer', {})
+            self.base_opt.load_state_dict(base_state)
+        self.k = state_dict.get('k', self.k)
+        self.alpha = state_dict.get('alpha', self.alpha)
+        self.step_count = state_dict.get('step_count', 0)
+        self.slow_params_x = state_dict.get('slow_params_x')
+        self.slow_params_y = state_dict.get('slow_params_y')
+        slow_state = state_dict.get('slow_params')
+        self.slow_params = np.array(slow_state, dtype=np.float32) if slow_state is not None else None
 
 
 class AdaBound(Optimizer):
@@ -956,7 +1395,15 @@ class AdaBound(Optimizer):
         theta_new = theta - lr_t * m_hat
     """
 
-    def __init__(self, lr=0.001, beta1=0.9, beta2=0.999, final_lr=0.1, epsilon=1e-8, gamma=1e-3):
+    def __init__(
+        self,
+        lr: float = 0.001,
+        beta1: float = 0.9,
+        beta2: float = 0.999,
+        final_lr: float = 0.1,
+        epsilon: float = 1e-8,
+        gamma: float = 1e-3
+    ) -> None:
         """
         Initialize AdaBound optimizer.
 
@@ -983,70 +1430,84 @@ class AdaBound(Optimizer):
         self.m, self.v = None, None
         self.t = 0
 
-    def step(self, params, gradients, **kwargs) -> Union[Tuple[float, float], Any]:
+    def step(
+        self,
+        params: Union[Tuple[float, float], Any],
+        gradients: Union[Tuple[float, float], Any],
+        **kwargs: Any
+    ) -> Union[Tuple[float, float], Any]:
         """Perform one AdaBound step."""
         self.t += 1
+        return self._dispatch_step(params, gradients, self._step_tuple, self._step_array)
 
-        if isinstance(params, tuple):
-            x, y = params
-            grad_x, grad_y = gradients
+    def _step_tuple(
+        self,
+        params: Tuple[float, float],
+        gradients: Tuple[float, float]
+    ) -> Tuple[float, float]:
+        """Handle tuple parameters (2D test functions)."""
+        x, y = params
+        grad_x, grad_y = gradients
 
-            # Update biased first moment
-            self.m_x = self.beta1 * self.m_x + (1 - self.beta1) * grad_x
-            self.m_y = self.beta1 * self.m_y + (1 - self.beta1) * grad_y
+        # Update biased first moment
+        self.m_x = self.beta1 * self.m_x + (1 - self.beta1) * grad_x
+        self.m_y = self.beta1 * self.m_y + (1 - self.beta1) * grad_y
 
-            # Update biased second moment
-            self.v_x = self.beta2 * self.v_x + (1 - self.beta2) * grad_x ** 2
-            self.v_y = self.beta2 * self.v_y + (1 - self.beta2) * grad_y ** 2
+        # Update biased second moment
+        self.v_x = self.beta2 * self.v_x + (1 - self.beta2) * grad_x ** 2
+        self.v_y = self.beta2 * self.v_y + (1 - self.beta2) * grad_y ** 2
 
-            # Compute bias-corrected moments
-            # Add epsilon guard for numerical stability
-            m_x_hat = self.m_x / max(1 - self.beta1 ** self.t, 1e-8)
-            m_y_hat = self.m_y / max(1 - self.beta1 ** self.t, 1e-8)
-            v_x_hat = self.v_x / max(1 - self.beta2 ** self.t, 1e-8)
-            v_y_hat = self.v_y / max(1 - self.beta2 ** self.t, 1e-8)
+        # Bias-corrected moments
+        m_x_hat = self.m_x / max(1 - self.beta1 ** self.t, 1e-8)
+        m_y_hat = self.m_y / max(1 - self.beta1 ** self.t, 1e-8)
+        v_x_hat = self.v_x / max(1 - self.beta2 ** self.t, 1e-8)
+        v_y_hat = self.v_y / max(1 - self.beta2 ** self.t, 1e-8)
 
-            # Compute dynamic bounds
-            final_lr_t = self.final_lr * self.lr / self.gamma
-            lower_bound = final_lr_t * (1.0 - 1.0 / (self.gamma * self.t + 1.0))
-            upper_bound = final_lr_t * (1.0 + 1.0 / (self.gamma * self.t))
+        # Dynamic bounds
+        lower_bound = self.final_lr * (1.0 - 1.0 / (self.gamma * self.t + 1.0))
+        upper_bound = self.final_lr * (1.0 + 1.0 / (self.gamma * self.t))
 
-            # Compute step sizes with bounds
-            step_size_x = self.lr / (np.sqrt(v_x_hat) + self.epsilon)
-            step_size_y = self.lr / (np.sqrt(v_y_hat) + self.epsilon)
+        # Adaptive learning rate with bounds
+        step_x = np.clip(self.lr / (np.sqrt(v_x_hat) + self.epsilon), lower_bound, upper_bound)
+        step_y = np.clip(self.lr / (np.sqrt(v_y_hat) + self.epsilon), lower_bound, upper_bound)
 
-            step_size_x = np.clip(step_size_x, lower_bound, upper_bound)
-            step_size_y = np.clip(step_size_y, lower_bound, upper_bound)
+        new_x = x - step_x * m_x_hat
+        new_y = y - step_y * m_y_hat
+        self._append_history((new_x, new_y))
+        return new_x, new_y
 
-            # Update parameters
-            new_x = x - step_size_x * m_x_hat
-            new_y = y - step_size_y * m_y_hat
-            return new_x, new_y
-        else:
-            # Array version
-            if self.m is None or self.m.shape != params.shape:
-                self.m = np.zeros_like(params)
-                self.v = np.zeros_like(params)
+    def _step_array(self, params: Any, gradients: Any) -> Any:
+        """Handle array parameters (neural networks)."""
+        if self.m is None:
+            self.m = np.zeros_like(params)
+            self.v = np.zeros_like(params)
+        elif self.m.shape != params.shape:
+            logging.warning("AdaBound: Parameter shape changed. Resizing state.")
+            self.m = np.zeros_like(params)
+            self.v = np.zeros_like(params)
 
-            assert self.m is not None
-            assert self.v is not None
-            grad_array = np.asarray(gradients)
-            self.m = self.beta1 * self.m + (1 - self.beta1) * grad_array
-            self.v = self.beta2 * self.v + (1 - self.beta2) * grad_array ** 2
+        # Type safety check
+        if self.m is None or self.v is None:
+            raise TypeError("AdaBound optimizer state not initialized properly.")
 
-            m_hat = self.m / (1 - self.beta1 ** self.t)
-            v_hat = self.v / (1 - self.beta2 ** self.t)
+        grad_array = np.asarray(gradients)
+        self.m = self.beta1 * self.m + (1 - self.beta1) * grad_array
+        self.v = self.beta2 * self.v + (1 - self.beta2) * grad_array ** 2
 
-            final_lr_t = self.final_lr * self.lr / self.gamma
-            lower_bound = final_lr_t * (1.0 - 1.0 / (self.gamma * self.t + 1.0))
-            upper_bound = final_lr_t * (1.0 + 1.0 / (self.gamma * self.t))
+        m_hat = self.m / max(1 - self.beta1 ** self.t, 1e-8)
+        v_hat = self.v / max(1 - self.beta2 ** self.t, 1e-8)
 
-            step_size = self.lr / (np.sqrt(v_hat) + self.epsilon)
-            step_size = np.clip(step_size, lower_bound, upper_bound)
+        # Dynamic bounds
+        lower_bound = self.final_lr * (1.0 - 1.0 / (self.gamma * self.t + 1.0))
+        upper_bound = self.final_lr * (1.0 + 1.0 / (self.gamma * self.t))
 
-            return params - step_size * m_hat
+        # Adaptive step size with bounds
+        step_size = self.lr / (np.sqrt(v_hat) + self.epsilon)
+        step_size = np.clip(step_size, lower_bound, upper_bound)
 
-    def reset(self):
+        return params - step_size * m_hat
+
+    def reset(self) -> None:
         """Reset optimizer state."""
         self.m_x, self.m_y = 0.0, 0.0
         self.v_x, self.v_y = 0.0, 0.0
@@ -1064,7 +1525,13 @@ class RAdam(Optimizer):
     Key idea: Use warmup heuristic based on variance of adaptive learning rate.
     """
 
-    def __init__(self, lr=0.001, beta1=0.9, beta2=0.999, epsilon=1e-8):
+    def __init__(
+        self,
+        lr: float = 0.001,
+        beta1: float = 0.9,
+        beta2: float = 0.999,
+        epsilon: float = 1e-8
+    ) -> None:
         """Initialize RAdam optimizer."""
         super().__init__()
         self.lr = lr
@@ -1082,70 +1549,83 @@ class RAdam(Optimizer):
         # Compute rho_inf (maximum length of approximated SMA)
         self.rho_inf = 2.0 / (1.0 - self.beta2) - 1.0
 
-    def step(self, params, gradients, **kwargs) -> Union[Tuple[float, float], Any]:
+    def step(
+        self,
+        params: Union[Tuple[float, float], Any],
+        gradients: Union[Tuple[float, float], Any],
+        **kwargs: Any
+    ) -> Union[Tuple[float, float], Any]:
         """Perform one RAdam step."""
         self.t += 1
+        return self._dispatch_step(params, gradients, self._step_tuple, self._step_array)
 
-        if isinstance(params, tuple):
-            x, y = params
-            grad_x, grad_y = gradients
+    def _step_tuple(
+        self,
+        params: Tuple[float, float],
+        gradients: Tuple[float, float]
+    ) -> Tuple[float, float]:
+        """Handle tuple parameters (2D test functions)."""
+        x, y = params
+        grad_x, grad_y = gradients
 
-            # Update biased first moment
-            self.m_x = self.beta1 * self.m_x + (1 - self.beta1) * grad_x
-            self.m_y = self.beta1 * self.m_y + (1 - self.beta1) * grad_y
+        # Update biased first moment
+        self.m_x = self.beta1 * self.m_x + (1 - self.beta1) * grad_x
+        self.m_y = self.beta1 * self.m_y + (1 - self.beta1) * grad_y
 
-            # Update biased second moment
-            self.v_x = self.beta2 * self.v_x + (1 - self.beta2) * grad_x ** 2
-            self.v_y = self.beta2 * self.v_y + (1 - self.beta2) * grad_y ** 2
+        # Update biased second moment
+        self.v_x = self.beta2 * self.v_x + (1 - self.beta2) * grad_x ** 2
+        self.v_y = self.beta2 * self.v_y + (1 - self.beta2) * grad_y ** 2
 
-            # Bias correction for first moment
-            m_x_hat = self.m_x / max(1 - self.beta1 ** self.t, 1e-8)
-            m_y_hat = self.m_y / max(1 - self.beta1 ** self.t, 1e-8)
+        # Bias correction for first moment
+        m_x_hat = self.m_x / max(1 - self.beta1 ** self.t, 1e-8)
+        m_y_hat = self.m_y / max(1 - self.beta1 ** self.t, 1e-8)
 
-            # Compute length of the approximated SMA
-            rho_t = self.rho_inf - 2.0 * self.t * (self.beta2 ** self.t) / (1.0 - self.beta2 ** self.t)
+        # Compute length of the approximated SMA
+        rho_t = self.rho_inf - 2.0 * self.t * (self.beta2 ** self.t) / max(1.0 - self.beta2 ** self.t, 1e-8)
 
-            # Check if variance is tractable
-            if rho_t > 4.0:
-                # Rectified update with bias correction
-                v_x_hat = self.v_x / (1 - self.beta2 ** self.t)
-                v_y_hat = self.v_y / (1 - self.beta2 ** self.t)
+        # Check if variance is tractable
+        if rho_t > 4.0:
+            # Rectified update with bias correction
+            v_x_hat = self.v_x / (1 - self.beta2 ** self.t)
+            v_y_hat = self.v_y / (1 - self.beta2 ** self.t)
 
-                r_t = np.sqrt(((rho_t - 4.0) * (rho_t - 2.0) * self.rho_inf) /
-                             ((self.rho_inf - 4.0) * (self.rho_inf - 2.0) * rho_t))
+            r_t = np.sqrt(((rho_t - 4.0) * (rho_t - 2.0) * self.rho_inf) /
+                         ((self.rho_inf - 4.0) * (self.rho_inf - 2.0) * rho_t))
 
-                new_x = x - self.lr * r_t * m_x_hat / (np.sqrt(v_x_hat) + self.epsilon)
-                new_y = y - self.lr * r_t * m_y_hat / (np.sqrt(v_y_hat) + self.epsilon)
-            else:
-                # Use un-adapted update (like SGD with momentum)
-                new_x = x - self.lr * m_x_hat
-                new_y = y - self.lr * m_y_hat
-
-            return new_x, new_y
+            new_x = x - self.lr * r_t * m_x_hat / (np.sqrt(v_x_hat) + self.epsilon)
+            new_y = y - self.lr * r_t * m_y_hat / (np.sqrt(v_y_hat) + self.epsilon)
         else:
-            # Array version
-            if self.m is None or self.m.shape != params.shape:
-                self.m = np.zeros_like(params)
-                self.v = np.zeros_like(params)
+            # Use un-adapted update (like SGD with momentum)
+            new_x = x - self.lr * m_x_hat
+            new_y = y - self.lr * m_y_hat
 
-            assert self.m is not None
-            assert self.v is not None
-            grad_array = np.asarray(gradients)
-            self.m = self.beta1 * self.m + (1 - self.beta1) * grad_array
-            self.v = self.beta2 * self.v + (1 - self.beta2) * grad_array ** 2
+        return new_x, new_y
 
-            m_hat = self.m / max(1 - self.beta1 ** self.t, 1e-8)
-            rho_t = self.rho_inf - 2.0 * self.t * (self.beta2 ** self.t) / max(1.0 - self.beta2 ** self.t, 1e-8)
+    def _step_array(self, params: Any, gradients: Any) -> Any:
+        """Handle array parameters (neural networks)."""
+        if self.m is None or self.m.shape != params.shape:
+            self.m = np.zeros_like(params)
+            self.v = np.zeros_like(params)
 
-            if rho_t > 4.0:
-                v_hat = self.v / max(1 - self.beta2 ** self.t, 1e-8)
-                r_t = np.sqrt(((rho_t - 4.0) * (rho_t - 2.0) * self.rho_inf) /
-                             ((self.rho_inf - 4.0) * (self.rho_inf - 2.0) * rho_t))
-                return params - self.lr * r_t * m_hat / (np.sqrt(v_hat) + self.epsilon)
-            else:
-                return params - self.lr * m_hat
+        if self.m is None or self.v is None:
+            raise TypeError("RAdam optimizer state not initialized properly.")
+        
+        grad_array = np.asarray(gradients)
+        self.m = self.beta1 * self.m + (1 - self.beta1) * grad_array
+        self.v = self.beta2 * self.v + (1 - self.beta2) * grad_array ** 2
 
-    def reset(self):
+        m_hat = self.m / max(1 - self.beta1 ** self.t, 1e-8)
+        rho_t = self.rho_inf - 2.0 * self.t * (self.beta2 ** self.t) / max(1.0 - self.beta2 ** self.t, 1e-8)
+
+        if rho_t > 4.0:
+            v_hat = self.v / max(1 - self.beta2 ** self.t, 1e-8)
+            r_t = np.sqrt(((rho_t - 4.0) * (rho_t - 2.0) * self.rho_inf) /
+                         ((self.rho_inf - 4.0) * (self.rho_inf - 2.0) * rho_t))
+            return params - self.lr * r_t * m_hat / (np.sqrt(v_hat) + self.epsilon)
+        else:
+            return params - self.lr * m_hat
+
+    def reset(self) -> None:
         """Reset optimizer state."""
         self.m_x, self.m_y = 0.0, 0.0
         self.v_x, self.v_y = 0.0, 0.0
@@ -1161,9 +1641,19 @@ class LAMB(Optimizer):
     Reference: https://arxiv.org/abs/1904.00962
 
     Key idea: Trust ratio based on layer-wise norms for better large-batch training.
+    
+    NOTE: This implementation uses a simplified global trust ratio for 2D optimization.
+    For neural network training with true layer-wise adaptation, use pytorch_optimizers.LAMBWrapper.
     """
 
-    def __init__(self, lr=0.001, beta1=0.9, beta2=0.999, epsilon=1e-8, weight_decay=0.01):
+    def __init__(
+        self,
+        lr: float = 0.001,
+        beta1: float = 0.9,
+        beta2: float = 0.999,
+        epsilon: float = 1e-8,
+        weight_decay: float = 0.01
+    ) -> None:
         """Initialize LAMB optimizer."""
         super().__init__()
         self.lr = lr
@@ -1179,77 +1669,89 @@ class LAMB(Optimizer):
         self.m, self.v = None, None
         self.t = 0
 
-    def step(self, params, gradients, **kwargs) -> Union[Tuple[float, float], Any]:
+    def step(
+        self,
+        params: Union[Tuple[float, float], Any],
+        gradients: Union[Tuple[float, float], Any],
+        **kwargs: Any
+    ) -> Union[Tuple[float, float], Any]:
         """Perform one LAMB step."""
         self.t += 1
+        return self._dispatch_step(params, gradients, self._step_tuple, self._step_array)
 
-        if isinstance(params, tuple):
-            x, y = params
-            grad_x, grad_y = gradients
+    def _step_tuple(
+        self,
+        params: Tuple[float, float],
+        gradients: Tuple[float, float]
+    ) -> Tuple[float, float]:
+        """Handle tuple parameters (2D test functions)."""
+        x, y = params
+        grad_x, grad_y = gradients
 
-            # Update biased first moment
-            self.m_x = self.beta1 * self.m_x + (1 - self.beta1) * grad_x
-            self.m_y = self.beta1 * self.m_y + (1 - self.beta1) * grad_y
+        # Update biased first moment
+        self.m_x = self.beta1 * self.m_x + (1 - self.beta1) * grad_x
+        self.m_y = self.beta1 * self.m_y + (1 - self.beta1) * grad_y
 
-            # Update biased second moment
-            self.v_x = self.beta2 * self.v_x + (1 - self.beta2) * grad_x ** 2
-            self.v_y = self.beta2 * self.v_y + (1 - self.beta2) * grad_y ** 2
+        # Update biased second moment
+        self.v_x = self.beta2 * self.v_x + (1 - self.beta2) * grad_x ** 2
+        self.v_y = self.beta2 * self.v_y + (1 - self.beta2) * grad_y ** 2
 
-            # Bias correction
-            # Add epsilon guard for numerical stability
-            m_x_hat = self.m_x / max(1 - self.beta1 ** self.t, 1e-8)
-            m_y_hat = self.m_y / max(1 - self.beta1 ** self.t, 1e-8)
-            v_x_hat = self.v_x / max(1 - self.beta2 ** self.t, 1e-8)
-            v_y_hat = self.v_y / max(1 - self.beta2 ** self.t, 1e-8)
+        # Bias correction
+        m_x_hat = self.m_x / max(1 - self.beta1 ** self.t, 1e-8)
+        m_y_hat = self.m_y / max(1 - self.beta1 ** self.t, 1e-8)
+        v_x_hat = self.v_x / max(1 - self.beta2 ** self.t, 1e-8)
+        v_y_hat = self.v_y / max(1 - self.beta2 ** self.t, 1e-8)
 
-            # Adam update (before trust ratio)
-            update_x = m_x_hat / (np.sqrt(v_x_hat) + self.epsilon) + self.weight_decay * x
-            update_y = m_y_hat / (np.sqrt(v_y_hat) + self.epsilon) + self.weight_decay * y
+        # Adam update (before trust ratio)
+        update_x = m_x_hat / (np.sqrt(v_x_hat) + self.epsilon) + self.weight_decay * x
+        update_y = m_y_hat / (np.sqrt(v_y_hat) + self.epsilon) + self.weight_decay * y
 
-            # Compute trust ratio
-            # Add epsilon for numerical stability in edge cases
-            param_norm = np.sqrt(x**2 + y**2)
-            update_norm = np.sqrt(update_x**2 + update_y**2)
+        # Compute trust ratio (numerical stability with hypot)
+        param_norm = np.hypot(x, y)
+        update_norm = np.hypot(update_x, update_y)
 
-            if param_norm > self.epsilon and update_norm > self.epsilon:
-                trust_ratio = param_norm / update_norm
-            else:
-                trust_ratio = 1.0
-
-            # Apply trust ratio
-            new_x = x - self.lr * trust_ratio * update_x
-            new_y = y - self.lr * trust_ratio * update_y
-
-            return new_x, new_y
+        if param_norm > self.epsilon and update_norm > self.epsilon:
+            trust_ratio = param_norm / update_norm
         else:
-            # Array version
-            if self.m is None or self.m.shape != params.shape:
-                self.m = np.zeros_like(params)
-                self.v = np.zeros_like(params)
+            trust_ratio = 1.0
 
-            # Ensure arrays initialized for safe arithmetic
-            assert self.m is not None and self.v is not None, "Internal state arrays must be initialized"
-            grad_array = np.asarray(gradients)
-            self.m = self.beta1 * self.m + (1 - self.beta1) * grad_array
-            self.v = self.beta2 * self.v + (1 - self.beta2) * grad_array ** 2
+        # Apply trust ratio
+        new_x = x - self.lr * trust_ratio * update_x
+        new_y = y - self.lr * trust_ratio * update_y
 
-            m_hat = self.m / (1 - self.beta1 ** self.t)
-            v_hat = self.v / (1 - self.beta2 ** self.t)
+        return new_x, new_y
 
-            update = m_hat / (np.sqrt(v_hat) + self.epsilon) + self.weight_decay * params
+    def _step_array(self, params: Any, gradients: Any) -> Any:
+        """Handle array parameters (neural networks)."""
+        if self.m is None or self.m.shape != params.shape:
+            self.m = np.zeros_like(params)
+            self.v = np.zeros_like(params)
 
-            # Use epsilon for numerical stability in norm comparison
-            param_norm = np.linalg.norm(params)
-            update_norm = np.linalg.norm(update)
+        # Type safety check
+        if self.m is None or self.v is None:
+            raise TypeError("LAMB optimizer state not initialized properly.")
+        
+        grad_array = np.asarray(gradients)
+        self.m = self.beta1 * self.m + (1 - self.beta1) * grad_array
+        self.v = self.beta2 * self.v + (1 - self.beta2) * grad_array ** 2
 
-            if param_norm > self.epsilon and update_norm > self.epsilon:
-                trust_ratio = param_norm / update_norm
-            else:
-                trust_ratio = 1.0
+        m_hat = self.m / (1 - self.beta1 ** self.t)
+        v_hat = self.v / (1 - self.beta2 ** self.t)
 
-            return params - self.lr * trust_ratio * update
+        update = m_hat / (np.sqrt(v_hat) + self.epsilon) + self.weight_decay * params
 
-    def reset(self):
+        # Compute trust ratio with numerical stability
+        param_norm = np.linalg.norm(params)
+        update_norm = np.linalg.norm(update)
+
+        if param_norm > self.epsilon and update_norm > self.epsilon:
+            trust_ratio = param_norm / update_norm
+        else:
+            trust_ratio = 1.0
+
+        return params - self.lr * trust_ratio * update
+
+    def reset(self) -> None:
         """Reset optimizer state."""
         self.m_x, self.m_y = 0.0, 0.0
         self.v_x, self.v_y = 0.0, 0.0

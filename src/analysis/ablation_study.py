@@ -29,10 +29,11 @@ def create_ablation_configs(base_config: Dict) -> Dict[str, Dict]:
     6. AdamW (full with decoupled weight decay)
     """
 
-    lr = base_config.get('lr', 1e-3)
-    weight_decay = base_config.get('weight_decay', 1e-4)
-    epochs = base_config.get('epochs', 10)
-    batch_size = base_config.get('batch_size', 128)
+    # Explicit type conversions to handle JSON string values
+    lr = float(base_config.get('lr', 1e-3))
+    weight_decay = float(base_config.get('weight_decay', 1e-4))
+    epochs = int(base_config.get('epochs', 10))
+    batch_size = int(base_config.get('batch_size', 128))
     dataset = base_config.get('dataset', 'MNIST')
     model = base_config.get('model', 'SimpleMLP')
 

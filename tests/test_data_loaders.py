@@ -102,12 +102,16 @@ def test_mnist_loaders_batch_shapes():
     # Get first batch
     inputs, targets = next(iter(train_loader))
 
+    # TYPE SAFETY FIX: Add type guards before accessing shape
+    if not (hasattr(inputs, 'shape') and hasattr(targets, 'shape')):
+        raise TypeError(f"Expected tensors with shape attribute, got {type(inputs)}, {type(targets)}")
+
     # MNIST: 1 channel, 28x28 images
     assert inputs.shape[1] == 1, f"Expected 1 channel, got {inputs.shape[1]}"
     assert inputs.shape[2] == 28, f"Expected height 28, got {inputs.shape[2]}"
     assert inputs.shape[3] == 28, f"Expected width 28, got {inputs.shape[3]}"
     assert inputs.shape[0] <= 32, f"Batch size should be <= 32, got {inputs.shape[0]}"
-    assert targets.shape[0] == inputs.shape[0]
+    assert targets.shape[0] == inputs.shape[0], f"Batch size mismatch: {inputs.shape[0]} vs {targets.shape[0]}"
 
 
 def test_cifar10_loaders_batch_shapes():
@@ -117,12 +121,16 @@ def test_cifar10_loaders_batch_shapes():
     # Get first batch
     inputs, targets = next(iter(train_loader))
 
+    # TYPE SAFETY FIX: Add type guards before accessing shape
+    if not (hasattr(inputs, 'shape') and hasattr(targets, 'shape')):
+        raise TypeError(f"Expected tensors with shape attribute, got {type(inputs)}, {type(targets)}")
+
     # CIFAR-10: 3 channels, 32x32 images
     assert inputs.shape[1] == 3, f"Expected 3 channels, got {inputs.shape[1]}"
     assert inputs.shape[2] == 32, f"Expected height 32, got {inputs.shape[2]}"
     assert inputs.shape[3] == 32, f"Expected width 32, got {inputs.shape[3]}"
     assert inputs.shape[0] <= 32, f"Batch size should be <= 32, got {inputs.shape[0]}"
-    assert targets.shape[0] == inputs.shape[0]
+    assert targets.shape[0] == inputs.shape[0], f"Batch size mismatch: {inputs.shape[0]} vs {targets.shape[0]}"
 
 
 @pytest.mark.parametrize("val_split", [0.05, 0.1, 0.2, 0.3])

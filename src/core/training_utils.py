@@ -178,12 +178,19 @@ class LabelSmoothingCrossEntropy(nn.Module):
             0.5404...  # Loss will never go below this
         """
         import math
-        if smoothing == 0.0:
+        
+        # LOGIC REVIEW FIX: Validate inputs to prevent mathematical errors
+        if num_classes < 1:
+            raise ValueError(f"num_classes must be >= 1, got {num_classes}")
+        if not (0.0 <= smoothing <= 1.0):
+            raise ValueError(f"smoothing must be in [0, 1], got {smoothing}")
+        
+        if smoothing == 0.0 or num_classes == 1:
             return 0.0
 
         # Smoothed target distribution: [1-s, s/(n-1), s/(n-1), ...]
         p_true = 1.0 - smoothing
-        p_other = smoothing / (num_classes - 1) if num_classes > 1 else 0.0
+        p_other = smoothing / (num_classes - 1)
 
         # Cross-entropy with perfect predictions (q = p):
         # H(p, q) = -sum(p * log(q)) = -p_true*log(p_true) - (n-1)*p_other*log(p_other)
@@ -267,6 +274,9 @@ class ModelEMA:
         # Store original model for reference
         self.model = model
 
+        # Backup storage for restore functionality
+        self.backup = {}
+
         # Disable gradients for shadow model
         for param in self.shadow.parameters():
             param.requires_grad = False
@@ -308,6 +318,7 @@ class ModelEMA:
     def apply_shadow(self, model: Optional[nn.Module] = None):
         """
         Apply EMA weights to model (for evaluation).
+        Backs up current weights so they can be restored later.
 
         Args:
             model: Model to apply shadow weights to (uses self.model if None)
@@ -316,31 +327,42 @@ class ModelEMA:
             model = self.model
 
         with torch.no_grad():
+            # Backup current weights before applying shadow
+            for name, param in model.named_parameters():
+                if param.requires_grad:
+                    self.backup[name] = param.data.clone()
+            
+            # Apply shadow weights
             for param, shadow_param in zip(model.parameters(), self.shadow.parameters()):
                 param.data.copy_(shadow_param.data.to(param.device))
 
     def restore(self, model: Optional[nn.Module] = None):
         """
-        Restore original model weights (after evaluation).
+        Restore backed-up model weights (after evaluation with shadow weights).
 
         Args:
             model: Model to restore (uses self.model if None)
 
-        Note:
-            This method is not typically needed if you use the shadow model
-            directly for evaluation. If you need to restore, save model state
-            before calling apply_shadow().
+        Raises:
+            RuntimeError: If no backup is available (apply_shadow() not called)
         """
         if model is None:
             model = self.model
 
-        # Restore by copying from original model (which should be unchanged)
-        # If apply_shadow was called, you should have saved state beforehand
-        import warnings
-        warnings.warn(
-            "ModelEMA.restore() called but original weights may have been overwritten. "
-            "Save model state before apply_shadow() if you need to restore."
-        )
+        if not self.backup:
+            raise RuntimeError(
+                "No backup available. Call apply_shadow() before restore(). "
+                "The typical workflow is: apply_shadow() -> evaluate -> restore()."
+            )
+
+        # Restore backed-up weights
+        with torch.no_grad():
+            for name, param in model.named_parameters():
+                if param.requires_grad and name in self.backup:
+                    param.data.copy_(self.backup[name])
+        
+        # Clear backup after restore
+        self.backup.clear()
 
 
 class AMPWrapper:
@@ -374,12 +396,22 @@ class AMPWrapper:
     def __init__(self, enabled: Optional[bool] = None, dtype: torch.dtype = torch.float16):
         if enabled is None:
             enabled = torch.cuda.is_available()
+        
+        # LOGIC FIX: Validate enabled flag against CUDA availability to prevent device mismatch
+        if enabled and not torch.cuda.is_available():
+            logging.warning(
+                "AMPWrapper: AMP enabled=True but CUDA not available. "
+                "Disabling AMP (CPU does not support mixed precision training)."
+            )
+            enabled = False
 
         self.enabled = enabled
         self.dtype = dtype
-        self.device_type = 'cuda' if torch.cuda.is_available() and enabled else 'cpu'
+        self.device_type = 'cuda' if enabled else 'cpu'
 
-        if self.enabled and torch.cuda.is_available():
+        if self.enabled:
+            # Now safe: enabled=True implies CUDA is available
+            assert torch.cuda.is_available(), "Internal error: AMP enabled but CUDA unavailable"
             # Prefer the new public API `torch.amp.GradScaler` when available
             # to avoid deprecation warnings for `torch.cuda.amp.GradScaler`.
             if callable(_GradScaler):

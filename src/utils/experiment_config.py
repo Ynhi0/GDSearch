@@ -73,12 +73,37 @@ class ExperimentConfig:
     verbose: bool = False
 
     def __post_init__(self):
-        """Validate configuration after initialization."""
-        # Convert results_dir to Path if string
+        """Validate and normalize configuration after initialization."""
+        # CRITICAL: Convert results_dir to Path and make ABSOLUTE
         if isinstance(self.results_dir, str):
             self.results_dir = Path(self.results_dir)
+        
+        # ALWAYS resolve to absolute path to prevent CWD-dependent behavior
+        if not self.results_dir.is_absolute():
+            # Resolve relative to PROJECT ROOT, not current working directory
+            # This file is in src/utils/, so project root is 2 levels up
+            project_root = Path(__file__).parent.parent.parent
+            self.results_dir = (project_root / self.results_dir).resolve()
+        
+        # Validate directory is writable (create if needed)
+        try:
+            self.results_dir.mkdir(parents=True, exist_ok=True)
+        except (PermissionError, OSError) as e:
+            raise ValueError(
+                f"results_dir {self.results_dir} is not writable: {e}\n"
+                f"Check permissions or specify a different location with --output-dir"
+            )
 
-        # Validate seeds
+        # BUG FIX: Validate resume_behavior allowed values
+        if self.resume_behavior is not None:
+            allowed_behaviors = ['error_if_no_checkpoint', 'restart_if_no_checkpoint', 'skip_if_results_exist']
+            if self.resume_behavior not in allowed_behaviors:
+                raise ValueError(
+                    f"Invalid resume_behavior '{self.resume_behavior}'. "
+                    f"Must be one of: {allowed_behaviors}"
+                )
+
+        # Validate seeds (strict checks for statistical validity)
         if not self.seeds:
             raise ValueError("At least one seed must be specified")
 
@@ -93,12 +118,20 @@ class ExperimentConfig:
 
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> 'ExperimentConfig':
-        """Create config from dictionary.
+        """Create config from dictionary with strict validation.
 
         Backwards-compatibility: accept a single integer key 'seed' and
-        migrate it to the canonical 'seeds' list. Also warn if an explicit
-        small seeds list is provided to encourage multi-seed experiments.
+        migrate it to the canonical 'seeds' list.
+        
+        Enforces statistical validity by requiring minimum 3 seeds.
         """
+        # EXPLICIT TYPE CONVERSION: str → Path BEFORE dataclass init
+        if 'results_dir' in config_dict:
+            results_dir = config_dict['results_dir']
+            if isinstance(results_dir, str):
+                config_dict['results_dir'] = Path(results_dir)
+                # Path will be made absolute in __post_init__
+        
         # Backwards compatibility: accept 'seed' as alias for 'seeds'
         if 'seed' in config_dict and 'seeds' not in config_dict:
             seed_val = config_dict.pop('seed')
@@ -109,14 +142,46 @@ class ExperimentConfig:
             elif isinstance(seed_val, (list, tuple)):
                 config_dict['seeds'] = list(seed_val)
 
-        # Warn about too-few seeds (recommend ≥3 for statistical validity)
-        if 'seeds' in config_dict and isinstance(config_dict['seeds'], (list, tuple)):
-            if len(config_dict['seeds']) < 3:
+        # STRICT VALIDATION: Enforce minimum 3 seeds for statistical validity
+        if 'seeds' in config_dict:
+            seeds = config_dict['seeds']
+            
+            if not isinstance(seeds, (list, tuple)):
+                raise TypeError(
+                    f"'seeds' must be list or tuple, got {type(seeds).__name__}"
+                )
+            
+            if len(seeds) < 3:
+                raise ValueError(
+                    f"STATISTICAL INTEGRITY ERROR: Got {len(seeds)} seeds: {seeds}\n\n"
+                    f"MINIMUM 3 seeds required for:\n"
+                    f"  - Variance estimation (σ²)\n"
+                    f"  - Confidence intervals (t-test requires n ≥ 3)\n"
+                    f"  - Reproducibility verification\n\n"
+                    f"Recommended: 5+ seeds for robust statistics.\n"
+                    f"See: https://en.wikipedia.org/wiki/Standard_deviation#Sample_standard_deviation\n\n"
+                    f"All experiments must report mean ± std to comply with ML reproducibility standards."
+                )
+            
+            if len(seeds) > 20:
                 import logging
                 logging.warning(
-                    "Configuration contains fewer than 3 seeds (%s). "
-                    "For statistical validity, use at least 3 distinct seeds.",
-                    config_dict['seeds']
+                    f"Large seed count ({len(seeds)}) detected. "
+                    f"Consider reducing to 5-10 seeds unless conducting power analysis."
+                )
+            
+            if len(seeds) != len(set(seeds)):
+                duplicates = [s for s in seeds if seeds.count(s) > 1]
+                raise ValueError(
+                    f"DUPLICATE SEEDS: {duplicates}\n"
+                    f"All seeds must be unique to ensure independent runs."
+                )
+            
+            if any(not isinstance(s, int) or not (0 <= s < 2**32) for s in seeds):
+                invalid = [s for s in seeds if not isinstance(s, int) or not (0 <= s < 2**32)]
+                raise ValueError(
+                    f"INVALID SEEDS: {invalid}\n"
+                    f"Seeds must be integers in range [0, 2^32-1] for RNG compatibility."
                 )
 
         # Filter out unknown keys

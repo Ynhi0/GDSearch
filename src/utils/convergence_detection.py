@@ -199,9 +199,26 @@ class AdaptiveConvergenceDetector:
 
     def _check_gradient_convergence(self, grad_norms: np.ndarray) -> ConvergenceResult:
         """Check if gradient norm drops below threshold."""
+        
+        # Filter NaN and Inf values
+        finite_mask = np.isfinite(grad_norms)
+        if not np.any(finite_mask):
+            # All gradients are NaN/Inf - numerical instability
+            return ConvergenceResult(
+                converged=False,
+                iteration=None,
+                convergence_value=float('inf'),
+                threshold=self.gradient_threshold,
+                criterion='gradient_explosion_nan'
+            )
+        
+        finite_grads = grad_norms[finite_mask]
+        
         for i, grad_norm in enumerate(grad_norms):
             if i < self.min_iterations:
                 continue
+            
+            # Check finite gradient norm
             if np.isfinite(grad_norm) and grad_norm < self.gradient_threshold:
                 return ConvergenceResult(
                     converged=True,
@@ -210,10 +227,9 @@ class AdaptiveConvergenceDetector:
                     threshold=self.gradient_threshold,
                     criterion='gradient_norm'
                 )
-
-        finite_grads = grad_norms[np.isfinite(grad_norms)]
+        
+        # No convergence
         final_grad = finite_grads[-1] if len(finite_grads) > 0 else float('inf')
-
         return ConvergenceResult(
             converged=False,
             iteration=None,
@@ -237,6 +253,16 @@ class AdaptiveConvergenceDetector:
         recent_losses = losses[-self.plateau_window:]
         finite_recent = recent_losses[np.isfinite(recent_losses)]
 
+        # LOGIC FIX: Explicit check for empty array to prevent np.mean([]) = NaN
+        if len(finite_recent) == 0:
+            return ConvergenceResult(
+                converged=False,
+                iteration=None,
+                convergence_value=float('inf'),
+                threshold=self.plateau_tolerance,
+                criterion='plateau'
+            )
+        
         if len(finite_recent) < self.plateau_window // 2:
             return ConvergenceResult(
                 converged=False,
@@ -247,6 +273,16 @@ class AdaptiveConvergenceDetector:
             )
 
         # Compute relative standard deviation
+        # Additional safety check: need at least 2 values to compute std
+        if len(finite_recent) < 2:
+            return ConvergenceResult(
+                converged=False,
+                iteration=None,
+                convergence_value=float('inf'),
+                threshold=self.plateau_tolerance,
+                criterion='plateau'
+            )
+        
         mean_loss = np.mean(finite_recent)
         std_loss = np.std(finite_recent)
 
@@ -368,6 +404,7 @@ def recommend_convergence_threshold(
 # Example usage
 if __name__ == '__main__':
     # Test function example (Rosenbrock)
+    # Using seed=42 for reproducible demo/example only
     np.random.seed(42)
     test_fn_losses = np.logspace(2, -8, 1000)  # Exponential decay to near-zero
     test_fn_grads = np.logspace(1, -7, 1000)

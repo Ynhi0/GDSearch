@@ -554,7 +554,9 @@ def main():
             raise ValueError("Rosenbrock expects 2D input")
 
     # Generate sample trajectories (simplified for demo)
-    np.random.seed(42)
+    # Use a deterministic seed for demo trajectory generation
+    demo_seed = 12345
+    np.random.seed(demo_seed)
 
     trajectories = {
         'Adam': np.array([

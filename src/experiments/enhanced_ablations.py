@@ -182,16 +182,19 @@ def run_data_efficiency_ablation(
             ).to(device_obj)
 
             # Create optimizer
+            # Import constant at function level to avoid circular dependency
+            from src.utils.constants import OptimizerNames
+            
             # HYPERPARAMETER FAIRNESS: Using published defaults from original papers
             # See docs/HYPERPARAMETER_FAIRNESS_PROTOCOL.md for justification
             # These hyperparameters follow Strategy C (published defaults with citations)
-            if optimizer_name == 'SGD':
+            if optimizer_name == OptimizerNames.SGD:
                 # Krizhevsky et al. ImageNet Classification 2012
                 optimizer = optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
-            elif optimizer_name == 'Adam':
+            elif optimizer_name == OptimizerNames.ADAM:
                 # Kingma & Ba Adam paper 2014 (no weight decay)
                 optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=0)
-            elif optimizer_name == 'AdamW':
+            elif optimizer_name == OptimizerNames.ADAMW:
                 # Loshchilov & Hutter AdamW paper 2017
                 optimizer = optim.AdamW(model.parameters(), lr=0.001, weight_decay=0.01)
             else:
@@ -206,6 +209,7 @@ def run_data_efficiency_ablation(
             for epoch in range(epochs):
                 model.train()
                 epoch_loss = 0.0
+                epoch_samples = 0
                 for inputs, targets in train_loader:
                     inputs, targets = inputs.to(device_obj), targets.to(device_obj)
                     optimizer.zero_grad()
@@ -232,12 +236,15 @@ def run_data_efficiency_ablation(
                         break
 
                     optimizer.step()
-                    epoch_loss += loss.item()
+                    # BUG FIX: Weight loss by batch size for correct averaging
+                    epoch_loss += loss.item() * inputs.size(0)
+                    epoch_samples += inputs.size(0)
 
                 if diverged:
                     break
 
-                train_losses.append(epoch_loss / len(train_loader))
+                # BUG FIX: Divide by total samples, not number of batches
+                train_losses.append(epoch_loss / max(1, epoch_samples))
 
             # Evaluate
             model.eval()
@@ -338,16 +345,19 @@ def run_model_scaling_ablation(
                 # Count parameters
                 n_params = sum(p.numel() for p in model.parameters())
 
+                # Import constant at function level to avoid circular dependency
+                from src.utils.constants import OptimizerNames
+                
                 # Create optimizer (same hyperparams for fair comparison)
                 # HYPERPARAMETER FAIRNESS: Using published defaults from original papers
                 # See docs/HYPERPARAMETER_FAIRNESS_PROTOCOL.md Strategy C
-                if optimizer_name == 'SGD':
+                if optimizer_name == OptimizerNames.SGD:
                     # Krizhevsky et al. 2012
                     optimizer = optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
-                elif optimizer_name == 'Adam':
+                elif optimizer_name == OptimizerNames.ADAM:
                     # Kingma & Ba 2014 (no weight decay)
                     optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=0)
-                elif optimizer_name == 'AdamW':
+                elif optimizer_name == OptimizerNames.ADAMW:
                     # Loshchilov & Hutter 2017
                     optimizer = optim.AdamW(model.parameters(), lr=0.001, weight_decay=0.01)
                 else:

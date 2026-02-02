@@ -50,8 +50,10 @@ def safe_read_csv(path: str | Path, *, header_required: bool = True, **kwargs) -
         return None
 
     # Try reading a single row to validate parseability and presence of header
+    # EXPLICIT context manager ensures file is closed
     try:
-        sample = pd.read_csv(p, nrows=1)
+        with open(p, 'r', encoding='utf-8', newline='') as f:
+            sample = pd.read_csv(f, nrows=1)
     except pd.errors.EmptyDataError:
         logging.warning("CSV file '%s' raised EmptyDataError on sample read.", p)
         return None
@@ -71,8 +73,10 @@ def safe_read_csv(path: str | Path, *, header_required: bool = True, **kwargs) -
         return None
 
     # Full read with provided kwargs
+    # EXPLICIT context manager ensures file is closed
     try:
-        df = pd.read_csv(p, **kwargs)
+        with open(p, 'r', encoding='utf-8', newline='') as f:
+            df = pd.read_csv(f, **kwargs)
         if df is None or df.shape[0] == 0:
             logging.warning("CSV '%s' yielded zero rows after full read.", p)
             return None
@@ -109,8 +113,11 @@ def cleanup_empty_csvs(results_dir: str | Path, pattern: str = "*.csv") -> list:
         # Skip files that are already in the corrupt quarantine to avoid re-processing
         if corrupt_dir in p.parents:
             continue
-        # Only process files
+        # BUG FIX: Only process files, not directories (even if they match pattern)
         if not p.is_file():
+            continue
+        # Additional safety: skip if path doesn't exist anymore (race condition)
+        if not p.exists():
             continue
         try:
             # If file is empty by size, consider it corrupt

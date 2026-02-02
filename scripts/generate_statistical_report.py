@@ -128,7 +128,7 @@ def _to_float(x: Any) -> float:
 
 
 def _load_final_metric(results_dir: str, optimizer: str, col: str) -> Dict[int, float]:
-    pattern = str(Path(results_dir) / "experiments" / "mnist" / "experiments" / "mnist" / OPTIMIZER_PATTERNS[optimizer])
+    pattern = str(Path(results_dir) / OPTIMIZER_PATTERNS[optimizer])
     data: Dict[int, float] = {}
     for f in glob.glob(pattern):
         try:

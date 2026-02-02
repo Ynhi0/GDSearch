@@ -5,16 +5,16 @@
   "properties": {
     "dataset": {
       "type": "string",
-      "enum": ["MNIST", "CIFAR10", "IMDB"]
+      "enum": ["MNIST", "CIFAR10", "CIFAR100", "IMDB", "Medical"]
     },
     "model": {
       "type": "string"
     },
     "seeds": {
       "type": "array",
-      "items": {"type": "integer", "minimum": 0},
-      "minItems": 1,
-      "description": "Preferred: list of integer seeds for multi-seed experiments"
+      "items": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+      "minItems": 3,
+      "description": "HIGH-PRIORITY FIX: Minimum 3 seeds required for statistical validity (variance estimation, t-tests, reproducibility verification). Recommended: 5+ seeds for robust statistics."
     },
     "seed": {
       "type": ["integer", "null"],
@@ -28,18 +28,31 @@
       "type": "array",
       "items": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
           "optimizer": {
             "type": "string",
-            "enum": ["SGD", "SGD_Momentum", "Adam", "AdamW", "AMSGrad", "RMSprop", "Adagrad", "Adadelta", "Lookahead", "SAM", "Lion"]
+            "enum": ["SGD", "SGD_Momentum", "SGD_Nesterov", "Adam", "AdamW", "AMSGrad", "RMSProp", "Adagrad", "Adadelta", "AdaBound", "RAdam", "LAMB", "Lookahead", "SAM"]
           },
           "learning_rate": {
             "type": "array",
-            "items": {"type": "number", "exclusiveMinimum": 0}
+            "items": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "minimum": 1e-10,
+              "maximum": 10.0
+            },
+            "description": "DEPRECATED: Use lr_values instead. Will be migrated automatically."
           },
           "lr_values": {
             "type": "array",
-            "items": {"type": "number", "exclusiveMinimum": 0}
+            "items": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "minimum": 1e-10,
+              "maximum": 10.0
+            },
+            "description": "HIGH-PRIORITY FIX #7 (Config-4): Canonical learning rate sweep values with bounds [1e-10, 10.0]"
           },
           "weight_decay": {
             "type": "array",
@@ -64,7 +77,23 @@
               "items": {"type": "number"},
               "minItems": 2,
               "maxItems": 2
-            }
+            },
+            "description": "Beta values for Adam-family optimizers: [[beta1, beta2], ...]"
+          },
+          "beta1_values": {
+            "type": "array",
+            "items": {"type": "number", "minimum": 0, "maximum": 1},
+            "description": "Beta1 (momentum) sweep for Adam-family optimizers"
+          },
+          "beta2_values": {
+            "type": "array",
+            "items": {"type": "number", "minimum": 0, "maximum": 1},
+            "description": "Beta2 (RMSprop momentum) sweep for Adam-family optimizers"
+          },
+          "alpha_values": {
+            "type": "array",
+            "items": {"type": "number", "minimum": 0, "maximum": 1},
+            "description": "Alpha (smoothing constant) sweep for RMSprop-family optimizers"
           },
           "epochs": {
             "type": "integer",

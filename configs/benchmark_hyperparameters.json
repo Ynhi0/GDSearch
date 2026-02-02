@@ -3,7 +3,7 @@
     "2d_optimization": {
       "optimizers": {
         "SGD": {"lr": 0.01},
-        "SGDMomentum": {"lr": 0.01, "beta": 0.9},
+        "SGD_Momentum": {"lr": 0.01, "beta": 0.9},
         "Adam": {"lr": 0.01, "beta1": 0.9, "beta2": 0.999, "epsilon": 1e-8},
         "RMSProp": {"lr": 0.01, "decay_rate": 0.9, "epsilon": 1e-8}
       },
@@ -22,7 +22,7 @@
     "highdim_optimization": {
       "optimizers": {
         "SGD": {"lr": 0.01},
-        "SGDMomentum": {"lr": 0.01, "beta": 0.9},
+        "SGD_Momentum": {"lr": 0.01, "beta": 0.9},
         "Adam": {"lr": 0.01, "beta1": 0.9, "beta2": 0.999}
       },
       "dimensions": 100,

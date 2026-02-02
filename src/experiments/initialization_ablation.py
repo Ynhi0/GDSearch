@@ -157,6 +157,7 @@ def train_epoch(model, loader, optimizer, criterion, device):
 
     for inputs, targets in loader:
         inputs, targets = inputs.to(device), targets.to(device)
+        batch_size = inputs.size(0)
 
         optimizer.zero_grad()
         outputs = model(inputs)
@@ -164,12 +165,14 @@ def train_epoch(model, loader, optimizer, criterion, device):
         loss.backward()
         optimizer.step()
 
-        total_loss += loss.item()
+        # BUG FIX: Weight loss by batch size for correct averaging
+        total_loss += loss.item() * batch_size
         _, predicted = outputs.max(1)
         total += targets.size(0)
         correct += predicted.eq(targets).sum().item()
 
-    return total_loss / max(1, len(loader)), 100.0 * correct / max(1, total)
+    # BUG FIX: Divide by total samples, not number of batches
+    return total_loss / max(1, total), 100.0 * correct / max(1, total)
 
 
 def evaluate(model, loader, criterion, device):
@@ -182,15 +185,18 @@ def evaluate(model, loader, criterion, device):
     with torch.no_grad():
         for inputs, targets in loader:
             inputs, targets = inputs.to(device), targets.to(device)
+            batch_size = inputs.size(0)
             outputs = model(inputs)
             loss = criterion(outputs, targets)
 
-            total_loss += loss.item()
+            # BUG FIX: Weight loss by batch size for correct averaging
+            total_loss += loss.item() * batch_size
             _, predicted = outputs.max(1)
             total += targets.size(0)
             correct += predicted.eq(targets).sum().item()
 
-    return total_loss / max(1, len(loader)), 100.0 * correct / max(1, total)
+    # BUG FIX: Divide by total samples, not number of batches
+    return total_loss / max(1, total), 100.0 * correct / max(1, total)
 
 
 def run_single_experiment(
@@ -221,15 +227,18 @@ def run_single_experiment(
     # SOLUTION: Use optimizer-preferred base LRs from published defaults.
     # This isolates the effect of INITIALIZATION from learning rate mismatch.
 
+    # Import constant at function level to avoid circular dependency
+    from src.utils.constants import OptimizerNames
+    
     # Create optimizer with fair LR per optimizer type
-    if optimizer_name == 'SGD':
+    if optimizer_name == OptimizerNames.SGD:
         optimizer = optim.SGD(model.parameters(), lr=0.01)  # SGD needs 10x more
-    elif optimizer_name == 'SGD_Momentum':
+    elif optimizer_name == OptimizerNames.SGD_MOMENTUM:
         optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
-    elif optimizer_name == 'Adam':
+    elif optimizer_name == OptimizerNames.ADAM:
         # Adam without weight decay (no regularization)
         optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=0)
-    elif optimizer_name == 'AdamW':
+    elif optimizer_name == OptimizerNames.ADAMW:
         optimizer = optim.AdamW(model.parameters(), lr=0.001, weight_decay=1e-4)
     else:
         raise ValueError(f"Unknown optimizer: {optimizer_name}")
@@ -332,12 +341,12 @@ def run_initialization_ablation(
     transform_train = transforms.Compose([
         transforms.RandomCrop(28, padding=4),
         transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,))
+        transforms.Normalize(MNIST_MEAN, MNIST_STD)
     ])
 
     transform_test = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,))
+        transforms.Normalize(MNIST_MEAN, MNIST_STD)
     ])
 
     train_dataset = torchvision.datasets.MNIST(
@@ -351,13 +360,16 @@ def run_initialization_ablation(
         train_dataset = torch.utils.data.Subset(train_dataset, range(5000))
         test_dataset = torch.utils.data.Subset(test_dataset, range(1000))
 
-    train_loader = make_dataloader(train_dataset, batch_size=128, shuffle=True, seed=42, num_workers=2, pin_memory=True)
+    train_loader = make_dataloader(train_dataset, batch_size=128, shuffle=True, seed=seeds[0], num_workers=2, pin_memory=True)
     test_loader = make_dataloader(test_dataset, batch_size=256, shuffle=False, num_workers=2, pin_memory=True)
 
+    # Import constant at function level to avoid circular dependency
+    from src.utils.constants import OptimizerNames
+    
     # Define configurations
     if quick:
         init_methods = ['normal_small', 'xavier_normal', 'kaiming_normal']
-        optimizers = ['SGD', 'Adam']
+        optimizers = [OptimizerNames.SGD, OptimizerNames.ADAM]
     else:
         init_methods = [
             'uniform_small',
@@ -367,7 +379,7 @@ def run_initialization_ablation(
             'kaiming_uniform',
             'kaiming_normal'
         ]
-        optimizers = ['SGD', 'SGD_Momentum', 'Adam', 'AdamW']
+        optimizers = [OptimizerNames.SGD, OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM, OptimizerNames.ADAMW]
 
     # Run experiments
     all_results = []

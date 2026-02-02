@@ -28,6 +28,7 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
+from src.utils.constants import MNIST_MEAN, MNIST_STD
 import torch.optim as optim
 from torch.utils.data import DataLoader
 import torchvision
@@ -99,12 +100,15 @@ def train_and_evaluate_model_with_loaders(model, optimizer, train_loader, test_l
 
             optimizer.step()
 
-            epoch_loss += loss.item()
+            # BUG FIX: Weight loss by batch size for correct averaging
+            epoch_loss += loss.item() * inputs.size(0)
+            epoch_samples += inputs.size(0)
 
         if diverged:
             break
 
-        train_losses.append(epoch_loss / len(train_loader))
+        # BUG FIX: Divide by total samples, not number of batches
+        train_losses.append(epoch_loss / max(1, epoch_samples))
 
     # Final test evaluation (only after training completes - use test set only for final evaluation)
     logging.info("Evaluating final performance on test set...")
@@ -154,7 +158,7 @@ def ablation_momentum_effect(
     # Load MNIST
     transform = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,))
+        transforms.Normalize(MNIST_MEAN, MNIST_STD)
     ])
     train_dataset = torchvision.datasets.MNIST(
         'data/', train=True, download=True, transform=transform
@@ -225,10 +229,13 @@ def ablation_momentum_effect(
     except (ImportError, ValueError, RuntimeError) as e:
         logging.warning("Visualization generation failed: %s", e)
 
+    # Import constant at function level to avoid circular dependency
+    from src.utils.constants import OptimizerNames
+    
     # Statistical comparison
     # arr_to_numpy_float already imported at top
-    sgd_accs = arr_to_numpy_float(df[df['optimizer'] == 'SGD']['final_test_accuracy'])
-    mom_accs = arr_to_numpy_float(df[df['optimizer'] == 'SGD_Momentum']['final_test_accuracy'])
+    sgd_accs = arr_to_numpy_float(df[df['optimizer'] == OptimizerNames.SGD]['final_test_accuracy'])
+    mom_accs = arr_to_numpy_float(df[df['optimizer'] == OptimizerNames.SGD_MOMENTUM]['final_test_accuracy'])
 
     improvement = mom_accs.mean() - sgd_accs.mean()
     logging.info("\nResults:")
@@ -260,7 +267,7 @@ def ablation_adaptive_lr(
     # Load MNIST
     transform = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,))
+        transforms.Normalize(MNIST_MEAN, MNIST_STD)
     ])
     train_dataset = torchvision.datasets.MNIST(
         'data/', train=True, download=True, transform=transform
@@ -330,9 +337,12 @@ def ablation_adaptive_lr(
     except (ImportError, ValueError, RuntimeError) as e:
         logging.warning("Visualization generation failed: %s", e)
 
+    # Import constant at function level to avoid circular dependency
+    from src.utils.constants import OptimizerNames
+    
     # Statistical comparison
-    sgd_accs = arr_to_numpy_float(df[df['optimizer'] == 'SGD_Momentum']['final_test_accuracy'])
-    adam_accs = arr_to_numpy_float(df[df['optimizer'] == 'Adam']['final_test_accuracy'])
+    sgd_accs = arr_to_numpy_float(df[df['optimizer'] == OptimizerNames.SGD_MOMENTUM]['final_test_accuracy'])
+    adam_accs = arr_to_numpy_float(df[df['optimizer'] == OptimizerNames.ADAM]['final_test_accuracy'])
 
     improvement = adam_accs.mean() - sgd_accs.mean()
     logging.info("\nResults:")
@@ -364,7 +374,7 @@ def ablation_weight_decay(
     # Load MNIST
     transform = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,))
+        transforms.Normalize(MNIST_MEAN, MNIST_STD)
     ])
     train_dataset = torchvision.datasets.MNIST(
         'data/', train=True, download=True, transform=transform
@@ -434,9 +444,12 @@ def ablation_weight_decay(
     except (ImportError, ValueError, RuntimeError) as e:
         logging.warning("Visualization generation failed: %s", e)
 
+    # Import constant at function level to avoid circular dependency
+    from src.utils.constants import OptimizerNames
+    
     # Statistical comparison
-    adam_accs = arr_to_numpy_float(df[df['optimizer'] == 'Adam']['final_test_accuracy'])
-    adamw_accs = arr_to_numpy_float(df[df['optimizer'] == 'AdamW']['final_test_accuracy'])
+    adam_accs = arr_to_numpy_float(df[df['optimizer'] == OptimizerNames.ADAM]['final_test_accuracy'])
+    adamw_accs = arr_to_numpy_float(df[df['optimizer'] == OptimizerNames.ADAMW]['final_test_accuracy'])
 
     improvement = adamw_accs.mean() - adam_accs.mean()
     logging.info("\nResults:")
@@ -506,9 +519,11 @@ def ablation_sam_effect(output_dir='results/ablation_studies', epochs=10, num_se
             for epoch in range(epochs):
                 model.train()
                 epoch_loss = 0.0
+                epoch_samples = 0
 
                 for inputs, targets in train_loader:
                     inputs, targets = inputs.to(device), targets.to(device)
+                    batch_size = inputs.size(0)
 
                     # SAM requires closure
                     if opt_name == 'SAM':
@@ -527,7 +542,8 @@ def ablation_sam_effect(output_dir='results/ablation_studies', epochs=10, num_se
                             return loss
 
                         loss = optimizer.step(closure)
-                        epoch_loss += loss.item()
+                        # BUG FIX: Weight loss by batch size for correct averaging
+                        epoch_loss += loss.item() * batch_size
                     else:
                         optimizer.zero_grad()
                         outputs = model(inputs)
@@ -535,9 +551,13 @@ def ablation_sam_effect(output_dir='results/ablation_studies', epochs=10, num_se
                         loss.backward()
                         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                         optimizer.step()
-                        epoch_loss += loss.item()
+                        # BUG FIX: Weight loss by batch size for correct averaging
+                        epoch_loss += loss.item() * batch_size
+                    
+                    epoch_samples += batch_size
 
-                avg_loss = epoch_loss / len(train_loader)
+                # BUG FIX: Divide by total samples, not number of batches
+                avg_loss = epoch_loss / max(1, epoch_samples)
                 train_losses.append(avg_loss)
 
                 # Test
@@ -570,18 +590,21 @@ def ablation_sam_effect(output_dir='results/ablation_studies', epochs=10, num_se
     df = pd.DataFrame(results)
     df.to_csv(output_dir / 'ablation_sam.csv', index=False)
 
+    # Import constant at function level to avoid circular dependency
+    from src.utils.constants import OptimizerNames
+    
     # Summary
     print("\n" + "-"*60)
     print("SAM Ablation Summary:")
     print("-"*60)
-    for opt_name in ['SGD', 'SAM']:
+    for opt_name in [OptimizerNames.SGD, 'SAM']:
         subset = df[df['optimizer'] == opt_name]
         mean_acc = subset['final_test_accuracy'].mean()
         std_acc = subset['final_test_accuracy'].std()
         print(f"{opt_name:15s}: {mean_acc:.4f} ± {std_acc:.4f}")
 
     improvement = df[df['optimizer']=='SAM']['final_test_accuracy'].mean() - \
-                  df[df['optimizer']=='SGD']['final_test_accuracy'].mean()
+                  df[df['optimizer']==OptimizerNames.SGD]['final_test_accuracy'].mean()
     print(f"\nSAM improvement: {improvement:+.4f}")
     interpretation = 'SAM finds flatter minima' if improvement > 0 else 'No clear benefit for this task'
     logging.info("   Interpretation: %s", interpretation)

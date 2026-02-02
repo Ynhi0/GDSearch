@@ -34,23 +34,62 @@ def train_epoch(model: nn.Module, train_loader: DataLoader, optimizer: torch.opt
     correct = 0
     total = 0
     
+    # LOGIC REVIEW FIX: Detect SAM optimizer to use closure-based training
+    # SAM requires two forward passes: one at current point, one at adversarial point
+    from src.core.pytorch_optimizers import SAMWrapper
+    is_sam = isinstance(optimizer, SAMWrapper)
+    
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
         
-        optimizer.zero_grad()
-        output = model(data)
-        loss = criterion(output, target)
-        loss.backward()
+        if is_sam:
+            # SAM requires closure for adversarial gradient computation
+            def closure():
+                optimizer.zero_grad()
+                output = model(data)
+                loss = criterion(output, target)
+                loss.backward()
+                
+                # Apply gradient clipping inside closure for SAM
+                if gradient_clipping is not None:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clipping)
+                
+                return loss
+            
+            # SAM step with closure
+            loss = optimizer.step(closure)
+            
+            # Track metrics from final forward pass
+            with torch.no_grad():
+                output = model(data)
+                pred = output.argmax(dim=1, keepdim=True)
+                correct += pred.eq(target.view_as(pred)).sum().item()
+        else:
+            # Standard optimizer (non-SAM)
+            optimizer.zero_grad()
+            output = model(data)
+            loss = criterion(output, target)
+            loss.backward()
+            
+            # Gradient clipping for non-SAM optimizers
+            if gradient_clipping is not None:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clipping)
+            
+            optimizer.step()
+            
+            # Track metrics
+            pred = output.argmax(dim=1, keepdim=True)
+            correct += pred.eq(target.view_as(pred)).sum().item()
         
-        # Gradient clipping if specified
-        if gradient_clipping is not None:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clipping)
+        # Handle loss return type (SAM returns Optional[float], others return Tensor)
+        if isinstance(loss, torch.Tensor):
+            total_loss += loss.item()
+        elif loss is not None:
+            total_loss += float(loss)
+        else:
+            # Fallback for optimizers that return None
+            total_loss += 0.0
         
-        optimizer.step()
-        
-        total_loss += loss.item()
-        pred = output.argmax(dim=1, keepdim=True)
-        correct += pred.eq(target.view_as(pred)).sum().item()
         total += target.size(0)
     
     avg_loss = total_loss / len(train_loader)

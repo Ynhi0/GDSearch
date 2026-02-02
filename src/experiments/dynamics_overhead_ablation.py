@@ -28,6 +28,7 @@ from typing import Dict, List, Optional
 from src.core.dataloader_utils import make_dataloader
 import psutil
 import matplotlib.pyplot as plt
+from src.utils.constants import MNIST_MEAN, MNIST_STD
 
 
 # Import dynamics tracker
@@ -195,7 +196,7 @@ def run_dynamics_overhead_ablation(
     # Setup data
     transform = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,))
+        transforms.Normalize(MNIST_MEAN, MNIST_STD)
     ])
 
     train_dataset = torchvision.datasets.MNIST(

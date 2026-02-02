@@ -1,3 +1,6 @@
+import pytest
+pytest.importorskip("httpx")  # Skip these tests if httpx (TestClient runtime dependency) is not installed
+
 from fastapi.testclient import TestClient
 from integration.inference_server import app
 from integration.action_schema import GenerateRequest, AgentState

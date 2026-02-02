@@ -84,6 +84,10 @@ def validate_config_keys(config_path: str, strict: bool = False) -> Dict[str, Li
         )
 
     # Check for deprecated/inconsistent keys
+    # OPTIMIZED: Batch-process all sweep/optimizer checks
+    all_lr_errors = []
+    all_lr_warnings = []
+    
     for sweep_idx, sweep in enumerate(config.get('sweeps', [])):
         # Check for zombie keys in sweep
         actual_sweep_keys = set(sweep.keys())
@@ -91,30 +95,48 @@ def validate_config_keys(config_path: str, strict: bool = False) -> Dict[str, Li
         if sweep_zombies:
             issues['zombies'].extend([f"Sweep[{sweep_idx}]: {k}" for k in sweep_zombies])
 
-        for opt_config in sweep.get('optimizers', []):
-            # Handle both list and dict format for optimizers
-            if isinstance(opt_config, dict):
-                # Check for learning_rates vs lr_values
-                has_learning_rates = 'learning_rates' in opt_config
-                has_lr_values = 'lr_values' in opt_config
-
-                if has_learning_rates and has_lr_values:
-                    issues['warnings'].append(
-                        f"Optimizer {opt_config.get('name')} has both 'learning_rates' and 'lr_values'. "
-                        f"Using 'lr_values' (preferred)."
-                    )
-                elif has_learning_rates and not has_lr_values:
-                    issues['warnings'].append(
-                        f"Optimizer {opt_config.get('name')} uses deprecated key 'learning_rates'. "
-                        f"Consider renaming to 'lr_values'."
-                    )
-                elif not has_learning_rates and not has_lr_values:
-                    # Check if lr_values is at sweep level
-                    if 'lr_values' not in sweep:
-                        issues['errors'].append(
-                            f"Optimizer {opt_config.get('name')} missing required key 'lr_values' "
-                            f"(not in optimizer config or sweep level)."
-                        )
+        # BUG FIX: Check learning_rate vs lr_values in NESTED optimizers array (not top sweep level)
+        # Schema has sweep.optimizers[] array, each optimizer has lr_values
+        optimizers_list = sweep.get('optimizers', [])
+        if not isinstance(optimizers_list, list):
+            issues['errors'].append(
+                f"Sweep {sweep_idx}: 'optimizers' must be a list, got {type(optimizers_list).__name__}"
+            )
+            continue
+        
+        # BATCH process all optimizers in sweep
+        for opt_idx, opt_config in enumerate(optimizers_list):
+            if not isinstance(opt_config, dict):
+                issues['errors'].append(
+                    f"Sweep {sweep_idx}, optimizer {opt_idx}: must be dict, got {type(opt_config).__name__}"
+                )
+                continue
+            
+            # Cache dict lookups
+            opt_keys = opt_config.keys()
+            has_old_lr = 'learning_rate' in opt_keys
+            has_new_lr = 'lr_values' in opt_keys
+            opt_name = opt_config.get('name', f'optimizer_{opt_idx}')
+            
+            if has_old_lr and has_new_lr:
+                all_lr_errors.append((sweep_idx, opt_name))
+            elif has_old_lr and not has_new_lr:
+                all_lr_warnings.append((sweep_idx, opt_name))
+            elif not has_old_lr and not has_new_lr:
+                all_lr_errors.append((sweep_idx, opt_name))
+    
+    # Batch-format error messages (one string operation instead of many)
+    if all_lr_errors:
+        issues['errors'].append(
+            f"LR configuration errors in {len(all_lr_errors)} optimizers: " +
+            ", ".join(f"Sweep {idx} {name}" for idx, name in all_lr_errors[:10]) +
+            (f" and {len(all_lr_errors) - 10} more" if len(all_lr_errors) > 10 else "")
+        )
+    
+    if all_lr_warnings:
+        issues['warnings'].append(
+            f"Deprecated 'learning_rate' in {len(all_lr_warnings)} optimizers"
+        )
 
     # In strict mode, zombies become errors
     if strict and issues['zombies']:

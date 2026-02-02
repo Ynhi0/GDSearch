@@ -62,8 +62,8 @@ def optimize_function(func, optimizer_class, optimizer_kwargs, max_iters=1000,
             print(f"  Converged at iteration {iteration + 1}: ||grad|| = {grad_norm:.2e}")
             break
 
-        # Update parameters
-        x = optimizer.step(x, grad)
+        # Update parameters (custom optimizers expect grad first, then x)
+        x = optimizer.step(grad, x)
 
     return x, value, iteration + 1, history_values, history_grad_norms
 

@@ -117,7 +117,8 @@ def run_analysis_pipeline_test() -> Tuple[bool, str]:
             'train_loss': [0.5, 0.4, 0.3],
             'test_acc': [85.0, 87.0, 89.0],
             'optimizer': ['SGD', 'SGD', 'SGD'],
-            'seed': [42, 42, 42]
+            'seed': [42, 42, 42],
+            'phase': ['test', 'test', 'test']  # FIX: Add phase column for proper filtering
         })
         df.to_csv(results_dir / "test_SGD_seed42.csv", index=False)
 

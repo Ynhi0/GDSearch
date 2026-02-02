@@ -26,22 +26,27 @@ def safe_to_float(x: Any) -> float:
     except Exception as e:
         logging.debug("safe_to_float: numeric isinstance check failed: %s", e, exc_info=True)
 
+    # BUG FIX: Check torch availability before isinstance check to avoid NameError
     try:
-        # Handle PyTorch tensors (scalars and small tensors)
         import torch as _torch
-        if isinstance(x, _torch.Tensor):
-            try:
-                if x.numel() == 0:
-                    return float(np.nan)
-                if x.numel() == 1:
-                    return float(x.item())
-                # Non-scalar tensor: convert to numpy and recurse
-                return safe_to_float(x.detach().cpu().numpy())
-            except Exception as e_inner:
-                logging.debug("safe_to_float: error while handling torch tensor content: %s", e_inner, exc_info=True)
-                return float(np.nan)
-    except Exception as e_outer:
-        logging.debug("safe_to_float: torch import/handling check failed: %s", e_outer, exc_info=True)
+    except ImportError:
+        _torch = None
+    
+    if _torch is not None:
+        try:
+            if isinstance(x, _torch.Tensor):
+                    try:
+                        if x.numel() == 0:
+                            return float(np.nan)
+                        if x.numel() == 1:
+                            return float(x.item())
+                        # Non-scalar tensor: convert to numpy and recurse
+                        return safe_to_float(x.detach().cpu().numpy())
+                    except Exception as e_inner:
+                        logging.debug("safe_to_float: error while handling torch tensor content: %s", e_inner, exc_info=True)
+                        return float(np.nan)
+        except Exception as e_outer:
+            logging.debug("safe_to_float: torch tensor handling failed: %s", e_outer, exc_info=True)
 
     try:
         import pandas as _pd  # local import to avoid hard deps for code that doesn't use pandas

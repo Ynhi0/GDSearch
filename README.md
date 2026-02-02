@@ -44,8 +44,8 @@ Full support for systematic hyperparameter tuning, convergence analysis, curvatu
 - **Statistical Analysis:** T-tests, effect sizes (Cohen's d), 95% confidence intervals
 - **Power Analysis:** Statistical power calculation and sample size determination
 - **Multiple Comparison Corrections:** Bonferroni, Holm-Bonferroni, Benjamini-Hochberg (FDR)
-- **Normality Testing:** Shapiro-Wilk, Anderson-Darling, Kolmogorov-Smirnov
-- **Non-parametric Tests:** Mann-Whitney U, Wilcoxon signed-rank (for non-normal data)
+- **Normality Testing:** Shapiro-Wilk
+- **Non-parametric Tests:** Mann-Whitney U (for non-normal data)
 - **Auto-Test Selection:** Automatically choose appropriate test based on normality
 - **Interactive Visualizations:** Plotly-based 2D/3D plots, animations, loss landscapes
 - **Error Bar Visualization:** Plots with mean ± std bands

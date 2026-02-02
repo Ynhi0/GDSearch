@@ -14,6 +14,9 @@ import sys
 import subprocess
 import warnings
 import math
+from src.utils.device_safety import safe_device_transfer, gpu_safe_operation
+from src.utils.sanity_checks import validate_loss
+from src.utils.constants import OptimizerNames, MNIST_MEAN, MNIST_STD, CIFAR10_MEAN, CIFAR10_STD
 # Delayed optional imports for heavy NLP/Transformer dependencies
 _optional_modules = {}
 def import_optional_nlp_dependencies():
@@ -136,31 +139,25 @@ def _int_if_possible(x: Any) -> int:
 def _safe_len(obj: object) -> int:
     """Return the length of obj when available, otherwise 0.
 
-    This implementation tries builtin len() first and falls back to calling
-    any callable __len__ attribute. It avoids directly accessing special
-    attributes on unknown objects where possible to satisfy static analysis.
+    TYPE SAFETY FIX: Use specific exception types and proper fallback handling.
+    Avoids bare except clauses and handles all edge cases gracefully.
+    
+    Args:
+        obj: Any object to get length from
+        
+    Returns:
+        Length of object if available, 0 otherwise
     """
     if obj is None:
         return 0
+    
     # Common Python sized containers
     if isinstance(obj, (str, bytes, list, tuple, dict, set, range)):
         try:
             return int(len(obj))
         except (TypeError, AttributeError):
             return 0
-
-
-# Backwards-compatibility wrapper used by existing tests/scripts
-def parse_opt_seed_from_stem(stem: str):
-    """Compatibility shim returning (optimizer, seed) for legacy callers."""
-    try:
-        from src.utils.filename import parse_experiment_filename
-        parsed = parse_experiment_filename(stem)
-        return parsed.get('optimizer'), parsed.get('seed')
-    except (ImportError, ModuleNotFoundError, AttributeError, ValueError, TypeError):
-        # Parsing failed or filename util unavailable — return None for backward compatibility
-        return None, None
-
+    
     # numpy arrays
     try:
         import numpy as _np  # noqa: F811  # Lazy import with alias for optional dependency check
@@ -171,28 +168,42 @@ def parse_opt_seed_from_stem(stem: str):
                 return 0
     except ImportError as e:
         logging.debug("Optional dependency not available: %s", e)
-
+    except Exception as e:
+        # Unexpected error during numpy check - log and continue
+        logging.debug("Unexpected error checking numpy array: %s", e, exc_info=True)
+    
     # torch tensors
     try:
         import torch as _torch  # noqa: F811  # Lazy import with alias for optional dependency check
         if isinstance(obj, _torch.Tensor):
             try:
                 return _int_if_possible(obj.numel())
-            except Exception as e:
-                logging.debug("Failed to get tensor numel: %s", e, exc_info=True)
+            except (TypeError, AttributeError) as e:
+                logging.debug("Failed to get tensor numel: %s", e)
                 return 0
+            except Exception as e:
+                # Unexpected error - log and continue
+                logging.debug("Unexpected error getting tensor numel: %s", e, exc_info=True)
+                return 0
+    except ImportError as e:
+        logging.debug("Optional dependency torch not available: %s", e)
     except Exception as e:
-        logging.debug("Error importing torch or inspecting tensor: %s", e, exc_info=True)
-
+        # Unexpected error during torch check - log and continue
+        logging.debug("Unexpected error checking torch tensor: %s", e, exc_info=True)
+    
     # Last resort: callable __len__
     le = getattr(obj, '__len__', None)
     if callable(le):
         try:
             return _int_if_possible(le())
-        except Exception as e:
-            logging.debug("_safe_len: __len__ callable failed: %s", e, exc_info=True)
+        except (TypeError, AttributeError) as e:
+            logging.debug("_safe_len: __len__ callable failed: %s", e)
             return 0
-
+        except Exception as e:
+            # Unexpected error calling __len__ - log and return 0
+            logging.warning("_safe_len: Unexpected error calling __len__: %s", e, exc_info=True)
+            return 0
+    
     return 0
 
 # Environment configuration moved into a controlled setup function
@@ -522,6 +533,181 @@ try:
 except ImportError as e:
     logging.debug("Training enhancements not available: %s", e)
 
+
+# =============================================================================
+# Fix 4: Configuration Validation Helpers
+# =============================================================================
+
+def validate_learning_rate(lr, optimizer_name):
+    """Validate learning rate is in reasonable range.
+    
+    Args:
+        lr: Learning rate value
+        optimizer_name: Name of optimizer for context in warnings
+        
+    Raises:
+        TypeError: If lr is not numeric
+        ValueError: If lr is outside valid range (0, 10.0]
+    """
+    if not isinstance(lr, (int, float)):
+        raise TypeError(
+            f"Learning rate must be numeric, got {type(lr).__name__}. "
+            f"If loading from JSON, ensure proper type conversion: lr = float(config['learning_rate'])"
+        )
+    
+    if lr <= 0 or lr > 10.0:
+        raise ValueError(
+            f"Learning rate {lr} for {optimizer_name} is outside valid range (0, 10.0]. "
+            f"This is likely a configuration error. "
+            f"Typical ranges: SGD [0.001-1.0], Adam [0.0001-0.01], AdamW [0.0001-0.01]"
+        )
+    
+    # Warn about potentially problematic values
+    if lr > 1.0:
+        logging.warning(
+            f"Large learning rate {lr} for {optimizer_name}. "
+            f"This may cause training instability (NaN losses, divergence). "
+            f"Consider reducing to < 1.0 unless you have specific reasons."
+        )
+    
+    if lr < 1e-6:
+        logging.warning(
+            f"Very small learning rate {lr} for {optimizer_name}. "
+            f"Training may be extremely slow or stall. Consider increasing."
+        )
+
+
+def validate_optimizer_name(name):
+    """Validate optimizer name and provide suggestions for typos.
+    
+    Args:
+        name: Optimizer name to validate
+        
+    Raises:
+        ValueError: If optimizer name is not recognized
+    """
+    # Canonical optimizer names supported by the codebase
+    VALID_OPTIMIZERS = {
+        'sgd', 'adam', 'adamw', 'rmsprop', 'adagrad',
+        'adadelta', 'sam', 'lookahead', 'lamb',
+        'radam', 'adabound', 'sgd_momentum', 'sgd_nesterov',
+        'amsgrad'
+    }
+    
+    name_lower = name.lower().replace('-', '_')
+    
+    if name_lower not in VALID_OPTIMIZERS:
+        # Find close matches for helpful error message
+        from difflib import get_close_matches
+        suggestions = get_close_matches(name_lower, VALID_OPTIMIZERS, n=3, cutoff=0.6)
+        
+        msg = f"Unknown optimizer: '{name}'"
+        if suggestions:
+            msg += f". Did you mean: {', '.join(suggestions)}?"
+        msg += f"\n\nValid optimizers: {sorted(VALID_OPTIMIZERS)}"
+        raise ValueError(msg)
+    
+    return name_lower
+
+
+def safe_config_int(config, key, default=None):
+    """Safely extract integer from config with type conversion.
+    
+    Fix 6: Handles JSON configs where numbers may be strings.
+    
+    Args:
+        config: Configuration dictionary
+        key: Key to extract
+        default: Default value if key not found
+        
+    Returns:
+        Integer value
+        
+    Raises:
+        ValueError: If value cannot be converted to int
+    """
+    if key not in config:
+        if default is None:
+            raise ValueError(f"Required config key '{key}' not found")
+        return default
+    
+    value = config[key]
+    try:
+        return int(value)
+    except (ValueError, TypeError) as e:
+        raise ValueError(
+            f"Config key '{key}' has invalid value '{value}' (type: {type(value).__name__}). "
+            f"Expected integer. Original error: {e}"
+        ) from e
+
+
+def safe_config_float(config, key, default=None):
+    """Safely extract float from config with type conversion.
+    
+    Fix 6: Handles JSON configs where numbers may be strings.
+    
+    Args:
+        config: Configuration dictionary
+        key: Key to extract
+        default: Default value if key not found
+        
+    Returns:
+        Float value
+        
+    Raises:
+        ValueError: If value cannot be converted to float
+    """
+    if key not in config:
+        if default is None:
+            raise ValueError(f"Required config key '{key}' not found")
+        return default
+    
+    value = config[key]
+    try:
+        return float(value)
+    except (ValueError, TypeError) as e:
+        raise ValueError(
+            f"Config key '{key}' has invalid value '{value}' (type: {type(value).__name__}). "
+            f"Expected float. Original error: {e}"
+        ) from e
+
+
+def safe_config_bool(config, key, default=None):
+    """Safely extract boolean from config with type conversion.
+    
+    Fix 6: Handles JSON configs where booleans may be strings or ints.
+    
+    Args:
+        config: Configuration dictionary
+        key: Key to extract
+        default: Default value if key not found
+        
+    Returns:
+        Boolean value
+    """
+    if key not in config:
+        if default is None:
+            raise ValueError(f"Required config key '{key}' not found")
+        return default
+    
+    value = config[key]
+    
+    # Handle string representations
+    if isinstance(value, str):
+        value_lower = value.lower()
+        if value_lower in ('true', '1', 'yes', 'on'):
+            return True
+        elif value_lower in ('false', '0', 'no', 'off'):
+            return False
+        else:
+            raise ValueError(
+                f"Config key '{key}' has invalid boolean string '{value}'. "
+                f"Expected: true/false, 1/0, yes/no, on/off (case-insensitive)"
+            )
+    
+    # Handle numeric representations
+    return bool(value)
+
 try:
     # Note: plotly + narwhals can be slow to import in Python 3.13
     # If this hangs, it's a known issue with narwhals lazy loading
@@ -534,8 +720,15 @@ try:
             animate_convergence
         )
     HAS_INTERACTIVE = True
-except (ImportError, Exception) as e:
-    logging.debug("Interactive plots not available: %s", e)
+except ImportError as e:
+    # Optional dependency missing; interactive plots disabled (normal case)
+    logging.debug("Interactive plots not available (ImportError): %s", e)
+    HAS_INTERACTIVE = False
+except Exception as e:
+    # Unexpected import-time error (likely a bug in the interactive plotting module).
+    # Do not silently disable visuals due to transient runtime exceptions; log the
+    # full exception for debugging and keep HAS_INTERACTIVE = False.
+    logging.exception("Unexpected error importing interactive plots: %s", e)
     HAS_INTERACTIVE = False
 
 try:
@@ -1099,11 +1292,11 @@ def load_experiment_config(config_path: Optional[str] = None) -> Dict[str, Any]:
             'full': 20
         },
         'learning_rates': {
-            'SGD': 0.01,
-            'SGD_Momentum': 0.05,
-            'Adam': 0.001,
-            'AdamW': 0.001,
-            'AMSGrad': 0.001
+            OptimizerNames.SGD: 0.01,
+            OptimizerNames.SGD_MOMENTUM: 0.05,
+            OptimizerNames.ADAM: 0.001,
+            OptimizerNames.ADAMW: 0.001,
+            OptimizerNames.AMSGRAD: 0.001
         },
         'weight_decay': 1e-4,
         'convergence': {
@@ -1426,7 +1619,28 @@ def make_dataloader(dataset, batch_size=64, shuffle: Union[bool, int] = False, s
     WINDOWS COMPATIBILITY: On Windows, num_workers is forced to 0 to prevent
     multiprocessing issues. This ensures testing works on Windows while still
     allowing full multiprocessing on Kaggle/Linux.
+    
+    Raises:
+        ValueError: If batch_size < 1
     """
+    # Fix 5: Validate batch size before creating DataLoader
+    dataset_size = len(dataset)
+    
+    if batch_size < 1:
+        raise ValueError(
+            f"Batch size must be >= 1, got {batch_size}. "
+            f"Check your configuration for invalid batch_size values."
+        )
+    
+    # Warn and adjust if batch size exceeds dataset size
+    if batch_size > dataset_size:
+        logging.warning(
+            f"Batch size {batch_size} > dataset size {dataset_size}. "
+            f"Reducing batch size to {dataset_size} to avoid empty batches. "
+            f"This may indicate a configuration error."
+        )
+        batch_size = dataset_size
+    
     # Coerce shuffle to bool to silence static typing when callers pass ints (e.g., 0/1 from CLI)
     shuffle = bool(shuffle)
     # Force num_workers=0 on Windows to prevent hanging/crashes
@@ -1528,10 +1742,10 @@ def find_optimal_lr(model, train_loader, criterion, device,
 
     # Default fallback LRs by optimizer type
     default_lrs = {
-        'SGD': 0.01, 'SGD_Momentum': 0.01, 'Nesterov': 0.01,
-        'Adam': 0.001, 'AdamW': 0.001, 'AMSGrad': 0.001,
-        'RMSprop': 0.001, 'RAdam': 0.001, 'AdaBound': 0.001,
-        'LAMB': 0.001, 'SAM_SGD': 0.01, 'SAM_Adam': 0.001,
+        OptimizerNames.SGD: 0.01, OptimizerNames.SGD_MOMENTUM: 0.01, OptimizerNames.SGD_NESTEROV: 0.01,
+        OptimizerNames.ADAM: 0.001, OptimizerNames.ADAMW: 0.001, OptimizerNames.AMSGRAD: 0.001,
+        OptimizerNames.RMSPROP: 0.001, OptimizerNames.RADAM: 0.001, OptimizerNames.ADABOUND: 0.001,
+        OptimizerNames.LAMB: 0.001, 'SAM_SGD': 0.01, 'SAM_Adam': 0.001,
         'Lookahead_SGD': 0.01, 'Lookahead_Adam': 0.001
     }
     default_lr = default_lrs.get(opt_name, 0.001)
@@ -1539,7 +1753,7 @@ def find_optimal_lr(model, train_loader, criterion, device,
     try:
         # Snapshot model state with copy.deepcopy
         model_copy = copy.deepcopy(model)
-        model_copy = model_copy.to(device)
+        model_copy = safe_device_transfer(model_copy, device, operation="LR finder model initialization")
 
         # Create temporary optimizer (be defensive in case optimizer_class has non-standard signature)
         import inspect
@@ -1711,9 +1925,9 @@ def get_dataloader_kwargs():
     if 'KAGGLE_CONFIG' in globals():
         config = globals()['KAGGLE_CONFIG']
         return {
-            'num_workers': config.get('num_workers', 0 if is_windows else 2),
-            'pin_memory': config.get('pin_memory', True),
-            'persistent_workers': config.get('persistent_workers', False)
+            'num_workers': int(config.get('num_workers', 0 if is_windows else 2)),
+            'pin_memory': bool(config.get('pin_memory', True)),
+            'persistent_workers': bool(config.get('persistent_workers', False))
         }
 
     return defaults
@@ -1723,7 +1937,7 @@ def get_dataloader_kwargs():
 # ABLATION STUDIES (INTERNAL)
 # ==============================================================================
 
-def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path] = 'results/batch_ablation'):
+def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path] = 'results/batch_ablation', seeds: List[int] = None):
     """
     Ablation Study A: Impact of Batch Size on Convergence
 
@@ -1734,7 +1948,10 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
     Args:
         dataset_name: 'MNIST' or 'CIFAR10'
         results_dir: Output directory for ablation results (Path or str)
+        seeds: List of random seeds for reproducibility (default: [42])
     """
+    if seeds is None:
+        seeds = [42]
     results_dir = Path(results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
     print("\n" + "="*80)
@@ -1752,7 +1969,7 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
 
     os.makedirs(results_dir, exist_ok=True)
     batch_sizes = [32, 256, 512]
-    optimizers_to_test = ['SGD', 'SAM']
+    optimizers_to_test = [OptimizerNames.SGD, OptimizerNames.SAM]
     base_lr = 0.01  # Reference LR for batch_size=256
 
     # FIX: Use canonical data loaders to prevent validation data leakage
@@ -1761,137 +1978,154 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
     # The canonical loaders use TransformedSubset to strip augmentations for val/test.
     from src.core.data_utils import get_mnist_loaders, get_cifar10_loaders
 
-    if dataset_name == 'MNIST':
-        # Use canonical MNIST loader with proper TransformedSubset handling
-        train_loader_ref, val_loader_ref, test_loader_ref = get_mnist_loaders(
-            batch_size=128,  # Temporary, will create new loaders per batch size
-            val_split=0.10,
-            seed=42
-        )
-        # Extract datasets from loaders for batch-size sweeps
-        train_dataset = train_loader_ref.dataset
-        val_dataset = val_loader_ref.dataset
-        test_dataset = test_loader_ref.dataset
-
-        input_dim = 28 * 28
-        num_classes = 10
-    elif dataset_name == 'CIFAR10':
-        # Use canonical CIFAR-10 loader with proper TransformedSubset handling
-        train_loader_ref, val_loader_ref, test_loader_ref = get_cifar10_loaders(
-            batch_size=128,  # Temporary, will create new loaders per batch size
-            val_split=0.10,
-            seed=42
-        )
-        # Extract datasets from loaders for batch-size sweeps
-        train_dataset = train_loader_ref.dataset
-        val_dataset = val_loader_ref.dataset
-        test_dataset = test_loader_ref.dataset
-
-        input_dim = 32 * 32 * 3
-        num_classes = 10
-    else:
-        raise ValueError(f"Unsupported dataset: {dataset_name}")
-
-    # Run grid
+    # Run grid with multi-seed support
     batch_results = []
-    for batch_size in batch_sizes:
-        # Linear LR Scaling: lr = base_lr * (batch_size / 256)
-        scaled_lr = base_lr * (batch_size / 256.0)
-        print(f"\nBatch Size: {batch_size}, Scaled LR: {scaled_lr:.6f}")
+    for seed in seeds:
+        set_seed(seed)
+        print(f"\n{'='*80}")
+        print(f"Running batch ablation with seed={seed}")
+        print(f"{'='*80}")
+        
+        if dataset_name == 'MNIST':
+            # Use canonical MNIST loader with proper TransformedSubset handling
+            train_loader_ref, val_loader_ref, test_loader_ref = get_mnist_loaders(
+                batch_size=128,  # Temporary, will create new loaders per batch size
+                val_split=0.10,
+                seed=seed
+            )
+            # Extract datasets from loaders for batch-size sweeps
+            train_dataset = train_loader_ref.dataset
+            val_dataset = val_loader_ref.dataset
+            test_dataset = test_loader_ref.dataset
 
-        # Use dataloader kwargs to respect Windows multiprocessing settings
-        dl_kwargs = get_dataloader_kwargs()
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
-                                  **dl_kwargs)
-        val_loader = DataLoader(val_dataset, batch_size=batch_size*2, shuffle=False,
-                                **dl_kwargs)
-        test_loader = DataLoader(test_dataset, batch_size=batch_size*2, shuffle=False,
-                                 **dl_kwargs)
+            input_dim = 28 * 28
+            num_classes = 10
+        elif dataset_name == 'CIFAR10':
+            # Use canonical CIFAR-10 loader with proper TransformedSubset handling
+            train_loader_ref, val_loader_ref, test_loader_ref = get_cifar10_loaders(
+                batch_size=128,  # Temporary, will create new loaders per batch size
+                val_split=0.10,
+                seed=seed
+            )
+            # Extract datasets from loaders for batch-size sweeps
+            train_dataset = train_loader_ref.dataset
+            val_dataset = val_loader_ref.dataset
+            test_dataset = test_loader_ref.dataset
 
-        for opt_name in optimizers_to_test:
-            print(f"  Testing {opt_name} with batch_size={batch_size}, lr={scaled_lr:.6f}")
+            input_dim = 32 * 32 * 3
+            num_classes = 10
+        else:
+            raise ValueError(f"Unsupported dataset: {dataset_name}")
 
-            # Create model
-            model = SimpleMLP(input_dim=input_dim, hidden_dims=[128, 64], num_classes=num_classes).to(device)
+        for batch_size in batch_sizes:
+            # Linear LR Scaling: lr = base_lr * (batch_size / 256)
+            scaled_lr = base_lr * (batch_size / 256.0)
+            print(f"\nBatch Size: {batch_size}, Scaled LR: {scaled_lr:.6f}")
 
-            # Create optimizer (ensure defined before usage)
-            # FIX: Added weight_decay=1e-4 to SGD for fair comparison with AdamW
-            # Without this, we were comparing "No Regularization" vs "AdamW with WD"
-            optimizer = None
-            if opt_name == 'SGD':
-                optimizer = torch.optim.SGD(model.parameters(), lr=scaled_lr, momentum=0.9, weight_decay=1e-4)
-            elif opt_name == 'SAM':
-                base_opt = torch.optim.SGD(model.parameters(), lr=scaled_lr, momentum=0.9, weight_decay=1e-4)
-                optimizer = SAMWrapper(base_opt, rho=0.05)
-            else:
-                raise ValueError(f"Unsupported optimizer for batch ablation: {opt_name}")
-            assert optimizer is not None
+            # Use dataloader kwargs to respect Windows multiprocessing settings
+            dl_kwargs = get_dataloader_kwargs()
+            train_loader = make_dataloader(train_dataset, batch_size=batch_size, shuffle=True, seed=None, **dl_kwargs)
+            val_loader = make_dataloader(val_dataset, batch_size=batch_size*2, shuffle=False, seed=None, **dl_kwargs)
+            test_loader = make_dataloader(test_dataset, batch_size=batch_size*2, shuffle=False, seed=None, **dl_kwargs)
 
-            criterion = nn.CrossEntropyLoss()
+            for opt_name in optimizers_to_test:
+                print(f"  Testing {opt_name} with batch_size={batch_size}, lr={scaled_lr:.6f}")
 
-            # FIX: Track full training trajectories (not just final values)
-            # This enables convergence analysis, oscillation detection, and saddle point studies
-            # GAP 1 FIX: Add wall-clock time tracking for "Loss vs Time" plots
-            # GAP 15 FIX: Add gradient norm tracking for non-convex convergence validation
-            loss_history = []
-            val_acc_history = []
-            grad_norm_history = []  # For non-convex convergence (||∇f|| → 0)
-            time_history = []  # Wall-clock time per epoch
+                # Create model
+                model = SimpleMLP(input_dim=input_dim, hidden_dims=[128, 64], num_classes=num_classes)
+                model = safe_device_transfer(model, device, operation="MNIST batch ablation model")
 
-            import time
-            start_time = time.time()
+                # Create optimizer (ensure defined before usage)
+                # FIX: Added weight_decay=1e-4 to SGD for fair comparison with AdamW
+                # Without this, we were comparing "No Regularization" vs "AdamW with WD"
+                optimizer = None
+                if opt_name == OptimizerNames.SGD:
+                    optimizer = torch.optim.SGD(model.parameters(), lr=scaled_lr, momentum=0.9, weight_decay=1e-4)
+                elif opt_name == OptimizerNames.SAM:
+                    base_opt = torch.optim.SGD(model.parameters(), lr=scaled_lr, momentum=0.9, weight_decay=1e-4)
+                    optimizer = SAMWrapper(base_opt, rho=0.05)
+                else:
+                    raise ValueError(f"Unsupported optimizer for batch ablation: {opt_name}")
+                assert optimizer is not None
 
-            for epoch in range(5):
-                epoch_start = time.time()
-                model.train()
-                total_loss = 0.0
-                epoch_grad_norms = []  # Collect grad norms for this epoch
-                for _, (data, target) in enumerate(train_loader):
-                    data, target = data.to(device), target.to(device)
-                    data = data.view(data.size(0), -1)  # Flatten for MLP
+                criterion = nn.CrossEntropyLoss()
 
-                    # SAM requires closure for step()
-                    # Check if optimizer requires closure (SAM, L-BFGS, etc.)
-                    assert optimizer is not None
-                    requires_closure = bool(getattr(optimizer, 'requires_closure', False))
-                    if requires_closure:
-                        # Capture loop-local variables to avoid cell-var issues in closures
-                        _opt = optimizer
-                        _model = model
-                        _data = data
-                        _target = target
-                        _criterion = criterion
+                # FIX: Track full training trajectories (not just final values)
+                # This enables convergence analysis, oscillation detection, and saddle point studies
+                # GAP 1 FIX: Add wall-clock time tracking for "Loss vs Time" plots
+                # GAP 15 FIX: Add gradient norm tracking for non-convex convergence validation
+                loss_history = []
+                val_acc_history = []
+                grad_norm_history = []  # For non-convex convergence (||∇f|| → 0)
+                time_history = []  # Wall-clock time per epoch
 
-                        def closure(_data=_data, _target=_target, _model=_model, _criterion=_criterion, _opt=_opt):
-                            _opt.zero_grad()
-                            output = _model(_data)
-                            loss = _criterion(output, _target)
-                            loss.backward()
-                            return loss
+                import time
+                start_time = time.time()
 
-                        loss = _opt.step(closure)
-                        # Use centralized coercion helper to avoid type issues
-                        from src.utils.num_utils import safe_to_float
-                        loss_value = safe_to_float(loss)
-                        total_loss += loss_value
-                    else:
-                        optimizer.zero_grad()
-                        output = model(data)
-                        loss = criterion(output, target)
-                        loss.backward()
+                for epoch in range(5):
+                    epoch_start = time.time()
+                    model.train()
+                    total_loss = 0.0
+                    epoch_grad_norms = []  # Collect grad norms for this epoch
+                    for _, (data, target) in enumerate(train_loader):
+                        # HIGH-PRIORITY FIX #1 (HIGH-4/CRITICAL-4): Safe device transfer with OOM protection
+                        from src.core.device_utils import safe_to_device
+                        data = safe_to_device(data, device, error_context=f"MNIST epoch {epoch}")
+                        target = safe_to_device(target, device, error_context=f"MNIST epoch {epoch}")
+                        data = data.view(data.size(0), -1)  # Flatten for MLP
 
-                        # Check gradient health before optimizer step
-                        grad_norm = check_gradient_health_quick(model, epoch=epoch, context=f"MNIST-{opt_name}")
-                        if not torch.isfinite(torch.tensor(grad_norm)):
-                            logging.warning(f"Skipping update due to bad gradients ({opt_name})")
-                            continue
+                        # SAM requires closure for step()
+                        # Check if optimizer requires closure (SAM, L-BFGS, etc.)
+                        assert optimizer is not None
+                        requires_closure = bool(getattr(optimizer, 'requires_closure', False))
+                        if requires_closure:
+                            # Capture loop-local variables to avoid cell-var issues in closures
+                            _opt = optimizer
+                            _model = model
+                            _data = data
+                            _target = target
+                            _criterion = criterion
+
+                            def closure(_data=_data, _target=_target, _model=_model, _criterion=_criterion, _opt=_opt):
+                                _opt.zero_grad()
+                                output = _model(_data)
+                                loss = _criterion(output, _target)
+                                validate_loss(loss, context="MNIST batch ablation SAM closure")
+                                loss.backward()
+                                return loss
+
+                            # TYPE SAFETY FIX: Ensure proper loss type handling
+                            loss_result = _opt.step(closure)  # May return Tensor or float depending on optimizer
+                            # Use centralized coercion helper to avoid type issues
+                            from src.utils.num_utils import safe_to_float
+                            loss_value: float = safe_to_float(loss_result)  # Explicit float type
+                            total_loss += loss_value
+                        else:
+                            optimizer.zero_grad()
+                            output = model(data)
+                            # TYPE SAFETY FIX: Explicit loss tensor and value separation
+                            loss_tensor: torch.Tensor = criterion(output, target)
+                            
+                            # HIGH-PRIORITY FIX #2 (HIGH-2): Validate loss before backward
+                            from src.core.validation import validate_loss
+                            loss_tensor = validate_loss(loss_tensor, context=f"epoch {epoch}, {opt_name}", max_allowed=1e6)
+                            
+                            loss_tensor.backward()
+
+                            # Check gradient health before optimizer step
+                            grad_norm = check_gradient_health_quick(model, epoch=epoch, context=f"MNIST-{opt_name}")
+                            if not torch.isfinite(torch.tensor(grad_norm)):
+                                logging.warning(f"Skipping update due to bad gradients ({opt_name})")
+                                continue
 
                         # GAP 15 FIX: Record gradient norm for non-convex convergence analysis
                         # Theory predicts ||∇f|| → 0 at rate O(1/√T), not f(x) → f*
                         epoch_grad_norms.append(grad_norm)
 
                         optimizer.step()
-                        total_loss += loss.item()
+                        # TYPE SAFETY FIX: Convert tensor to float for accumulation
+                        loss_value: float = float(loss_tensor.item())
+                        total_loss += loss_value
 
                 avg_loss = total_loss / len(train_loader)
 
@@ -1950,6 +2184,7 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
                 'dataset': dataset_name,
                 'optimizer': opt_name,
                 'batch_size': batch_size,
+                'seed': seed,
                 'base_lr': base_lr,
                 'scaled_lr': scaled_lr,
                 'final_loss': avg_loss,
@@ -1963,10 +2198,11 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
             # Apply metric name normalization (GAP 29: test_acc/test_accuracy/final_test_acc consistency)
             batch_results.append(normalize_metric_names(result_dict))
 
-    # Save to CSV
+    # Save to CSV (one file with all seeds)
     df = pd.DataFrame(batch_results)
-    csv_path = os.path.join(results_dir, f'{dataset_name}_batch_ablation.csv')
-    df.to_csv(csv_path, index=False)
+    csv_path = os.path.join(results_dir, f'{dataset_name}_batch_ablation_seeds{"_".join(map(str, seeds))}.csv')
+    from src.utils.file_safety import safe_to_csv
+    safe_to_csv(df, csv_path, index=False)
     print(f"\nBatch ablation results saved to {csv_path}")
 
     # Try to create visualization (Kaggle-safe)
@@ -2006,7 +2242,7 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
     return df
 
 
-def run_scheduler_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path] = 'results/scheduler_ablation'):
+def run_scheduler_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path] = 'results/scheduler_ablation', seeds: List[int] = None):
     """
     Ablation Study B: Learning Rate Scheduler Impact
 
@@ -2016,7 +2252,10 @@ def run_scheduler_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, 
     Args:
         dataset_name: 'MNIST' or 'CIFAR10'
         results_dir: Output directory for ablation results (Path or str)
+        seeds: List of random seeds for reproducibility (default: [42])
     """
+    if seeds is None:
+        seeds = [42]
     print("\n" + "="*80)
     print("ABLATION STUDY B: LR Scheduler Impact (2×2 Grid)")
     print("="*80)
@@ -2029,141 +2268,152 @@ def run_scheduler_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, 
 
     # Hardcoded pairs: (optimizer_name, scheduler_name)
     pairs = [
-        ('SGD', 'CosineAnnealingLR'),
-        ('SGD', 'StepLR'),
-        ('AdamW', 'CosineAnnealingLR'),
-        ('AdamW', 'StepLR')
+        (OptimizerNames.SGD, 'CosineAnnealingLR'),
+        (OptimizerNames.SGD, 'StepLR'),
+        (OptimizerNames.ADAMW, 'CosineAnnealingLR'),
+        (OptimizerNames.ADAMW, 'StepLR')
     ]
 
-    # Load dataset
-    if dataset_name == 'MNIST':
-        transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize((0.1307,), (0.3081,))
-        ])
-        full_train_dataset = torchvision.datasets.MNIST(root='./data', train=True, download=True, transform=transform)
-        test_dataset = torchvision.datasets.MNIST(root='./data', train=False, transform=transform)
-
-        # Use canonical datasets (prevents augmentation in validation)
-        train_dataset, val_dataset, test_dataset = canonical_fetch_datasets('MNIST', val_split=0.10, seed=42)
-        input_dim = 28 * 28
-        num_classes = 10
-    elif dataset_name == 'CIFAR10':
-        transform_train = transforms.Compose([
-            transforms.RandomCrop(32, padding=4),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
-        ])
-        full_train_dataset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform_train)
-        test_dataset = torchvision.datasets.CIFAR10(root='./data', train=False,
-                                        transform=transforms.Compose([
-                                            transforms.ToTensor(),
-                                            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
-                                        ]))
-
-        # Use canonical datasets (prevents augmentation in validation)
-        train_dataset, val_dataset, test_dataset = canonical_fetch_datasets('CIFAR10', val_split=0.10, seed=42)
-        input_dim = 32 * 32 * 3
-        num_classes = 10
-    else:
-        raise ValueError(f"Unsupported dataset: {dataset_name}")
-
-    train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True, num_workers=2, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=256, shuffle=False, num_workers=2, pin_memory=True)
-    test_loader = DataLoader(test_dataset, batch_size=256, shuffle=False, num_workers=2, pin_memory=True)
-
+    # Run scheduler ablation with multi-seed support
     scheduler_results = []
-    for opt_name, sched_name in pairs:
-        print(f"\nTesting {opt_name} + {sched_name}")
+    for seed in seeds:
+        set_seed(seed)
+        print(f"\n{'='*80}")
+        print(f"Running scheduler ablation with seed={seed}")
+        print(f"{'='*80}")
+        
+        # Load dataset with current seed
+        if dataset_name == 'MNIST':
+            transform = transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize(MNIST_MEAN, MNIST_STD)
+            ])
+            full_train_dataset = torchvision.datasets.MNIST(root='./data', train=True, download=True, transform=transform)
+            test_dataset = torchvision.datasets.MNIST(root='./data', train=False, transform=transform)
 
-        # Create model
-        model = SimpleMLP(input_dim=input_dim, hidden_dims=[128, 64], num_classes=num_classes).to(device)
+            # Use canonical datasets (prevents augmentation in validation)
+            train_dataset, val_dataset, test_dataset = canonical_fetch_datasets('MNIST', val_split=0.10, seed=seed)
+            input_dim = 28 * 28
+            num_classes = 10
+        elif dataset_name == 'CIFAR10':
+            transform_train = transforms.Compose([
+                transforms.RandomCrop(32, padding=4),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                transforms.Normalize(CIFAR10_MEAN, CIFAR10_STD)
+            ])
+            full_train_dataset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform_train)
+            test_dataset = torchvision.datasets.CIFAR10(root='./data', train=False,
+                                            transform=transforms.Compose([
+                                                transforms.ToTensor(),
+                                                transforms.Normalize(CIFAR10_MEAN, CIFAR10_STD)
+                                            ]))
 
-        # Create optimizer
-        if opt_name == 'SGD':
-            sgd_params = get_default_hyperparameters('SGD', 'resnet_cifar10')
-            optimizer = torch.optim.SGD(model.parameters(), **sgd_params)
-        elif opt_name == 'AdamW':
-            adamw_params = get_default_hyperparameters('AdamW', 'resnet_cifar10')
-            optimizer = torch.optim.AdamW(model.parameters(), **adamw_params)
+            # Use canonical datasets (prevents augmentation in validation)
+            train_dataset, val_dataset, test_dataset = canonical_fetch_datasets('CIFAR10', val_split=0.10, seed=seed)
+            input_dim = 32 * 32 * 3
+            num_classes = 10
         else:
-            raise ValueError(f"Unsupported optimizer: {opt_name}. Expected 'SGD' or 'AdamW'.")
+            raise ValueError(f"Unsupported dataset: {dataset_name}")
 
-        # Create scheduler
-        if sched_name == 'CosineAnnealingLR':
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
-        elif sched_name == 'StepLR':
-            scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.1)
-        else:
-            raise ValueError(f"Unsupported scheduler: {sched_name}. Expected 'CosineAnnealingLR' or 'StepLR'.")
+        # Create data loaders with current seed
+        train_loader = make_dataloader(train_dataset, batch_size=128, shuffle=True, seed=seed, num_workers=2, pin_memory=True)
+        val_loader = make_dataloader(val_dataset, batch_size=256, shuffle=False, seed=seed, num_workers=2, pin_memory=True)
+        test_loader = make_dataloader(test_dataset, batch_size=256, shuffle=False, seed=seed, num_workers=2, pin_memory=True)
 
-        criterion = nn.CrossEntropyLoss()
+        for opt_name, sched_name in pairs:
+            print(f"\nTesting {opt_name} + {sched_name} (seed={seed})")
 
-        # Train for 10 epochs
-        for epoch in range(10):
-            model.train()
-            total_loss = 0.0
-            for data, target in train_loader:
-                data, target = data.to(device), target.to(device)
-                data = data.view(data.size(0), -1)
+            # Create model
+            model = SimpleMLP(input_dim=input_dim, hidden_dims=[128, 64], num_classes=num_classes)
+            model = safe_device_transfer(model, device, operation=f"Scheduler ablation {opt_name}+{sched_name}")
 
-                optimizer.zero_grad()
-                output = model(data)
-                loss = criterion(output, target)
-                loss.backward()
-                optimizer.step()
-                total_loss += loss.item()
+            # Create optimizer
+            if opt_name == OptimizerNames.SGD:
+                sgd_params = get_default_hyperparameters(OptimizerNames.SGD, 'resnet_cifar10')
+                optimizer = torch.optim.SGD(model.parameters(), **sgd_params)
+            elif opt_name == OptimizerNames.ADAMW:
+                adamw_params = get_default_hyperparameters(OptimizerNames.ADAMW, 'resnet_cifar10')
+                optimizer = torch.optim.AdamW(model.parameters(), **adamw_params)
+            else:
+                raise ValueError(f"Unsupported optimizer: {opt_name}. Expected {OptimizerNames.SGD!r} or {OptimizerNames.ADAMW!r}.")
 
-            avg_loss = total_loss / len(train_loader)
-            # scheduler.step() called after optimizer.step() completes for all batches
-            scheduler.step()  # Step scheduler after epoch
+            # Create scheduler
+            if sched_name == 'CosineAnnealingLR':
+                scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
+            elif sched_name == 'StepLR':
+                scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.1)
+            else:
+                raise ValueError(f"Unsupported scheduler: {sched_name}. Expected 'CosineAnnealingLR' or 'StepLR'.")
 
-            # Validation accuracy (use validation set for model selection)
+            criterion = nn.CrossEntropyLoss()
+
+            # Train for 10 epochs
+            for epoch in range(10):
+                model.train()
+                total_loss = 0.0
+                for data, target in train_loader:
+                    data, target = data.to(device), target.to(device)
+                    data = data.view(data.size(0), -1)
+
+                    optimizer.zero_grad()
+                    output = model(data)
+                    loss = criterion(output, target)
+                    validate_loss(loss, step=epoch, context="Scheduler ablation")
+                    loss.backward()
+                    optimizer.step()
+                    total_loss += loss.item()
+
+                avg_loss = total_loss / len(train_loader)
+                # scheduler.step() called after optimizer.step() completes for all batches
+                scheduler.step()  # Step scheduler after epoch
+
+                # Validation accuracy (use validation set for model selection)
+                model.eval()
+                correct = 0
+                with torch.no_grad():
+                    for data, target in val_loader:
+                        data, target = data.to(device), target.to(device)
+                        data = data.view(data.size(0), -1)
+                        output = model(data)
+                        pred = output.argmax(dim=1)
+                        correct += pred.eq(target).sum().item()
+
+                val_accuracy = 100.0 * correct / len(val_dataset)  # type: ignore[arg-type]
+                current_lr = optimizer.param_groups[0]['lr']
+                print(f"  Epoch {epoch+1}/10: Loss={avg_loss:.4f}, Val Acc={val_accuracy:.2f}%, LR={current_lr:.6f}")
+
+            # Final test evaluation (only after training completes)
             model.eval()
-            correct = 0
+            test_correct = 0
+            test_loss_total = 0.0
             with torch.no_grad():
-                for data, target in val_loader:
+                for data, target in test_loader:
                     data, target = data.to(device), target.to(device)
                     data = data.view(data.size(0), -1)
                     output = model(data)
+                    loss = criterion(output, target)
+                    test_loss_total += loss.item()
                     pred = output.argmax(dim=1)
-                    correct += pred.eq(target).sum().item()
+                    test_correct += pred.eq(target).sum().item()
 
-            val_accuracy = 100.0 * correct / len(val_dataset)  # type: ignore[arg-type]
-            current_lr = optimizer.param_groups[0]['lr']
-            print(f"  Epoch {epoch+1}/10: Loss={avg_loss:.4f}, Val Acc={val_accuracy:.2f}%, LR={current_lr:.6f}")
+            final_test_accuracy = 100.0 * test_correct / len(test_dataset)  # type: ignore[arg-type]
+            final_test_loss = test_loss_total / len(test_loader)
+            print(f"  Final Test: Loss={final_test_loss:.4f}, Acc={final_test_accuracy:.2f}%")
 
-        # Final test evaluation (only after training completes)
-        model.eval()
-        test_correct = 0
-        test_loss_total = 0.0
-        with torch.no_grad():
-            for data, target in test_loader:
-                data, target = data.to(device), target.to(device)
-                data = data.view(data.size(0), -1)
-                output = model(data)
-                loss = criterion(output, target)
-                test_loss_total += loss.item()
-                pred = output.argmax(dim=1)
-                test_correct += pred.eq(target).sum().item()
+            # Save result with seed
+            scheduler_results.append({
+                'dataset': dataset_name,
+                'optimizer': opt_name,
+                'scheduler': sched_name,
+                'seed': seed,
+                'final_loss': avg_loss,
+                'final_accuracy': final_test_accuracy
+            })
 
-        final_test_accuracy = 100.0 * test_correct / len(test_dataset)  # type: ignore[arg-type]
-        final_test_loss = test_loss_total / len(test_loader)
-        print(f"  Final Test: Loss={final_test_loss:.4f}, Acc={final_test_accuracy:.2f}%")
-
-        # Save result
-        scheduler_results.append({
-            'dataset': dataset_name,
-            'optimizer': opt_name,
-            'scheduler': sched_name,
-            'final_loss': avg_loss,
-            'final_accuracy': final_test_accuracy
-        })
-
-    # Save to CSV
+    # Save to CSV (one file with all seeds)
     df = pd.DataFrame(scheduler_results)
-    csv_path = os.path.join(results_dir, f'{dataset_name}_scheduler_ablation.csv')
+    csv_path = os.path.join(results_dir, f'{dataset_name}_scheduler_ablation_seeds{"_".join(map(str, seeds))}.csv')
     df.to_csv(csv_path, index=False)
     print(f"\nScheduler ablation results saved to {csv_path}")
 
@@ -2444,28 +2694,29 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader
 
     def objective(trial) -> float:
         set_seed(seed + trial.number)
-        model = model_fn().to(device)
+        model = model_fn()
+        model = safe_device_transfer(model, device, operation=f"Tuning {optimizer_name} trial {trial.number}")
 
         # Suggest hyperparameters based on optimizer type
-        if optimizer_name == 'SGD':
+        if optimizer_name == OptimizerNames.SGD:
             lr = trial.suggest_float('lr', 1e-4, 1e-1, log=True)
             optimizer = optim.SGD(model.parameters(), lr=lr)
-        elif optimizer_name == 'SGD_Momentum':
+        elif optimizer_name == OptimizerNames.SGD_MOMENTUM:
             lr = trial.suggest_float('lr', 1e-4, 1e-1, log=True)
             momentum = trial.suggest_float('momentum', 0.5, 0.99)
             optimizer = optim.SGD(model.parameters(), lr=lr, momentum=momentum)
-        elif optimizer_name == 'Adam':
+        elif optimizer_name == OptimizerNames.ADAM:
             lr = trial.suggest_float('lr', 1e-5, 1e-2, log=True)
             beta1 = trial.suggest_float('beta1', 0.85, 0.95)
             beta2 = trial.suggest_float('beta2', 0.9, 0.9999)
             optimizer = optim.Adam(model.parameters(), lr=lr, betas=(beta1, beta2))
-        elif optimizer_name == 'AdamW':
+        elif optimizer_name == OptimizerNames.ADAMW:
             lr = trial.suggest_float('lr', 1e-5, 1e-2, log=True)
             beta1 = trial.suggest_float('beta1', 0.85, 0.95)
             beta2 = trial.suggest_float('beta2', 0.9, 0.9999)
             wd = trial.suggest_float('weight_decay', 1e-6, 1e-2, log=True)
             optimizer = optim.AdamW(model.parameters(), lr=lr, betas=(beta1, beta2), weight_decay=wd)
-        elif optimizer_name == 'AMSGrad':
+        elif optimizer_name == OptimizerNames.AMSGRAD:
             lr = trial.suggest_float('lr', 1e-5, 1e-2, log=True)
             beta1 = trial.suggest_float('beta1', 0.85, 0.95)
             beta2 = trial.suggest_float('beta2', 0.9, 0.9999)
@@ -2496,7 +2747,7 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader
             alpha = trial.suggest_float('alpha', 0.3, 0.8)
             base_opt = optim.Adam(model.parameters(), lr=lr)
             optimizer = LookaheadWrapper(base_opt, k=k, alpha=alpha)
-        elif optimizer_name == 'AdaBound':
+        elif optimizer_name == OptimizerNames.ADABOUND:
             from src.core.pytorch_optimizers import AdaBoundWrapper
             lr = trial.suggest_float('lr', 1e-5, 1e-2, log=True)
             beta1 = trial.suggest_float('beta1', 0.85, 0.95)
@@ -2506,14 +2757,14 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader
             # AdaBoundWrapper expects beta1, beta2 separately (not betas tuple)
             optimizer = AdaBoundWrapper(model.parameters(), lr=lr, beta1=beta1, beta2=beta2,
                                        final_lr=final_lr, gamma=gamma)
-        elif optimizer_name == 'RAdam':
+        elif optimizer_name == OptimizerNames.RADAM:
             from src.core.pytorch_optimizers import RAdamWrapper
             lr = trial.suggest_float('lr', 1e-5, 1e-2, log=True)
             beta1 = trial.suggest_float('beta1', 0.85, 0.95)
             beta2 = trial.suggest_float('beta2', 0.9, 0.9999)
             # RAdamWrapper expects beta1, beta2 separately (not betas tuple)
             optimizer = RAdamWrapper(model.parameters(), lr=lr, beta1=beta1, beta2=beta2)
-        elif optimizer_name == 'LAMB':
+        elif optimizer_name == OptimizerNames.LAMB:
             from src.core.pytorch_optimizers import LAMBWrapper
             lr = trial.suggest_float('lr', 1e-5, 1e-2, log=True)
             beta1 = trial.suggest_float('beta1', 0.85, 0.95)
@@ -2545,6 +2796,7 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader
                         optimizer.zero_grad()
                         outputs = model(_inputs)
                         loss = criterion(outputs, _targets)
+                        validate_loss(loss, context="Tuning objective SAM")
                         loss.backward()
                         return loss
                     loss = optimizer.step(closure)
@@ -2553,6 +2805,7 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader
                     optimizer.zero_grad()
                     outputs = model(inputs)
                     loss = criterion(outputs, targets)
+                    validate_loss(loss, context="Tuning objective")
                     loss.backward()
                     optimizer.step()
 
@@ -2647,18 +2900,18 @@ def get_default_hyperparameters(optimizer_name: str, experiment_type: str = "2d_
 
     # Fallback defaults if config loading fails
     defaults = {
-        'SGD': {'lr': 0.01},
-        'SGD_Momentum': {'lr': 0.05, 'momentum': 0.9},
-        'Adam': {'lr': 0.001, 'beta1': 0.9, 'beta2': 0.999},
-        'AdamW': {'lr': 0.001, 'beta1': 0.9, 'beta2': 0.999, 'weight_decay': 1e-4},
-        'AMSGrad': {'lr': 0.001, 'beta1': 0.9, 'beta2': 0.999},
+        OptimizerNames.SGD: {'lr': 0.01},
+        OptimizerNames.SGD_MOMENTUM: {'lr': 0.05, 'momentum': 0.9},
+        OptimizerNames.ADAM: {'lr': 0.001, 'beta1': 0.9, 'beta2': 0.999},
+        OptimizerNames.ADAMW: {'lr': 0.001, 'beta1': 0.9, 'beta2': 0.999, 'weight_decay': 1e-4},
+        OptimizerNames.AMSGRAD: {'lr': 0.001, 'beta1': 0.9, 'beta2': 0.999},
         'SAM_SGD': {'lr': 0.01, 'rho': 0.05},
         'SAM_Adam': {'lr': 0.001, 'rho': 0.05},
         'Lookahead_SGD': {'lr': 0.01, 'k': 5, 'alpha': 0.5},
         'Lookahead_Adam': {'lr': 0.001, 'k': 5, 'alpha': 0.5},
-        'AdaBound': {'lr': 0.001, 'beta1': 0.9, 'beta2': 0.999, 'final_lr': 0.1, 'gamma': 1e-3},
-        'RAdam': {'lr': 0.001, 'beta1': 0.9, 'beta2': 0.999},
-        'LAMB': {'lr': 0.001, 'beta1': 0.9, 'beta2': 0.999, 'weight_decay': 0.01}
+        OptimizerNames.ADABOUND: {'lr': 0.001, 'beta1': 0.9, 'beta2': 0.999, 'final_lr': 0.1, 'gamma': 1e-3},
+        OptimizerNames.RADAM: {'lr': 0.001, 'beta1': 0.9, 'beta2': 0.999},
+        OptimizerNames.LAMB: {'lr': 0.001, 'beta1': 0.9, 'beta2': 0.999, 'weight_decay': 0.01}
     }
     return defaults.get(optimizer_name, {'lr': 0.001})
 
@@ -2678,6 +2931,23 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
     if seeds is None:
         seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
     experiment_name = "MNIST_Benchmark"
+
+    # HIGH-PRIORITY FIX #3 (HIGH-3): Check filesystem permissions and disk space before starting
+    from src.core.filesystem_utils import check_write_permission, check_disk_space, cleanup_stale_temp_files
+    results_path = Path(results_dir)
+    
+    if not check_write_permission(results_path):
+        raise PermissionError(
+            f"Cannot write to {results_path}. Check directory permissions."
+        )
+    
+    if not check_disk_space(results_path, required_mb=1000, check_type="MNIST experiment"):
+        raise RuntimeError(
+            f"Insufficient disk space at {results_path}. Need at least 1GB free."
+        )
+    
+    # Clean up stale temp files from previous failed runs
+    cleanup_stale_temp_files(results_path, max_age_hours=24)
 
     # Clear GPU memory before starting new experiment
     clear_gpu_memory()
@@ -2710,7 +2980,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
             # Data loading
             transform = transforms.Compose([
                 transforms.ToTensor(),
-                transforms.Normalize((0.1307,), (0.3081,))
+                transforms.Normalize(MNIST_MEAN, MNIST_STD)
             ])
 
             # Download MNIST with proper mirror handling
@@ -2790,9 +3060,9 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                 # Previously only tuned 5 basic optimizers, leaving advanced ones with defaults
                 # This created unfair advantage for tuned optimizers and invalidated comparisons
                 optimizers_to_tune = [
-                    'SGD', 'SGD_Momentum', 'Adam', 'AdamW', 'AMSGrad',
+                    OptimizerNames.SGD, OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM, OptimizerNames.ADAMW, OptimizerNames.AMSGRAD,
                     'SAM_SGD', 'SAM_Adam', 'Lookahead_SGD', 'Lookahead_Adam',
-                    'AdaBound', 'RAdam', 'LAMB'
+                    OptimizerNames.ADABOUND, OptimizerNames.RADAM, OptimizerNames.LAMB
                 ]
 
                 logging.info(f"Tuning ALL optimizers with equal budget: n_trials={n_trials}, epochs={tune_epochs}")
@@ -2827,21 +3097,21 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                     # Read params at call time from the shared tuned_params dict
                     current_params = tuned_params.get(opt_name, params_dict).copy()
 
-                    if opt_name == 'SGD':
+                    if opt_name == OptimizerNames.SGD:
                         return optim.SGD(model_params, lr=current_params.get('lr', 0.01))
-                    elif opt_name == 'SGD_Momentum':
+                    elif opt_name == OptimizerNames.SGD_MOMENTUM:
                         return optim.SGD(model_params, lr=current_params.get('lr', 0.01),
                                        momentum=current_params.get('momentum', 0.0))
-                    elif opt_name == 'Adam':
+                    elif opt_name == OptimizerNames.ADAM:
                         return optim.Adam(model_params, lr=current_params.get('lr', 0.001),
                                         betas=(current_params.get('beta1', 0.9),
                                                current_params.get('beta2', 0.999)))
-                    elif opt_name == 'AdamW':
+                    elif opt_name == OptimizerNames.ADAMW:
                         return optim.AdamW(model_params, lr=current_params.get('lr', 0.001),
                                          betas=(current_params.get('beta1', 0.9),
                                                 current_params.get('beta2', 0.999)),
                                          weight_decay=current_params.get('weight_decay', 0.0))
-                    elif opt_name == 'AMSGrad':
+                    elif opt_name == OptimizerNames.AMSGRAD:
                         return optim.Adam(model_params, lr=current_params.get('lr', 0.001),
                                         betas=(current_params.get('beta1', 0.9),
                                                current_params.get('beta2', 0.999)),
@@ -2860,17 +3130,17 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                         base_opt = optim.Adam(model_params, lr=current_params.get('lr', 0.001))
                         return LookaheadWrapper(base_opt, k=current_params.get('k', 5),
                                               alpha=current_params.get('alpha', 0.5))
-                    elif opt_name == 'AdaBound':
+                    elif opt_name == OptimizerNames.ADABOUND:
                         return AdaBoundWrapper(model_params, lr=current_params.get('lr', 0.001),
                                              beta1=current_params.get('beta1', 0.9),
                                              beta2=current_params.get('beta2', 0.999),
                                              final_lr=current_params.get('final_lr', 0.1),
                                              gamma=current_params.get('gamma', 1e-3))
-                    elif opt_name == 'RAdam':
+                    elif opt_name == OptimizerNames.RADAM:
                         return RAdamWrapper(model_params, lr=current_params.get('lr', 0.001),
                                           beta1=current_params.get('beta1', 0.9),
                                           beta2=current_params.get('beta2', 0.999))
-                    elif opt_name == 'LAMB':
+                    elif opt_name == OptimizerNames.LAMB:
                         return LAMBWrapper(model_params, lr=current_params.get('lr', 0.001),
                                          beta1=current_params.get('beta1', 0.9),
                                          beta2=current_params.get('beta2', 0.999),
@@ -2882,7 +3152,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
 
             # Build optimizers with tuned or default parameters
             optimizers_config = []
-            for opt_name in ['SGD', 'SGD_Momentum', 'Adam', 'AdamW', 'AMSGrad', 'SAM_SGD', 'SAM_Adam', 'Lookahead_SGD', 'Lookahead_Adam', 'AdaBound', 'RAdam', 'LAMB']:
+            for opt_name in [OptimizerNames.SGD, OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM, OptimizerNames.ADAMW, OptimizerNames.AMSGRAD, 'SAM_SGD', 'SAM_Adam', 'Lookahead_SGD', 'Lookahead_Adam', OptimizerNames.ADABOUND, OptimizerNames.RADAM, OptimizerNames.LAMB]:
                 # Apply tuned parameters if available, merging into defaults to preserve missing fields
                 if opt_name in tuned_params:
                     try:
@@ -2934,14 +3204,22 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                 logging.info("-" * 50)
 
                 for seed in seeds:
-                    # Check if this specific experiment is already completed
-                    if resume and is_experiment_completed(str(results_dir), 'MNIST', 'SimpleMLP', opt_name, seed):
-                        logging.info(f"Skipping {opt_name} seed {seed} (already completed)")
-                        continue
+                    # HIGH-PRIORITY FIX #5 (CRITICAL-6): Seed isolation with proper cleanup
+                    model, optimizer = None, None
+                    try:
+                        # Clear GPU memory between seeds to prevent contamination
+                        from src.core.device_utils import clear_gpu_memory
+                        clear_gpu_memory(force=True)
+                        
+                        # Check if this specific experiment is already completed
+                        if resume and is_experiment_completed(str(results_dir), 'MNIST', 'SimpleMLP', opt_name, seed):
+                            logging.info(f"Skipping {opt_name} seed {seed} (already completed)")
+                            continue
 
-                    with error_context(f"MNIST {opt_name} seed {seed}", continue_on_error=True):
-                        set_seed(seed)
-                        model = SimpleMLP().to(device)
+                        with error_context(f"MNIST {opt_name} seed {seed}", continue_on_error=True):
+                            set_seed(seed)
+                            model = SimpleMLP()
+                            model = safe_device_transfer(model, device, operation=f"MNIST {opt_name} seed {seed}")
 
                         # === PHASE 1 FIX: WIRE AUTO-LR (Safe LR Finder) ===
                         # Find optimal LR if auto-lr flag is enabled
@@ -3453,10 +3731,62 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                             'effective_batch_size': effective_batch_size,
                             'tainted': run_tainted
                         }))
+                    
+                    finally:
+                        # HIGH-PRIORITY FIX #5 (CRITICAL-6): Always cleanup between seeds
+                        if model is not None:
+                            del model
+                        if optimizer is not None:
+                            del optimizer
+                        from src.core.device_utils import clear_gpu_memory
+                        clear_gpu_memory()
 
                 # Clean GPU memory between seeds to prevent accumulation and OOM
                 if torch.cuda.is_available():
                     clear_gpu_memory()
+
+            # ========================================
+            # AGGREGATE RESULTS ACROSS SEEDS
+            # ========================================
+            from src.experiments.run_multi_seed import aggregate_results
+            from pathlib import Path
+            import pandas as pd
+
+            for opt_name in set(r['optimizer'] for r in results):
+                results_path = Path(results_dir)
+                seed_csvs = list(results_path.glob(f"MNIST_SimpleMLP_{opt_name}_seed*.csv"))
+
+                if len(seed_csvs) >= 2:  # Need at least 2 seeds for statistics
+                    try:
+                        # Aggregate across seeds
+                        agg_results = aggregate_results(
+                            [str(csv) for csv in seed_csvs],
+                            metric_name='test_acc',
+                            exclude_tainted=True
+                        )
+                        
+                        # Save aggregated summary
+                        agg_filename = f"MNIST_SimpleMLP_{opt_name}_aggregated.csv"
+                        agg_path = results_path / agg_filename
+                        
+                        # Create summary row
+                        summary_df = pd.DataFrame([{
+                            'dataset': 'MNIST',
+                            'model': 'SimpleMLP',
+                            'optimizer': opt_name,
+                            'mean_test_acc': agg_results['mean'],
+                            'std_test_acc': agg_results['std'],
+                            'min_test_acc': agg_results['min'],
+                            'max_test_acc': agg_results['max'],
+                            'n_seeds': agg_results['n'],
+                            'seeds': str(seeds)
+                        }])
+                        
+                        summary_df.to_csv(agg_path, index=False)
+                        logging.info(f"Aggregated results saved to {agg_path}")
+                        logging.info(f"{opt_name}: {agg_results['mean']:.3f}±{agg_results['std']:.3f}")
+                    except Exception as e:
+                        logging.warning(f"Could not aggregate results for {opt_name}: {e}")
 
             # End profiling and log performance
             if profiler:
@@ -3557,12 +3887,12 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
         transforms.RandomCrop(32, padding=4),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        transforms.Normalize(CIFAR10_MEAN, CIFAR10_STD),
     ])
 
     transform_test = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        transforms.Normalize(CIFAR10_MEAN, CIFAR10_STD),
     ])
 
     # Robust CIFAR-10 download with SSL handling and retries
@@ -3618,12 +3948,12 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
 
     # Multi-optimizer configuration
     optimizers_config = [
-        ('Adam', 0.001),
-        ('AdamW', 0.001),
-        ('SGD_Momentum', 0.01),
-        ('AdaBound', 0.001),
-        ('RAdam', 0.001),
-        ('LAMB', 0.001),
+        (OptimizerNames.ADAM, 0.001),
+        (OptimizerNames.ADAMW, 0.001),
+        (OptimizerNames.SGD_MOMENTUM, 0.01),
+        (OptimizerNames.ADABOUND, 0.001),
+        (OptimizerNames.RADAM, 0.001),
+        (OptimizerNames.LAMB, 0.001),
     ]
 
     all_results = []
@@ -3638,7 +3968,8 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
             set_seed(seed)
 
             # Create fresh model for each run
-            model = ResNet18(num_classes=10).to(device)
+            model = ResNet18(num_classes=10)
+            model = safe_device_transfer(model, device, operation=f"CIFAR-10 {opt_name} seed {seed}")
 
             # === PHASE 1 FIX: WIRE AUTO-LR FOR CIFAR-10 ===
             final_lr = lr  # Start with default LR
@@ -3657,17 +3988,17 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
                 final_lr = suggested_lr
 
             # Create optimizer with potentially updated LR
-            if opt_name == 'Adam':
+            if opt_name == OptimizerNames.ADAM:
                 optimizer = optim.Adam(model.parameters(), lr=final_lr, weight_decay=0.0001)
-            elif opt_name == 'AdamW':
+            elif opt_name == OptimizerNames.ADAMW:
                 optimizer = optim.AdamW(model.parameters(), lr=final_lr, weight_decay=0.01)
-            elif opt_name == 'SGD_Momentum':
+            elif opt_name == OptimizerNames.SGD_MOMENTUM:
                 optimizer = optim.SGD(model.parameters(), lr=final_lr, momentum=0.9)
-            elif opt_name == 'AdaBound':
+            elif opt_name == OptimizerNames.ADABOUND:
                 optimizer = AdaBoundWrapper(model.parameters(), lr=final_lr, final_lr=0.1)
-            elif opt_name == 'RAdam':
+            elif opt_name == OptimizerNames.RADAM:
                 optimizer = RAdamWrapper(model.parameters(), lr=final_lr)
-            elif opt_name == 'LAMB':
+            elif opt_name == OptimizerNames.LAMB:
                 optimizer = LAMBWrapper(model.parameters(), lr=final_lr, weight_decay=0.01)
             else:
                 optimizer = optim.Adam(model.parameters(), lr=final_lr)
@@ -3965,7 +4296,8 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
             # Save per-run CSV
             df_history = pd.DataFrame(history)
             csv_path = results_dir / f"CIFAR10_ResNet18_{opt_name}_seed{seed}.csv"
-            df_history.to_csv(csv_path, index=False)
+            from src.utils.file_safety import safe_to_csv
+            safe_to_csv(df_history, csv_path, index=False)
 
             # NEW: Add robust gradient statistics to metadata if available
             params_metadata = {
@@ -4010,8 +4342,50 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
     if all_results:
         df_summary = pd.DataFrame(all_results)
         summary_path = results_dir / "CIFAR10_summary.csv"
-        df_summary.to_csv(summary_path, index=False)
+        from src.utils.file_safety import safe_to_csv
+        safe_to_csv(df_summary, summary_path, index=False)
         logging.info(f"CIFAR-10 summary saved to {summary_path}")
+
+    # ========================================
+    # AGGREGATE RESULTS ACROSS SEEDS
+    # ========================================
+    from src.experiments.run_multi_seed import aggregate_results
+    import pandas as pd
+
+    for opt_name in set(r['optimizer'] for r in all_results) if all_results else []:
+        seed_csvs = list(results_dir.glob(f"CIFAR10_ResNet18_{opt_name}_seed*.csv"))
+
+        if len(seed_csvs) >= 2:  # Need at least 2 seeds for statistics
+            try:
+                # Aggregate across seeds
+                agg_results = aggregate_results(
+                    [str(csv) for csv in seed_csvs],
+                    metric_name='test_acc',
+                    exclude_tainted=True
+                )
+                
+                # Save aggregated summary
+                agg_filename = f"CIFAR10_ResNet18_{opt_name}_aggregated.csv"
+                agg_path = results_dir / agg_filename
+                
+                # Create summary row
+                summary_df = pd.DataFrame([{
+                    'dataset': 'CIFAR10',
+                    'model': 'ResNet18',
+                    'optimizer': opt_name,
+                    'mean_test_acc': agg_results['mean'],
+                    'std_test_acc': agg_results['std'],
+                    'min_test_acc': agg_results['min'],
+                    'max_test_acc': agg_results['max'],
+                    'n_seeds': agg_results['n'],
+                    'seeds': str(seeds)
+                }])
+                
+                summary_df.to_csv(agg_path, index=False)
+                logging.info(f"Aggregated results saved to {agg_path}")
+                logging.info(f"{opt_name}: {agg_results['mean']:.3f}±{agg_results['std']:.3f}")
+            except Exception as e:
+                logging.warning(f"Could not aggregate results for {opt_name}: {e}")
 
     # End profiling
     if profiler:
@@ -4158,12 +4532,12 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
 
     # Optimizers to test - expanded to include all new optimizers
     configs = [
-        ('AdamW', lr_adamw),
-        ('Adam', lr_adamw),
-        ('SGD_Momentum', lr_sgd),
-        ('AdaBound', lr_default),
-        ('RAdam', lr_default),
-        ('LAMB', lr_default),
+        (OptimizerNames.ADAMW, lr_adamw),
+        (OptimizerNames.ADAM, lr_adamw),
+        (OptimizerNames.SGD_MOMENTUM, lr_sgd),
+        (OptimizerNames.ADABOUND, lr_default),
+        (OptimizerNames.RADAM, lr_default),
+        (OptimizerNames.LAMB, lr_default),
     ]
 
     results = []
@@ -4192,7 +4566,8 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
 
             try:
                 tokenizer = AutoTokenizer.from_pretrained(model_name)
-                model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2).to(device)
+                model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2)
+                model = safe_device_transfer(model, device, operation=f"NLP {model_name} initialization")
             except (OSError, RuntimeError, Exception) as model_err:
                 logging.warning(f"Failed to load model '{model_name}': {model_err}")
                 logging.warning("This is often due to HuggingFace authentication or network issues.")
@@ -4268,9 +4643,9 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                 try:
                     # Create temporary model and optimizer for LR search
                     temp_model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2).to(device)
-                    if opt_name in ['AdamW', 'Adam']:
+                    if opt_name in [OptimizerNames.ADAMW, OptimizerNames.ADAM]:
                         temp_opt = torch.optim.AdamW(temp_model.parameters(), lr=1e-7)
-                    elif opt_name == 'SGD_Momentum':
+                    elif opt_name == OptimizerNames.SGD_MOMENTUM:
                         temp_opt = torch.optim.SGD(temp_model.parameters(), lr=1e-7, momentum=0.9)
                     else:
                         temp_opt = torch.optim.Adam(temp_model.parameters(), lr=1e-7)
@@ -4306,17 +4681,17 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
 
             # Setup optimizer with checkpoint validation
             optimizer = None
-            if opt_name == 'AdamW':
+            if opt_name == OptimizerNames.ADAMW:
                 optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
-            elif opt_name == 'Adam':
+            elif opt_name == OptimizerNames.ADAM:
                 optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-            elif opt_name == 'SGD_Momentum':
+            elif opt_name == OptimizerNames.SGD_MOMENTUM:
                 optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9)
-            elif opt_name == 'AdaBound':
+            elif opt_name == OptimizerNames.ADABOUND:
                 optimizer = AdaBoundWrapper(model.parameters(), lr=lr, final_lr=0.1)
-            elif opt_name == 'RAdam':
+            elif opt_name == OptimizerNames.RADAM:
                 optimizer = RAdamWrapper(model.parameters(), lr=lr)
-            elif opt_name == 'LAMB':
+            elif opt_name == OptimizerNames.LAMB:
                 optimizer = LAMBWrapper(model.parameters(), lr=lr)
             if optimizer is None:
                 raise ValueError(f"Unsupported optimizer: {opt_name}")
@@ -4416,6 +4791,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                         loss = outputs.loss
 
                         optimizer.zero_grad()
+                        validate_loss(loss, step=epoch, context=f"NLP {model_name} {opt_name}")
                         loss.backward()
 
                         # Apply robust gradient handling (if enabled)
@@ -4628,6 +5004,49 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                 save_run_artifacts(results_dir, 'IMDB', model_name.replace('/', '_'), opt_name, seed, history, params, device=device, exp_tracker=tracker)
             except Exception as e:
                 logging.debug("Failed to save per-run NLP artifact for %s seed %s: %s", opt_name, seed, e, exc_info=True)
+
+    # ========================================
+    # AGGREGATE RESULTS ACROSS SEEDS
+    # ========================================
+    from src.experiments.run_multi_seed import aggregate_results
+    from pathlib import Path
+
+    for opt_name in set(r['optimizer'] for r in results) if results else []:
+        results_path = Path(results_dir)
+        model_name_clean = model_name.replace('/', '_')
+        seed_csvs = list(results_path.glob(f"IMDB_{model_name_clean}_{opt_name}_seed*.csv"))
+
+        if len(seed_csvs) >= 2:  # Need at least 2 seeds for statistics
+            try:
+                # Aggregate across seeds
+                agg_results = aggregate_results(
+                    [str(csv) for csv in seed_csvs],
+                    metric_name='test_acc',
+                    exclude_tainted=True
+                )
+                
+                # Save aggregated summary
+                agg_filename = f"IMDB_{model_name_clean}_{opt_name}_aggregated.csv"
+                agg_path = results_path / agg_filename
+                
+                # Create summary row
+                summary_df = pd.DataFrame([{
+                    'dataset': 'IMDB',
+                    'model': model_name_clean,
+                    'optimizer': opt_name,
+                    'mean_test_acc': agg_results['mean'],
+                    'std_test_acc': agg_results['std'],
+                    'min_test_acc': agg_results['min'],
+                    'max_test_acc': agg_results['max'],
+                    'n_seeds': agg_results['n'],
+                    'seeds': str(seeds)
+                }])
+                
+                summary_df.to_csv(agg_path, index=False)
+                logging.info(f"Aggregated results saved to {agg_path}")
+                logging.info(f"{opt_name}: {agg_results['mean']:.3f}±{agg_results['std']:.3f}")
+            except Exception as e:
+                logging.warning(f"Could not aggregate results for {opt_name}: {e}")
 
     # End profiling
     if profiler:
@@ -4874,8 +5293,8 @@ def run_nlp_experiment_simple(results_dir: Union[str, Path] = "results_nlp", see
 
     # Optimizer configs
     optimizer_configs = [
-        ('AdamW', lambda params: torch.optim.AdamW(params, lr=1e-3)),
-        ('SGD_Momentum', lambda params: torch.optim.SGD(params, lr=1e-2, momentum=0.9)),
+        (OptimizerNames.ADAMW, lambda params: torch.optim.AdamW(params, lr=1e-3)),
+        (OptimizerNames.SGD_MOMENTUM, lambda params: torch.optim.SGD(params, lr=1e-2, momentum=0.9)),
     ]
 
     for model_name, model_fn in model_configs:
@@ -4891,19 +5310,14 @@ def run_nlp_experiment_simple(results_dir: Union[str, Path] = "results_nlp", see
                 set_seed(seed)
 
                 # Create model
-                model = model_fn().to(device)
+                model = model_fn()
+                model = safe_device_transfer(model, device, operation=f"Simple NLP {model_name} {opt_name} seed {seed}")
                 optimizer = opt_fn(model.parameters())
                 criterion = nn.CrossEntropyLoss()
 
-                train_loader = torch.utils.data.DataLoader(
-                    train_dataset, batch_size=batch_size, shuffle=True
-                )
-                val_loader = torch.utils.data.DataLoader(
-                    val_dataset, batch_size=batch_size, shuffle=False
-                )
-                test_loader = torch.utils.data.DataLoader(
-                    test_dataset, batch_size=batch_size, shuffle=False
-                )
+                train_loader = make_dataloader(train_dataset, batch_size=batch_size, shuffle=True, seed=seed)
+                val_loader = make_dataloader(val_dataset, batch_size=batch_size, shuffle=False, seed=seed)
+                test_loader = make_dataloader(test_dataset, batch_size=batch_size, shuffle=False, seed=seed)
 
                 history = []
                 for epoch in range(epochs):
@@ -4918,6 +5332,7 @@ def run_nlp_experiment_simple(results_dir: Union[str, Path] = "results_nlp", see
                         optimizer.zero_grad()
                         outputs = model(inputs)
                         loss = criterion(outputs, labels)
+                        validate_loss(loss, step=epoch, context=f"Simple NLP {model_name} {opt_name}")
                         loss.backward()
                         optimizer.step()
 
@@ -5001,11 +5416,12 @@ def run_nlp_experiment_simple(results_dir: Union[str, Path] = "results_nlp", see
 
     os.makedirs(results_dir, exist_ok=True)
     df = pd.DataFrame(results)
-    df.to_csv(f"{results_dir}/nlp_results.csv", index=False)
+    from src.utils.file_safety import safe_to_csv
+    safe_to_csv(df, f"{results_dir}/nlp_results.csv", index=False)
 
     # Save detailed history
     history_df = pd.DataFrame(all_history)
-    history_df.to_csv(f"{results_dir}/nlp_training_history.csv", index=False)
+    safe_to_csv(history_df, f"{results_dir}/nlp_training_history.csv", index=False)
 
     print(f"\nResults saved to {results_dir}/nlp_results.csv")
     print(f"   Data source: {'IMDB (real)' if use_real_data else 'Synthetic (demonstration)'}")
@@ -5114,12 +5530,12 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
 
     # Optimizers to test - expanded to include all new optimizers
     configs = [
-        ('Adam', lr_adam),
-        ('AdamW', lr_adam),
-        ('SGD_Momentum', lr_sgd),
-        ('AdaBound', lr_default),
-        ('RAdam', lr_default),
-        ('LAMB', lr_default),
+        (OptimizerNames.ADAM, lr_adam),
+        (OptimizerNames.ADAMW, lr_adam),
+        (OptimizerNames.SGD_MOMENTUM, lr_sgd),
+        (OptimizerNames.ADABOUND, lr_default),
+        (OptimizerNames.RADAM, lr_default),
+        (OptimizerNames.LAMB, lr_default),
     ]
 
     results = []
@@ -5169,21 +5585,22 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                                           seed=seed, **dl_kwargs)
 
             # Initialize U-Net model
-            model = UNet2D(in_channels=1, out_channels=1, features=[32, 64, 128]).to(device)
+            model = UNet2D(in_channels=1, out_channels=1, features=[32, 64, 128])
+            model = safe_device_transfer(model, device, operation=f"Medical {opt_name} seed {seed}")
 
             # Setup optimizer with all variants
             optimizer = None
-            if opt_name == 'Adam':
+            if opt_name == OptimizerNames.ADAM:
                 optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=0.0001)
-            elif opt_name == 'AdamW':
+            elif opt_name == OptimizerNames.ADAMW:
                 optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.01)
-            elif opt_name == 'SGD_Momentum':
+            elif opt_name == OptimizerNames.SGD_MOMENTUM:
                 optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9)
-            elif opt_name == 'AdaBound':
+            elif opt_name == OptimizerNames.ADABOUND:
                 optimizer = AdaBoundWrapper(model.parameters(), lr=lr, final_lr=0.1)
-            elif opt_name == 'RAdam':
+            elif opt_name == OptimizerNames.RADAM:
                 optimizer = RAdamWrapper(model.parameters(), lr=lr)
-            elif opt_name == 'LAMB':
+            elif opt_name == OptimizerNames.LAMB:
                 optimizer = LAMBWrapper(model.parameters(), lr=lr)
             if optimizer is None:
                 raise ValueError(f"Unsupported optimizer: {opt_name}")
@@ -5227,13 +5644,13 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                 logging.info(f"Medical: Robust gradient handling enabled for {opt_name}")
 
             # Resume logic with compatibility validation
-            ckpt_file = f"Medical_UNet_{opt_name}_lr{lr}_seed{seed}.pt"
+            ckpt_file = f"Medical_UNet2D_{opt_name}_lr{lr}_seed{seed}.pt"
             start_epoch = 1
             history = []
             checkpoint = None  # Initialize to prevent NameError if checkpoint_manager is None
 
             if checkpoint_manager:
-                checkpoint = checkpoint_manager.load_checkpoint(ckpt_file, f"Medical_UNet_{opt_name}_lr{lr}_seed{seed}")
+                checkpoint = checkpoint_manager.load_checkpoint(ckpt_file, f"Medical_UNet2D_{opt_name}_lr{lr}_seed{seed}")
                 if checkpoint:
                     # Validate optimizer compatibility
                     if checkpoint_manager.validate_optimizer_compatibility(checkpoint, opt_name):
@@ -5284,6 +5701,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                             optimizer.zero_grad()  # type: ignore[union-attr]
                             outputs = model(images)
                             loss = criterion(outputs, masks)
+                            validate_loss(loss, step=epoch, context=f"Medical {opt_name} SAM")
                             loss.backward()
                             return loss
                         # Pass actual closure to SAM, not dummy lambda
@@ -5293,6 +5711,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                     else:
                         outputs = model(images)
                         loss = criterion(outputs, masks)
+                        validate_loss(loss, step=epoch, context=f"Medical {opt_name}")
                         optimizer.zero_grad()
                         loss.backward()
 
@@ -5401,7 +5820,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                         }
                     }
                     try:
-                        saved = checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"Medical_UNet_{opt_name}_lr{lr}_seed{seed}")
+                        saved = checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"Medical_UNet2D_{opt_name}_lr{lr}_seed{seed}")
                         if not saved:
                             run_tainted = True
                             logging.warning("INTEGRITY: Checkpoint save returned False for %s seed %s; results may be incomplete or non-reproducible.", opt_name, seed)
@@ -5484,6 +5903,48 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
             except Exception:
                 logging.debug("Failed to save per-run Medical artifact for %s seed %s", opt_name, seed)
 
+    # ========================================
+    # AGGREGATE RESULTS ACROSS SEEDS
+    # ========================================
+    from src.experiments.run_multi_seed import aggregate_results
+    from pathlib import Path
+
+    for opt_name in set(r['optimizer'] for r in results) if results else []:
+        results_path = Path(results_dir)
+        seed_csvs = list(results_path.glob(f"Medical_UNet2D_{opt_name}_seed*.csv"))
+
+        if len(seed_csvs) >= 2:  # Need at least 2 seeds for statistics
+            try:
+                # Aggregate across seeds
+                agg_results = aggregate_results(
+                    [str(csv) for csv in seed_csvs],
+                    metric_name='test_dice',
+                    exclude_tainted=True
+                )
+                
+                # Save aggregated summary
+                agg_filename = f"Medical_UNet2D_{opt_name}_aggregated.csv"
+                agg_path = results_path / agg_filename
+                
+                # Create summary row
+                summary_df = pd.DataFrame([{
+                    'dataset': 'Medical',
+                    'model': 'UNet2D',
+                    'optimizer': opt_name,
+                    'mean_test_dice': agg_results['mean'],
+                    'std_test_dice': agg_results['std'],
+                    'min_test_dice': agg_results['min'],
+                    'max_test_dice': agg_results['max'],
+                    'n_seeds': agg_results['n'],
+                    'seeds': str(seeds)
+                }])
+                
+                summary_df.to_csv(agg_path, index=False)
+                logging.info(f"Aggregated results saved to {agg_path}")
+                logging.info(f"{opt_name}: {agg_results['mean']:.3f}±{agg_results['std']:.3f}")
+            except Exception as e:
+                logging.warning(f"Could not aggregate results for {opt_name}: {e}")
+
     # End profiling
     if profiler:
         perf_metrics = profiler.end_profiling("Medical_Experiment")
@@ -5492,7 +5953,8 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
     # Save results
     os.makedirs(results_dir, exist_ok=True)
     df = pd.DataFrame(results)
-    df.to_csv(f"{results_dir}/medical_results.csv", index=False)
+    from src.utils.file_safety import safe_to_csv
+    safe_to_csv(df, f"{results_dir}/medical_results.csv", index=False)
 
     if tracker:
         tracker.log_artifact(f"{results_dir}/medical_results.csv", "results")
@@ -5800,7 +6262,10 @@ def create_experiment_visualizations(experiment_name, results_dir, csv_files):
     dfs = []
     for csv_file in time_series_paths:
         try:
-            df = pd.read_csv(csv_file)
+            df = safe_read_csv(csv_file)
+            if df is None:
+                logging.debug(f"Skipping empty/invalid CSV: {csv_file}")
+                continue
             # Parse filename metadata
             parsed = parse_experiment_filename(csv_file.stem)
             if 'optimizer' not in df.columns or df['optimizer'].isnull().all():
@@ -6207,7 +6672,10 @@ def generate_interactive_visualizations(results_dir, plots_dir):
         dfs = []
         for csv_file in csv_files:
             try:
-                df = pd.read_csv(csv_file)
+                df = safe_read_csv(csv_file)
+                if df is None:
+                    logging.debug(f"Skipping empty/invalid CSV: {csv_file}")
+                    continue
                 # Normalize metric column names and apply fallbacks so interactive plots reliably show test metrics
                 try:
                     from src.utils.metric_normalization import normalize_dataframe_columns, to_percent_series
@@ -6309,7 +6777,10 @@ def generate_basic_stats(results_dir):
     stats_summary = []
     for csv_file in all_csvs:
         try:
-            df = pd.read_csv(csv_file)
+            df = safe_read_csv(csv_file)
+            if df is None:
+                logging.debug(f"Skipping empty/invalid CSV: {csv_file}")
+                continue
 
             # Extract metrics
             metrics = {}
@@ -6491,7 +6962,7 @@ def run_theory_analysis_pipeline(
 
             # SGD with momentum (β=0.9)
             sgd_momentum_pred = {
-                'optimizer': 'SGD_Momentum',
+                'optimizer': OptimizerNames.SGD_MOMENTUM,
                 'velocity': theoretical_velocity_magnitude(lr=0.001, L=10.0, momentum=0.9),
                 'oscillation': theoretical_oscillation_amplitude(lr=0.001, L=10.0, mu=0.1, momentum=0.9),
                 'smoothness': theoretical_smoothness_index(lr=0.001, momentum=0.9)
@@ -6500,7 +6971,7 @@ def run_theory_analysis_pipeline(
 
             # Adam (β1=0.9, β2=0.999)
             adam_pred = {
-                'optimizer': 'Adam',
+                'optimizer': OptimizerNames.ADAM,
                 'velocity': theoretical_velocity_magnitude(lr=0.001, L=10.0, momentum=0.9),
                 'oscillation': theoretical_oscillation_amplitude(lr=0.001, L=10.0, mu=0.1, momentum=0.9),
                 'smoothness': theoretical_smoothness_index(lr=0.001, momentum=0.9)
@@ -7030,7 +7501,8 @@ def aggregate_cross_experiment_results(results_dir: Path, experiment_results: Di
         if stat_results:
             stat_df = pd.DataFrame(stat_results)
             stat_path = analysis_dir / "cross_experiment_statistics.csv"
-            stat_df.to_csv(stat_path, index=False)
+            from src.utils.file_safety import safe_to_csv
+            safe_to_csv(stat_df, stat_path, index=False)
             print(f"\n   Cross-experiment statistics saved to {stat_path}")
 
     return agg_df
@@ -7217,15 +7689,15 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, resume=False):
     ]
 
     optimizers_2d = []
-    for opt_name in ['SGD', 'Adam', 'SAM_SGD']:
+    for opt_name in [OptimizerNames.SGD, OptimizerNames.ADAM, 'SAM_SGD']:
         hyperparams = get_default_hyperparameters(opt_name, "2d_optimization")
         if opt_name == 'SAM_SGD':
             optimizers_2d.append((opt_name, lambda params, hp=hyperparams: SAMWrapper(
                 optim.SGD(params, lr=hp.get('lr', 0.01)), rho=float(hp.get('rho', 0.05))
             )))
-        elif opt_name == 'SGD':
+        elif opt_name == OptimizerNames.SGD:
             optimizers_2d.append((opt_name, lambda params, hp=hyperparams: optim.SGD(params, **hp)))
-        elif opt_name == 'Adam':
+        elif opt_name == OptimizerNames.ADAM:
             # Convert beta1/beta2 to betas tuple for torch.optim.Adam
             hp_adam = hyperparams.copy()
             if 'beta1' in hp_adam and 'beta2' in hp_adam:
@@ -7366,7 +7838,7 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, resume
     ]
 
     optimizers_robust = []
-    for opt_name in ['SGD', 'Adam', 'SAM_SGD']:
+    for opt_name in [OptimizerNames.SGD, OptimizerNames.ADAM, 'SAM_SGD']:
         hyperparams = get_default_hyperparameters(opt_name, "2d_optimization")
         if opt_name == 'SAM_SGD':
             # Construct a SAMWrapper wrapping a concrete base optimizer instance
@@ -7399,58 +7871,60 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, resume
                 logging.debug("Could not read robustness results file: %s", e, exc_info=True)
 
     results = []
-    seed = seeds[0] if seeds else 42
 
-    for opt_name, opt_func in optimizers_robust:
-        logging.info(f"\n[TESTING] Testing Optimizer: {opt_name}")
-        logging.info("-" * 50)
+    for seed in seeds:
+        logging.info(f"\n🎲 Running Robustness Analysis with seed={seed}")
+        set_seed(seed)
 
-        for start_point in initial_points:
-            set_seed(seed)  # Fixed seed for reproducibility
+        for opt_name, opt_func in optimizers_robust:
+            logging.info(f"\n[TESTING] Testing Optimizer: {opt_name}")
+            logging.info("-" * 50)
 
-            x = torch.tensor(start_point, dtype=torch.float32, requires_grad=True)
-            optimizer = opt_func([x])
+            for start_point in initial_points:
+                x = torch.tensor(start_point, dtype=torch.float32, requires_grad=True)
+                optimizer = opt_func([x])
 
-            max_iter = 2000
-            converged = False
+                max_iter = 2000
+                converged = False
 
-            for i in range(max_iter):
-                optimizer.zero_grad()
+                for i in range(max_iter):
+                    optimizer.zero_grad()
 
-                # Compute loss using PyTorch autograd
-                loss = rosenbrock.torch_loss(x)
-                loss.backward()
+                    # Compute loss using PyTorch autograd
+                    loss = rosenbrock.torch_loss(x)
+                    loss.backward()
 
-                if opt_name.startswith('SAM'):
-                    def closure():
-                        optimizer.zero_grad()
-                        loss_c = rosenbrock.torch_loss(x)
-                        loss_c.backward()
-                        return loss_c
-                    optimizer.step(closure)
-                else:
-                    optimizer.step()
+                    if opt_name.startswith('SAM'):
+                        def closure():
+                            optimizer.zero_grad()
+                            loss_c = rosenbrock.torch_loss(x)
+                            loss_c.backward()
+                            return loss_c
+                        optimizer.step(closure)
+                    else:
+                        optimizer.step()
 
-                if loss.item() < 1e-6:
-                    converged = True
-                    break
+                    if loss.item() < 1e-6:
+                        converged = True
+                        break
 
-            results.append({
-                'optimizer': opt_name,
-                'initial_x': start_point[0],
-                'initial_y': start_point[1],
-                'final_loss': loss.item(),
-                'iterations': i + 1,
-                'converged': converged
-            })
+                results.append({
+                    'optimizer': opt_name,
+                    'seed': seed,
+                    'initial_x': start_point[0],
+                    'initial_y': start_point[1],
+                    'final_loss': loss.item(),
+                    'iterations': i + 1,
+                    'converged': converged
+                })
 
-            # Save per-run artifact for robustness run (fixed seed)
-            try:
-                save_run_artifacts(results_dir, 'Robustness', 'Rosenbrock', opt_name, 42, [{'final_loss': loss.item(), 'iterations': i+1, 'initial_point': start_point}], {'converged': converged}, device=None, exp_tracker=None)
-            except Exception as e:
-                logging.debug("Failed to save robustness artifact for start %s: %s", start_point, e, exc_info=True)
+                # Save per-run artifact for robustness run
+                try:
+                    save_run_artifacts(results_dir, 'Robustness', 'Rosenbrock', opt_name, seed, [{'final_loss': loss.item(), 'iterations': i+1, 'initial_point': start_point}], {'converged': converged}, device=None, exp_tracker=None)
+                except Exception as e:
+                    logging.debug("Failed to save robustness artifact for start %s seed %s: %s", start_point, seed, e, exc_info=True)
 
-            print(f"  Start {start_point}: Loss={loss.item():.6f}, Iters={i+1}, Converged={converged}")
+                print(f"  Start {start_point}: Loss={loss.item():.6f}, Iters={i+1}, Converged={converged}")
 
     # Save results
     os.makedirs(results_dir, exist_ok=True)
@@ -7500,7 +7974,7 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=None, resum
     # Simple dataset for quick testing
     transform = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,))
+        transforms.Normalize(MNIST_MEAN, MNIST_STD)
     ])
 
     # Download MNIST with proper mirror handling
@@ -7520,61 +7994,65 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=None, resum
     train_dataset = download_mnist()
     logging.info("MNIST dataset loaded successfully")
 
-    train_loader = make_dataloader(train_dataset, batch_size=256, shuffle=True, seed=seed, num_workers=2, pin_memory=True)
-
     rho_values = [0.01, 0.02, 0.05, 0.1, 0.2]
     results = []
 
-    for rho in rho_values:
-        print(f"\n[TESTING] Testing rho = {rho}")
-        print("-" * 30)
+    for seed in seeds:
+        logging.info(f"\n🎲 Running SAM Sensitivity Analysis with seed={seed}")
+        set_seed(seed)
+        train_loader = make_dataloader(train_dataset, batch_size=256, shuffle=True, seed=seed, num_workers=2, pin_memory=True)
 
-        set_seed(42)
-        model = SimpleMLP().to(device)
-        sam_params = get_default_hyperparameters('SAM_SGD', 'resnet_cifar10')
-        # SAMWrapper wraps a base optimizer instance
-        base_optimizer = optim.SGD(model.parameters(), **sam_params)
-        optimizer = SAMWrapper(base_optimizer, rho=rho)  # Override rho for sensitivity analysis
-        criterion = nn.CrossEntropyLoss()
+        for rho in rho_values:
+            print(f"\n[TESTING] Testing rho = {rho}")
+            print("-" * 30)
 
-        # Quick training (3 epochs)
-        for epoch in range(3):
-            model.train()
-            epoch_loss = 0
+            set_seed(seed)
+            model = SimpleMLP()
+            model = safe_device_transfer(model, device, operation=f"SAM rho ablation rho={rho}")
+            sam_params = get_default_hyperparameters('SAM_SGD', 'resnet_cifar10')
+            # SAMWrapper wraps a base optimizer instance
+            base_optimizer = optim.SGD(model.parameters(), **sam_params)
+            optimizer = SAMWrapper(base_optimizer, rho=rho)  # Override rho for sensitivity analysis
+            criterion = nn.CrossEntropyLoss()
 
-            for inputs, targets in train_loader:
-                inputs, targets = inputs.to(device), targets.to(device)
+            # Quick training (3 epochs)
+            for epoch in range(3):
+                model.train()
+                epoch_loss = 0
 
-                # Initialize loss to avoid unbound variable error
-                loss = None
+                for inputs, targets in train_loader:
+                    inputs, targets = inputs.to(device), targets.to(device)
 
-                def closure():
-                    optimizer.zero_grad()
-                    outputs = model(inputs)
-                    loss_inner = criterion(outputs, targets)
-                    loss_inner.backward()
-                    return loss_inner
+                    # Initialize loss to avoid unbound variable error
+                    loss = None
 
-                # Pass actual closure to SAM
-                loss = optimizer.step(closure)
-                from src.utils.num_utils import safe_to_float
-                loss_value = safe_to_float(loss)
-                epoch_loss += loss_value
+                    def closure():
+                        optimizer.zero_grad()
+                        outputs = model(inputs)
+                        loss_inner = criterion(outputs, targets)
+                        loss_inner.backward()
+                        return loss_inner
 
-            epoch_loss /= len(train_loader)
-            print(f"  Epoch {epoch+1}: Loss = {epoch_loss:.4f}")
+                    # Pass actual closure to SAM
+                    loss = optimizer.step(closure)
+                    from src.utils.num_utils import safe_to_float
+                    loss_value = safe_to_float(loss)
+                    epoch_loss += loss_value
 
-        results.append({
-            'rho': rho,
-            'final_loss': epoch_loss
-        })
+                epoch_loss /= len(train_loader)
+                print(f"  Epoch {epoch+1}: Loss = {epoch_loss:.4f}")
+            results.append({
+                'rho': rho,
+                'seed': seed,
+                'final_loss': epoch_loss
+            })
 
-        # Save per-run artifact for this rho
-        try:
-            params = {'rho': rho, 'epochs': 3, 'batch_size': 256}
-            save_run_artifacts(results_dir, 'MNIST', 'SimpleMLP', f'SAM_rho_{rho}', 42, [{'final_loss': epoch_loss}], params, device=device, exp_tracker=None)
-        except Exception as e:
-            logging.debug("Failed to save SAM sensitivity artifact for rho %s: %s", rho, e, exc_info=True)
+            # Save per-run artifact for this rho
+            try:
+                params = {'rho': rho, 'epochs': 3, 'batch_size': 256, 'seed': seed}
+                save_run_artifacts(results_dir, 'MNIST', 'SimpleMLP', f'SAM_rho_{rho}', seed, [{'final_loss': epoch_loss}], params, device=device, exp_tracker=None)
+            except Exception as e:
+                logging.debug("Failed to save SAM sensitivity artifact for rho %s seed %s: %s", rho, seed, e, exc_info=True)
 
     # Save results
     os.makedirs(results_dir, exist_ok=True)
@@ -7620,42 +8098,45 @@ def run_ablation_study(results_dir="results_ablation", seeds=None, resume=False)
 
     rosenbrock = Rosenbrock()
     initial_point = (-1.5, 2.0)
-    seed = seeds[0] if seeds else 42
 
     # Different optimizer variants
     ablation_configs = [
-        ('SGD', {'lr': 0.01}),
-        ('SGD_Momentum', {'lr': 0.05, 'momentum': 0.9}),
-        ('Adam', {'lr': 0.1}),
+        (OptimizerNames.SGD, {'lr': 0.01}),
+        (OptimizerNames.SGD_MOMENTUM, {'lr': 0.05, 'momentum': 0.9}),
+        (OptimizerNames.ADAM, {'lr': 0.1}),
         ('Adam_NoBeta2', {'lr': 0.1, 'betas': (0.9, 0.999)}),  # Same as Adam
         ('SAM_SGD', {'lr': 0.01, 'rho': 0.05}),
     ]
 
     results = []
 
-    for opt_name, params in ablation_configs:
-        print(f"\n[TESTING] Testing: {opt_name}")
-        print("-" * 30)
-
+    for seed in seeds:
+        logging.info(f"\n🎲 Running Ablation Study with seed={seed}")
         set_seed(seed)
-        x = torch.tensor(initial_point, dtype=torch.float32, requires_grad=True)
 
-        optimizer = None
-        if opt_name == 'SGD':
-            optimizer = optim.SGD([x], **params)
-        elif opt_name == 'SGD_Momentum':
-            optimizer = optim.SGD([x], **params)
-        elif opt_name.startswith('Adam'):
-            optimizer = optim.Adam([x], **params)
-        elif opt_name.startswith('SAM'):
-            # SAMWrapper wraps a base optimizer instance
-            base_opt = optim.SGD([x], **params)
-            optimizer = SAMWrapper(base_opt, rho=params.get('rho', 0.05))
-        if optimizer is None:
-            raise ValueError(f"Unsupported optimizer: {opt_name}")
-        max_iter = 1000
-        for i in range(max_iter):
-            optimizer.zero_grad()  # type: ignore[union-attr]
+        for opt_name, params in ablation_configs:
+            print(f"\n[TESTING] Testing: {opt_name}")
+            print("-" * 30)
+
+            set_seed(seed)
+            x = torch.tensor(initial_point, dtype=torch.float32, requires_grad=True)
+
+            optimizer = None
+            if opt_name == OptimizerNames.SGD:
+                optimizer = optim.SGD([x], **params)
+            elif opt_name == OptimizerNames.SGD_MOMENTUM:
+                optimizer = optim.SGD([x], **params)
+            elif opt_name.startswith(OptimizerNames.ADAM):
+                optimizer = optim.Adam([x], **params)
+            elif opt_name.startswith('SAM'):
+                # SAMWrapper wraps a base optimizer instance
+                base_opt = optim.SGD([x], **params)
+                optimizer = SAMWrapper(base_opt, rho=params.get('rho', 0.05))
+            if optimizer is None:
+                raise ValueError(f"Unsupported optimizer: {opt_name}")
+            max_iter = 1000
+            for i in range(max_iter):
+                optimizer.zero_grad()  # type: ignore[union-attr]
 
             # Compute loss using PyTorch autograd
             loss = rosenbrock.torch_loss(x)
@@ -7674,21 +8155,23 @@ def run_ablation_study(results_dir="results_ablation", seeds=None, resume=False)
             if loss.item() < 1e-6:
                 break
 
-        results.append({
-            'optimizer': opt_name,
-            'final_loss': loss.item(),
-            'iterations': i + 1,
-            'converged': loss.item() < 1e-6
-        })
+            results.append({
+                'optimizer': opt_name,
+                'seed': seed,
+                'final_loss': loss.item(),
+                'iterations': i + 1,
+                'converged': loss.item() < 1e-6
+            })
 
-        # Save per-run artifact for ablation configuration
-        try:
-            params = params if isinstance(params, dict) else {'params': params}
-            save_run_artifacts(results_dir, 'Ablation', '2D_Rosenbrock', opt_name, 42, [{'final_loss': loss.item(), 'iterations': i+1}], params, device=None, exp_tracker=None)
-        except Exception as e:
-            logging.debug("Failed to save ablation artifact for %s: %s", opt_name, e, exc_info=True)
+            # Save per-run artifact for ablation configuration
+            try:
+                params_save = params if isinstance(params, dict) else {'params': params}
+                params_save['seed'] = seed
+                save_run_artifacts(results_dir, 'Ablation', '2D_Rosenbrock', opt_name, seed, [{'final_loss': loss.item(), 'iterations': i+1}], params_save, device=None, exp_tracker=None)
+            except Exception as e:
+                logging.debug("Failed to save ablation artifact for %s seed %s: %s", opt_name, seed, e, exc_info=True)
 
-        print(f"  Loss: {loss.item():.6f}, Iters: {i+1}, Converged: {loss.item() < 1e-6}")
+            print(f"  Loss: {loss.item():.6f}, Iters: {i+1}, Converged: {loss.item() < 1e-6}")
 
     # Save results
     os.makedirs(results_dir, exist_ok=True)
@@ -7877,6 +8360,10 @@ class VisionTransformer(nn.Module):
         self.head = nn.Linear(dim, num_classes)
 
     def forward(self, x):
+        # TYPE SAFETY FIX: Add type guard before accessing .shape attribute
+        if not hasattr(x, 'shape'):
+            raise TypeError(f"Expected tensor with shape attribute, got {type(x)}")
+        
         B = x.shape[0]
 
         # Patch embedding: (B, 3, H, W) -> (B, dim, H//patch_size, W//patch_size)
@@ -7966,7 +8453,8 @@ def distributed_training_worker(rank, world_size, backend, results_dir):
             logging.info(f"Using LOCAL_RANK={local_rank} (different from process rank={rank}) for device mapping")
 
         # Create model and move to device
-        model = ResNet18(num_classes=10).to(device)
+        model = ResNet18(num_classes=10)
+        model = safe_device_transfer(model, device, operation=f"DDP rank {rank}")
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank])
 
         # Data loading with distributed sampler
@@ -7974,7 +8462,7 @@ def distributed_training_worker(rank, world_size, backend, results_dir):
             transforms.RandomCrop(32, padding=4),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
-            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+            transforms.Normalize(CIFAR10_MEAN, CIFAR10_STD),
         ])
 
         # BUG FIX (Dec 2025): Changed download=False → download=True for Kaggle compatibility
@@ -8060,7 +8548,7 @@ def run_advanced_architecture_experiment(results_dir="results_advanced_arch", ep
     transform = transforms.Compose([
         transforms.Resize(64),  # Small for demo
         transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        transforms.Normalize(CIFAR10_MEAN, CIFAR10_STD),
     ])
 
     # Use exponential backoff for dataset downloads
@@ -8078,7 +8566,8 @@ def run_advanced_architecture_experiment(results_dir="results_advanced_arch", ep
     model = VisionTransformer(
         img_size=64, patch_size=16, num_classes=10,
         dim=256, depth=4, heads=8, mlp_dim=512
-    ).to(device)
+    )
+    model = safe_device_transfer(model, device, operation="ViT CIFAR-10")
 
     optimizer = optim.AdamW(model.parameters(), lr=1e-4)
     criterion = nn.CrossEntropyLoss()
@@ -8571,7 +9060,7 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
         transforms.RandomCrop(32, padding=4),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        transforms.Normalize(CIFAR10_MEAN, CIFAR10_STD),
     ])
 
     # Robust CIFAR-10 download with SSL handling and retries
@@ -8606,59 +9095,113 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
     train_bs, test_bs = get_batch_size('resnet', default_train=128, default_test=256)
     dl_kwargs = get_dataloader_kwargs()
 
-    train_loader = make_dataloader(train_dataset_split, batch_size=train_bs, shuffle=True,
-                                     seed=seeds[0] if seeds else None, **dl_kwargs)
-    val_loader = make_dataloader(val_dataset, batch_size=test_bs, shuffle=False,
-                                   seed=seeds[0] if seeds else None, **dl_kwargs)
-    test_loader = make_dataloader(test_dataset, batch_size=test_bs, shuffle=False,
-                                    seed=seeds[0] if seeds else None, **dl_kwargs)
-
-    model = ResNet18(num_classes=10).to(device)
-    optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=0.0001)
-    criterion = nn.CrossEntropyLoss()
-
     epochs = 2 if ULTRA_QUICK_MODE else (20 if quick else 50)
-    results = []
+    all_results = []
 
-    for epoch in range(epochs):
-        # Train
-        model.train()
-        train_loss, train_correct = 0, 0
+    for seed in seeds:
+        logging.info(f"\n🎲 Running ResNet18 experiment with seed={seed}")
+        set_seed(seed)
 
-        for inputs, targets in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}"):
-            inputs, targets = inputs.to(device), targets.to(device)
+        train_loader = make_dataloader(train_dataset_split, batch_size=train_bs, shuffle=True,
+                                         seed=seed, **dl_kwargs)
+        val_loader = make_dataloader(val_dataset, batch_size=test_bs, shuffle=False,
+                                       seed=seed, **dl_kwargs)
+        test_loader = make_dataloader(test_dataset, batch_size=test_bs, shuffle=False,
+                                        seed=seed, **dl_kwargs)
 
-            if isinstance(optimizer, SAMWrapper):
-                def closure():
+        model = ResNet18(num_classes=10)
+        model = safe_device_transfer(model, device, operation=f"ResNet18 seed={seed}")
+        optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=0.0001)
+        criterion = nn.CrossEntropyLoss()
+
+        results = []
+
+        for epoch in range(epochs):
+            # Train
+            model.train()
+            train_loss, train_correct = 0, 0
+
+            for inputs, targets in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}"):
+                inputs, targets = inputs.to(device), targets.to(device)
+
+                if isinstance(optimizer, SAMWrapper):
+                    def closure():
+                        optimizer.zero_grad()
+                        outputs = model(inputs)
+                        loss = criterion(outputs, targets)
+                        loss.backward()
+                        return loss
+                    # Pass actual closure to SAM
+                    loss = optimizer.step(closure)
+                    outputs = model(inputs)  # Recompute after SAM step
+                else:
                     optimizer.zero_grad()
                     outputs = model(inputs)
                     loss = criterion(outputs, targets)
                     loss.backward()
-                    return loss
-                # Pass actual closure to SAM
-                loss = optimizer.step(closure)
-                outputs = model(inputs)  # Recompute after SAM step
-            else:
-                optimizer.zero_grad()
-                outputs = model(inputs)
-                loss = criterion(outputs, targets)
-                loss.backward()
-                optimizer.step()
+                    optimizer.step()
 
-            from src.utils.num_utils import safe_to_float
-            loss_value = safe_to_float(loss)
-            train_loss += loss_value
-            _, predicted = outputs.max(1)
-            train_correct += predicted.eq(targets).sum().item()
+                from src.utils.num_utils import safe_to_float
+                loss_value = safe_to_float(loss)
+                train_loss += loss_value
+                _, predicted = outputs.max(1)
+                train_correct += predicted.eq(targets).sum().item()
 
-        train_loss /= max(1, _safe_len(train_loader))
-        train_acc = 100. * train_correct / max(1, _safe_len(train_dataset_split))
+            train_loss /= max(1, _safe_len(train_loader))
+            train_acc = 100. * train_correct / max(1, _safe_len(train_dataset_split))
 
-        # Sanity check: Verify all batches were processed
-        if epoch > 1 and train_acc < 10.0:
-            logging.error(f"SANITY CHECK FAILED: ResNet train accuracy {train_acc:.1f}% is suspiciously low")
+            # Sanity check: Verify all batches were processed
+            if epoch > 1 and train_acc < 10.0:
+                logging.error(f"SANITY CHECK FAILED: ResNet train accuracy {train_acc:.1f}% is suspiciously low")
 
-        # Test
+            # Test
+            model.eval()
+            test_loss, test_correct = 0, 0
+            with torch.no_grad():
+                for inputs, targets in test_loader:
+                    inputs, targets = inputs.to(device), targets.to(device)
+                    outputs = model(inputs)
+                    loss = criterion(outputs, targets)
+                    test_loss += loss.item()
+                    _, predicted = outputs.max(1)
+                    test_correct += predicted.eq(targets).sum().item()
+
+            # Validation
+            val_loss, val_correct = 0, 0
+            with torch.no_grad():
+                for inputs, targets in val_loader:
+                    inputs, targets = inputs.to(device), targets.to(device)
+                    outputs = model(inputs)
+                    loss = criterion(outputs, targets)
+                    val_loss += loss.item()
+                    _, predicted = outputs.max(1)
+                    val_correct += predicted.eq(targets).sum().item()
+
+            val_loss /= max(1, len(val_loader))  # Protect against empty loader
+            val_acc = 100. * val_correct / len(val_dataset)
+
+            results.append({
+                'epoch': epoch + 1,
+                'train_loss': train_loss,
+                'train_acc': train_acc,
+                'val_loss': val_loss,
+                'val_acc': val_acc
+            })
+
+            if tracker:
+                tracker.log_metrics({
+                    'resnet_train_loss': train_loss,
+                    'resnet_train_acc': train_acc,
+                    'resnet_val_loss': val_loss,
+                    'resnet_val_acc': val_acc
+                }, step=epoch)
+
+            print(f"Epoch {epoch}/{epochs}: Train Loss={train_loss:.4f}, "
+                  f"Train Acc={train_acc:.1f}%, Val Loss={val_loss:.4f}, "
+                  f"Val Acc={val_acc:.1f}%")
+
+        # Final test evaluation (only after training completes - use test set only for final evaluation)
+        logging.info("Evaluating final performance on test set...")
         model.eval()
         test_loss, test_correct = 0, 0
         with torch.no_grad():
@@ -8670,79 +9213,40 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
                 _, predicted = outputs.max(1)
                 test_correct += predicted.eq(targets).sum().item()
 
-        # Validation
-        val_loss, val_correct = 0, 0
-        with torch.no_grad():
-            for inputs, targets in val_loader:
-                inputs, targets = inputs.to(device), targets.to(device)
-                outputs = model(inputs)
-                loss = criterion(outputs, targets)
-                val_loss += loss.item()
-                _, predicted = outputs.max(1)
-                val_correct += predicted.eq(targets).sum().item()
-
-        val_loss /= max(1, len(val_loader))  # Protect against empty loader
-        val_acc = 100. * val_correct / len(val_dataset)
-
-        results.append({
-            'epoch': epoch + 1,
-            'train_loss': train_loss,
-            'train_acc': train_acc,
-            'val_loss': val_loss,
-            'val_acc': val_acc
-        })
-
-        if tracker:
-            tracker.log_metrics({
-                'resnet_train_loss': train_loss,
-                'resnet_train_acc': train_acc,
-                'resnet_val_loss': val_loss,
-                'resnet_val_acc': val_acc
-            }, step=epoch)
-
-        print(f"Epoch {epoch}/{epochs}: Train Loss={train_loss:.4f}, "
-              f"Train Acc={train_acc:.1f}%, Val Loss={val_loss:.4f}, "
-              f"Val Acc={val_acc:.1f}%")
-
-    # Final test evaluation (only after training completes - use test set only for final evaluation)
-    logging.info("Evaluating final performance on test set...")
-    model.eval()
-    test_loss, test_correct = 0, 0
-    with torch.no_grad():
-        for inputs, targets in test_loader:
-            inputs, targets = inputs.to(device), targets.to(device)
-            outputs = model(inputs)
-            loss = criterion(outputs, targets)
-            test_loss += loss.item()
-            _, predicted = outputs.max(1)
-            test_correct += predicted.eq(targets).sum().item()
-
-    test_loss /= max(1, len(test_loader))  # Protect against empty loader
-    test_acc = 100. * test_correct / len(test_dataset)
-    logging.info(f"Final Test Performance: Loss={test_loss:.4f}, Acc={test_acc:.2f}%")
+        test_loss /= max(1, len(test_loader))  # Protect against empty loader
+        test_acc = 100. * test_correct / len(test_dataset)
+        logging.info(f"Final Test Performance: Loss={test_loss:.4f}, Acc={test_acc:.2f}%")
 
     # End profiling
     if profiler:
         perf_metrics = profiler.end_profiling("ResNet18_Experiment")
         profiler.log_performance("ResNet18_Experiment")
 
-    # Save results
-    os.makedirs(results_dir, exist_ok=True)
-    df = pd.DataFrame(results)
-    df.to_csv(f"{results_dir}/resnet_results.csv", index=False)
+        # Save per-seed results
+        os.makedirs(results_dir, exist_ok=True)
+        df_seed = pd.DataFrame(results)
+        df_seed['seed'] = seed
+        result_filename = f"{results_dir}/ResNet18_CIFAR10_Adam_seed{seed}.csv"
+        df_seed.to_csv(result_filename, index=False)
+        all_results.extend(results)
+
+        # Save per-run artifact
+        try:
+            params = {'epochs': epochs, 'batch_size': train_bs, 'seed': seed}
+            save_run_artifacts(results_dir, 'ResNet18', 'CIFAR10', 'Adam', seed, results, params, device=device, exp_tracker=tracker)
+        except Exception:
+            logging.debug(f"Failed to save per-run ResNet artifact for seed={seed}")
+
+        logging.info(f"💾 Results for seed={seed} saved to {result_filename}")
+
+    # Aggregate results across all seeds
+    df = pd.DataFrame(all_results)
+    df.to_csv(f"{results_dir}/resnet_results_all_seeds.csv", index=False)
+    logging.info(f"\n💾 Aggregated results saved to {results_dir}/resnet_results_all_seeds.csv")
 
     if tracker:
-        tracker.log_artifact(f"{results_dir}/resnet_results.csv", "results")
+        tracker.log_artifact(f"{results_dir}/resnet_results_all_seeds.csv", "results")
         tracker.end_run()
-    # Save a per-run artifact (representative seed)
-    try:
-        seed0 = int(seeds[0]) if seeds else 0
-        params = {'epochs': epochs, 'batch_size': 128}
-        save_run_artifacts(results_dir, 'ResNet18', 'ResNet18', 'Adam', seed0, results, params, device=device, exp_tracker=tracker)
-    except Exception:
-        logging.debug("Failed to save per-run ResNet artifact")
-
-    print(f"\n💾 Results saved to {results_dir}/resnet_results.csv")
 
     # Generate visualizations for ResNet experiment
     try:
@@ -8796,7 +9300,7 @@ def run_highdim_experiment(results_dir="results_highdim", seeds=None, quick=Fals
 
     dimensions = [100, 200] if quick else [100, 500, 1000]
     optimizers_config = []
-    for opt_name in ['SGD', 'Adam', 'SAM_SGD']:
+    for opt_name in [OptimizerNames.SGD, OptimizerNames.ADAM, 'SAM_SGD']:
         hyperparams = get_default_hyperparameters(opt_name, "highdim_optimization")
         if opt_name == 'SAM_SGD':
             def _sam_factory(params, hp=hyperparams):
@@ -8806,7 +9310,7 @@ def run_highdim_experiment(results_dir="results_highdim", seeds=None, quick=Fals
                     base_opt = optim.SGD(params, lr=hp.get('lr', 0.01))
                 return SAMWrapper(base_opt, rho=hp.get('rho', 0.05), adaptive=hp.get('adaptive', False))
             optimizers_config.append((opt_name, _sam_factory))
-        elif opt_name == 'SGD':
+        elif opt_name == OptimizerNames.SGD:
             optimizers_config.append((opt_name, lambda params, hp=hyperparams: optim.SGD(params, **hp)))
         elif opt_name == 'Adam':
             # Convert beta1/beta2 to betas tuple for torch.optim.Adam
@@ -8997,6 +9501,7 @@ def main():  # type: ignore[misc]  # pyright: complexity limit exceeded (10k+ li
     warnings.filterwarnings('ignore', message=r".*invalid escape sequence.*", category=SyntaxWarning)
 
     # Initialize reproducibility defaults (can be overridden by CLI --deterministic)
+    # Note: This default seed=42 is immediately overridden by --seeds from CLI
     setup_experiment_reproducibility(seed=42, deterministic=False)  # Will be overridden by --seeds
     warn_if_nondeterministic()
 
@@ -9052,6 +9557,10 @@ Examples:
                         help='Force deterministic mode (use_deterministic_algorithms + CUBLAS_WORKSPACE_CONFIG)')
     parser.add_argument('--no-mlflow', action='store_true',
                         help='Disable MLflow tracking even if available')
+    parser.add_argument('--parallel', action='store_true', default=False,
+                        help='Enable parallel experiment execution on multiple GPUs')
+    parser.add_argument('--num-gpus', type=int, default=None,
+                        help='Number of GPUs to use for parallel execution (default: auto-detect)')
     parser.add_argument('--grad-noise-every', type=int, default=10,
                         help='Estimate gradient noise variance every N epochs (default: 10). Set to 0 to disable.')
     parser.add_argument('--grad-noise-samples', type=int, default=100,
@@ -9216,6 +9725,17 @@ Examples:
     # Parse seeds
     seeds = [int(s.strip()) for s in args.seeds.split(',')]
 
+    # Fix 7: Enforce minimum 3 seeds for statistical validity
+    if len(seeds) < 3:
+        raise ValueError(
+            f"At least 3 seeds required for statistical validity, got {len(seeds)}. "
+            f"Use --seeds 42,123,456 or similar. "
+            f"Single or dual-seed experiments lack statistical power for optimizer comparisons."
+        )
+
+    if len(set(seeds)) != len(seeds):
+        raise ValueError(f"Duplicate seeds detected: {seeds}. Each seed must be unique.")
+
     # Set global seed FIRST before any operations
     # Use first seed for reproducibility of all subsequent operations
     primary_seed = seeds[0]
@@ -9237,6 +9757,38 @@ Examples:
                                 'adam_adamw_comparison']
     else:
         selected_experiments = [e.strip() for e in args.experiments.split(',')]
+
+    # Fix 3: Validate experiment names early to fail fast on typos
+    VALID_EXPERIMENTS = {
+        'mnist', 'cifar10', 'cifar100', 'nlp', 'medical',
+        '2d', '2d_optimization', '2d_visualization',
+        'ablation', 'advanced_ablation', 'init_ablation',
+        'batch_ablation', 'lr_ablation', 'wd_ablation', 'scheduler_ablation',
+        'missing_ablations', 'ablation_comprehensive',
+        'robustness', 'sam', 'optimizer_comparison', 'resnet', 'highdim',
+        'hyperparam_sensitivity', 'convergence_validation',
+        'dynamics_overhead', 'theory_practice', 'cross_optimizer_dynamics',
+        'beta_sensitivity_training', 'label_noise',
+        'saddle_escape', 'hyperparameter_heatmaps', 'stochastic_2d_integrity',
+        'adam_adamw_comparison', 'label_smoothing', 'models', 'all'
+    }
+
+    invalid_experiments = set(selected_experiments) - VALID_EXPERIMENTS
+    if invalid_experiments:
+        from difflib import get_close_matches
+        suggestions = {}
+        for invalid in invalid_experiments:
+            matches = get_close_matches(invalid, VALID_EXPERIMENTS, n=3, cutoff=0.6)
+            if matches:
+                suggestions[invalid] = matches
+
+        error_msg = f"Invalid experiment names: {sorted(invalid_experiments)}. "
+        if suggestions:
+            error_msg += "\n\nDid you mean:\n"
+            for invalid, matches in suggestions.items():
+                error_msg += f"  '{invalid}' -> {matches}\n"
+        error_msg += f"\n\nValid experiments: {sorted(VALID_EXPERIMENTS)}"
+        raise ValueError(error_msg)
 
     # NOW validate optional dependencies for selected experiments
     print("\n[*] Validating Optional Dependencies for Selected Experiments:")
@@ -9757,7 +10309,8 @@ Examples:
                 dataset_name = 'MNIST'  # Can extend to CIFAR10
                 experiment_results['batch_ablation'] = run_batch_ablation(
                     dataset_name=dataset_name,
-                    results_dir=str(experiments_dir / "batch_ablation")
+                    results_dir=str(experiments_dir / "batch_ablation"),
+                    seeds=args.seeds
                 )
             except Exception as e:
                 logging.error(f"Batch size ablation failed: {e}")
@@ -9780,7 +10333,7 @@ Examples:
                 }
 
                 learning_rates = [1e-3, 1e-2] if args.quick else [1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2]
-                optimizers = ['SGD', 'Adam'] if args.quick else ['SGD', 'SGD_Momentum', 'Adam', 'AdamW']
+                optimizers = [OptimizerNames.SGD, OptimizerNames.ADAM] if args.quick else [OptimizerNames.SGD, OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM, OptimizerNames.ADAMW]
 
                 experiment_results['lr_ablation'] = run_learning_rate_ablation(
                     base_config,
@@ -9811,7 +10364,7 @@ Examples:
                 }
 
                 weight_decays = [0.0, 1e-4, 1e-3] if args.quick else [0.0, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2]
-                optimizers = ['SGD', 'Adam'] if args.quick else ['SGD', 'SGD_Momentum', 'Adam', 'AdamW']
+                optimizers = [OptimizerNames.SGD, OptimizerNames.ADAM] if args.quick else [OptimizerNames.SGD, OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM, OptimizerNames.ADAMW]
 
                 experiment_results['wd_ablation'] = run_weight_decay_ablation(
                     base_config,
@@ -9832,7 +10385,8 @@ Examples:
                 dataset_name = 'MNIST'  # Can extend to CIFAR10
                 experiment_results['scheduler_ablation'] = run_scheduler_ablation(
                     dataset_name=dataset_name,
-                    results_dir=str(experiments_dir / "scheduler_ablation")
+                    results_dir=str(experiments_dir / "scheduler_ablation"),
+                    seeds=args.seeds
                 )
             except Exception as e:
                 logging.error(f"Scheduler ablation failed: {e}")
@@ -9890,7 +10444,7 @@ Examples:
                 # Use MNIST results if available
                 mnist_results_dir = str(experiments_dir / "mnist")
                 if os.path.exists(mnist_results_dir):
-                    optimizers = ['SGD', 'SGD_Momentum', 'Adam', 'AdamW', 'AMSGrad']
+                    optimizers = [OptimizerNames.SGD, OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM, OptimizerNames.ADAMW, OptimizerNames.AMSGRAD]
 
                     run_optimizer_comparison_matrix(
                         results_dir=mnist_results_dir,
@@ -10334,7 +10888,7 @@ Examples:
                     # Run on MNIST (fast, clear dynamics)
                     df = run_cross_optimizer_dynamics_comparison(
                         dataset='MNIST',
-                        optimizers=['SGD', 'SGD_Momentum', 'Adam'] if args.quick else None,
+                        optimizers=[OptimizerNames.SGD, OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM] if args.quick else None,
                         epochs=20 if args.quick else 50,
                         seeds=seeds[:2] if args.quick else seeds[:3],
                         quick=args.quick,
@@ -10488,12 +11042,12 @@ Examples:
                     )
 
                     # Get tuned hyperparameters for all optimizers
-                    optimizers_to_test = ['SGD', 'SGD_Momentum', 'Adam', 'AdamW', 'AMSGrad']
+                    optimizers_to_test = [OptimizerNames.SGD, OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM, OptimizerNames.ADAMW, OptimizerNames.AMSGRAD]
 
                     # Add advanced optimizers if not in quick mode
                     if not args.quick:
                         optimizers_to_test.extend(['SAM_SGD', 'SAM_Adam', 'Lookahead_SGD',
-                                                   'Lookahead_Adam', 'RAdam'])
+                                                   'Lookahead_Adam', OptimizerNames.RADAM])
 
                     # Build optimizer configs from tuned hyperparameters
                     mnist_optimizers_config = {}
@@ -10507,9 +11061,9 @@ Examples:
 
                     # All optimizers in this list are now equally tuned
                     all_tuned_optimizers = [
-                        'SGD', 'SGD_Momentum', 'Adam', 'AdamW', 'AMSGrad',
+                        OptimizerNames.SGD, OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM, OptimizerNames.ADAMW, OptimizerNames.AMSGRAD,
                         'SAM_SGD', 'SAM_Adam', 'Lookahead_SGD', 'Lookahead_Adam',
-                        'AdaBound', 'RAdam', 'LAMB'
+                        OptimizerNames.ADABOUND, OptimizerNames.RADAM, OptimizerNames.LAMB
                     ]
 
                     for opt_name in optimizers_to_test:

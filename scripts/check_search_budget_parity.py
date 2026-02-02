@@ -106,7 +106,11 @@ def check_search_budget_parity(config_path, threshold=5.0):
 
     max_size = max(grid_sizes.values())
     min_size = min(grid_sizes.values())
-    max_ratio = max_size / min_size if min_size > 0 else float('inf')
+    # Guard against min_size=0 AND max_size=0 (all grids empty)
+    if min_size == 0:
+        max_ratio = float('inf') if max_size > 0 else 1.0
+    else:
+        max_ratio = max_size / min_size
 
     return {
         'valid': max_ratio <= threshold,

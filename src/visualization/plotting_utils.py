@@ -6,6 +6,44 @@ import numpy as np
 
 from ..utils.metric_normalization import to_percent_series, to_percent
 from ..utils.filename import parse_experiment_filename
+from contextlib import contextmanager
+import logging
+
+
+@contextmanager
+def plot_protect(log_on_fail: bool = True, strict: bool = False, logger: logging.Logger | None = None):
+    """Context manager to protect plotting code from failing the whole run.
+
+    Usage:
+        with plot_protect(log_on_fail=True):
+            plt.savefig(...)
+
+    By default catches plotting-related errors and logs a single WARNING. If
+    ``strict=True`` the exception is re-raised (useful for CI/debugging).
+
+    Note: This intentionally uses a broad catch to isolate visual failures
+    from the rest of the run; keep narrow where possible outside of plotting.
+    """
+    if logger is None:
+        logger = logging.getLogger(__name__)
+    try:
+        yield
+    except (OSError, RuntimeError, ValueError) as e:
+        # These are expected plotting/IO/runtime errors we can reasonably
+        # catch and continue from during normal runs.
+        if strict:
+            logger.warning("Plot failed (strict mode): re-raising: %s", e)
+            raise
+        if log_on_fail:
+            logger.warning("Plotting failed: %s", e)
+            logger.debug("Plotting failure details:", exc_info=True)
+    except Exception as e:  # broad catch intentional: isolate any plotting error
+        if strict:
+            logger.warning("Plot failed (strict mode): re-raising unexpected exception: %s", e)
+            raise
+        if log_on_fail:
+            logger.warning("Plotting failed (unexpected): %s", e)
+            logger.debug("Unexpected plotting failure:", exc_info=True)
 
 
 def filter_time_series_files(csv_paths: List[Path]) -> List[Path]:

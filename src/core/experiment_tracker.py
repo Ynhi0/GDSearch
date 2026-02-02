@@ -5,6 +5,7 @@ access warnings and provides consistent behavior across runners.
 """
 from typing import Any, Dict, Optional
 import logging
+import os
 
 try:
     # Import mlflow. In some environments (e.g., mismatched DB schema), importing mlflow
@@ -65,10 +66,147 @@ class ExperimentTracker:
             mlflow_exc_mod = getattr(mlflow, 'exceptions', None)
             mlflow_exc_cls = getattr(mlflow_exc_mod, 'MlflowException', None) if mlflow_exc_mod is not None else None
             if mlflow_exc_cls is not None and isinstance(e, mlflow_exc_cls):
+                # Check if this is a database schema error
+                error_msg = str(e).lower()
+                if 'schema' in error_msg or 'out-of-date' in error_msg or 'upgrade' in error_msg:
+                    logging.warning("MLflow database schema is out of date. Attempting automatic upgrade...")
+                    if self._attempt_db_upgrade(tracking_uri):
+                        logging.info("MLflow database upgrade successful. Retrying initialization...")
+                        try:
+                            if tracking_uri:
+                                mlflow.set_tracking_uri(tracking_uri)
+                            mlflow.set_experiment(experiment_name)
+                            self.enabled = True
+                            logging.info("MLflow initialized successfully after database upgrade.")
+                            return
+                        except Exception as retry_error:
+                            logging.warning("MLflow initialization still failed after upgrade: %s", retry_error)
+                    else:
+                        logging.warning("MLflow database upgrade failed or not attempted. Trying fresh database...")
+                        if self._attempt_fresh_db(tracking_uri):
+                            logging.info("Created fresh MLflow database. Retrying initialization...")
+                            try:
+                                if tracking_uri:
+                                    mlflow.set_tracking_uri(tracking_uri)
+                                mlflow.set_experiment(experiment_name)
+                                self.enabled = True
+                                logging.info("MLflow initialized successfully with fresh database.")
+                                return
+                            except Exception as retry_error:
+                                logging.warning("MLflow initialization failed with fresh database: %s", retry_error)
+                
                 logging.warning("MLflow initialization failed (%s). Experiment tracking disabled.", e)
+                logging.warning("Remediation: Run 'mlflow db upgrade <database_uri>' manually or use --no-mlflow flag.")
                 self.enabled = False
             else:
                 raise
+
+    def _attempt_db_upgrade(self, tracking_uri: Optional[str]) -> bool:
+        """Attempt to upgrade MLflow database schema automatically.
+        
+        Returns:
+            True if upgrade succeeded, False otherwise
+        """
+        import subprocess
+        import sys
+        
+        try:
+            # Determine the database URI to upgrade
+            db_uri = tracking_uri if tracking_uri else "mlruns"
+            
+            # In Kaggle environment, may not have write permissions
+            if os.environ.get('KAGGLE_KERNEL_RUN_TYPE'):
+                logging.info("Running in Kaggle environment - skipping database upgrade (likely read-only filesystem)")
+                return False
+            
+            logging.info(f"Attempting to upgrade MLflow database: {db_uri}")
+            result = subprocess.run(
+                [sys.executable, "-m", "mlflow", "db", "upgrade", db_uri],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            if result.returncode == 0:
+                logging.info("MLflow database upgrade completed successfully.")
+                return True
+            else:
+                logging.warning(f"MLflow database upgrade failed: {result.stderr}")
+                return False
+                
+        except subprocess.TimeoutExpired:
+            logging.warning("MLflow database upgrade timed out after 30 seconds.")
+            return False
+        except Exception as e:
+            logging.warning(f"Failed to run MLflow database upgrade: {e}")
+            return False
+
+    def _attempt_fresh_db(self, tracking_uri: Optional[str]) -> bool:
+        """Attempt to create a fresh MLflow database by backing up and recreating.
+        
+        Returns:
+            True if fresh database created successfully, False otherwise
+        """
+        import shutil
+        from pathlib import Path
+        from datetime import datetime
+        
+        try:
+            # Determine the database path
+            db_path = Path(tracking_uri if tracking_uri else "mlruns")
+            
+            # In Kaggle environment, may not have write permissions
+            if os.environ.get('KAGGLE_KERNEL_RUN_TYPE'):
+                logging.info("Running in Kaggle environment - skipping database recreation (likely read-only filesystem)")
+                return False
+            
+            if not db_path.exists():
+                logging.info(f"Database path {db_path} does not exist, will be created fresh on next MLflow call.")
+                return True
+            
+            # Create backup
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_path = db_path.parent / f"{db_path.name}_backup_{timestamp}"
+            
+            logging.info(f"Backing up MLflow database from {db_path} to {backup_path}")
+            shutil.move(str(db_path), str(backup_path))
+            logging.info(f"Backup created successfully. Fresh database will be created at {db_path}")
+            
+            return True
+            
+        except Exception as e:
+            logging.warning(f"Failed to create fresh MLflow database: {e}")
+            return False
+
+    @property
+    def active_run_id(self) -> str:
+        """Get active run ID, raises if no active run.
+        
+        TYPE SAFETY FIX: Property with validation to prevent Optional[str] access issues.
+        Use this instead of self.current_run.info.run_id to ensure run is active.
+        
+        Returns:
+            Active MLflow run ID
+            
+        Raises:
+            RuntimeError: If no active MLflow run
+        """
+        if self.current_run is None:
+            raise RuntimeError(
+                "No active MLflow run. Call start_run() before logging metrics/parameters.\n"
+                "Example:\n"
+                "  tracker = ExperimentTracker()\n"
+                "  tracker.start_run(run_name='my_experiment')\n"
+                "  tracker.log_metric('loss', 0.5)\n"
+                "  tracker.end_run()"
+            )
+        info = getattr(self.current_run, "info", None)
+        if info is None:
+            raise RuntimeError("Current run has no info attribute")
+        run_id = getattr(info, "run_id", None)
+        if run_id is None:
+            raise RuntimeError("Current run info has no run_id attribute")
+        return run_id
 
     def start_run(self, run_name: Optional[str] = None) -> Optional[str]:
         """Start a new MLflow run (supports nested runs)."""

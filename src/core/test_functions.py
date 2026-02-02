@@ -6,6 +6,32 @@ import numpy as np
 from typing import Tuple
 
 
+# ============================================================================
+# CONSTANTS FOR CLASSIC TEST FUNCTIONS (L2 Priority Fix - Dec 2025)
+# ============================================================================
+
+# Classic Rosenbrock parameters (Rosenbrock, 1960)
+ROSENBROCK_DEFAULT_A = 1.0
+ROSENBROCK_DEFAULT_B = 100.0  # Controls valley curvature
+
+# Ill-conditioned Quadratic parameters
+QUADRATIC_DEFAULT_KAPPA = 100  # Condition number (ratio between axes)
+
+# Ackley function parameters
+ACKLEY_DEFAULT_A = 20.0  # Amplitude
+ACKLEY_DEFAULT_B = 0.2   # Width
+ACKLEY_DEFAULT_C = 2 * np.pi  # Frequency
+
+# Rastrigin function parameters
+RASTRIGIN_DEFAULT_A = 10  # Amplitude
+
+# Search bounds
+ROSENBROCK_BOUNDS = ((-2, 2), (-1, 3))
+SADDLE_POINT_BOUNDS = ((-2, 2), (-2, 2))
+ACKLEY_2D_BOUNDS = ((-5, 5), (-5, 5))
+RASTRIGIN_BOUNDS = (-5.12, 5.12)
+
+
 class TestFunction:
     """Base class for 2D test functions."""
     __test__ = False
@@ -38,13 +64,13 @@ class Rosenbrock(TestFunction):
     Global minimum at (a, a^2) with value 0.
     """
 
-    def __init__(self, a: float = 1, b: float = 100) -> None:
+    def __init__(self, a: float = ROSENBROCK_DEFAULT_A, b: float = ROSENBROCK_DEFAULT_B) -> None:
         """
         Initialize Rosenbrock function.
 
         Args:
-            a: Parameter a (default: 1)
-            b: Parameter b (default: 100)
+            a: Parameter a (default: ROSENBROCK_DEFAULT_A = 1.0)
+            b: Parameter b (default: ROSENBROCK_DEFAULT_B = 100.0, controls valley curvature)
         """
         super().__init__()
         self.a = a
@@ -114,7 +140,7 @@ class Rosenbrock(TestFunction):
 
     def get_bounds(self) -> Tuple[Tuple[float, float], Tuple[float, float]]:
         """Return plotting bounds for Rosenbrock function."""
-        return (-2, 2), (-1, 3)
+        return ROSENBROCK_BOUNDS
 
 
 class IllConditionedQuadratic(TestFunction):
@@ -129,12 +155,12 @@ class IllConditionedQuadratic(TestFunction):
           Use kappa >= 1000 for realistic experiments.
     """
 
-    def __init__(self, kappa=100):
+    def __init__(self, kappa=QUADRATIC_DEFAULT_KAPPA):
         """
         Initialize Ill-conditioned Quadratic function.
 
         Args:
-            kappa: Condition number - ratio between axes (default: 100)
+            kappa: Condition number - ratio between axes (default: QUADRATIC_DEFAULT_KAPPA = 100)
                    Recommended: kappa=1000 or kappa=10000 for realistic NN simulation
         """
         super().__init__()
@@ -219,9 +245,15 @@ class SaddlePoint(TestFunction):
         df/dy = -y
 
         Args:
+            x, y: Point at which to compute gradient
             noise_std: Base standard deviation of gradient noise (0 = deterministic GD)
             noise_type: 'additive' or 'multiplicative'
             batch_size: Simulated batch size (noise variance scales as 1/batch_size)
+            
+        Scientific Note on Batch Size:
+              - In real SGD, gradient variance ∝ 1/B where B is batch size
+              - actual_noise_std = noise_std / sqrt(batch_size)
+              - This allows studying batch size effects on convergence and saddle escape
         """
         grad_x = x
         grad_y = -y
@@ -253,7 +285,7 @@ class SaddlePoint(TestFunction):
 
     def get_bounds(self):
         """Return plotting bounds for Saddle Point function."""
-        return (-2, 2), (-2, 2)
+        return SADDLE_POINT_BOUNDS
 
 
 class Ackley2D(TestFunction):
@@ -265,7 +297,7 @@ class Ackley2D(TestFunction):
     Default: a=20, b=0.2, c=2π. Global minimum at (0,0) with f=0.
     """
 
-    def __init__(self, a=20.0, b=0.2, c=2 * np.pi):
+    def __init__(self, a=ACKLEY_DEFAULT_A, b=ACKLEY_DEFAULT_B, c=ACKLEY_DEFAULT_C):
         super().__init__()
         self.a = float(a)
         self.b = float(b)
@@ -284,9 +316,15 @@ class Ackley2D(TestFunction):
         """Compute gradient with optional stochastic noise for SGD simulation.
 
         Args:
-            noise_std: Base standard deviation of gradient noise
+            x, y: Point at which to compute gradient
+            noise_std: Base standard deviation of gradient noise (0 = deterministic)
             noise_type: 'additive' or 'multiplicative'
             batch_size: Simulated batch size (noise variance scales as 1/batch_size)
+            
+        Scientific Note on Batch Size:
+              - In real SGD, gradient variance ∝ 1/B where B is batch size
+              - actual_noise_std = noise_std / sqrt(batch_size)
+              - This allows studying batch size effects on convergence
         """
         x = float(x)
         y = float(y)
@@ -342,7 +380,7 @@ class Ackley2D(TestFunction):
         return np.array([[f_xx, 0.5 * (f_xy + f_yx)], [0.5 * (f_xy + f_yx), f_yy]], dtype=float)
 
     def get_bounds(self):
-        return ((-5, 5), (-5, 5))
+        return ACKLEY_2D_BOUNDS
 
 
 # ============================================================================
@@ -414,13 +452,13 @@ class Rastrigin(HighDimensionalFunction):
     Global minimum at x = [0, 0, ..., 0] with f(x) = 0.
     """
 
-    def __init__(self, dim=10, A=10):
+    def __init__(self, dim=10, A=RASTRIGIN_DEFAULT_A):
         """
         Initialize Rastrigin function.
 
         Args:
             dim: Number of dimensions (default: 10)
-            A: Amplitude parameter (default: 10)
+            A: Amplitude parameter (default: RASTRIGIN_DEFAULT_A = 10)
         """
         super().__init__(dim)
         self.A = A
@@ -442,7 +480,7 @@ class Rastrigin(HighDimensionalFunction):
 
     def get_bounds(self):
         """Return search bounds for Rastrigin function."""
-        return (-5.12, 5.12)
+        return RASTRIGIN_BOUNDS
 
     def get_optimum(self):
         """Return known global optimum."""
@@ -457,15 +495,15 @@ class Ackley(HighDimensionalFunction):
     Global minimum at x = [0, 0, ..., 0] with f(x) = 0.
     """
 
-    def __init__(self, dim=10, a=20, b=0.2, c=2*np.pi):
+    def __init__(self, dim=10, a=ACKLEY_DEFAULT_A, b=ACKLEY_DEFAULT_B, c=ACKLEY_DEFAULT_C):
         """
         Initialize Ackley function.
 
         Args:
             dim: Number of dimensions (default: 10)
-            a: Amplitude parameter (default: 20)
-            b: Width parameter (default: 0.2)
-            c: Frequency parameter (default: 2*pi)
+            a: Amplitude parameter (default: ACKLEY_DEFAULT_A = 20)
+            b: Width parameter (default: ACKLEY_DEFAULT_B = 0.2)
+            c: Frequency parameter (default: ACKLEY_DEFAULT_C = 2*pi)
         """
         super().__init__(dim)
         self.a = a

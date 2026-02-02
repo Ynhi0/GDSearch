@@ -22,10 +22,20 @@ def ensure_dirs():
 
 
 def run_and_save(cfg: Dict[str, Any], tag: str) -> Tuple[str, pd.DataFrame]:
+    """Run experiment and save results with validation integrity checks."""
     cfg = dict(cfg)
     cfg['tag'] = tag
-    # Add validation split to avoid test set leakage during hyperparameter tuning
-    cfg['val_split'] = 0.1  # Use 10% of training data for validation
+    
+    # CRITICAL INTEGRITY CHECK: Enforce validation split for tuning
+    if cfg.get('val_split', 0.0) <= 0.0:
+        raise ValueError(
+            "TUNING INTEGRITY CHECK FAILED: val_split must be > 0 for hyperparameter tuning.\n\n"
+            "Hyperparameter selection requires a validation set to avoid test set leakage.\n"
+            "Recommended: val_split=0.1 (uses 10% of training data for validation).\n\n"
+            "Without this, hyperparameters would be selected based on test set performance,\n"
+            "which constitutes adaptive overfitting and invalidates all experimental results."
+        )
+    
     df = train_and_evaluate(cfg)
     out = os.path.join(RESULTS_DIR, result_filename(cfg))
     df.to_csv(out, index=False)
@@ -43,13 +53,13 @@ def best_by_eval(csv_paths: List[str], prefer: str = 'accuracy') -> Tuple[Option
     """
     Return best CSV path by final validation metric.
 
-    Use 'val' phase (validation set) instead of 'eval' phase (test set)
-    to prevent test set leakage during hyperparameter tuning.
+    CRITICAL: This function is used for hyperparameter selection during tuning.
+    It MUST use validation set ONLY, NEVER the test set.
 
     Rationale:
-    Hyperparameter selection MUST use a held-out validation set carved from
-    the training data. Using the test set for tuning constitutes adaptive
-    overfitting and invalidates generalization claims.
+    Hyperparameter selection based on test set performance constitutes adaptive
+    overfitting and invalidates all generalization claims. This would make all
+    experimental results scientifically invalid.
 
     Args:
         csv_paths: List of result CSV file paths
@@ -57,30 +67,33 @@ def best_by_eval(csv_paths: List[str], prefer: str = 'accuracy') -> Tuple[Option
 
     Returns:
         Tuple of (best_path, best_score)
+
+    Raises:
+        ValueError: If any CSV lacks validation data. This prevents test set leakage.
     """
     best_path = None
     best_score = None
     for p in csv_paths:
         df = ensure_dataframe(pd.read_csv(p))
-        # Use 'val' phase instead of 'eval' to avoid test set leakage
-        if 'phase' in df.columns:
-            val_rows = ensure_dataframe(df[df['phase'] == 'val'])
-        else:
-            val_rows = ensure_dataframe(pd.DataFrame())
-        if val_rows.empty:
-            # Fallback to 'eval' with warning (should not happen with val_split enabled)
-            import logging
-            logging.warning(
-                "INTEGRITY WARNING: No validation data found in %s, "
-                "falling back to eval. This may indicate test set leakage!",
-                p
+        
+        # STRICT VALIDATION: Require validation set, NEVER fall back to test set
+        if 'phase' not in df.columns or 'val' not in df['phase'].values:
+            raise ValueError(
+                f"INTEGRITY ERROR: {p} has no validation data.\n\n"
+                f"Hyperparameter tuning REQUIRES a validation set (set val_split > 0 in config).\n"
+                f"Using test set for tuning constitutes adaptive overfitting and "
+                f"invalidates all experimental results.\n\n"
+                f"RESOLUTION: Ensure val_split >= 0.1 in experiment configuration.\n"
+                f"ABORTING to prevent scientific invalidity."
             )
-            if 'phase' in df.columns:
-                val_rows = ensure_dataframe(df[df['phase'] == 'eval'])
-            else:
-                val_rows = ensure_dataframe(pd.DataFrame())
-            if val_rows.empty:
-                continue
+        
+        val_rows = ensure_dataframe(df[df['phase'] == 'val'])
+        
+        if val_rows.empty:
+            raise ValueError(
+                f"INTEGRITY ERROR: {p} has validation phase but no data rows.\n"
+                f"This indicates a data loading bug. Check dataset splitting logic."
+            )
 
         # Determine scoring columns based on preference
         from src.utils.num_utils import safe_to_float
@@ -130,6 +143,7 @@ def tune_optimizer(base: Dict[str, Any], spec: Dict[str, Any]) -> Dict[str, Any]
             'optimizer': spec['optimizer'],
             'lr': lr,
             'epochs': spec.get('epochs', 3),
+            'val_split': base.get('val_split', 0.1),  # FIX: Add val_split to satisfy validation check
         }
         if spec['optimizer'].upper().startswith('ADAM') and 'weight_decay_values' in spec:
             # Try default wd 0.0 in LR sweep
@@ -160,6 +174,7 @@ def tune_optimizer(base: Dict[str, Any], spec: Dict[str, Any]) -> Dict[str, Any]
                 'lr': best_lr,
                 'epochs': spec.get('epochs', 3),
                 'weight_decay': wd,
+                'val_split': base.get('val_split', 0.1),  # FIX: Add val_split
             }
             out, _ = run_and_save(cfg, tag='sweepWD')
             csvs_stage2.append(out)
@@ -174,6 +189,7 @@ def tune_optimizer(base: Dict[str, Any], spec: Dict[str, Any]) -> Dict[str, Any]
                 'lr': best_lr,
                 'epochs': spec.get('epochs', 3),
                 'momentum': mom,
+                'val_split': base.get('val_split', 0.1),  # FIX: Add val_split
             }
             out, _ = run_and_save(cfg, tag='sweepMOM')
             csvs_stage2.append(out)
@@ -255,6 +271,7 @@ def main():
         'model': cfg['model'],
         'seed': cfg.get('seed', 1),
         'batch_size': cfg.get('batch_size', 128),
+        'val_split': cfg.get('val_split', 0.1),  # FIX: Include val_split in base config
     }
     finals = []
     for spec in cfg['sweeps']:

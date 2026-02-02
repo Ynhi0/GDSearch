@@ -28,6 +28,7 @@ import pandas as pd
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any
 import logging
+from src.utils.constants import MNIST_MEAN, MNIST_STD, CIFAR10_MEAN, CIFAR10_STD
 from src.utils.safe_len import len_sized
 from dataclasses import dataclass
 
@@ -145,11 +146,14 @@ def create_noisy_dataloaders(
     if dataset_name.lower() == 'mnist':
         transform = transforms.Compose([
             transforms.ToTensor(),
-            transforms.Normalize((0.1307,), (0.3081,))
+            transforms.Normalize(MNIST_MEAN, MNIST_STD)
         ])
-        train_dataset = torchvision.datasets.MNIST(
+        # BUG FIX #1: MNIST doesn't need separate augmented/non-augmented datasets
+        # (no augmentation for MNIST), but initialize variables for consistency
+        train_dataset_augmented = torchvision.datasets.MNIST(
             root=data_root, train=True, download=True, transform=transform
         )
+        train_dataset_no_augment = train_dataset_augmented  # No augmentation for MNIST
         test_dataset = torchvision.datasets.MNIST(
             root=data_root, train=False, download=True, transform=transform
         )
@@ -160,14 +164,19 @@ def create_noisy_dataloaders(
             transforms.RandomCrop(32, padding=4),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
-            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+            transforms.Normalize(CIFAR10_MEAN, CIFAR10_STD)
         ])
         transform_test = transforms.Compose([
             transforms.ToTensor(),
-            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+            transforms.Normalize(CIFAR10_MEAN, CIFAR10_STD)
         ])
-        train_dataset = torchvision.datasets.CIFAR10(
+        # BUG FIX #1: Load training data TWICE - once with augmentation, once without
+        # This prevents augmentation from being applied to validation split
+        train_dataset_augmented = torchvision.datasets.CIFAR10(
             root=data_root, train=True, download=True, transform=transform_train
+        )
+        train_dataset_no_augment = torchvision.datasets.CIFAR10(
+            root=data_root, train=True, download=True, transform=transform_test
         )
         test_dataset = torchvision.datasets.CIFAR10(
             root=data_root, train=False, download=True, transform=transform_test
@@ -177,12 +186,13 @@ def create_noisy_dataloaders(
         raise ValueError(f"Unsupported dataset: {dataset_name}")
 
     # Create validation split (10% of training data)
-    train_size = int(0.9 * len(train_dataset))
+    # BUG FIX #1: Use augmented dataset for training, non-augmented for validation
+    train_size = int(0.9 * len(train_dataset_augmented))
     train_indices = list(range(train_size))
-    val_indices = list(range(train_size, len(train_dataset)))
+    val_indices = list(range(train_size, len(train_dataset_augmented)))
 
-    train_subset = Subset(train_dataset, train_indices)
-    val_subset = Subset(train_dataset, val_indices)
+    train_subset = Subset(train_dataset_augmented, train_indices)
+    val_subset = Subset(train_dataset_no_augment, val_indices)  # ← FIX: No augmentation
 
     # Inject noise only into training set
     noisy_train_dataset = NoisyLabelDataset(train_subset, noise_rate, num_classes, seed)
@@ -456,15 +466,19 @@ def run_label_noise_ablation(
                     optimizer = create_optimizer_from_config(optimizer_config_dict, model.parameters())
                 except Exception as e:
                     logger.warning("Registry creation failed, using fallback: %s", e)
+                    # Import constant at function level to avoid circular dependency
+                    from src.utils.constants import OptimizerNames
+                    
                     # Fallback to direct creation
-                    if optimizer_name.lower() == 'sgd':
+                    opt_lower = optimizer_name.lower()
+                    if opt_lower == OptimizerNames.SGD.lower():
                         optimizer = torch.optim.SGD(
                             model.parameters(),
                             lr=opt_config.get('lr', 0.01),
                             momentum=opt_config.get('momentum', 0.0),
                             weight_decay=opt_config.get('weight_decay', 0.0)
                         )
-                    elif optimizer_name.lower() == 'adam':
+                    elif opt_lower == OptimizerNames.ADAM.lower():
                         # Use AdamW for decoupled weight decay when weight_decay > 0
                         # Original Adam couples weight decay with adaptive LR (Loshchilov & Hutter 2019)
                         wd = opt_config.get('weight_decay', 0.0)
@@ -482,14 +496,14 @@ def run_label_noise_ablation(
                                 betas=(opt_config.get('beta1', 0.9), opt_config.get('beta2', 0.999)),
                                 weight_decay=0.0
                             )
-                    elif optimizer_name.lower() == 'adamw':
+                    elif opt_lower == OptimizerNames.ADAMW.lower():
                         optimizer = torch.optim.AdamW(
                             model.parameters(),
                             lr=opt_config.get('lr', 0.001),
                             betas=(opt_config.get('beta1', 0.9), opt_config.get('beta2', 0.999)),
                             weight_decay=opt_config.get('weight_decay', 0.01)
                         )
-                    elif optimizer_name.lower() == 'sgd_momentum':
+                    elif opt_lower == OptimizerNames.SGD_MOMENTUM.lower():
                         optimizer = torch.optim.SGD(
                             model.parameters(),
                             lr=opt_config.get('lr', 0.01),
