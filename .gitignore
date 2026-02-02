@@ -25,8 +25,12 @@ ENV/
 *~
 
 # Data files (datasets download automatically)
-data/
+# CRITICAL: Only ignore top-level data/ directory, NOT src/data/
+/data/
 !data/generate_data.py
+# Explicitly allow src/data/ and its __init__.py
+!src/data/
+!src/data/__init__.py
 *.tar.gz
 *.zip
 *.h5
