@@ -246,6 +246,8 @@ from contextlib import contextmanager
 from src.core.retry import retry_with_backoff
 # Import centralized set_seed for consistency
 from src.core.training_utils import set_seed
+# Import tuning cache for hyperparameter result caching
+from src.core.tuning_cache import create_tuning_cache
 
 # Version-aware torch.load wrapper to maintain compatibility across PyTorch versions
 # Prefer centralized implementation in src.core.io_utils if available
@@ -2612,7 +2614,8 @@ def dice_coefficient(pred, target, smooth=1e-6):
 # ==============================================================================
 
 def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader,
-                        device, epochs=3, n_trials=10, seed=42):
+                        device, epochs=3, n_trials=10, seed=42, tuning_cache=None,
+                        dataset_name="MNIST", model_name="SimpleMLP"):
     """
     Quick hyperparameter tuning for an optimizer.
 
@@ -2634,10 +2637,22 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader
         epochs: Number of epochs for each trial
         n_trials: Number of tuning trials
         seed: Random seed
+        tuning_cache: Optional TuningCache instance for caching results
+        dataset_name: Dataset name for cache key (default: 'MNIST')
+        model_name: Model name for cache key (default: 'SimpleMLP')
 
     Returns:
         Dict with best hyperparameters
     """
+    # Check cache first
+    if tuning_cache is not None:
+        cached_params = tuning_cache.load_tuned_params(dataset_name, model_name, optimizer_name)
+        if cached_params is not None:
+            logging.info(f"  ✅ Using cached tuning results for {optimizer_name}")
+            return cached_params
+    
+    logging.info(f"  Tuning {optimizer_name}...")
+    
     # Fail-fast: val_loader MUST be provided and non-empty - prevents accidental test leakage
     if val_loader is None:
         raise ValueError(
@@ -2858,6 +2873,16 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader
 
     logging.info(f"    Best params: {best_params}")
     logging.info(f"    Best val acc: {best_value:.4f}")
+    
+    # Save to cache
+    if tuning_cache is not None:
+        metadata = {
+            "best_val_acc": best_value,
+            "n_trials": n_trials,
+            "epochs": epochs,
+            "seed": seed
+        }
+        tuning_cache.save_tuned_params(dataset_name, model_name, optimizer_name, best_params, metadata)
 
     return best_params
 
@@ -3005,6 +3030,9 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
 
             # Hyperparameter tuning (if enabled)
             tuned_params = {}
+            # Initialize tuning cache
+            tuning_cache = create_tuning_cache(results_dir) if not skip_tuning else None
+            
             if not skip_tuning:
                 logging.info("\nHYPERPARAMETER TUNING PHASE")
                 logging.info("-" * 80)
@@ -3069,10 +3097,10 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                 logging.info("This ensures fairness - all optimizers tuned with identical compute budget")
 
                 for opt_name in optimizers_to_tune:
-                    logging.info(f"  Tuning {opt_name}...")
                     tuned_params[opt_name] = quick_tune_optimizer(
                         opt_name, SimpleMLP, tune_loader, val_loader,
-                        device, epochs=tune_epochs, n_trials=n_trials, seed=seeds[0]
+                        device, epochs=tune_epochs, n_trials=n_trials, seed=seeds[0],
+                        tuning_cache=tuning_cache, dataset_name="MNIST", model_name="SimpleMLP"
                     )
 
                 logging.info("\nTuning complete!\n")
