@@ -94,7 +94,8 @@ class TuningCache:
         cache_file = self.cache_dir / cache_key
         
         if not cache_file.exists():
-            logger.debug(f"No cached tuning for {dataset}/{model}/{optimizer}")
+            logger.info(f"⏳ No cached tuning found for {optimizer} (first run) - will tune")
+            logger.debug(f"  Cache path: {cache_file}")
             return None
         
         try:
