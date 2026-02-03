@@ -3970,15 +3970,45 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
     epochs = 2 if ULTRA_QUICK_MODE else (20 if quick else 50)
     criterion = nn.CrossEntropyLoss()
 
-    # Multi-optimizer configuration
-    optimizers_config = [
-        (OptimizerNames.ADAM, 0.001),
-        (OptimizerNames.ADAMW, 0.001),
-        (OptimizerNames.SGD_MOMENTUM, 0.01),
-        (OptimizerNames.ADABOUND, 0.001),
-        (OptimizerNames.RADAM, 0.001),
-        (OptimizerNames.LAMB, 0.001),
-    ]
+    # Multi-optimizer configuration (default LRs as fallback)
+    default_lrs = {
+        OptimizerNames.ADAM: 0.001,
+        OptimizerNames.ADAMW: 0.001,
+        OptimizerNames.SGD_MOMENTUM: 0.01,
+        OptimizerNames.ADABOUND: 0.001,
+        OptimizerNames.RADAM: 0.001,
+        OptimizerNames.LAMB: 0.001,
+    }
+
+    # Hyperparameter tuning (if enabled)
+    tuned_params = {}
+    tuning_cache = create_tuning_cache(results_dir) if not skip_tuning else None
+
+    if not skip_tuning:
+        logging.info("\nCIFAR-10 HYPERPARAMETER TUNING PHASE")
+        logging.info("-" * 80)
+
+        # Create validation split for tuning (use train/val loaders already created)
+        n_trials = 5 if quick else 15
+        tune_epochs = 1 if ULTRA_QUICK_MODE else (2 if quick else 3)
+
+        optimizers_to_tune = list(default_lrs.keys())
+        logging.info(f"Tuning {len(optimizers_to_tune)} optimizers with n_trials={n_trials}, epochs={tune_epochs}")
+
+        for opt_name in optimizers_to_tune:
+            tuned_params[opt_name] = quick_tune_optimizer(
+                opt_name, lambda: ResNet18(num_classes=10), train_loader, val_loader,
+                device, epochs=tune_epochs, n_trials=n_trials, seed=seeds[0],
+                tuning_cache=tuning_cache, dataset_name="CIFAR10", model_name="ResNet18"
+            )
+
+        logging.info("\nCIFAR-10 tuning complete!\n")
+
+    # Build optimizers_config with tuned or default LRs
+    optimizers_config = []
+    for opt_name, default_lr in default_lrs.items():
+        lr = tuned_params.get(opt_name, {}).get('lr', default_lr)
+        optimizers_config.append((opt_name, lr))
 
     all_results = []
 
@@ -4553,15 +4583,36 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
     results_dir = Path(results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    # Optimizers to test - expanded to include all new optimizers
-    configs = [
-        (OptimizerNames.ADAMW, lr_adamw),
-        (OptimizerNames.ADAM, lr_adamw),
-        (OptimizerNames.SGD_MOMENTUM, lr_sgd),
-        (OptimizerNames.ADABOUND, lr_default),
-        (OptimizerNames.RADAM, lr_default),
-        (OptimizerNames.LAMB, lr_default),
-    ]
+    # Default LRs for each optimizer
+    default_lrs = {
+        OptimizerNames.ADAMW: lr_adamw,
+        OptimizerNames.ADAM: lr_adamw,
+        OptimizerNames.SGD_MOMENTUM: lr_sgd,
+        OptimizerNames.ADABOUND: lr_default,
+        OptimizerNames.RADAM: lr_default,
+        OptimizerNames.LAMB: lr_default,
+    }
+
+    # Hyperparameter tuning (if enabled)
+    # NOTE: NLP tuning is more expensive due to transformer models
+    # For full tuning, a separate tuning dataset subset is created
+    tuned_params = {}
+    tuning_cache = create_tuning_cache(results_dir) if not skip_tuning else None
+
+    # Build configs with tuned or default LRs
+    # Note: NLP experiment can use AUTO_LR in addition to cached tuned params
+    configs = []
+    for opt_name, default_lr in default_lrs.items():
+        if tuning_cache is not None:
+            cached = tuning_cache.load_tuned_params("IMDB", "DistilBERT", opt_name)
+            if cached:
+                lr = cached.get('lr', default_lr)
+                logging.info(f"NLP: Using cached LR for {opt_name}: {lr:.2e}")
+            else:
+                lr = default_lr
+        else:
+            lr = default_lr
+        configs.append((opt_name, lr))
 
     results = []
 
@@ -5550,15 +5601,71 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
         logging.warning("  Using synthetic data - NOT RECOMMENDED for research")
 
 
-    # Optimizers to test - expanded to include all new optimizers
-    configs = [
-        (OptimizerNames.ADAM, lr_adam),
-        (OptimizerNames.ADAMW, lr_adam),
-        (OptimizerNames.SGD_MOMENTUM, lr_sgd),
-        (OptimizerNames.ADABOUND, lr_default),
-        (OptimizerNames.RADAM, lr_default),
-        (OptimizerNames.LAMB, lr_default),
-    ]
+    # Default LRs for each optimizer
+    default_lrs = {
+        OptimizerNames.ADAM: lr_adam,
+        OptimizerNames.ADAMW: lr_adam,
+        OptimizerNames.SGD_MOMENTUM: lr_sgd,
+        OptimizerNames.ADABOUND: lr_default,
+        OptimizerNames.RADAM: lr_default,
+        OptimizerNames.LAMB: lr_default,
+    }
+
+    # Hyperparameter tuning (if enabled)
+    tuned_params = {}
+    tuning_cache = create_tuning_cache(results_dir) if not skip_tuning else None
+
+    if not skip_tuning:
+        logging.info("\nMEDICAL HYPERPARAMETER TUNING PHASE")
+        logging.info("-" * 80)
+
+        # Load dataset once for tuning with first seed
+        tune_seed = seeds[0] if seeds else 42
+        tune_train_ds, tune_test_ds = get_medical_datasets(
+            dataset_type=dataset_type,
+            num_train=200 if quick else 500,
+            num_test=50 if quick else 100,
+            img_size=img_size,
+            seed=tune_seed,
+            medmnist_name=medmnist_name,
+            kaggle_path=kaggle_path
+        )
+
+        # Create validation split for tuning
+        val_split = 0.15
+        ds_len = getattr(tune_train_ds, '__len__', lambda: 0)()
+        tune_train_size = int((1 - val_split) * ds_len)
+        tune_val_size = ds_len - tune_train_size
+        tune_train_split, tune_val_split = torch.utils.data.random_split(
+            tune_train_ds, [tune_train_size, tune_val_size],
+            generator=torch.Generator().manual_seed(tune_seed)
+        )
+
+        tune_train_loader = make_dataloader(tune_train_split, batch_size=train_bs, shuffle=True,
+                                            seed=tune_seed, **dl_kwargs)
+        tune_val_loader = make_dataloader(tune_val_split, batch_size=test_bs, shuffle=False,
+                                          seed=tune_seed, **dl_kwargs)
+
+        n_trials = 5 if quick else 15
+        tune_epochs = 1 if ULTRA_QUICK_MODE else (2 if quick else 3)
+
+        logging.info(f"Tuning {len(default_lrs)} optimizers with n_trials={n_trials}, epochs={tune_epochs}")
+
+        for opt_name in default_lrs.keys():
+            tuned_params[opt_name] = quick_tune_optimizer(
+                opt_name, lambda: UNet2D(in_channels=1, out_channels=1, features=[32, 64, 128]),
+                tune_train_loader, tune_val_loader,
+                device, epochs=tune_epochs, n_trials=n_trials, seed=tune_seed,
+                tuning_cache=tuning_cache, dataset_name="Medical", model_name="UNet2D"
+            )
+
+        logging.info("\nMedical tuning complete!\n")
+
+    # Build configs with tuned or default LRs
+    configs = []
+    for opt_name, default_lr in default_lrs.items():
+        lr = tuned_params.get(opt_name, {}).get('lr', default_lr)
+        configs.append((opt_name, lr))
 
     results = []
 
@@ -9117,6 +9224,42 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
     dl_kwargs = get_dataloader_kwargs()
 
     epochs = 2 if ULTRA_QUICK_MODE else (20 if quick else 50)
+    
+    results_dir = Path(results_dir)
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    # Hyperparameter tuning (if enabled)
+    # Note: ResNet experiment currently uses a single optimizer (Adam)
+    # but we prepare tuning cache for future multi-optimizer support
+    tuned_params = {}
+    tuning_cache = create_tuning_cache(results_dir) if not skip_tuning else None
+
+    default_lr = 0.001
+    if tuning_cache is not None and not skip_tuning:
+        logging.info("\nRESNET18 HYPERPARAMETER TUNING PHASE")
+        logging.info("-" * 80)
+
+        # Create loaders for tuning with first seed
+        tune_seed = seeds[0] if seeds else 42
+        tune_train_loader = make_dataloader(train_dataset_split, batch_size=train_bs, shuffle=True,
+                                            seed=tune_seed, **dl_kwargs)
+        tune_val_loader = make_dataloader(val_dataset, batch_size=test_bs, shuffle=False,
+                                          seed=tune_seed, **dl_kwargs)
+
+        n_trials = 5 if quick else 15
+        tune_epochs = 1 if ULTRA_QUICK_MODE else (2 if quick else 3)
+
+        tuned_params[OptimizerNames.ADAM] = quick_tune_optimizer(
+            OptimizerNames.ADAM, lambda: ResNet18(num_classes=10),
+            tune_train_loader, tune_val_loader,
+            device, epochs=tune_epochs, n_trials=n_trials, seed=tune_seed,
+            tuning_cache=tuning_cache, dataset_name="CIFAR10_ResNet", model_name="ResNet18"
+        )
+        logging.info("\nResNet18 tuning complete!\n")
+
+    # Get tuned or default LR
+    tuned_lr = tuned_params.get(OptimizerNames.ADAM, {}).get('lr', default_lr)
+
     all_results = []
 
     for seed in seeds:
@@ -9132,7 +9275,7 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
 
         model = ResNet18(num_classes=10)
         model = safe_device_transfer(model, device, operation=f"ResNet18 seed={seed}")
-        optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=0.0001)
+        optimizer = optim.Adam(model.parameters(), lr=tuned_lr, weight_decay=0.0001)
         criterion = nn.CrossEntropyLoss()
 
         results = []
