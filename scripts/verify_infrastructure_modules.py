@@ -13,6 +13,10 @@ import sys
 import inspect
 from pathlib import Path
 
+# Add project root to path
+project_root = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(project_root))
+
 
 def verify_module_structure():
     """Verify that all infrastructure modules exist and are importable."""
@@ -137,6 +141,53 @@ def verify_module_structure():
         print(f"❌ FAILED: {init_path} does not exist")
         return False
     
+    # Check 5: Verify core modules
+    print("\n5. VERIFYING src/core/tuning_cache.py")
+    print("-" * 80)
+    try:
+        from src.core.tuning_cache import TuningCache, create_tuning_cache
+        
+        print(f"✅ Module: {TuningCache.__module__}")
+        print(f"✅ TuningCache.__init__ signature: {inspect.signature(TuningCache.__init__)}")
+        print(f"✅ create_tuning_cache signature: {inspect.signature(create_tuning_cache)}")
+        
+        # Check TuningCache methods
+        required_methods = ['save_tuned_params', 'load_tuned_params', 'get_cache_key']
+        for method in required_methods:
+            if hasattr(TuningCache, method):
+                print(f"✅ TuningCache.{method} exists")
+            else:
+                print(f"❌ TuningCache.{method} MISSING")
+                return False
+        
+        print("✅ tuning_cache.py: ALL CHECKS PASSED")
+        
+    except ImportError as e:
+        print(f"❌ FAILED: Cannot import tuning_cache: {e}")
+        return False
+    except Exception as e:
+        print(f"❌ FAILED: Unexpected error: {e}")
+        return False
+    
+    # Check 6: Verify resume_utils
+    print("\n6. VERIFYING src/core/resume_utils.py")
+    print("-" * 80)
+    try:
+        from src.core.resume_utils import compute_run_signature, decide_resume_action, results_exist
+        
+        print(f"✅ compute_run_signature signature: {inspect.signature(compute_run_signature)}")
+        print(f"✅ decide_resume_action signature: {inspect.signature(decide_resume_action)}")
+        print(f"✅ results_exist signature: {inspect.signature(results_exist)}")
+        
+        print("✅ resume_utils.py: ALL CHECKS PASSED")
+        
+    except ImportError as e:
+        print(f"❌ FAILED: Cannot import resume_utils: {e}")
+        return False
+    except Exception as e:
+        print(f"❌ FAILED: Unexpected error: {e}")
+        return False
+    
     # Final summary
     print("\n" + "=" * 80)
     print("✅ ALL VERIFICATION CHECKS PASSED")
@@ -146,6 +197,8 @@ def verify_module_structure():
     print("  • checkpoint_utils.py: 1 class + 3 functions")
     print("  • parallel_experiment_runner.py: 1 class + 2 functions")
     print("  • __init__.py: Package structure defined")
+    print("  • tuning_cache.py: 1 class + 1 function")
+    print("  • resume_utils.py: 3 functions")
     print("\nAll modules are importable and have the expected structure.")
     print("=" * 80)
     
@@ -277,6 +330,8 @@ def main():
     print("║" + "    • src/utils/checkpoint_utils.py".center(78) + "║")
     print("║" + "    • src/utils/parallel_experiment_runner.py".center(78) + "║")
     print("║" + "    • src/utils/__init__.py".center(78) + "║")
+    print("║" + "    • src/core/tuning_cache.py".center(78) + "║")
+    print("║" + "    • src/core/resume_utils.py".center(78) + "║")
     print("║" + " " * 78 + "║")
     print("╚" + "=" * 78 + "╝")
     print("\n")
