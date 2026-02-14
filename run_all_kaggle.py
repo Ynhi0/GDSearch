@@ -5160,6 +5160,19 @@ def run_nlp_experiment_simple(results_dir: Union[str, Path] = "results_nlp", see
     This function provides a complete NLP benchmark that works even when HuggingFace
     models are unavailable (401 errors, network issues, etc.)
     """
+    # Import set_seed at function level to ensure it's always available
+    try:
+        from src.core.training_utils import set_seed
+    except ImportError:
+        # Fallback: define a simple set_seed function
+        def set_seed(seed):
+            import random
+            random.seed(seed)
+            np.random.seed(seed)
+            torch.manual_seed(seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(seed)
+    
     print("\n" + "="*80)
     print("NLP SENTIMENT ANALYSIS EXPERIMENT (Local Models)")
     print("="*80)
@@ -5653,7 +5666,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
 
         for opt_name in default_lrs.keys():
             tuned_params[opt_name] = quick_tune_optimizer(
-                opt_name, lambda: UNet2D(in_channels=1, out_channels=1, features=[32, 64, 128]),
+                opt_name, lambda: UNet2D(in_channels=3, out_channels=1, features=[32, 64, 128]),  # PathMNIST is RGB
                 tune_train_loader, tune_val_loader,
                 device, epochs=tune_epochs, n_trials=n_trials, seed=tune_seed,
                 tuning_cache=tuning_cache, dataset_name="Medical", model_name="UNet2D"
@@ -5714,7 +5727,8 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                                           seed=seed, **dl_kwargs)
 
             # Initialize U-Net model
-            model = UNet2D(in_channels=1, out_channels=1, features=[32, 64, 128])
+            # PathMNIST is RGB (3 channels), not grayscale
+            model = UNet2D(in_channels=3, out_channels=1, features=[32, 64, 128])
             model = safe_device_transfer(model, device, operation=f"Medical {opt_name} seed {seed}")
 
             # Setup optimizer with all variants
@@ -8138,8 +8152,10 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=None, resum
             model = SimpleMLP()
             model = safe_device_transfer(model, device, operation=f"SAM rho ablation rho={rho}")
             sam_params = get_default_hyperparameters('SAM_SGD', 'resnet_cifar10')
+            # Extract rho from sam_params since it's not a valid SGD parameter
+            sam_rho = sam_params.pop('rho', 0.05)  # Remove rho, use as SAM parameter
             # SAMWrapper wraps a base optimizer instance
-            base_optimizer = optim.SGD(model.parameters(), **sam_params)
+            base_optimizer = optim.SGD(model.parameters(), **sam_params)  # Now sam_params only has SGD-valid params
             optimizer = SAMWrapper(base_optimizer, rho=rho)  # Override rho for sensitivity analysis
             criterion = nn.CrossEntropyLoss()
 
@@ -8258,10 +8274,15 @@ def run_ablation_study(results_dir="results_ablation", seeds=None, resume=False)
                 optimizer = optim.Adam([x], **params)
             elif opt_name.startswith('SAM'):
                 # SAMWrapper wraps a base optimizer instance
-                base_opt = optim.SGD([x], **params)
-                optimizer = SAMWrapper(base_opt, rho=params.get('rho', 0.05))
+                # Extract rho since it's not a valid SGD parameter
+                sam_rho = params.pop('rho', 0.05) if 'rho' in params else 0.05
+                params_copy = params.copy()  # Don't modify original params
+                params_copy.pop('rho', None)  # Remove rho if present
+                base_opt = optim.SGD([x], **params_copy)
+                optimizer = SAMWrapper(base_opt, rho=sam_rho)
             if optimizer is None:
                 raise ValueError(f"Unsupported optimizer: {opt_name}")
+
             max_iter = 1000
             for i in range(max_iter):
                 optimizer.zero_grad()  # type: ignore[union-attr]
