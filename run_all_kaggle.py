@@ -5250,14 +5250,8 @@ def run_nlp_experiment_simple(results_dir: Union[str, Path] = "results_nlp", see
 
         # Generate synthetic sentiment data
         # Ensure reproducibility by seeding RNGs deterministically using the provided seeds list
-        try:
-            from src.core.training_utils import set_seed
-            seed0 = seeds[0] if seeds else 42
-            set_seed(seed0)
-        except Exception as e:
-            logging.debug("Could not use training_utils.set_seed, falling back to np.random.seed: %s", e, exc_info=True)
-            # If seeding utilities unavailable, fall back to NumPy seeding
-            np.random.seed(42)
+        seed0 = seeds[0] if seeds else 42
+        set_seed(seed0)  # Use the set_seed already imported/defined at function start
 
         positive_templates = [
             "This movie is amazing and wonderful",
@@ -5627,6 +5621,9 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
     # Hyperparameter tuning (if enabled)
     tuned_params = {}
     tuning_cache = create_tuning_cache(results_dir) if not skip_tuning else None
+    
+    # Initialize n_channels with default (will be updated from data during tuning or main loop)
+    n_channels = 3  # Default to RGB (PathMNIST standard)
 
     if not skip_tuning:
         logging.info("\nMEDICAL HYPERPARAMETER TUNING PHASE")
@@ -5659,6 +5656,19 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
         tune_val_loader = make_dataloader(tune_val_split, batch_size=test_bs, shuffle=False,
                                           seed=tune_seed, **dl_kwargs)
 
+        # Detect number of channels from training data (PathMNIST=3, Synthetic=1, etc.)
+        try:
+            sample_img, _ = tune_train_split[0] if hasattr(tune_train_split, '__getitem__') else tune_train_ds[0]
+            if torch.is_tensor(sample_img):
+                n_channels = sample_img.shape[0] if sample_img.ndim >= 3 else 1
+            else:
+                sample_img = torch.tensor(sample_img) if not isinstance(sample_img, torch.Tensor) else sample_img
+                n_channels = sample_img.shape[0] if sample_img.ndim >= 3 else 1
+            logging.info(f"Medical dataset: Detected {n_channels} input channel(s)")
+        except Exception as e:
+            logging.warning(f"Could not detect channels from data: {e}. Defaulting to 3 channels (RGB)")
+            n_channels = 3
+
         n_trials = 5 if quick else 15
         tune_epochs = 1 if ULTRA_QUICK_MODE else (2 if quick else 3)
 
@@ -5666,7 +5676,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
 
         for opt_name in default_lrs.keys():
             tuned_params[opt_name] = quick_tune_optimizer(
-                opt_name, lambda: UNet2D(in_channels=3, out_channels=1, features=[32, 64, 128]),  # PathMNIST is RGB
+                opt_name, lambda ch=n_channels: UNet2D(in_channels=ch, out_channels=1, features=[32, 64, 128]),
                 tune_train_loader, tune_val_loader,
                 device, epochs=tune_epochs, n_trials=n_trials, seed=tune_seed,
                 tuning_cache=tuning_cache, dataset_name="Medical", model_name="UNet2D"
@@ -5726,9 +5736,23 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
             test_loader = make_dataloader(test_ds, batch_size=test_bs, shuffle=False,
                                           seed=seed, **dl_kwargs)
 
-            # Initialize U-Net model
-            # PathMNIST is RGB (3 channels), not grayscale
-            model = UNet2D(in_channels=3, out_channels=1, features=[32, 64, 128])
+            # Dynamically detect input channels from actual data (PathMNIST=3, Synthetic=1, etc.)
+            # Update n_channels for this seed's dataset in case it differs
+            try:
+                sample_img, _ = train_ds_split[0] if hasattr(train_ds_split, '__getitem__') else train_ds[0]
+                if torch.is_tensor(sample_img):
+                    detected_channels = sample_img.shape[0] if sample_img.ndim >= 3 else 1
+                else:
+                    # Fallback: convert to tensor if needed
+                    sample_img = torch.tensor(sample_img) if not isinstance(sample_img, torch.Tensor) else sample_img
+                    detected_channels = sample_img.shape[0] if sample_img.ndim >= 3 else 1
+                if detected_channels != n_channels:
+                    logging.info(f"Seed {seed}: Detected {detected_channels} channel(s), updating from {n_channels}")
+                    n_channels = detected_channels
+            except Exception as e:
+                logging.warning(f"Could not detect channels from data: {e}. Using n_channels={n_channels}")
+
+            model = UNet2D(in_channels=n_channels, out_channels=1, features=[32, 64, 128])
             model = safe_device_transfer(model, device, operation=f"Medical {opt_name} seed {seed}")
 
             # Setup optimizer with all variants
@@ -7985,11 +8009,15 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, resume
         if opt_name == 'SAM_SGD':
             # Construct a SAMWrapper wrapping a concrete base optimizer instance
             def _sam_factory(params, hp=hyperparams):
+                # Extract SAM-specific parameters before passing to SGD
+                hp_clean = hp.copy()
+                sam_rho = hp_clean.pop('rho', 0.05)
+                sam_adaptive = hp_clean.pop('adaptive', False)
                 try:
-                    base_opt = optim.SGD(params, **hp)
+                    base_opt = optim.SGD(params, **hp_clean)
                 except TypeError:
-                    base_opt = optim.SGD(params, lr=hp.get('lr', 0.01))
-                return SAMWrapper(base_opt, rho=hp.get('rho', 0.05), adaptive=hp.get('adaptive', False))
+                    base_opt = optim.SGD(params, lr=hp_clean.get('lr', 0.01))
+                return SAMWrapper(base_opt, rho=sam_rho, adaptive=sam_adaptive)
             optimizers_robust.append((opt_name, _sam_factory))
         elif opt_name == 'SGD':
             optimizers_robust.append((opt_name, lambda params, hp=hyperparams: optim.SGD(params, **hp)))
@@ -8275,9 +8303,9 @@ def run_ablation_study(results_dir="results_ablation", seeds=None, resume=False)
             elif opt_name.startswith('SAM'):
                 # SAMWrapper wraps a base optimizer instance
                 # Extract rho since it's not a valid SGD parameter
-                sam_rho = params.pop('rho', 0.05) if 'rho' in params else 0.05
-                params_copy = params.copy()  # Don't modify original params
-                params_copy.pop('rho', None)  # Remove rho if present
+                params_copy = params.copy()  # Create copy first to avoid modifying original
+                sam_rho = params_copy.pop('rho', 0.05)  # Remove SAM-specific params
+                params_copy.pop('adaptive', None)  # Remove other SAM-specific params
                 base_opt = optim.SGD([x], **params_copy)
                 optimizer = SAMWrapper(base_opt, rho=sam_rho)
             if optimizer is None:
@@ -9489,11 +9517,15 @@ def run_highdim_experiment(results_dir="results_highdim", seeds=None, quick=Fals
         hyperparams = get_default_hyperparameters(opt_name, "highdim_optimization")
         if opt_name == 'SAM_SGD':
             def _sam_factory(params, hp=hyperparams):
+                # Extract SAM-specific parameters before passing to SGD
+                hp_clean = hp.copy()
+                sam_rho = hp_clean.pop('rho', 0.05)
+                sam_adaptive = hp_clean.pop('adaptive', False)
                 try:
-                    base_opt = optim.SGD(params, **hp)
+                    base_opt = optim.SGD(params, **hp_clean)
                 except TypeError:
-                    base_opt = optim.SGD(params, lr=hp.get('lr', 0.01))
-                return SAMWrapper(base_opt, rho=hp.get('rho', 0.05), adaptive=hp.get('adaptive', False))
+                    base_opt = optim.SGD(params, lr=hp_clean.get('lr', 0.01))
+                return SAMWrapper(base_opt, rho=sam_rho, adaptive=sam_adaptive)
             optimizers_config.append((opt_name, _sam_factory))
         elif opt_name == OptimizerNames.SGD:
             optimizers_config.append((opt_name, lambda params, hp=hyperparams: optim.SGD(params, **hp)))
