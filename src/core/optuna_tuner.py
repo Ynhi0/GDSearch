@@ -71,7 +71,7 @@ class OptunaHyperparameterTuner:
             objective_fn: Function to optimize (takes trial, returns metric)
             direction: "maximize" or "minimize"
             study_name: Name for the optimization study
-            storage: Database URL for distributed optimization (optional)
+            storage: Database URL for distributed optimization (optional, defaults to SQLite)
             sampler: Sampling algorithm ("tpe", "random", "grid")
             pruner: Pruning algorithm ("median", "percentile", None)
             n_startup_trials: Number of random trials before TPE
@@ -113,25 +113,35 @@ class OptunaHyperparameterTuner:
         else:
             raise ValueError(f"Unknown pruner: {pruner}")
 
-        # Create study
-        # Changed default to load_if_exists=False to prevent contamination
-        # Users must explicitly set study_name with timestamp/UUID for shared storage
-        # or accept risk of reusing old trials
+        # Set up persistent storage if not provided
+        if storage is None:
+            # Create SQLite database for persistent storage
+            storage_dir = Path("results/optuna_studies")
+            storage_dir.mkdir(parents=True, exist_ok=True)
+            storage_path = storage_dir / f"{study_name}.db"
+            storage = f"sqlite:///{storage_path}"
+            logging.info(f"Using SQLite storage: {storage_path}")
+
+        # Create study with persistence enabled
+        # load_if_exists=True allows resuming existing studies
         self.study = optuna.create_study(
             study_name=study_name,
             direction=direction,
             sampler=self.sampler,
             pruner=self.pruner,
             storage=storage,
-            load_if_exists=False  # Prevents accidental trial contamination
+            load_if_exists=True  # Enable resuming existing studies
         )
 
-        if storage is not None:
-            logging.warning(
-                f"Using shared storage with study_name='{study_name}'. "
-                f"To prevent trial contamination, ensure study_name is unique (include timestamp/UUID). "
-                f"If you want to resume an existing study, manually set load_if_exists=True in create_study() call."
+        # Log study status
+        n_existing_trials = len(self.study.trials)
+        if n_existing_trials > 0:
+            logging.info(
+                f"Loaded existing study '{study_name}' with {n_existing_trials} trials. "
+                f"New trials will continue from trial {n_existing_trials}."
             )
+        else:
+            logging.info(f"Created new study '{study_name}'. Trials will be saved to: {storage}")
 
     def optimize(
         self,
