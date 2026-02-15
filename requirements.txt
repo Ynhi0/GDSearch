@@ -44,6 +44,8 @@ seaborn==0.13.2  # PINNED: Statistical visualization
 # ============================================================================
 # UTILITIES - COMPATIBLE RANGES
 # ============================================================================
+SQLAlchemy>=1.4,<2.2  # Pin to compatible major for Alembic/MLflow
+alembic>=1.8,<2.0     # Alembic migration tooling (compatible with SQLAlchemy 1.4 - 2.1)
 tqdm>=4.66.0,<5.0
 click>=7.0,<9.0,!=8.3.0
 rich>=12.4.4,<14.0

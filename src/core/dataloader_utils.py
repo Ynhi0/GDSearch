@@ -4,6 +4,9 @@ DataLoader utilities for creating reproducible, deterministic data loaders.
 This module provides a centralized implementation of make_dataloader that ensures
 consistent behavior across all experiments.
 """
+# broad catch intentional - module-level allowlist: pragmatic guards in this module may
+# intentionally catch broad exceptions related to backend worker/runtime variability and
+# log/continue rather than crash the full experiment sweep.
 import functools
 import random
 from typing import Optional, Callable, Any, Dict

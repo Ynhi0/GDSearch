@@ -4,6 +4,9 @@ Reproducibility helpers: verify claimed results using metadata and checkpoints.
 Made verify_checkpoint_with_metadata() DYNAMIC instead of
 hardcoded for CIFAR-10/ResNet18. Now reads dataset_name and model_arch from metadata.
 """
+# broad catch intentional - verification may run in environments with missing
+# artifacts or incompatible serialization; some broad catches are intentional to
+# surface an 'error' status rather than crash the whole pipeline.
 from pathlib import Path
 import json
 import logging

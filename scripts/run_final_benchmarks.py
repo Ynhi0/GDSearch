@@ -33,7 +33,7 @@ from src.experiments.run_optimizer_ablation import run_optimizer_ablation
 from src.core.test_functions import Rosenbrock, IllConditionedQuadratic, SaddlePoint
 
 
-def run_mnist_experiments(seeds: Optional[List[int]] = None, results_dir: str = 'results'):
+def run_mnist_experiments(seeds: Optional[List[int]] = None, results_dir: str = 'results') -> None:
     """
     Run comprehensive MNIST experiments with multiple optimizers and seeds.
 
@@ -131,7 +131,7 @@ def run_mnist_experiments(seeds: Optional[List[int]] = None, results_dir: str = 
     return results_files
 
 
-def run_statistical_analysis(results_dir: str = 'results', plots_dir: str = 'plots'):
+def run_statistical_analysis(results_dir: str = 'results', plots_dir: str = 'plots') -> pd.DataFrame:
     """
     Run comprehensive statistical analysis on MNIST results.
     """
@@ -182,8 +182,9 @@ def run_statistical_analysis(results_dir: str = 'results', plots_dir: str = 'plo
     for opt_A, opt_B in comparison_pairs:
         print(f"\nComparing {opt_A} vs {opt_B}...")
 
-        pattern_A = f"*{opt_A}*seed*final.csv"
-        pattern_B = f"*{opt_B}*seed*final.csv"
+        # FIX: Match actual result filename format: Model_Dataset_Optimizer_lr<lr>_seed<seed>_<tag>.csv
+        pattern_A = f"*{opt_A}*seed*.csv"
+        pattern_B = f"*{opt_B}*seed*.csv"
 
         files_A = glob.glob(os.path.join(results_dir, pattern_A))
         files_B = glob.glob(os.path.join(results_dir, pattern_B))
@@ -293,7 +294,7 @@ def run_statistical_analysis(results_dir: str = 'results', plots_dir: str = 'plo
     return df_stats
 
 
-def run_2d_experiments(results_dir: str = 'results'):
+def run_2d_experiments(results_dir: str = 'results') -> None:
     """
     Run comprehensive 2D optimization experiments.
     """
@@ -323,7 +324,7 @@ def run_2d_experiments(results_dir: str = 'results'):
     print(f"✅ Completed {len(configs)} 2D experiments")
 
 
-def run_robustness_analysis(results_dir: str = 'results', plots_dir: str = 'plots'):
+def run_robustness_analysis(results_dir: str = 'results', plots_dir: str = 'plots') -> None:
     """
     Run initial condition robustness analysis.
     """
@@ -371,7 +372,7 @@ def run_robustness_analysis(results_dir: str = 'results', plots_dir: str = 'plot
     print("✅ Robustness analysis complete")
 
 
-def run_ablation_study(results_dir: str = 'results', plots_dir: str = 'plots'):
+def run_ablation_study(results_dir: str = 'results', plots_dir: str = 'plots') -> None:
     """
     Run optimizer ablation study.
     """
@@ -393,7 +394,7 @@ def run_ablation_study(results_dir: str = 'results', plots_dir: str = 'plots'):
     print("✅ Ablation study complete")
 
 
-def main():
+def main() -> None:
     """
     Run all benchmark-quality experiments.
     """

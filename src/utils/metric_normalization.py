@@ -9,6 +9,7 @@ AUDIT FIX: Addresses metric naming inconsistencies found during audit.
 
 from typing import Union, List, Optional
 import pandas as pd
+import numpy as np
 import logging
 
 
@@ -84,8 +85,12 @@ def get_metric_column(df: pd.DataFrame, metric: str, strict: bool = False) -> Op
     # Try all aliases
     if standard in METRIC_ALIASES:
         for alias in METRIC_ALIASES[standard]:
-            # Use scalar comparison to avoid pandas ambiguity
-            if isinstance(df.columns, pd.Index) and alias in df.columns:
+            # BUG FIX: Use .tolist() to avoid pandas ambiguity in 'in' operator
+            if isinstance(df.columns, pd.Index):
+                if alias in df.columns.tolist():
+                    logging.debug("Found metric '%s' as alias '%s'", metric, alias)
+                    return alias
+            elif alias in df.columns:
                 logging.debug("Found metric '%s' as alias '%s'", metric, alias)
                 return alias
 
@@ -97,57 +102,61 @@ def get_metric_column(df: pd.DataFrame, metric: str, strict: bool = False) -> Op
     return None
 
 
-def extract_metric(df: pd.DataFrame, metric: str, default=None) -> Union[float, pd.Series, None]:
+def extract_metric(df: pd.DataFrame, metric: str, default=None, aggregation: str = 'last') -> Union[float, None]:
     """
     Extract metric value from DataFrame, handling aliases automatically.
-
-    For single-row DataFrames, returns scalar value.
-    For multi-row DataFrames, returns Series.
-
+    
     Args:
         df: DataFrame containing metrics
         metric: Metric name (standard or alias)
         default: Value to return if metric not found
-
+        aggregation: How to handle multi-row data ('last', 'mean', 'min', 'max', 'first')
+    
     Returns:
-        Metric value(s) or default
-
-    Example:
-        >>> df = pd.DataFrame({'test_acc': [0.92]})
-        >>> extract_metric(df, 'test_accuracy')
-        0.92
+        Scalar metric value or default (never returns Series)
     """
     col = get_metric_column(df, metric, strict=False)
-
+    
     if col is None:
         return default
-
+    
     values = df[col]
-
-    # If we accidentally got a DataFrame slice, collapse it when possible
+    
+    # Collapse DataFrame to Series if needed
     if isinstance(values, pd.DataFrame):
         if values.shape[1] == 1:
-            # Convert single-column DataFrame into a Series using column label (avoids tuple indexing)
-            col_label = values.columns[0]
-            # Column access returns a Series for a single-column DataFrame; silence indexing overload false-positive
-            values = values[col_label]  # type: ignore[index]
+            values = values.iloc[:, 0]
         else:
-            # Ambiguous multi-column selection: return default to be safe
+            logging.warning(f"Ambiguous metric '{metric}' returned multiple columns, using default")
             return default
-
-    # Return scalar for single-value Series (coerce numpy scalars to Python floats)
+    
+    # Single-value Series: return scalar
     if isinstance(values, pd.Series) and len(values) == 1:
         v = values.iloc[0]
-        try:
+        if isinstance(v, (int, float, np.integer, np.floating)):
             return float(v)
-        except (TypeError, ValueError):
-            return v
-
-    # Guard: if we still have a DataFrame here for some reason, treat as ambiguous and return default
-    if isinstance(values, pd.DataFrame):
         return default
-
-    return values
+    
+    # Multi-value Series: aggregate
+    if isinstance(values, pd.Series) and len(values) > 1:
+        valid_values = values.dropna()
+        if len(valid_values) == 0:
+            return default
+        
+        if aggregation == 'last':
+            return float(valid_values.iloc[-1])
+        elif aggregation == 'first':
+            return float(valid_values.iloc[0])
+        elif aggregation == 'mean':
+            return float(valid_values.mean())
+        elif aggregation == 'min':
+            return float(valid_values.min())
+        elif aggregation == 'max':
+            return float(valid_values.max())
+        else:
+            raise ValueError(f"Unknown aggregation: {aggregation}")
+    
+    return default
 
 
 def normalize_dataframe_columns(df: pd.DataFrame, inplace: bool = False) -> pd.DataFrame:

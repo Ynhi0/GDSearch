@@ -92,16 +92,10 @@ def _collect_runs() -> pd.DataFrame:
 def _scatter(df: pd.DataFrame, x: str, y: str, title: str, out_png: Path):
     fig, ax = plt.subplots(figsize=(8, 6))
     # distinct markers/colors by optimizer
-    opt_col = df.get('optimizer', np.array([]))
-    if hasattr(opt_col, 'dropna'):
-        opts = sorted(opt_col.dropna().unique())
+    if 'optimizer' in df.columns:
+        opts = sorted(df['optimizer'].dropna().unique())
     else:
-        arr = np.asarray(opt_col)
-        try:
-            arr = arr[~pd.isna(arr)]
-        except Exception as e:
-            logging.debug("_scatter: filtering NA failed: %s", e, exc_info=True)
-        opts = sorted(np.unique(arr).tolist())
+        opts = []
     cmap = plt.cm.get_cmap('tab10', max(1, len(opts)))
     for i, opt in enumerate(opts):
         sub = df[df['optimizer'] == opt]
@@ -129,16 +123,10 @@ def main():
     logging.info("Saved: %s", summary_csv)
 
     # Per-dataset plots
-    ds_col = df.get('dataset', np.array([]))
-    if hasattr(ds_col, 'dropna'):
-        ds_list = sorted(ds_col.dropna().unique())
+    if 'dataset' in df.columns:
+        ds_list = sorted(df['dataset'].dropna().unique())
     else:
-        arr = np.asarray(ds_col)
-        try:
-            arr = arr[~pd.isna(arr)]
-        except Exception as e:
-            logging.debug("compute_tradeoffs: filtering NA failed for ds_col: %s", e, exc_info=True)
-        ds_list = sorted(np.unique(arr).tolist())
+        ds_list = []
 
     for dataset in ds_list:
         sub = df[df['dataset'] == dataset]
@@ -146,9 +134,8 @@ def main():
             continue
         sub = pd.DataFrame(sub)
         _scatter(sub, 'elapsed_seconds', 'final_test_acc', f"{dataset}: Accuracy vs Time", PLOTS_DIR / f"tradeoff_time_{dataset}.png")
-        col = sub.get('peak_gpu_mb', np.array([]))
-        arr = np.asarray(col)
-        if arr.size > 0 and np.any(~pd.isna(arr)):
+        # Check if peak_gpu_mb has non-null values before plotting
+        if 'peak_gpu_mb' in sub.columns and sub['peak_gpu_mb'].notna().any():
             _scatter(pd.DataFrame(sub), 'peak_gpu_mb', 'final_test_acc', f"{dataset}: Accuracy vs Peak GPU MB", PLOTS_DIR / f"tradeoff_memory_{dataset}.png")
     return 0
 

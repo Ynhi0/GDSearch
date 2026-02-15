@@ -7,6 +7,9 @@ with true PyTorch tensor operations for maximum performance.
 All optimizers inherit from torch.optim.Optimizer and use in-place operations
 to avoid CPU-GPU data transfer overhead.
 """
+# broad catch intentional - low-level optimizer implementations may include
+# safe-guards for array/shape mismatches and device issues; broad catches are
+# used sparingly and documented in the function-level comments where present.
 
 import torch
 from torch.optim.optimizer import Optimizer

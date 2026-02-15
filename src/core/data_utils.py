@@ -9,6 +9,7 @@ import torch
 import os
 from torch.utils.data import DataLoader, random_split, Subset
 from torchvision import datasets, transforms
+from src.utils.constants import MNIST_MEAN, MNIST_STD, CIFAR10_MEAN, CIFAR10_STD
 
 
 class TransformedSubset(torch.utils.data.Dataset):
@@ -66,29 +67,43 @@ def get_mnist_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optiona
         transform_train = transforms.Compose([
             transforms.Grayscale(num_output_channels=3),
             transforms.ToTensor(),
-            transforms.Normalize((0.1307, 0.1307, 0.1307), (0.3081, 0.3081, 0.3081)),
+            transforms.Normalize(MNIST_MEAN * 3, MNIST_STD * 3),
         ])
 
         transform_test = transforms.Compose([
             transforms.Grayscale(num_output_channels=3),
             transforms.ToTensor(),
-            transforms.Normalize((0.1307, 0.1307, 0.1307), (0.3081, 0.3081, 0.3081)),
+            transforms.Normalize(MNIST_MEAN * 3, MNIST_STD * 3),
         ])
     else:
         # Default behavior: single-channel MNIST transforms
         transform_train = transforms.Compose([
             transforms.ToTensor(),
-            transforms.Normalize((0.1307,), (0.3081,)),
+            transforms.Normalize(MNIST_MEAN, MNIST_STD),
         ])
 
         transform_test = transforms.Compose([
             transforms.ToTensor(),
-            transforms.Normalize((0.1307,), (0.3081,)),
+            transforms.Normalize(MNIST_MEAN, MNIST_STD),
         ])
 
     data_root = get_data_root()
     full_train_dataset = datasets.MNIST(root=data_root, train=True, download=True, transform=transform_train)
     test_dataset = datasets.MNIST(root=data_root, train=False, download=True, transform=transform_test)
+
+    # HIGH-PRIORITY FIX #5 (HIGH-1): Validate datasets are non-empty
+    from src.core.validation import validate_dataset, validate_batch_size as validate_batch_size_edge_cases
+    n_train = validate_dataset(full_train_dataset, min_samples=100, name="MNIST training")
+    n_test = validate_dataset(test_dataset, min_samples=100, name="MNIST test")
+    
+    # HIGH-PRIORITY FIX #6 (Data-4): Check batch size edge cases (dataset < batch_size)
+    if batch_size > n_train:
+        import logging
+        logging.warning(
+            f"Batch size ({batch_size}) > training dataset size ({n_train}). "
+            f"Adjusting batch size to {n_train}."
+        )
+        batch_size = n_train
 
     worker_seed = seed
     def _worker_init_fn(worker_id: int):
@@ -249,8 +264,8 @@ def get_cifar10_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optio
     import platform
     if platform.system() == 'Windows':
         num_workers = 0
-    mean = (0.4914, 0.4822, 0.4465)
-    std = (0.2470, 0.2435, 0.2616)
+    mean = CIFAR10_MEAN
+    std = CIFAR10_STD
 
     # GAP 21 FIX: Conditional augmentation for scientific rigor
     if augment:
@@ -277,6 +292,20 @@ def get_cifar10_loaders(batch_size: int = 128, num_workers: int = 2, seed: Optio
     data_root = get_data_root()
     full_train_dataset = datasets.CIFAR10(root=data_root, train=True, download=True, transform=transform_train)
     test_dataset = datasets.CIFAR10(root=data_root, train=False, download=True, transform=transform_test)
+
+    # HIGH-PRIORITY FIX #5 (HIGH-1): Validate datasets are non-empty
+    from src.core.validation import validate_dataset
+    n_train = validate_dataset(full_train_dataset, min_samples=100, name="CIFAR-10 training")
+    n_test = validate_dataset(test_dataset, min_samples=100, name="CIFAR-10 test")
+    
+    # HIGH-PRIORITY FIX #6 (Data-4): Check batch size edge cases
+    if batch_size > n_train:
+        import logging
+        logging.warning(
+            f"Batch size ({batch_size}) > training dataset size ({n_train}). "
+            f"Adjusting batch size to {n_train}."
+        )
+        batch_size = n_train
 
     worker_seed = seed
     def _worker_init_fn(worker_id: int):

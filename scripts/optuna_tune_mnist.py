@@ -23,6 +23,7 @@ import argparse
 import random
 import numpy as np
 from typing import Any, Union, cast
+from src.utils.constants import MNIST_MEAN, MNIST_STD
 
 
 def set_seed(seed: int):
@@ -256,7 +257,7 @@ def main():
     from torchvision.datasets import MNIST
     train_transform = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,))
+        transforms.Normalize(MNIST_MEAN, MNIST_STD)
     ])
 
     # Load full training set with consistent transforms

@@ -28,6 +28,7 @@ from torch.utils.data import DataLoader
 import torchvision
 import torchvision.transforms as transforms
 import numpy as np
+from src.utils.constants import MNIST_MEAN, MNIST_STD
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -67,17 +68,17 @@ def load_mnist_with_augmentation(
             transforms.RandomRotation(10),
             transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)),
             transforms.ToTensor(),
-            transforms.Normalize((0.1307,), (0.3081,))
+            transforms.Normalize(MNIST_MEAN, MNIST_STD)
         ])
     else:
         transform_train = transforms.Compose([
             transforms.ToTensor(),
-            transforms.Normalize((0.1307,), (0.3081,))
+            transforms.Normalize(MNIST_MEAN, MNIST_STD)
         ])
 
     transform_test = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,))
+        transforms.Normalize(MNIST_MEAN, MNIST_STD)
     ])
 
     # Use core data_utils function for consistent loading
@@ -158,15 +159,18 @@ def evaluate(model, loader, criterion, device):
     with torch.no_grad():
         for data, target in loader:
             data, target = data.to(device), target.to(device)
+            batch_size = data.size(0)
             output = model(data)
             loss = criterion(output, target)
-            total_loss += loss.item()
+            # BUG FIX: Weight loss by batch size for correct averaging
+            total_loss += loss.item() * batch_size
             _, predicted = torch.max(output.data, 1)
             total += target.size(0)
             correct += predicted.eq(target).sum().item()
 
     accuracy = 100.0 * correct / max(1, total)
-    avg_loss = total_loss / max(1, len(loader))
+    # BUG FIX: Divide by total samples, not number of batches
+    avg_loss = total_loss / max(1, total)
     return accuracy, avg_loss
 
 

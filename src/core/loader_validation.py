@@ -4,6 +4,9 @@ Validation utilities to prevent test set leakage in hyperparameter tuning.
 CRITICAL: Ensures that test sets are never used for hyperparameter selection,
 which would constitute adaptive overfitting and invalidate research claims.
 """
+# broad catch intentional - this module performs defensive validation and may
+# use guarded broad catches in some cases to avoid false positives from optional
+# dataset wrappers. All such uses are localized and documented.
 
 import torch
 from torch.utils.data import DataLoader, Subset

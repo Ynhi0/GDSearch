@@ -2,20 +2,49 @@
 Data Loading Module for GDSearch.
 
 Handles dataset loading, validation splits, and data provenance tracking.
+
+CRITICAL FIX: Uses TransformedSubset to prevent augmentation leakage into
+validation/test splits. Previously, validation sets inherited training
+augmentations (RandomCrop, RandomFlip), artificially inflating metrics.
 """
 
 import logging
 from pathlib import Path
 from typing import Tuple, Optional, Dict, Any
 import torch
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader
 import numpy as np
+from src.utils.constants import MNIST_MEAN, MNIST_STD, CIFAR10_MEAN, CIFAR10_STD
+
+# Import fixed subset class that prevents augmentation leakage
+from src.utils.transformed_subset import TransformedSubset, split_indices
+
+
+def _validate_dataset_not_empty(dataset, dataset_name: str):
+    """Validate dataset is not empty before creating DataLoader.
+    
+    Args:
+        dataset: Dataset to validate
+        dataset_name: Name for error message
+        
+    Raises:
+        ValueError: If dataset is empty
+    """
+    if len(dataset) == 0:
+        raise ValueError(
+            f"{dataset_name} is empty. Check data loading and preprocessing. "
+            "Cannot create DataLoader for empty dataset."
+        )
 
 
 def get_mnist_loaders(batch_size: int = 128, val_split: Optional[float] = None, 
                      seed: int = 42, num_workers: int = 0) -> Tuple:
     """
     Load MNIST dataset with optional validation split.
+    
+    FIXED: Validation split no longer inherits training transforms.
+    Both train and val use the same transform for MNIST (no augmentation),
+    but this pattern is important for CIFAR-10.
     
     Args:
         batch_size: Batch size for data loaders
@@ -29,31 +58,39 @@ def get_mnist_loaders(batch_size: int = 128, val_split: Optional[float] = None,
     """
     from torchvision import datasets, transforms
     
+    # MNIST doesn't typically use augmentation, but we use consistent pattern
     transform = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,))
+        transforms.Normalize(MNIST_MEAN, MNIST_STD)
     ])
     
-    train_dataset = datasets.MNIST('./data', train=True, download=True, transform=transform)
+    # Load raw datasets without transforms initially
+    train_dataset_raw = datasets.MNIST('./data', train=True, download=True, transform=None)
     test_dataset = datasets.MNIST('./data', train=False, transform=transform)
     
     if val_split is not None and val_split > 0:
         # Split training set into train and validation
-        n_train = len(train_dataset)
-        n_val = int(n_train * val_split)
-        n_train_actual = n_train - n_val
+        n_train = len(train_dataset_raw)
+        train_indices, val_indices = split_indices(n_train, val_split, seed)
         
-        # Reproducible split
-        generator = torch.Generator().manual_seed(seed)
-        indices = torch.randperm(n_train, generator=generator).tolist()
+        # Create subsets with explicit transforms (prevents inheritance bugs)
+        train_subset = TransformedSubset(train_dataset_raw, train_indices, transform)
+        val_subset = TransformedSubset(train_dataset_raw, val_indices, transform)
         
-        train_indices = indices[:n_train_actual]
-        val_indices = indices[n_train_actual:]
+        # Validate datasets are not empty
+        _validate_dataset_not_empty(train_subset, "MNIST training subset")
+        _validate_dataset_not_empty(val_subset, "MNIST validation subset")
+        _validate_dataset_not_empty(test_dataset, "MNIST test dataset")
         
-        train_subset = Subset(train_dataset, train_indices)
-        val_subset = Subset(train_dataset, val_indices)
+        # Adjust batch size if needed
+        effective_batch_size = min(batch_size, len(train_subset))
+        if effective_batch_size < batch_size:
+            logging.warning(
+                f"MNIST: Batch size {batch_size} > training set size {len(train_subset)}. "
+                f"Reducing to {effective_batch_size}."
+            )
         
-        train_loader = DataLoader(train_subset, batch_size=batch_size, 
+        train_loader = DataLoader(train_subset, batch_size=effective_batch_size, 
                                  shuffle=True, num_workers=num_workers)
         val_loader = DataLoader(val_subset, batch_size=batch_size, 
                                shuffle=False, num_workers=num_workers)
@@ -62,6 +99,8 @@ def get_mnist_loaders(batch_size: int = 128, val_split: Optional[float] = None,
         
         return train_loader, val_loader, test_loader
     else:
+        # No validation split - apply transform to full training set
+        train_dataset = datasets.MNIST('./data', train=True, download=True, transform=transform)
         train_loader = DataLoader(train_dataset, batch_size=batch_size, 
                                  shuffle=True, num_workers=num_workers)
         test_loader = DataLoader(test_dataset, batch_size=batch_size, 
@@ -75,6 +114,13 @@ def get_cifar10_loaders(batch_size: int = 128, val_split: Optional[float] = None
     """
     Load CIFAR-10 dataset with optional validation split.
     
+    CRITICAL FIX: Validation split NO LONGER inherits training augmentations.
+    - Train: Uses RandomCrop + RandomHorizontalFlip (augmentation)
+    - Val/Test: Uses only ToTensor + Normalize (NO augmentation)
+    
+    Previous bug: Subset(augmented_dataset) made validation inherit
+    RandomCrop/Flip, artificially inflating validation accuracy.
+    
     Args:
         batch_size: Batch size for data loaders
         val_split: Fraction of training data to use for validation
@@ -87,37 +133,47 @@ def get_cifar10_loaders(batch_size: int = 128, val_split: Optional[float] = None
     """
     from torchvision import datasets, transforms
     
+    # Training transform: WITH augmentation
     transform_train = transforms.Compose([
         transforms.RandomCrop(32, padding=4),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+        transforms.Normalize(CIFAR10_MEAN, CIFAR10_STD)
     ])
     
-    transform_test = transforms.Compose([
+    # Evaluation transform: NO augmentation (only normalization)
+    transform_eval = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+        transforms.Normalize(CIFAR10_MEAN, CIFAR10_STD)
     ])
     
-    train_dataset = datasets.CIFAR10('./data', train=True, download=True, 
-                                     transform=transform_train)
-    test_dataset = datasets.CIFAR10('./data', train=False, transform=transform_test)
+    # Load raw training data WITHOUT transform (apply later per subset)
+    train_dataset_raw = datasets.CIFAR10('./data', train=True, download=True, transform=None)
+    test_dataset = datasets.CIFAR10('./data', train=False, transform=transform_eval)
     
     if val_split is not None and val_split > 0:
-        n_train = len(train_dataset)
-        n_val = int(n_train * val_split)
-        n_train_actual = n_train - n_val
+        n_train = len(train_dataset_raw)
+        train_indices, val_indices = split_indices(n_train, val_split, seed)
         
-        generator = torch.Generator().manual_seed(seed)
-        indices = torch.randperm(n_train, generator=generator).tolist()
+        # CRITICAL: Use TransformedSubset to apply DIFFERENT transforms
+        # Train gets augmentation, validation gets ONLY normalization
+        train_subset = TransformedSubset(train_dataset_raw, train_indices, transform_train)
+        val_subset = TransformedSubset(train_dataset_raw, val_indices, transform_eval)  # ← NO augmentation!
         
-        train_indices = indices[:n_train_actual]
-        val_indices = indices[n_train_actual:]
+        # Validate datasets are not empty
+        _validate_dataset_not_empty(train_subset, "CIFAR-10 training subset")
+        _validate_dataset_not_empty(val_subset, "CIFAR-10 validation subset")
+        _validate_dataset_not_empty(test_dataset, "CIFAR-10 test dataset")
         
-        train_subset = Subset(train_dataset, train_indices)
-        val_subset = Subset(train_dataset, val_indices)
+        # Adjust batch size if needed
+        effective_batch_size = min(batch_size, len(train_subset))
+        if effective_batch_size < batch_size:
+            logging.warning(
+                f"CIFAR-10: Batch size {batch_size} > training set size {len(train_subset)}. "
+                f"Reducing to {effective_batch_size}."
+            )
         
-        train_loader = DataLoader(train_subset, batch_size=batch_size,
+        train_loader = DataLoader(train_subset, batch_size=effective_batch_size,
                                  shuffle=True, num_workers=num_workers)
         val_loader = DataLoader(val_subset, batch_size=batch_size,
                                shuffle=False, num_workers=num_workers)
@@ -126,6 +182,9 @@ def get_cifar10_loaders(batch_size: int = 128, val_split: Optional[float] = None
         
         return train_loader, val_loader, test_loader
     else:
+        # No validation split - apply training transform to full set
+        train_dataset = datasets.CIFAR10('./data', train=True, download=True, 
+                                         transform=transform_train)
         train_loader = DataLoader(train_dataset, batch_size=batch_size,
                                  shuffle=True, num_workers=num_workers)
         test_loader = DataLoader(test_dataset, batch_size=batch_size,

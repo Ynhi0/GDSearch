@@ -387,8 +387,10 @@ def plot_trajectory_3d(df: Union[pd.DataFrame, ArrayLike], test_function: TwoDTe
         plt.show()
 
 
-def trajectory_grid_adam(beta1_values, beta2_values, lr=0.01, a=1, b=100, initial=(-1.5, 2.0), num_iterations=2000, seed=42, save_path=None):
+def trajectory_grid_adam(beta1_values, beta2_values, lr=0.01, a=1, b=100, initial=(-1.5, 2.0), num_iterations=2000, seed=None, save_path=None):
     """Generate a grid of trajectory plots for Adam with varying beta1 rows and beta2 columns on Rosenbrock."""
+    if seed is None:
+        raise ValueError("seed parameter is required for reproducibility")
     func = Rosenbrock(a=a, b=b)
     nrows = len(beta1_values)
     ncols = len(beta2_values)
@@ -439,8 +441,10 @@ def trajectory_grid_adam(beta1_values, beta2_values, lr=0.01, a=1, b=100, initia
         plt.show()
 
 
-def trajectory_series_momentum(betas, lr=0.01, a=1, b=100, initial=(-1.5, 2.0), num_iterations=2000, seed=42, save_path=None):
+def trajectory_series_momentum(betas, lr=0.01, a=1, b=100, initial=(-1.5, 2.0), num_iterations=2000, seed=None, save_path=None):
     """Generate a row of trajectory plots for SGD with Momentum for various beta values on Rosenbrock."""
+    if seed is None:
+        raise ValueError("seed parameter is required for reproducibility")
     func = Rosenbrock(a=a, b=b)
     ncols = len(betas)
     fig, axes = plt.subplots(1, ncols, figsize=(5*ncols, 4))
@@ -487,8 +491,10 @@ def trajectory_series_momentum(betas, lr=0.01, a=1, b=100, initial=(-1.5, 2.0), 
         plt.show()
 
 
-def trajectory_series_nesterov(betas, lr=0.01, a=1, b=100, initial=(-1.5, 2.0), num_iterations=2000, seed=42, save_path=None):
+def trajectory_series_nesterov(betas, lr=0.01, a=1, b=100, initial=(-1.5, 2.0), num_iterations=2000, seed=None, save_path=None):
     """Generate a row of trajectory plots for SGD with Nesterov for various beta values on Rosenbrock."""
+    if seed is None:
+        raise ValueError("seed parameter is required for reproducibility")
     func = Rosenbrock(a=a, b=b)
     ncols = len(betas)
     fig, axes = plt.subplots(1, ncols, figsize=(5*ncols, 4))
@@ -535,8 +541,10 @@ def trajectory_series_nesterov(betas, lr=0.01, a=1, b=100, initial=(-1.5, 2.0), 
         plt.show()
 
 
-def trajectory_series_adamw(weight_decays, lr=0.01, a=1, b=100, initial=(-1.5, 2.0), num_iterations=2000, seed=42, beta1=0.9, beta2=0.999, save_path=None):
+def trajectory_series_adamw(weight_decays, lr=0.01, a=1, b=100, initial=(-1.5, 2.0), num_iterations=2000, seed=None, beta1=0.9, beta2=0.999, save_path=None):
     """Generate a row of trajectory plots for AdamW across weight decay values on Rosenbrock."""
+    if seed is None:
+        raise ValueError("seed parameter is required for reproducibility")
     func = Rosenbrock(a=a, b=b)
     ncols = len(weight_decays)
     fig, axes = plt.subplots(1, ncols, figsize=(5*ncols, 4))
@@ -1110,8 +1118,10 @@ def plot_final_metric_comparison(
     _bars = ax.bar(x, means, yerr=stds, capsize=10, alpha=0.7,
                    color=cmap(np.linspace(0, 1, len(opt_names))))
 
-    # Scatter individual points
-    np.random.seed(42)
+    # Scatter individual points (use seed from results if available, else deterministic)
+    # Using a deterministic seed here for consistent jitter across visualizations
+    jitter_seed = 12345  # Visualization-specific seed for jitter
+    np.random.seed(jitter_seed)
     for i, vals in enumerate(individual_vals):
         jitter = np.random.normal(0, 0.04, size=len(vals))
         ax.scatter(x[i] + jitter, vals, alpha=0.7, s=60,

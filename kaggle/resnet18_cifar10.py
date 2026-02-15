@@ -30,6 +30,7 @@ For standalone Kaggle execution without src/ directory:
 """
 
 import time
+import logging
 import numpy as np
 import torch
 import torch.nn as nn
@@ -144,11 +145,16 @@ def evaluate(model, test_loader, criterion, device):
 
 def main():
     import argparse
+    import warnings
 
     parser = argparse.ArgumentParser(description='SAM Sensitivity Analysis on ResNet-18 (CIFAR-10)')
     parser.add_argument('--optimizer', type=str, default='SAM_Adam',
                        choices=['Adam', 'SAM_SGD', 'SAM_Adam'],
                        help='Optimizer to use')
+    parser.add_argument('--seeds', type=str, default='42,123,456',
+                       help='Comma-separated random seeds for multi-seed experiments (e.g., "42,123,456")')
+    parser.add_argument('--seed', type=int, default=None,
+                       help='DEPRECATED: Use --seeds instead. Single seed for backward compatibility.')
     parser.add_argument('--rho', type=float, default=0.05,
                        help='SAM rho parameter (neighborhood size)')
     parser.add_argument('--rho-sweep', type=str, default=None,
@@ -163,6 +169,23 @@ def main():
                        help='Results directory')
 
     args = parser.parse_args()
+    
+    # Handle seed parameters with deprecation warning
+    if args.seed is not None:
+        warnings.warn(
+            "--seed is deprecated. Use --seeds with comma-separated values (e.g., --seeds 42,123,456)",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        seeds = [args.seed]
+    else:
+        seeds = [int(s.strip()) for s in args.seeds.split(',')]
+    
+    # Minimum seed validation
+    if len(seeds) < 3:
+        logging.warning(
+            f"Only {len(seeds)} seeds provided. Minimum 3 seeds recommended for statistical validity."
+        )
 
     # Configuration
     BATCH_SIZE = args.batch_size

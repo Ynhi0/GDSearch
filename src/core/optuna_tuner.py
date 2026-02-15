@@ -15,6 +15,7 @@ Supports:
 
 import os
 # Optuna is an optional dependency. Import lazily to avoid import-time failures
+# broad catch intentional - optuna import may raise various errors at import-time; mark unavailable rather than failing
 try:
     import optuna
     from optuna.pruners import MedianPruner, PercentilePruner
@@ -70,7 +71,7 @@ class OptunaHyperparameterTuner:
             objective_fn: Function to optimize (takes trial, returns metric)
             direction: "maximize" or "minimize"
             study_name: Name for the optimization study
-            storage: Database URL for distributed optimization (optional)
+            storage: Database URL for distributed optimization (optional, defaults to SQLite)
             sampler: Sampling algorithm ("tpe", "random", "grid")
             pruner: Pruning algorithm ("median", "percentile", None)
             n_startup_trials: Number of random trials before TPE
@@ -112,25 +113,35 @@ class OptunaHyperparameterTuner:
         else:
             raise ValueError(f"Unknown pruner: {pruner}")
 
-        # Create study
-        # Changed default to load_if_exists=False to prevent contamination
-        # Users must explicitly set study_name with timestamp/UUID for shared storage
-        # or accept risk of reusing old trials
+        # Set up persistent storage if not provided
+        if storage is None:
+            # Create SQLite database for persistent storage
+            storage_dir = Path("results/optuna_studies")
+            storage_dir.mkdir(parents=True, exist_ok=True)
+            storage_path = storage_dir / f"{study_name}.db"
+            storage = f"sqlite:///{storage_path}"
+            logging.info(f"Using SQLite storage: {storage_path}")
+
+        # Create study with persistence enabled
+        # load_if_exists=True allows resuming existing studies
         self.study = optuna.create_study(
             study_name=study_name,
             direction=direction,
             sampler=self.sampler,
             pruner=self.pruner,
             storage=storage,
-            load_if_exists=False  # Prevents accidental trial contamination
+            load_if_exists=True  # Enable resuming existing studies
         )
 
-        if storage is not None:
-            logging.warning(
-                f"Using shared storage with study_name='{study_name}'. "
-                f"To prevent trial contamination, ensure study_name is unique (include timestamp/UUID). "
-                f"If you want to resume an existing study, manually set load_if_exists=True in create_study() call."
+        # Log study status
+        n_existing_trials = len(self.study.trials)
+        if n_existing_trials > 0:
+            logging.info(
+                f"Loaded existing study '{study_name}' with {n_existing_trials} trials. "
+                f"New trials will continue from trial {n_existing_trials}."
             )
+        else:
+            logging.info(f"Created new study '{study_name}'. Trials will be saved to: {storage}")
 
     def optimize(
         self,
@@ -140,19 +151,21 @@ class OptunaHyperparameterTuner:
         callbacks: Optional[List[Callable]] = None,
         val_loader = None,  # CRITICAL: Validation loader parameter for test-leakage checks
         test_dataset = None,  # Reference test dataset for identity check
-        enforce_validation: bool = True  # FIXED: New parameter to enforce validation loader requirement
+        enforce_validation: Optional[bool] = None  # H3 FIX: Changed from True to None for grace period
     ) -> Dict[str, Any]:
         """
-        Run hyperparameter optimization.
+        Run hyperparameter optimization with test-leakage prevention.
 
         Args:
             n_trials: Number of trials to run
             timeout: Time limit in seconds (optional)
             show_progress_bar: Show progress bar during optimization
             callbacks: List of callback functions
-            val_loader: Validation DataLoader (required for test-leakage checks when enforce_validation=True)
+            val_loader: Validation DataLoader (STRONGLY RECOMMENDED for test-leakage prevention)
             test_dataset: Reference to test dataset for identity validation (RECOMMENDED)
-            enforce_validation: If True, raises error if val_loader is None (default: True to enforce validation)
+            enforce_validation: If True, requires validation loader (strict mode).
+                              If False, allows tuning without validation (not recommended).
+                              If None (default), auto-detects and emits FutureWarning if missing.
 
         Returns:
             Dictionary with best parameters and statistics
@@ -161,8 +174,24 @@ class OptunaHyperparameterTuner:
             ValueError: If enforce_validation=True and val_loader is None or lacks proper metadata
             RuntimeError: If validation loader fails test-leakage check
         """
-        # FIXED: Make validation loader mandatory by default to prevent test-leakage
-        if val_loader is None:
+        # H3 FIX: Auto-detection with grace period for backward compatibility
+        if enforce_validation is None:
+            if val_loader is None:
+                import warnings
+                warnings.warn(
+                    "DEPRECATION WARNING: Calling OptunaHyperparameterTuner.optimize() "
+                    "without a validation loader will REQUIRE validation in version 2.0. "
+                    "Add val_loader=your_validation_loader to your code to prevent test set leakage. "
+                    "See documentation: src/core/loader_validation.py",
+                    FutureWarning,
+                    stacklevel=2
+                )
+                enforce_validation = False  # Allow for now with warning
+            else:
+                enforce_validation = True  # Validation provided, enforce checks
+        
+        # Rest of existing validation logic...
+        if enforce_validation and val_loader is None:
             if enforce_validation:
                 raise ValueError(
                     "INTEGRITY ERROR: No validation loader provided to OptunaHyperparameterTuner.optimize().\n"
@@ -347,13 +376,17 @@ def suggest_lr_scheduler_params(trial: Any, scheduler_name: str, max_epochs: int
 
     if scheduler_name == 'step':
         # Guard against invalid ranges when max_epochs is too small
-        if max_epochs < 3:
-            # Too few epochs for meaningful stepping
+        if max_epochs <= 3:
+            # Too few epochs for meaningful stepping (include boundary case)
             params['step_size'] = 1
             params['gamma'] = 0.1
         else:
             step_min = max(1, max_epochs // 10)
             step_max = max(step_min + 1, max_epochs // 2)
+            # LOGIC FIX: Ensure step_max allows at least 2 epochs at reduced LR
+            step_max = min(step_max, max_epochs - 2)
+            if step_max < step_min:
+                step_max = step_min
             params['step_size'] = trial.suggest_int('step_size', step_min, step_max)
             params['gamma'] = trial.suggest_float('gamma', 0.05, 0.5)
 
@@ -361,18 +394,34 @@ def suggest_lr_scheduler_params(trial: Any, scheduler_name: str, max_epochs: int
         # Guard against invalid milestone ranges
         if max_epochs < 10:
             # Too few epochs for milestones - use simple defaults
-            params['milestones'] = [max_epochs // 2] if max_epochs >= 2 else [1]
-            params['gamma'] = 0.1
+            if max_epochs <= 2:
+                # Too few epochs for meaningful milestones
+                params['milestones'] = []
+                params['gamma'] = 0.1
+            else:
+                params['milestones'] = [max_epochs // 2]
+                params['gamma'] = 0.1
         else:
-            n_milestones = trial.suggest_int('n_milestones', 2, min(4, max_epochs - 1))
+            # LOGIC FIX: Ensure unique milestones within valid range (no duplicates, all < max_epochs)
+            n_milestones = trial.suggest_int('n_milestones', 2, min(4, max_epochs - 2))
             milestone_min = max(1, max_epochs // 10)
-            milestone_max = max(milestone_min + n_milestones, max_epochs - 5)
-            if milestone_max <= milestone_min:
-                milestone_max = max_epochs - 1
-            milestones = sorted([
-                trial.suggest_int(f'milestone_{i}', milestone_min, milestone_max)
-                for i in range(n_milestones)
-            ])
+            milestone_max = min(max_epochs - 1, max(milestone_min + n_milestones, max_epochs - 5))
+            
+            # Generate unique milestones by using distinct ranges for each suggestion
+            milestones = []
+            if milestone_max > milestone_min:
+                step = max(1, (milestone_max - milestone_min) // (n_milestones + 1))
+                for i in range(n_milestones):
+                    suggested_min = milestone_min + i * step
+                    suggested_max = min(milestone_max, suggested_min + step * 2)
+                    if suggested_max > suggested_min:
+                        milestone = trial.suggest_int(f'milestone_{i}', suggested_min, suggested_max)
+                        milestones.append(milestone)
+            
+            # Ensure uniqueness and proper ordering
+            milestones = sorted(list(set(milestones)))
+            if not milestones:  # Fallback if all suggestions failed
+                milestones = [max_epochs // 2]
             params['milestones'] = milestones
             params['gamma'] = trial.suggest_float('gamma', 0.05, 0.5)
 

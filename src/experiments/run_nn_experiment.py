@@ -7,6 +7,7 @@ from typing import Dict, Any, Tuple, Optional
 import time
 import json
 import uuid
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -50,6 +51,72 @@ HAS_OOM_SAFE = True
 # Removed duplicate set_seed - using from src.core.training_utils
 
 
+def run_experiment(
+    config: Dict[str, Any],
+    device: str = 'cuda:0',
+    results_dir: Path = Path('results')
+) -> Dict[str, Any]:
+    """
+    Wrapper for running experiments in parallel execution mode.
+    
+    This function is called by ParallelExperimentRunner to execute
+    experiments on specific GPU devices.
+    
+    Args:
+        config: Experiment configuration dictionary
+        device: PyTorch device string (e.g., 'cuda:0')
+        results_dir: Directory to save results
+        
+    Returns:
+        Dictionary with experiment metadata
+    """
+    # Ensure results directory exists
+    results_dir = Path(results_dir)
+    results_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Override device in config
+    config = config.copy()
+    config['device'] = device
+    
+    # Run the experiment
+    try:
+        df = train_and_evaluate(config)
+        
+        # Generate result filename
+        from src.utils.result_filename import generate_result_filename
+        result_filename = generate_result_filename(
+            model=config['model'],
+            dataset=config['dataset'],
+            optimizer=config['optimizer'],
+            lr=config['lr'],
+            seed=config['seed'],
+            tag=config.get('tag')
+        )
+        
+        # Save results
+        experiment_name = config.get('experiment_name', 'experiment')
+        result_dir = results_dir / 'experiments' / experiment_name
+        result_dir.mkdir(parents=True, exist_ok=True)
+        result_path = result_dir / result_filename
+        
+        df.to_csv(result_path, index=False)
+        logging.info(f"Saved results to {result_path}")
+        
+        return {
+            'status': 'success',
+            'result_file': str(result_path),
+            'final_test_acc': float(df['test_acc'].iloc[-1]) if 'test_acc' in df.columns else None,
+            'final_train_loss': float(df['train_loss'].iloc[-1]) if 'train_loss' in df.columns else None
+        }
+        
+    except Exception as e:
+        logging.error(f"Experiment failed: {e}", exc_info=True)
+        return {
+            'status': 'failed',
+            'error': str(e)
+        }
+
+
 def count_parameters(model: torch.nn.Module) -> int:
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
@@ -60,6 +127,12 @@ def _flattened_grad_norm(model: torch.nn.Module) -> float:
         if not grads:
             return 0.0
         g = torch.cat(grads)
+        
+        # Check for non-finite gradients
+        if not torch.isfinite(g).all():
+            logging.warning("Non-finite gradients detected in norm calculation")
+            return float('nan')
+        
         return float(torch.norm(g, p=2).item())
 
 
@@ -145,13 +218,16 @@ def build_optimizer(optimizer_name: str, model: torch.nn.Module, lr: float, weig
 
     Uses custom wrappers from pytorch_optimizers.py to test our implementations.
     """
+    # Import constant at function level to avoid circular dependency
+    from src.utils.constants import OptimizerNames
+    
     name = optimizer_name.upper().replace('-', '_')  # Normalize names
 
-    if name == 'SGD':
+    if name == OptimizerNames.SGD:
         return SGDWrapper(model.parameters(), lr=lr)
     elif name in ('SGD_MOMENTUM', 'SGDMOMENTUM', 'MOMENTUM'):
         return SGDMomentumWrapper(model.parameters(), lr=lr, momentum=momentum)
-    elif name == 'ADAM':
+    elif name == OptimizerNames.ADAM:
         return AdamWrapper(model.parameters(), lr=lr)
     elif name in ('AMSGRAD', 'ADAM_AMSGRAD', 'ADAM_AMS'):
         # AMSGrad: Use AdamW with amsgrad=True for correct decoupled weight decay
@@ -161,9 +237,9 @@ def build_optimizer(optimizer_name: str, model: torch.nn.Module, lr: float, weig
             return optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay, amsgrad=True)
         else:
             return optim.Adam(model.parameters(), lr=lr, weight_decay=0, amsgrad=True)
-    elif name == 'ADAMW':
+    elif name == OptimizerNames.ADAMW:
         return AdamWWrapper(model.parameters(), lr=lr, weight_decay=weight_decay)
-    elif name == 'RMSPROP':
+    elif name == OptimizerNames.RMSPROP:
         return RMSPropWrapper(model.parameters(), lr=lr)
     elif name == 'SAM':
         # SAM requires base optimizer
@@ -590,7 +666,7 @@ def main():
     # Load experiments from JSON config file
     config_path = 'configs/nn_tuning.json'
     if os.path.exists(config_path):
-        print(f"Loading experiments from {config_path}")
+        logging.info("Loading experiments from %s", config_path)
         with open(config_path, 'r', encoding='utf-8') as f:
             config_data = json.load(f)
 
@@ -623,7 +699,7 @@ def main():
                 f"Config file {config_path} not found. To proceed with default (non-reproducible) experiments, set GDSEARCH_ALLOW_DEFAULTS=1. Otherwise, create a valid config at {config_path}."
             )
 
-    print(f"Total experiments: {len(experiments)}")
+    logging.info("Total experiments: %d", len(experiments))
 
     for cfg in tqdm(experiments, desc="NN Experiments"):
         df = train_and_evaluate(cfg)
@@ -632,7 +708,7 @@ def main():
         # AUDIT FIX: Use safe_to_csv for automatic directory creation
         safe_to_csv(df, out_path, index=False)
 
-    print("Done. Results saved to 'results/'.")
+    print("✅ Done. Results saved to 'results/'.")
 
 
 if __name__ == '__main__':

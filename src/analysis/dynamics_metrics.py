@@ -65,9 +65,20 @@ def compute_smoothness_index(trajectory: np.ndarray, window: int = 5) -> float:
     # Compute direction vectors between consecutive points
     directions = np.diff(trajectory, axis=0)
 
-    # Avoid division by zero
+    # Compute norms
     norms = np.linalg.norm(directions, axis=1, keepdims=True)
-    norms = np.maximum(norms, 1e-10)
+    
+    # LOGIC FIX: Filter out near-zero directions (repeated points) to prevent NaN
+    valid_mask = (norms.flatten() > 1e-8)
+    if np.sum(valid_mask) < 2:
+        # Too few valid directions to compute smoothness (plateaued trajectory)
+        return 0.0
+    
+    # Keep only valid directions
+    directions = directions[valid_mask]
+    norms = norms[valid_mask]
+    
+    # Now safe to normalize (all norms > 1e-8)
     directions = directions / norms
 
     # Compute angles between consecutive direction vectors
@@ -76,7 +87,8 @@ def compute_smoothness_index(trajectory: np.ndarray, window: int = 5) -> float:
         # Dot product gives cos(angle)
         cos_angle = np.clip(np.dot(directions[i], directions[i+1]), -1.0, 1.0)
         angle = np.arccos(cos_angle)
-        angles.append(angle)
+        if np.isfinite(angle):
+            angles.append(angle)
 
     if len(angles) == 0:
         return 0.0
@@ -302,6 +314,7 @@ if __name__ == "__main__":
     print("=" * 60)
 
     # Simulate trajectories
+    # Using seed=42 for reproducible demo/example only
     np.random.seed(42)
     n_iter = 100
 

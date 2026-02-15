@@ -185,18 +185,21 @@ def run_robustness_experiment(
         opt_type = opt_cfg['type']
         opt_params = opt_cfg.get('params', {})
 
+        # Import constant at function level to avoid circular dependency
+        from src.utils.constants import OptimizerNames
+        
         # Instantiate optimizer
-        if opt_type == 'SGD':
+        if opt_type == OptimizerNames.SGD:
             optimizer = SGD(**opt_params)
-        elif opt_type == 'SGDMomentum':
+        elif opt_type == OptimizerNames.SGD_MOMENTUM:
             optimizer = SGDMomentum(**opt_params)
         elif opt_type == 'SGDNesterov':
             optimizer = SGDNesterov(**opt_params)
-        elif opt_type == 'RMSProp':
+        elif opt_type == OptimizerNames.RMSPROP:
             optimizer = RMSProp(**opt_params)
-        elif opt_type == 'Adam':
+        elif opt_type == OptimizerNames.ADAM:
             optimizer = Adam(**opt_params)
-        elif opt_type == 'AdamW':
+        elif opt_type == OptimizerNames.ADAMW:
             optimizer = AdamW(**opt_params)
         elif opt_type == 'AMSGrad':
             optimizer = AMSGrad(**opt_params)

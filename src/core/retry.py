@@ -24,7 +24,7 @@ def retry_with_backoff(
     initial_backoff: float = 1.0,
     backoff_factor: float = 2.0,
     max_backoff: float = 60.0,
-    exceptions: Tuple[Type[Exception], ...] = (Exception,),
+    exceptions: Tuple[Type[Exception], ...] = NETWORK_EXCEPTIONS,
     log_prefix: str = ""
 ) -> Callable[[Callable[..., T]], Callable[..., T]]:
     """
@@ -35,7 +35,7 @@ def retry_with_backoff(
         initial_backoff: Initial backoff delay in seconds
         backoff_factor: Multiplier for backoff after each retry
         max_backoff: Maximum backoff delay in seconds
-        exceptions: Tuple of exception types to catch and retry
+        exceptions: Tuple of exception types to catch and retry (defaults to NETWORK_EXCEPTIONS; does not include KeyboardInterrupt/SystemExit)
         log_prefix: Prefix for log messages
 
     Returns:
@@ -92,7 +92,7 @@ def retry_operation(
     initial_backoff: float = 1.0,
     backoff_factor: float = 2.0,
     max_backoff: float = 60.0,
-    exceptions: Tuple[Type[Exception], ...] = (Exception,),
+    exceptions: Tuple[Type[Exception], ...] = NETWORK_EXCEPTIONS,
     log_prefix: str = "",
     *args: Any,
     **kwargs: Any
@@ -108,7 +108,7 @@ def retry_operation(
         initial_backoff: Initial backoff delay in seconds
         backoff_factor: Multiplier for backoff after each retry
         max_backoff: Maximum backoff delay in seconds
-        exceptions: Tuple of exception types to catch and retry
+        exceptions: Tuple of exception types to catch and retry (defaults to NETWORK_EXCEPTIONS; does not include KeyboardInterrupt/SystemExit)
         log_prefix: Prefix for log messages
         *args: Positional arguments for operation
         **kwargs: Keyword arguments for operation

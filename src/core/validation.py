@@ -383,3 +383,318 @@ if __name__ == '__main__':
         print(f"Correctly rejected invalid batch size: {e}")
 
     print("\nAll validation tests passed!")
+
+
+# ============================================================================
+# DEEP LOGIC REVIEW ADDITIONS - Enhanced Validation Functions
+# ============================================================================
+
+import math
+
+
+def validate_loss(
+    loss: Union[torch.Tensor, float],
+    context: str = "",
+    max_allowed: float = 1e6
+) -> torch.Tensor:
+    """
+    Validate loss is finite before backward pass.
+    
+    Catches NaN/Inf early to prevent gradient corruption and wasted computation.
+    
+    Args:
+        loss: Loss tensor or scalar
+        context: Context string for error message (e.g., "epoch 5, batch 23")
+        max_allowed: Maximum allowed loss value (to catch exploding loss early)
+    
+    Returns:
+        Original loss tensor if valid
+    
+    Raises:
+        ValidationError: If loss is NaN, Inf, or exceeds max_allowed
+    
+    Example:
+        >>> loss = criterion(output, target)
+        >>> validate_loss(loss, context=f"epoch {epoch}, batch {batch_idx}")
+        >>> loss.backward()  # Safe - loss is guaranteed finite
+    """
+    # Convert scalar to tensor for uniform handling
+    if isinstance(loss, (int, float)):
+        loss_value = float(loss)
+        is_tensor = False
+    else:
+        loss_value = loss.item()
+        is_tensor = True
+    
+    context_str = f" ({context})" if context else ""
+    
+    # Check for NaN
+    if math.isnan(loss_value):
+        raise ValidationError(
+            f"NaN loss detected{context_str}. Training has diverged.\n"
+            f"REMEDIATION:\n"
+            f"  1. Reduce learning rate (current value may be too high)\n"
+            f"  2. Use gradient clipping: torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)\n"
+            f"  3. Check for unstable operations (log(0), sqrt(negative), division by zero)\n"
+            f"  4. Verify input data is normalized and doesn't contain NaN/Inf\n"
+            f"  5. Consider using a smaller model or batch size"
+        )
+    
+    # Check for Inf
+    if math.isinf(loss_value):
+        raise ValidationError(
+            f"Infinite loss detected{context_str}. Loss exploded to {loss_value}.\n"
+            f"REMEDIATION:\n"
+            f"  1. CRITICAL: Reduce learning rate significantly (try 10x smaller)\n"
+            f"  2. Enable gradient clipping immediately\n"
+            f"  3. Check for numerical instability in custom loss functions\n"
+            f"  4. Verify model initialization (weights may be too large)\n"
+            f"  5. Check for exploding gradients in earlier layers"
+        )
+    
+    # Check for suspiciously large loss
+    if loss_value > max_allowed:
+        import logging
+        logging.warning(
+            f"Very large loss detected{context_str}: {loss_value:.2e} > {max_allowed:.2e}. "
+            f"This may indicate training instability."
+        )
+    
+    # Check for negative loss (usually indicates a bug)
+    if loss_value < 0:
+        import logging
+        logging.warning(
+            f"Negative loss detected{context_str}: {loss_value:.4f}. "
+            f"This is unusual for most loss functions and may indicate a bug."
+        )
+    
+    # Return original tensor (not scalar) to preserve gradients
+    return loss if is_tensor else torch.tensor(loss_value)
+
+
+def validate_dataset(
+    dataset,
+    min_samples: int = 1,
+    name: str = "dataset"
+) -> int:
+    """
+    Validate dataset is non-empty and has expected properties.
+    
+    Args:
+        dataset: Dataset to validate (must have __len__)
+        min_samples: Minimum required samples
+        name: Dataset name for error messages
+    
+    Returns:
+        Dataset length
+    
+    Raises:
+        ValidationError: If dataset is empty or too small
+        AttributeError: If dataset doesn't support len()
+    
+    Example:
+        >>> train_dataset = datasets.MNIST(...)
+        >>> n_train = validate_dataset(train_dataset, min_samples=100, name="training")
+    """
+    try:
+        dataset_len = len(dataset)
+    except (TypeError, AttributeError) as e:
+        raise AttributeError(
+            f"{name} does not support len(). "
+            f"Ensure it's a proper torch.utils.data.Dataset. "
+            f"Error: {e}"
+        ) from e
+    
+    if dataset_len == 0:
+        raise ValidationError(
+            f"{name} is empty (0 samples).\n"
+            f"REMEDIATION:\n"
+            f"  1. Check dataset download succeeded\n"
+            f"  2. Verify data directory is correct\n"
+            f"  3. Check for file corruption in data files\n"
+            f"  4. Review dataset construction code for bugs"
+        )
+    
+    if dataset_len < min_samples:
+        raise ValidationError(
+            f"{name} has only {dataset_len} samples, "
+            f"but {min_samples} required.\n"
+            f"REMEDIATION:\n"
+            f"  1. Download full dataset (may have partial download)\n"
+            f"  2. Adjust min_samples if this is intentional (e.g., quick test)\n"
+            f"  3. Check dataset split logic (train/val/test) for errors"
+        )
+    
+    import logging
+    logging.debug(f"{name}: {dataset_len} samples (>= {min_samples} required)")
+    return dataset_len
+
+
+def validate_batch_size(
+    batch_size: int,
+    dataset_len: int,
+    model: torch.nn.Module = None,
+    dataset_name: str = "dataset"
+) -> None:
+    """
+    Validate batch size is compatible with dataset and model.
+    
+    Checks:
+    1. Batch size > 0
+    2. Batch size <= dataset length
+    3. Batch size >= 2 if model has BatchNorm
+    
+    Args:
+        batch_size: Requested batch size
+        dataset_len: Dataset length
+        model: Model (optional, for BatchNorm check)
+        dataset_name: Dataset name for error messages
+    
+    Raises:
+        ValidationError: If batch size is invalid
+    
+    Example:
+        >>> validate_batch_size(batch_size=128, dataset_len=60000, model=model)
+    """
+    if batch_size <= 0:
+        raise ValidationError(
+            f"Batch size must be positive, got {batch_size}"
+        )
+    
+    if batch_size > dataset_len:
+        raise ValidationError(
+            f"Batch size ({batch_size}) larger than {dataset_name} ({dataset_len} samples).\n"
+            f"REMEDIATION:\n"
+            f"  1. Reduce batch size to at most {dataset_len}\n"
+            f"  2. Use full-batch training (batch_size={dataset_len}) if intentional\n"
+            f"  3. Check dataset construction for errors"
+        )
+    
+    # Check for BatchNorm compatibility
+    if model is not None and batch_size == 1:
+        if has_batchnorm(model):
+            raise ValidationError(
+                f"Model uses BatchNorm but batch_size=1.\n"
+                f"BatchNorm requires batch_size >= 2 for training mode.\n"
+                f"REMEDIATION:\n"
+                f"  1. Use batch_size >= 2\n"
+                f"  2. Replace BatchNorm with LayerNorm or GroupNorm\n"
+                f"  3. Use model.eval() mode (disables BatchNorm updates, changes semantics)"
+            )
+    
+    import logging
+    logging.debug(
+        f"Batch size validation passed: batch_size={batch_size}, "
+        f"{dataset_name}_len={dataset_len}"
+    )
+
+
+def has_batchnorm(model: torch.nn.Module) -> bool:
+    """
+    Check if model contains BatchNorm layers.
+    
+    Args:
+        model: PyTorch model
+    
+    Returns:
+        True if model has any BatchNorm layers
+    
+    Example:
+        >>> model = SimpleMLP(784, 128, 10)  # has BatchNorm1d
+        >>> has_batchnorm(model)
+        True
+    """
+    for module in model.modules():
+        if isinstance(module, (
+            torch.nn.BatchNorm1d,
+            torch.nn.BatchNorm2d,
+            torch.nn.BatchNorm3d,
+            torch.nn.SyncBatchNorm
+        )):
+            return True
+    return False
+
+
+def validate_gradients(
+    model: torch.nn.Module,
+    max_norm: float = 100.0,
+    context: str = ""
+) -> float:
+    """
+    Validate gradients are finite and not exploding.
+    
+    Should be called after loss.backward() but before optimizer.step().
+    
+    Args:
+        model: Model to check gradients
+        max_norm: Maximum allowed gradient norm
+        context: Context string for error messages
+    
+    Returns:
+        Total gradient norm
+    
+    Raises:
+        ValidationError: If gradients are NaN or too large
+    
+    Example:
+        >>> loss.backward()
+        >>> grad_norm = validate_gradients(model, max_norm=10.0, context="epoch 5")
+        >>> optimizer.step()
+    """
+    total_norm = 0.0
+    has_grad = False
+    
+    for param in model.parameters():
+        if param.grad is not None:
+            has_grad = True
+            param_norm = param.grad.data.norm(2).item()
+            
+            # Check for NaN
+            if math.isnan(param_norm):
+                context_str = f" ({context})" if context else ""
+                raise ValidationError(
+                    f"NaN gradient detected{context_str}.\n"
+                    f"Parameter shape: {param.shape}\n"
+                    f"REMEDIATION:\n"
+                    f"  1. Reduce learning rate\n"
+                    f"  2. Use gradient clipping\n"
+                    f"  3. Check for unstable operations in model"
+                )
+            
+            # Check for Inf
+            if math.isinf(param_norm):
+                context_str = f" ({context})" if context else ""
+                raise ValidationError(
+                    f"Infinite gradient detected{context_str}.\n"
+                    f"Parameter shape: {param.shape}\n"
+                    f"Gradient norm: {param_norm}\n"
+                    f"REMEDIATION:\n"
+                    f"  1. CRITICAL: Reduce learning rate\n"
+                    f"  2. Enable gradient clipping\n"
+                    f"  3. Check model initialization"
+                )
+            
+            total_norm += param_norm ** 2
+    
+    if not has_grad:
+        context_str = f" ({context})" if context else ""
+        import logging
+        logging.warning(
+            f"No gradients found{context_str}. "
+            f"Check that model parameters require_grad=True and "
+            f"loss.backward() was called."
+        )
+        return 0.0
+    
+    total_norm = total_norm ** 0.5
+    
+    # Warn for large gradients
+    if total_norm > max_norm:
+        context_str = f" ({context})" if context else ""
+        import logging
+        logging.warning(
+            f"Large gradient norm detected{context_str}: {total_norm:.2e} > {max_norm:.2e}. "
+            f"Consider gradient clipping."
+        )
+    
+    return total_norm

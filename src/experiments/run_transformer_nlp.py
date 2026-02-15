@@ -339,7 +339,8 @@ def run_single_imdb(optimizer_name: str, seed: int, lr: float, epochs: int, batc
         seq = list(ds)
         return _SeqDataset(seq)
 
-    train_loader = make_dataloader(_ensure_torch_dataset(train_dataset), batch_size=batch_size, shuffle=True, seed=42, collate_fn=collate_fn, num_workers=0, pin_memory=True)
+    # BUG FIX #4: Use experiment seed instead of hardcoded 42 for proper multi-seed variance
+    train_loader = make_dataloader(_ensure_torch_dataset(train_dataset), batch_size=batch_size, shuffle=True, seed=seed, collate_fn=collate_fn, num_workers=0, pin_memory=True)
     test_loader = make_dataloader(_ensure_torch_dataset(test_dataset), batch_size=batch_size, shuffle=False, collate_fn=collate_fn, num_workers=0, pin_memory=True)
 
     # Model
@@ -387,6 +388,9 @@ def run_single_imdb(optimizer_name: str, seed: int, lr: float, epochs: int, batc
             optimizer.step()
         # end of epoch: eval and layer grad norms (captured on last batch grads)
         test_loss, test_acc = evaluate(model, test_loader, device)
+        # BUG FIX #3: Restore training mode after evaluation
+        # evaluate() sets model.eval(), which affects dropout/batchnorm in next epoch
+        model.train()
         layer_grads = _layer_grad_norms(model)
         row = {
             'epoch': epoch,

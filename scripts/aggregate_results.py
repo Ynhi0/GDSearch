@@ -99,12 +99,27 @@ def compute_statistics(df: pd.DataFrame, metric: str) -> Dict[str, float]:
     if metric not in df.columns:
         return {}
 
+    # FIX: Filter to final epoch test metrics only if phase column exists
+    # This prevents mixing train/val/test metrics from different phases
+    metric_df = df
+    if 'phase' in df.columns:
+        # Get final test metrics only
+        test_rows = df[df['phase'] == 'test']
+        if not test_rows.empty:
+            # Group by seed/run and take last epoch for each
+            if 'epoch' in test_rows.columns and 'seed' in test_rows.columns:
+                metric_df = test_rows.groupby('seed').tail(1)
+            else:
+                metric_df = test_rows
+        else:
+            metric_df = df  # Fallback if no test phase
+
     stats = {
-        'mean': float(df[metric].mean()),
-        'std': float(df[metric].std()),
-        'min': float(df[metric].min()),
-        'max': float(df[metric].max()),
-        'median': float(df[metric].median())
+        'mean': float(metric_df[metric].mean()),
+        'std': float(metric_df[metric].std()),
+        'min': float(metric_df[metric].min()),
+        'max': float(metric_df[metric].max()),
+        'median': float(metric_df[metric].median())
     }
 
     return stats
@@ -124,8 +139,22 @@ def generate_optimizer_comparison_table(df: pd.DataFrame, metric: str) -> str:
     if 'optimizer' not in df.columns or metric not in df.columns:
         return "No data available for comparison"
 
+    # FIX: Filter to final test metrics only if phase exists
+    # This ensures we compare final test performance, not intermediate values
+    comparison_df = df
+    if 'phase' in df.columns:
+        test_df = df[df['phase'] == 'test']
+        if not test_df.empty:
+            # Get final epoch per seed
+            if 'epoch' in test_df.columns and 'seed' in test_df.columns:
+                comparison_df = test_df.sort_values('epoch').groupby(['optimizer', 'seed']).tail(1)
+            else:
+                comparison_df = test_df
+        else:
+            comparison_df = df
+
     # Group by optimizer and compute statistics
-    grouped = df.groupby('optimizer')[metric].agg(['mean', 'std', 'min', 'max', 'count'])
+    grouped = comparison_df.groupby('optimizer')[metric].agg(['mean', 'std', 'min', 'max', 'count'])
     grouped = grouped.sort_values('mean', ascending=False)
 
     # Generate markdown table

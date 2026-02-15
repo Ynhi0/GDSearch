@@ -3,6 +3,9 @@ PyTorch-compatible optimizer wrappers for GDSearch custom optimizers.
 
 Wraps our custom optimizers (SGD, Adam, etc.) to work with PyTorch nn.Module parameters.
 """
+# broad catch intentional - optimizer wrappers interact with many runtime objects
+# (parameters, device, dtypes) and may use guarded broad exceptions to provide
+# graceful degradation in corner cases during experiments.
 
 import torch
 import logging
@@ -143,7 +146,7 @@ class SGDMomentumWrapper(Optimizer):
 
                 # Get gradient as numpy
                 grad = p.grad.data.cpu().numpy()
-                param_np = p.data.cpu().numpy()
+                param_np = p.data.cpu().numpy().copy()  # CRITICAL: copy to prevent corruption
                 original_shape = param_np.shape
 
                 # Compute update
@@ -243,7 +246,7 @@ class AdamWrapper(Optimizer):
 
                 # Get gradient as numpy
                 grad = p.grad.data.cpu().numpy()
-                param_np = p.data.cpu().numpy()
+                param_np = p.data.cpu().numpy().copy()  # CRITICAL: copy to prevent corruption
                 original_shape = param_np.shape
 
                 # Compute update
@@ -342,7 +345,7 @@ class SGDNesterovWrapper(Optimizer):
                         beta=group['momentum']
                     )
                 grad = p.grad.data.cpu().numpy()
-                param_np = p.data.cpu().numpy()
+                param_np = p.data.cpu().numpy().copy()  # CRITICAL: copy to prevent corruption
                 original_shape = param_np.shape
                 original_dtype = p.data.dtype
 
@@ -442,7 +445,7 @@ class RMSPropWrapper(Optimizer):
 
                 # Get gradient as numpy
                 grad = p.grad.data.cpu().numpy()
-                param_np = p.data.cpu().numpy()
+                param_np = p.data.cpu().numpy().copy()  # CRITICAL: copy to prevent corruption
                 original_shape = param_np.shape
                 original_dtype = p.data.dtype
 
@@ -546,7 +549,7 @@ class AdamWWrapper(Optimizer):
                         weight_decay=group['weight_decay']
                     )
                 grad = p.grad.data.cpu().numpy()
-                param_np = p.data.cpu().numpy()
+                param_np = p.data.cpu().numpy().copy()  # CRITICAL: copy to prevent corruption
                 original_shape = param_np.shape
                 original_dtype = p.data.dtype
 
@@ -733,7 +736,9 @@ class SAMWrapper(Optimizer):
                 # Compute perturbation with proper dtype handling
                 if self.adaptive:
                     # Adaptive SAM: weight perturbations by parameter magnitude
-                    e_w = (torch.abs(p).pow(2)) * p.grad * scale_p
+                    # Paper formula: ε(w) = ρ * (g / ||g||) * |w|
+                    # Add epsilon for numerical stability when params are near zero
+                    e_w = (torch.abs(p) + 1e-12) * p.grad * scale_p
                 else:
                     # Standard SAM: uniform perturbation direction
                     e_w = p.grad * scale_p

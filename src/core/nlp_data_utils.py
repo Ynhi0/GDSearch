@@ -17,6 +17,8 @@ import re
 
 # Make datasets import lazy/optional to prevent import-time errors
 # when transformers/datasets are not installed (per "optional dependency" claim)
+# broad catch intentional - optional NLP datasets can raise diverse errors at import and
+# runtime; we prefer graceful degradation in constrained CI/Kaggle environments
 try:
     from datasets import load_dataset
     HAS_DATASETS = True

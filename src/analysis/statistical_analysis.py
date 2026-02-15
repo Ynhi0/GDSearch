@@ -122,12 +122,13 @@ def cohens_d_ci_paired(a, b, confidence: float = 0.95, n_bootstrap: int = 10000)
     d_observed = cohens_d_paired(a, b)
     
     # Bootstrap resampling
-    np.random.seed(42)  # For reproducibility within this function
+    # Use a local RNG to avoid mutating global numpy/random state
+    rng = np.random.default_rng(42)
     bootstrap_ds = []
     
     for _ in range(n_bootstrap):
-        # Resample paired indices
-        indices = np.random.choice(n, size=n, replace=True)
+        # Resample paired indices using local RNG
+        indices = rng.choice(n, size=n, replace=True)
         a_resample = np.array(a)[indices]
         b_resample = np.array(b)[indices]
         
@@ -239,8 +240,14 @@ def load_multiseed_results(pattern: str, results_dir: str = 'results') -> List[p
         List of DataFrames
     """
     import glob
+    from src.utils.csv_utils import safe_read_csv
     files = glob.glob(os.path.join(results_dir, pattern))
-    return [pd.read_csv(f) for f in sorted(files)]
+    results = []
+    for f in sorted(files):
+        df = safe_read_csv(f)
+        if df is not None:
+            results.append(df)
+    return results
 
 
 def extract_final_metric(
@@ -753,7 +760,8 @@ def plot_comparison_with_errorbars(
                   color=['#1f77b4', '#ff7f0e'])
 
     # Add individual data points
-    np.random.seed(42)  # For reproducible jitter
+    jitter_seed = 12345  # Visualization-specific seed for jitter
+    np.random.seed(jitter_seed)  # For reproducible jitter
     for i, (values, xpos) in enumerate([(results_A, 0), (results_B, 1)]):
         jitter = np.random.normal(0, 0.04, size=len(values))
         ax.scatter(xpos + jitter, values, alpha=0.6, s=50, color='black', zorder=3)
@@ -1456,6 +1464,7 @@ def main():
     logging.info("\n### EXAMPLE 1: Basic T-Test ###\n")
 
     # Simulate results (replace with actual data loading)
+    # Using seed=42 for reproducible demo/example only
     np.random.seed(42)
     adamw_results = np.random.normal(0.975, 0.005, size=10)  # Mean 97.5%, std 0.5%
     sgdm_results = np.random.normal(0.976, 0.003, size=10)   # Mean 97.6%, std 0.3%
@@ -1492,6 +1501,7 @@ def main():
     logging.info("\n### EXAMPLE 3: Multiple Comparisons ###\n")
 
     # Simulate results for 4 optimizers
+    # Using seed=42 for reproducible demo/example only
     np.random.seed(42)
     results_dict = {
         'SGD': np.random.normal(0.950, 0.008, size=10),

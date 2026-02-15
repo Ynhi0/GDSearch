@@ -164,6 +164,11 @@ def generate_lr_sweep(optimizer_name: str, n_points: int = 7) -> List[float]:
     Returns:
         List of learning rates in log-space
     """
+    # BUG FIX: Try exact match first before fuzzy matching
+    if optimizer_name in OPTIMIZER_SEARCH_SPACES:
+        lr_min, lr_max, _ = OPTIMIZER_SEARCH_SPACES[optimizer_name]['lr']
+        return np.logspace(np.log10(lr_min), np.log10(lr_max), n_points).tolist()
+    
     # Robust key matching: case-insensitive with normalization of separators
     matched_key = None
 

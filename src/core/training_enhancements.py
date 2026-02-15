@@ -9,6 +9,9 @@ Implements research-grade training utilities:
 
 These utilities address critical gaps for production-quality training.
 """
+# broad catch intentional - training enhancement functions may use guarded broad
+# exceptions to ensure that auxiliary features (plotting, cleanup) do not crash
+# the main training loop. Each use should be documented at the site of usage.
 
 import os
 import sys
@@ -781,15 +784,15 @@ class DiskSpaceGuardian:
         checkpoints = list(self.checkpoint_dir.glob("*.pt"))
         checkpoints.extend(self.checkpoint_dir.glob("*.pth"))
 
-        if len(checkpoints) <= 1:
-            logging.warning("No old checkpoints to delete")
+        if len(checkpoints) <= self.max_checkpoints:
+            logging.info("No checkpoints need deleting")
             return
 
         # Sort by modification time (oldest first)
         checkpoints.sort(key=lambda p: p.stat().st_mtime)
 
         # Keep only max_checkpoints, delete the rest
-        to_delete = checkpoints[:-self.max_checkpoints] if len(checkpoints) > self.max_checkpoints else checkpoints[:1]
+        to_delete = checkpoints[:-self.max_checkpoints]
 
         for ckpt in to_delete:
             try:

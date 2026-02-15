@@ -68,24 +68,29 @@ def train_epoch(model, train_loader, optimizer, criterion, device):
 
 def evaluate(model, test_loader, criterion, device):
     """Evaluate on test set."""
+    was_training = model.training
     model.eval()
     total_loss = 0.0
     correct = 0
     total = 0
 
-    with torch.no_grad():
-        for batch in test_loader:
-            indices = batch['indices'].to(device)
-            labels = batch['labels'].to(device)
-            lengths = batch['lengths'].to(device)
+    try:
+        with torch.no_grad():
+            for batch in test_loader:
+                indices = batch['indices'].to(device)
+                labels = batch['labels'].to(device)
+                lengths = batch['lengths'].to(device)
 
-            outputs = model(indices, lengths)
-            loss = criterion(outputs, labels)
+                outputs = model(indices, lengths)
+                loss = criterion(outputs, labels)
 
-            total_loss += loss.item()
-            _, predicted = torch.max(outputs, 1)
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
+                total_loss += loss.item()
+                _, predicted = torch.max(outputs, 1)
+                total += labels.size(0)
+                correct += (predicted == labels).sum().item()
+    finally:
+        if was_training:
+            model.train()
 
     avg_loss = total_loss / max(1, len(test_loader))
     accuracy = 100.0 * correct / max(1, total)
@@ -117,10 +122,28 @@ def main():
                        help='Maximum sequence length')
     parser.add_argument('--hidden-size', type=int, default=128,
                        help='Hidden size')
-    parser.add_argument('--seed', type=int, default=42,
-                       help='Random seed')
+    parser.add_argument('--seeds', type=str, default='42,123,456',
+                       help='Comma-separated random seeds for multi-seed experiments (e.g., "42,123,456")')
+    parser.add_argument('--seed', type=int, default=None,
+                       help='DEPRECATED: Use --seeds instead. Single seed for backward compatibility.')
 
     args = parser.parse_args()
+    
+    # Handle seed parameters with deprecation warning
+    import warnings
+    if args.seed is not None:
+        warnings.warn(
+            "--seed is deprecated. Use --seeds with comma-separated values (e.g., --seeds 42,123,456)",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        seeds = [args.seed]
+    else:
+        seeds = [int(s.strip()) for s in args.seeds.split(',')]
+    
+    # Minimum seed validation
+    if len(seeds) < 3:
+        print(f"WARNING: Only {len(seeds)} seeds provided. Minimum 3 seeds recommended for statistical validity.")
 
     # Set device and seeds for full reproducibility
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

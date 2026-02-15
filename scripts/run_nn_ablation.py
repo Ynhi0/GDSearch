@@ -29,11 +29,11 @@ import matplotlib.pyplot as plt
 
 
 OPTIMIZER_PATTERNS = {
-    'SGD': 'NN_SimpleMLP_MNIST_SGD_*_benchmark.csv',
-    'SGD_Momentum': 'NN_SimpleMLP_MNIST_SGD_Momentum_*_benchmark.csv',
-    'Adam': 'NN_SimpleMLP_MNIST_Adam_*_benchmark.csv',
-    'AdamW': 'NN_SimpleMLP_MNIST_AdamW_*_benchmark.csv',
-    'AMSGrad': 'NN_SimpleMLP_MNIST_AMSGrad_*_benchmark.csv',
+    'SGD': 'NN_SimpleMLP_MNIST_SGD_*seed*.csv',
+    'SGD_Momentum': 'NN_SimpleMLP_MNIST_SGD_Momentum_*seed*.csv',
+    'Adam': 'NN_SimpleMLP_MNIST_Adam_*seed*.csv',
+    'AdamW': 'NN_SimpleMLP_MNIST_AdamW_*seed*.csv',
+    'AMSGrad': 'NN_SimpleMLP_MNIST_AMSGrad_*seed*.csv',
 }
 
 

@@ -26,22 +26,27 @@ def safe_to_float(x: Any) -> float:
     except Exception as e:
         logging.debug("safe_to_float: numeric isinstance check failed: %s", e, exc_info=True)
 
+    # BUG FIX: Check torch availability before isinstance check to avoid NameError
     try:
-        # Handle PyTorch tensors (scalars and small tensors)
         import torch as _torch
-        if isinstance(x, _torch.Tensor):
-            try:
-                if x.numel() == 0:
-                    return float(np.nan)
-                if x.numel() == 1:
-                    return float(x.item())
-                # Non-scalar tensor: convert to numpy and recurse
-                return safe_to_float(x.detach().cpu().numpy())
-            except Exception as e_inner:
-                logging.debug("safe_to_float: error while handling torch tensor content: %s", e_inner, exc_info=True)
-                return float(np.nan)
-    except Exception as e_outer:
-        logging.debug("safe_to_float: torch import/handling check failed: %s", e_outer, exc_info=True)
+    except ImportError:
+        _torch = None
+    
+    if _torch is not None:
+        try:
+            if isinstance(x, _torch.Tensor):
+                    try:
+                        if x.numel() == 0:
+                            return float(np.nan)
+                        if x.numel() == 1:
+                            return float(x.item())
+                        # Non-scalar tensor: convert to numpy and recurse
+                        return safe_to_float(x.detach().cpu().numpy())
+                    except Exception as e_inner:
+                        logging.debug("safe_to_float: error while handling torch tensor content: %s", e_inner, exc_info=True)
+                        return float(np.nan)
+        except Exception as e_outer:
+            logging.debug("safe_to_float: torch tensor handling failed: %s", e_outer, exc_info=True)
 
     try:
         import pandas as _pd  # local import to avoid hard deps for code that doesn't use pandas
@@ -94,3 +99,42 @@ def safe_to_float(x: Any) -> float:
         return float(str(x))
     except Exception:
         return float(np.nan)
+
+
+def safe_len(obj: object) -> int:
+    """Robustly determine the number of elements in an object.
+
+    Handles Python containers, numpy arrays, and torch tensors, returning 0
+    for None or unsupported objects. This helper avoids raising on unusual
+    inputs and is safe for use in dataset/loader size computations.
+    """
+    if obj is None:
+        return 0
+
+    # numpy arrays (prefer total element count over first-dimension len)
+    try:
+        import numpy as _np
+        if isinstance(obj, _np.ndarray):
+            return int(obj.size)
+    except Exception:
+        pass
+
+    # torch tensors
+    try:
+        import torch as _torch
+        if isinstance(obj, _torch.Tensor):
+            try:
+                return int(obj.numel())
+            except Exception:
+                return 0
+    except Exception:
+        pass
+
+    # Builtin containers (lists, tuples, dicts, etc.)
+    try:
+        return int(len(obj))
+    except Exception:
+        pass
+
+    # Fallback: try iterator consuming (not ideal for generators) - avoid expensive ops
+    return 0

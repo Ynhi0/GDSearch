@@ -28,6 +28,7 @@ import os
 import time
 from pathlib import Path
 import logging
+from src.utils.constants import CIFAR10_MEAN, CIFAR10_STD
 
 import numpy as np
 import pandas as pd
@@ -60,11 +61,11 @@ def get_loaders(batch_size: int = 128, seed: int = 42):
         T.RandomCrop(32, padding=4),
         T.RandomHorizontalFlip(),
         T.ToTensor(),
-        T.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        T.Normalize(CIFAR10_MEAN, CIFAR10_STD),
     ])
     transform_test = T.Compose([
         T.ToTensor(),
-        T.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        T.Normalize(CIFAR10_MEAN, CIFAR10_STD),
     ])
 
     root = os.environ.get('DATA_ROOT', './data')
@@ -168,19 +169,22 @@ def run_single(optimizer_name: str, seed: int, lr: float, epochs: int, batch_siz
     trainloader, testloader = get_loaders(batch_size, seed=seed)
     model = ResNet18().to(device)  # ARCHITECTURE STANDARDIZATION: Use ResNet18 instead of SimpleCIFARNet
 
+    # Import constant at function level to avoid circular dependency
+    from src.utils.constants import OptimizerNames
+    
     # GAP 47 FIX: Standardize weight_decay for fair optimizer comparison
     # All optimizers get same regularization to compare algorithms, not regularization strength
     weight_decay = 5e-4  # Standard for CIFAR-10 ResNet
 
-    if optimizer_name == 'SGD':
+    if optimizer_name == OptimizerNames.SGD:
         # GAP 47 FIX: Add weight_decay for fair comparison with AdamW
         optimizer = optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay)
-    elif optimizer_name == 'SGD_Momentum':
+    elif optimizer_name == OptimizerNames.SGD_MOMENTUM:
         optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=weight_decay)
-    elif optimizer_name == 'SGD_Nesterov':
+    elif optimizer_name == OptimizerNames.SGD_NESTEROV:
         # GAP 54 FIX: Added Nesterov Accelerated Gradient
         optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9, nesterov=True, weight_decay=weight_decay)
-    elif optimizer_name == 'Adam':
+    elif optimizer_name == OptimizerNames.ADAM:
         # Use AdamW for decoupled weight decay when weight_decay > 0 (Loshchilov & Hutter 2019)
         # Original Adam couples weight decay with adaptive LR, causing effective regularization
         # to vary by ~100x across parameters (incorrect behavior)
@@ -188,10 +192,10 @@ def run_single(optimizer_name: str, seed: int, lr: float, epochs: int, batch_siz
             optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
         else:
             optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=0)
-    elif optimizer_name == 'AdamW':
+    elif optimizer_name == OptimizerNames.ADAMW:
         # AdamW uses decoupled weight decay (different from L2 in Adam)
         optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-    elif optimizer_name == 'RMSProp':
+    elif optimizer_name == OptimizerNames.RMSPROP:
         optimizer = optim.RMSprop(model.parameters(), lr=lr, weight_decay=weight_decay)
     else:
         raise ValueError(f"Unknown optimizer: {optimizer_name}")

@@ -92,11 +92,11 @@ def _create_dynamics_tracker() -> Optional["TrainingDynamicsTracker"]:
 from src.core.models import SimpleMLP
 
 
-def load_mnist(batch_size=128, quick=False):
+def load_mnist(batch_size=128, quick=False, seed=42):
     """Load MNIST dataset"""
     transform = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,))
+        transforms.Normalize(MNIST_MEAN, MNIST_STD)
     ])
 
     train_dataset = torchvision.datasets.MNIST(
@@ -111,7 +111,7 @@ def load_mnist(batch_size=128, quick=False):
         train_dataset = torch.utils.data.Subset(train_dataset, range(10000))
         test_dataset = torch.utils.data.Subset(test_dataset, range(2000))
 
-    train_loader = make_dataloader(train_dataset, batch_size=batch_size, shuffle=True, seed=42, num_workers=2, pin_memory=True)
+    train_loader = make_dataloader(train_dataset, batch_size=batch_size, shuffle=True, seed=seed, num_workers=2, pin_memory=True)
     test_loader = make_dataloader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=True)
 
     return train_loader, test_loader
@@ -244,12 +244,14 @@ def train_with_beta(
                 )
 
             optimizer.step()
-            train_loss += loss.item()
+            # BUG FIX: Weight loss by batch size for correct averaging
+            train_loss += loss.item() * target.size(0)
             _, predicted = output.max(1)
             train_total += target.size(0)
             train_correct += predicted.eq(target).sum().item()
 
-        train_loss /= len(train_loader)
+        # BUG FIX: Divide by total samples, not number of batches
+        train_loss /= train_total
         train_acc = 100. * train_correct / train_total
 
         # Compute param norm (tensor-safe)
@@ -286,12 +288,14 @@ def train_with_beta(
             data, target = data.to(device), target.to(device)
             output = model(data)
             loss = criterion(output, target)
-            test_loss += loss.item()
+            # BUG FIX: Weight loss by batch size for correct averaging
+            test_loss += loss.item() * target.size(0)
             _, predicted = output.max(1)
             test_total += target.size(0)
             test_correct += predicted.eq(target).sum().item()
 
-    test_loss /= len(test_loader)
+    # BUG FIX: Divide by total samples, not number of batches
+    test_loss /= test_total
     final_test_acc = 100. * test_correct / test_total
     logger.info(f"Final Test Performance: Loss={test_loss:.4f}, Acc={final_test_acc:.2f}%")
 
@@ -830,15 +834,18 @@ def evaluate(model, loader, criterion, device):
     with torch.no_grad():
         for data, target in loader:
             data, target = data.to(device), target.to(device)
+            batch_size = data.size(0)
             output = model(data)
             loss = criterion(output, target)
-            total_loss += loss.item()
+            # BUG FIX: Weight loss by batch size for correct averaging
+            total_loss += loss.item() * batch_size
             _, predicted = torch.max(output.data, 1)
             total += target.size(0)
             correct += (predicted == target).sum().item()
 
     accuracy = 100.0 * correct / max(1, total)
-    avg_loss = total_loss / max(1, len(loader))
+    # BUG FIX: Divide by total samples, not number of batches
+    avg_loss = total_loss / max(1, total)
     return accuracy, avg_loss
 
 

@@ -28,6 +28,7 @@ import seaborn as sns
 from src.utils.plot_helpers import arr_to_numpy_float
 from typing import Dict, List, Optional, Tuple
 from src.core.dataloader_utils import make_dataloader
+from src.utils.constants import MNIST_MEAN, MNIST_STD, CIFAR10_MEAN, CIFAR10_STD
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -93,23 +94,26 @@ def run_single_optimizer_with_dynamics(
         optimizer = create_optimizer_from_config(config_dict, model.parameters())
     except Exception as e:
         logging.warning(f"Registry creation failed for {optimizer_name}, falling back to direct creation: {e}")
+        # Import constant at function level to avoid circular dependency
+        from src.utils.constants import OptimizerNames
+        
         # Fallback to direct creation for backward compatibility
-        if optimizer_name == 'SGD':
+        if optimizer_name == OptimizerNames.SGD:
             optimizer = torch.optim.SGD(model.parameters(), **optimizer_config)
-        elif optimizer_name == 'SGD_Momentum':
+        elif optimizer_name == OptimizerNames.SGD_MOMENTUM:
             import copy as copy_module
             config = copy_module.deepcopy(optimizer_config)
             config['momentum'] = config.get('momentum', 0.9)
             optimizer = torch.optim.SGD(model.parameters(), **config)
-        elif optimizer_name == 'Adam':
+        elif optimizer_name == OptimizerNames.ADAM:
             # Use AdamW if weight_decay > 0 for correct decoupled weight decay
             if optimizer_config.get('weight_decay', 0) > 0:
                 optimizer = torch.optim.AdamW(model.parameters(), **optimizer_config)
             else:
                 optimizer = torch.optim.Adam(model.parameters(), **optimizer_config)
-        elif optimizer_name == 'AdamW':
+        elif optimizer_name == OptimizerNames.ADAMW:
             optimizer = torch.optim.AdamW(model.parameters(), **optimizer_config)
-        elif optimizer_name == 'RMSprop':
+        elif optimizer_name == OptimizerNames.RMSPROP:
             optimizer = torch.optim.RMSprop(model.parameters(), **optimizer_config)
         else:
             raise ValueError(f"Unknown optimizer: {optimizer_name}")
@@ -251,12 +255,15 @@ def run_cross_optimizer_dynamics_comparison(
         # Return empty DataFrame so callers receive a consistent object
         return pd.DataFrame()
 
+    # Import constant at function level to avoid circular dependency
+    from src.utils.constants import OptimizerNames
+    
     # Default configurations
     if optimizers is None:
         if quick:
-            optimizers = ['SGD', 'SGD_Momentum', 'Adam']
+            optimizers = [OptimizerNames.SGD, OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM]
         else:
-            optimizers = ['SGD', 'SGD_Momentum', 'Adam', 'AdamW', 'RMSprop']
+            optimizers = [OptimizerNames.SGD, OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM, OptimizerNames.ADAMW, OptimizerNames.RMSPROP]
 
     if seeds is None:
         seeds = [42] if quick else [42, 123, 456]
@@ -283,7 +290,7 @@ def run_cross_optimizer_dynamics_comparison(
     if dataset == 'MNIST':
         transform = transforms.Compose([
             transforms.ToTensor(),
-            transforms.Normalize((0.1307,), (0.3081,))
+            transforms.Normalize(MNIST_MEAN, MNIST_STD)
         ])
         train_dataset = torchvision.datasets.MNIST(
             root='data', train=True, download=True, transform=transform
@@ -296,7 +303,7 @@ def run_cross_optimizer_dynamics_comparison(
     elif dataset == 'CIFAR10':
         transform = transforms.Compose([
             transforms.ToTensor(),
-            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+            transforms.Normalize(CIFAR10_MEAN, CIFAR10_STD)
         ])
         train_dataset = torchvision.datasets.CIFAR10(
             root='data', train=True, download=True, transform=transform
@@ -309,7 +316,7 @@ def run_cross_optimizer_dynamics_comparison(
     else:
         raise ValueError(f"Unsupported dataset: {dataset}")
 
-    train_loader = make_dataloader(train_dataset, batch_size=128, shuffle=True, seed=42, num_workers=2, pin_memory=True)
+    train_loader = make_dataloader(train_dataset, batch_size=128, shuffle=True, seed=seeds[0], num_workers=2, pin_memory=True)
     test_loader = make_dataloader(test_dataset, batch_size=256, shuffle=False, num_workers=2, pin_memory=True)
 
     # Optimizer configurations (tuned values)

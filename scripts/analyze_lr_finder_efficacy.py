@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.core.models import SimpleMLP
 from src.core.training_enhancements import LRFinder
+from src.utils.constants import MNIST_MEAN, MNIST_STD
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -32,7 +33,7 @@ def load_mnist_data(batch_size=128):
     """Load MNIST dataset."""
     transform = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,))
+        transforms.Normalize(MNIST_MEAN, MNIST_STD)
     ])
 
     train_dataset = torchvision.datasets.MNIST(
@@ -149,13 +150,18 @@ def find_optimal_lr_wrapper(device, seed=42):
     lr_finder = LRFinder(model, optimizer, criterion, device)
 
     try:
-        # Run LR range test (no input_transform parameter)
+        # Run LR range test with proper input transform for MNIST
+        # MNIST needs to be flattened from (batch, 1, 28, 28) to (batch, 784)
+        def flatten_mnist(x):
+            return x.view(x.size(0), -1)
+        
         lrs, losses = lr_finder.range_test(
             train_loader,
             start_lr=1e-5,
             end_lr=1.0,
             num_iter=100,
-            verbose=False
+            verbose=False,
+            input_transform=flatten_mnist  # FIX: Add required transform
         )
         # Get suggested LR from the LRFinder
         suggested_lr = lr_finder.suggest_lr()

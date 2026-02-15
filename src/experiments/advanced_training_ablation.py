@@ -28,6 +28,7 @@ import torch.optim as optim
 import torchvision
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
+from src.utils.constants import MNIST_MEAN, MNIST_STD
 from src.core.training_utils import set_seed
 import numpy as np
 import pandas as pd
@@ -94,12 +95,15 @@ def train_epoch(model, loader, optimizer, criterion, device,
             ema.update(model)
 
         # Track metrics
-        total_loss += loss.item()
+        batch_size = targets.size(0)
+        # BUG FIX: Weight loss by batch size for correct averaging
+        total_loss += loss.item() * batch_size
         _, predicted = outputs.max(1)
         total += targets.size(0)
         correct += predicted.eq(targets).sum().item()
 
-    return total_loss / max(1, len(loader)), 100.0 * correct / max(1, total)
+    # BUG FIX: Divide by total samples, not number of batches
+    return total_loss / max(1, total), 100.0 * correct / max(1, total)
 
 
 def evaluate(model, loader, criterion, device):
@@ -112,15 +116,18 @@ def evaluate(model, loader, criterion, device):
     with torch.no_grad():
         for inputs, targets in loader:
             inputs, targets = inputs.to(device), targets.to(device)
+            batch_size = inputs.size(0)
             outputs = model(inputs)
             loss = criterion(outputs, targets)
 
-            total_loss += loss.item()
+            # BUG FIX: Weight loss by batch size for correct averaging
+            total_loss += loss.item() * batch_size
             _, predicted = outputs.max(1)
             total += targets.size(0)
             correct += predicted.eq(targets).sum().item()
 
-    return total_loss / max(1, len(loader)), 100.0 * correct / max(1, total)
+    # BUG FIX: Divide by total samples, not number of batches
+    return total_loss / max(1, total), 100.0 * correct / max(1, total)
 
 
 def run_single_experiment(
@@ -161,7 +168,7 @@ def run_single_experiment(
 
     # Setup loss function (with optional label smoothing)
     if config.get('use_label_smoothing', False):
-        smoothing = config.get('label_smoothing_factor', 0.1)
+        smoothing = float(config.get('label_smoothing_factor', 0.1))
         criterion = LabelSmoothingCrossEntropy(smoothing=smoothing)
     else:
         criterion = nn.CrossEntropyLoss()
@@ -174,7 +181,7 @@ def run_single_experiment(
     # Setup EMA if enabled
     ema = None
     if config.get('use_ema', False):
-        decay = config.get('ema_decay', 0.9999)
+        decay = float(config.get('ema_decay', 0.9999))
         ema = create_model_ema(model, decay=decay)
 
     # Learning rate scheduler
@@ -287,12 +294,12 @@ def run_ablation_study(
     transform_train = transforms.Compose([
         transforms.RandomCrop(28, padding=4),
         transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,))
+        transforms.Normalize(MNIST_MEAN, MNIST_STD)
     ])
 
     transform_test = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,))
+        transforms.Normalize(MNIST_MEAN, MNIST_STD)
     ])
 
     train_dataset = torchvision.datasets.MNIST(
