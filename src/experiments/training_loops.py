@@ -397,6 +397,14 @@ def standard_classification_loop(
                     optimizer_name=optimizer_name or 'unknown',
                     seed=seed
                 )
+                # Register checkpoint path with ExperimentTracker (best-effort)
+                try:
+                    if experiment_tracker is not None:
+                        # Use the canonical checkpoint filename convention when available
+                        ckpt_path = str(Path(getattr(checkpoint_manager, 'base_dir', 'checkpoints')) / f"checkpoint_epoch{epoch}.pt")
+                        experiment_tracker.register_checkpoint(ckpt_path)
+                except Exception as _e:
+                    logging.debug("Failed to register checkpoint with ExperimentTracker: %s", _e, exc_info=True)
             except Exception as e:
                 logging.warning(f"Failed to save checkpoint: {e}")
         

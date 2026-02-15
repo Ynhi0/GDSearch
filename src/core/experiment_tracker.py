@@ -36,9 +36,10 @@ class ExperimentTracker:
     to avoid optional-member access issues detected by static analyzers.
     """
 
-    def __init__(self, experiment_name: str = "GDSearch_Benchmark", tracking_uri: Optional[str] = None):
+    def __init__(self, experiment_name: str = "GDSearch_Benchmark", tracking_uri: Optional[str] = None, artifacts_dir: str = "artifacts"):
         self.experiment_name = experiment_name
         self.tracking_uri = tracking_uri
+        self.artifacts_dir = str(artifacts_dir)
         self.current_run = None
         self.run_stack = []  # type: list
         self.enabled = False
@@ -178,6 +179,56 @@ class ExperimentTracker:
             logging.warning(f"Failed to create fresh MLflow database: {e}")
             return False
 
+    def _resume_meta_path(self) -> str:
+        """Path to the persisted resume metadata file (artifacts/resume_meta.json)."""
+        return os.path.join(self.artifacts_dir, "resume_meta.json")
+
+    def _write_resume_meta(self, run_id: Optional[str], checkpoint: Optional[str]):
+        """Persist run_id and last checkpoint so future invocations can resume."""
+        try:
+            meta = {"run_id": run_id, "checkpoint": checkpoint}
+            os.makedirs(self.artifacts_dir, exist_ok=True)
+            with open(self._resume_meta_path(), "w", encoding="utf-8") as fh:
+                import json
+                json.dump(meta, fh)
+        except Exception:
+            # Best-effort persistence; do not raise to avoid breaking experiments
+            logging.debug("Failed to write resume meta", exc_info=True)
+
+    def _read_resume_meta(self) -> Optional[dict]:
+        """Read persisted resume metadata if present, else None."""
+        p = self._resume_meta_path()
+        if not os.path.exists(p):
+            return None
+        try:
+            import json
+            with open(p, "r", encoding="utf-8") as fh:
+                return json.load(fh)
+        except Exception:
+            logging.debug("Failed to read resume meta", exc_info=True)
+            return None
+
+    def register_checkpoint(self, path: str) -> None:
+        """Register a checkpoint path with the tracker (updates persisted resume meta).
+
+        Call this from checkpointing code after a successful save so future runs can resume.
+        """
+        try:
+            run_id = None
+            try:
+                run_id = self.active_run_id
+            except RuntimeError:
+                run_id = None
+            self._write_resume_meta(run_id, path)
+            # Also log checkpoint as artifact when MLflow enabled
+            if self.enabled and self.current_run is not None:
+                try:
+                    mlflow.log_artifact(path)
+                except Exception:
+                    logging.debug("Failed to log checkpoint artifact to MLflow", exc_info=True)
+        except Exception:
+            logging.debug("register_checkpoint failed", exc_info=True)
+
     @property
     def active_run_id(self) -> str:
         """Get active run ID, raises if no active run.
@@ -208,10 +259,25 @@ class ExperimentTracker:
             raise RuntimeError("Current run info has no run_id attribute")
         return run_id
 
-    def start_run(self, run_name: Optional[str] = None) -> Optional[str]:
-        """Start a new MLflow run (supports nested runs)."""
+    def start_run(self, run_name: Optional[str] = None, resume: bool = False) -> Optional[str]:
+        """Start a new MLflow run (supports nested runs). If `resume=True`, attempt to attach
+        to a previously persisted run using `artifacts/resume_meta.json`.
+        """
         if not self.enabled:
             return None
+
+        # If resume requested, prefer persisted run_id when available
+        if resume:
+            try:
+                meta = self._read_resume_meta()
+                if meta and meta.get('run_id'):
+                    # Attach to existing run by run_id
+                    try:
+                        self.current_run = mlflow.start_run(run_id=meta.get('run_id'))
+                    except Exception:
+                        logging.debug("Failed to attach to persisted run_id; will start a new run", exc_info=True)
+            except Exception:
+                logging.debug("Failed to read resume metadata; starting fresh run", exc_info=True)
 
         if self.current_run is not None:
             # Start a nested/child run
@@ -232,10 +298,29 @@ class ExperimentTracker:
                 # Unexpected exception types: re-raise to surface programming errors
                 raise
         else:
-            # Start a new top-level run
-            self.current_run = mlflow.start_run(run_name=run_name)
+            # Start a new top-level run if not already attached via resume
+            try:
+                self.current_run = mlflow.start_run(run_name=run_name)
+            except Exception as e:
+                # Surface Mlflow-specific exceptions, otherwise re-raise
+                mlflow_exc_mod = getattr(mlflow, 'exceptions', None)
+                mlflow_exc_cls = getattr(mlflow_exc_mod, 'MlflowException', None) if mlflow_exc_mod is not None else None
+                if mlflow_exc_cls is not None and isinstance(e, mlflow_exc_cls):
+                    raise
+                raise
+
         if self.current_run is None:
             return None
+
+        # Persist run_id so subsequent invocations may resume when requested
+        try:
+            info = getattr(self.current_run, "info", None)
+            run_id = getattr(info, "run_id", None)
+            # register persisted run_id, checkpoint unknown until register_checkpoint is called
+            self._write_resume_meta(run_id, None)
+        except Exception:
+            logging.debug("Failed to persist resume meta after start_run", exc_info=True)
+
         info = getattr(self.current_run, "info", None)
         return getattr(info, "run_id", None)
 
