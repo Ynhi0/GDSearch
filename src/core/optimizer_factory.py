@@ -90,11 +90,11 @@ class OptimizerFactory:
         # === PyTorch Wrappers ===
         try:
             from src.core.pytorch_optimizers import (
-                AdaBoundOptimizer, RAdamOptimizer, LAMBOptimizer
+                AdaBound, RAdam, LAMB
             )
-            cls._REGISTRY['adabound'] = AdaBoundOptimizer
-            cls._REGISTRY['radam'] = RAdamOptimizer
-            cls._REGISTRY['lamb'] = LAMBOptimizer
+            cls._REGISTRY['adabound'] = AdaBound
+            cls._REGISTRY['radam'] = RAdam
+            cls._REGISTRY['lamb'] = LAMB
             cls._DEFAULTS['adabound'] = {'lr': 0.001, 'final_lr': 0.1}
             cls._DEFAULTS['radam'] = {'lr': 0.001}
             cls._DEFAULTS['lamb'] = {'lr': 0.001, 'weight_decay': 0.01}
