@@ -134,17 +134,12 @@ def logistic_regression_with_condition_number(
     y = (probabilities > 0.5).astype(float)
 
     def loss_fn(w: np.ndarray) -> float:
-        """Binary cross-entropy loss"""
+        """Binary cross-entropy loss (numerically stable, depends on labels)."""
         logits = X @ w
-        # Numerically stable sigmoid
-        pos_mask = logits >= 0
-        neg_mask = ~pos_mask
-
-        loss = np.zeros_like(logits)
-        loss[pos_mask] = np.log(1 + np.exp(-logits[pos_mask]))
-        loss[neg_mask] = -logits[neg_mask] + np.log(1 + np.exp(logits[neg_mask]))
-
-        return float(np.mean(y * loss + (1 - y) * loss))
+        # Stable combined expression for logistic loss:
+        #   loss = max(z,0) - y*z + log(1 + exp(-abs(z)))
+        per_example = np.maximum(logits, 0.0) - logits * y + np.log1p(np.exp(-np.abs(logits)))
+        return float(np.mean(per_example))
 
     def grad_fn(w: np.ndarray) -> np.ndarray:
         """Gradient of loss"""
@@ -275,6 +270,18 @@ def run_optimizer_on_function(
     # Momentum state
     velocity = np.zeros_like(x)
 
+    # Adam optimizer instance for adaptive updates (keeps internal state across iterations)
+    adam_opt = None
+    if opt_type == 'adam':
+        from src.core.optimizers import Adam
+        adam_opt = Adam(
+            lr=optimizer_config.get('lr', lr),
+            beta1=optimizer_config.get('beta1', 0.9),
+            beta2=optimizer_config.get('beta2', 0.999),
+            epsilon=optimizer_config.get('epsilon', 1e-8),
+            weight_decay=optimizer_config.get('weight_decay', 0.0)
+        )
+
     optimal_x = metadata.get('optimal_x', np.zeros_like(x))
 
     for _ in range(n_iterations):
@@ -296,8 +303,12 @@ def run_optimizer_on_function(
             # Vanilla SGD
             x = x - lr * grad
         elif opt_type == 'adam':
-            # Simplified Adam (not fully implemented here)
-            x = x - lr * grad
+            # Canonical Adam from src/core/optimizers.py (keeps moments across iterations)
+            if adam_opt is None:
+                # Defensive fallback to SGD if Adam init failed for some reason
+                x = x - lr * grad
+            else:
+                x = adam_opt.step(x, grad)
         else:
             raise ValueError(f"Unknown optimizer type: {opt_type}")
 
