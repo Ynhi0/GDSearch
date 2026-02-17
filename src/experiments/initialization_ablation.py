@@ -70,6 +70,7 @@ except ImportError:
 
 from src.core.training_utils import set_seed
 from src.core.models import SimpleCNN  # Import from central models.py
+from src.utils.constants import MNIST_MEAN, MNIST_STD
 
 
 # Removed duplicate set_seed - using from src.core.training_utils
@@ -202,14 +203,20 @@ def evaluate(model, loader, criterion, device):
 def run_single_experiment(
     init_method: str,
     optimizer_name: str,
-    train_loader: DataLoader,
-    test_loader: DataLoader,
+    train_dataset: torchvision.datasets.VisionDataset,
+    test_dataset: torchvision.datasets.VisionDataset,
     device: torch.device,
     epochs: int = 10,
-    seed: int = 42
+    seed: int = 42,
+    results_dir: str = "results/initialization_ablation"
 ) -> Dict:
     """Run a single initialization-optimizer experiment"""
     set_seed(seed)
+
+    # Create dataloaders with specific seed for this run
+    # This ensures data order is randomized per seed but deterministic for that seed
+    train_loader = make_dataloader(train_dataset, batch_size=128, shuffle=True, seed=seed, num_workers=2, pin_memory=True)
+    test_loader = make_dataloader(test_dataset, batch_size=256, shuffle=False, num_workers=2, pin_memory=True)
 
     # Create model and apply initialization
     model = SimpleCNN(num_classes=10).to(device)
@@ -294,6 +301,18 @@ def run_single_experiment(
             convergence_epoch = h['epoch']
             break
 
+    # Create results dataframe
+    df = pd.DataFrame(history)
+    
+    # Save individual result file
+    results_path = Path(results_dir)
+    results_path.mkdir(parents=True, exist_ok=True)
+    
+    # Filename format: InitAblation_{init}_{opt}_seed{seed}.csv
+    filename = f"InitAblation_{init_method}_{optimizer_name}_seed{seed}.csv"
+    df.to_csv(results_path / filename, index=False)
+    print(f"Saved: {filename}")
+
     return {
         'init_method': init_method,
         'optimizer': optimizer_name,
@@ -303,7 +322,8 @@ def run_single_experiment(
         'training_time': training_time,
         'diverged': np.isnan(history[-1]['train_loss']),
         'seed': seed,
-        'history': history
+        'history': history,
+        'result_file': str(results_path / filename)
     }
 
 
@@ -360,8 +380,9 @@ def run_initialization_ablation(
         train_dataset = torch.utils.data.Subset(train_dataset, range(5000))
         test_dataset = torch.utils.data.Subset(test_dataset, range(1000))
 
-    train_loader = make_dataloader(train_dataset, batch_size=128, shuffle=True, seed=seeds[0], num_workers=2, pin_memory=True)
-    test_loader = make_dataloader(test_dataset, batch_size=256, shuffle=False, num_workers=2, pin_memory=True)
+    # Loaders are now created inside run_single_experiment for proper seeding
+    # train_loader = make_dataloader(train_dataset, batch_size=128, shuffle=True, seed=seeds[0], num_workers=2, pin_memory=True)
+    # test_loader = make_dataloader(test_dataset, batch_size=256, shuffle=False, num_workers=2, pin_memory=True)
 
     # Import constant at function level to avoid circular dependency
     from src.utils.constants import OptimizerNames
@@ -396,8 +417,9 @@ def run_initialization_ablation(
                 print(f"  Seed {seed}...", end=" ")
                 result = run_single_experiment(
                     init_method, optimizer_name,
-                    train_loader, test_loader,
-                    device, epochs=epochs, seed=seed
+                    train_dataset, test_dataset,
+                    device, epochs=epochs, seed=seed,
+                    results_dir=results_dir
                 )
                 config_results.append(result)
                 print(f"Acc: {result['final_test_acc']:.2f}%, Converged: {result['convergence_epoch']}")

@@ -57,6 +57,7 @@ import logging
 
 from src.core.test_functions import Rosenbrock, TestFunction
 from src.core.optimizers import SGD, SGDMomentum, RMSProp, Adam, AdamW, AMSGrad, SAM
+from src.core.training_utils import set_seed
 
 
 # Add guard to prevent unfair benchmark usage
@@ -109,7 +110,8 @@ def run_optimizer_ablation(
     plots_dir: str = 'plots',
     use_legacy_unfair: bool = False,
     track_params: bool = False,
-    lr_map_override: dict[str, float] | None = None
+    lr_map_override: dict[str, float] | None = None,
+    seeds: list[int] = [42]
 ) -> pd.DataFrame:
     """
     Run ablation study comparing optimizer variants on 2D test functions.
@@ -207,11 +209,15 @@ def run_optimizer_ablation(
     import torch
 
     for opt_name, optimizer in optimizers:
-        # Reset optimizer state completely before each run
-        optimizer.reset()
-        x: float
-        y: float
-        x, y = initial_point
+        # Loop over seeds
+        for seed in seeds:
+            set_seed(seed)
+            
+            # Reset optimizer state completely before each run
+            optimizer.reset()
+            x: float
+            y: float
+            x, y = initial_point
 
         # Extract learning rate once for consistent reference throughout loop
         opt_lr = optimizer.lr if hasattr(optimizer, 'lr') else 0.01
@@ -380,7 +386,7 @@ def run_optimizer_ablation(
             np.seterr(**old_settings)
 
         # Store tracker for later comparative plots
-        trajectories.setdefault('trackers', {})[opt_name] = tracker
+        # (Moved this logic to end of loop to decide which seed to keep)
 
 
 
@@ -547,6 +553,7 @@ def run_optimizer_ablation(
         # Append LR and estimates to summary
         summary_metrics.append({
             'Optimizer': opt_name,
+            'Seed': seed,  # Add seed to summary
             'LR': current_lr,
             'Final Loss': final_loss,
             'Final Grad Norm': final_grad,
@@ -562,10 +569,13 @@ def run_optimizer_ablation(
             'Has_Theoretical_Curve': theory_curve is not None
         })
 
-        # Store theory curve for plotting overlay
-        trajectories.setdefault('__theory__', {})[opt_name] = (theory_iters, theory_curve)
+        # Store theory curve for plotting overlay (only need once per optimizer)
+        if seed == seeds[0]:
+            trajectories.setdefault('__theory__', {})[opt_name] = (theory_iters, theory_curve)
+            # Only store first seed trajectory for cleaner plotting
+            trajectories.setdefault('trackers', {})[opt_name] = tracker
 
-        print(f"{opt_name:20s} | Final Loss: {final_loss:12.6e} | "
+        print(f"{opt_name:20s} [Seed {seed}] | Final Loss: {final_loss:12.6e} | "
               f"Converged (loss<1e-3): {'YES' if converged_iter is not None else 'NO':3s} at iter {converged_iter if converged_iter is not None else ('DIV' if np.isinf(final_loss) else '>10k')}")
 
     # Save summary CSV
@@ -590,6 +600,8 @@ def run_optimizer_ablation(
     # Plot 1: Loss curves (log scale)
     ax = axes[0, 0]
     for (opt_name, _), color in zip(optimizers, colors):
+        if opt_name not in trajectories.get('trackers', {}):
+            continue
         tracker = trajectories['trackers'][opt_name]
         iters = tracker.iterations
         losses = tracker.losses
@@ -623,6 +635,8 @@ def run_optimizer_ablation(
     # Plot 2: Gradient norm (log scale)
     ax = axes[0, 1]
     for (opt_name, _), color in zip(optimizers, colors):
+        if opt_name not in trajectories.get('trackers', {}):
+            continue
         tracker = trajectories['trackers'][opt_name]
         iters = tracker.iterations
         grads = tracker.grad_norms
@@ -758,7 +772,8 @@ def main():
         plots_dir=args.plots_dir,
         use_legacy_unfair=args.allow_unfair,
         track_params=args.track_params,
-        lr_map_override=lr_overrides
+        lr_map_override=lr_overrides,
+        seeds=seeds  # Pass parsed seeds
     )
     print("Ablation study complete!")
     return df_summary

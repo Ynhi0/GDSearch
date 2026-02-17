@@ -1307,6 +1307,17 @@ class Lookahead(Optimizer):
             return self.slow_params_x, self.slow_params_y
         else:
             assert self.slow_params is not None, "Slow params must be initialized before update"
+            
+            # Shape validation (BUG #8 from audit): prevent cryptic broadcasting errors
+            if self.slow_params.shape != params.shape:
+                logging.warning(
+                    "Lookahead: Parameter shape changed from %s to %s. "
+                    "Reinitializing slow weights. This breaks Lookahead's stability guarantees!",
+                    self.slow_params.shape, params.shape
+                )
+                self.slow_params = params.copy()
+                return self.slow_params
+            
             self.slow_params = (1 - self.alpha) * self.slow_params + self.alpha * params
             return self.slow_params
 
