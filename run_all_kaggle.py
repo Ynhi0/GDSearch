@@ -4485,7 +4485,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
     return df
 
 
-def run_nlp_experiment(results_dir="results_nlp", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
+def run_nlp_experiment(results_dir="results_nlp", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False, resume_behavior: str = None):
     if seeds is None:
         seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
     """Run full IMDB sentiment analysis with DistilBERT
@@ -4511,7 +4511,7 @@ def run_nlp_experiment(results_dir="results_nlp", seeds=None, quick=False, skip_
     if not HAS_HF:
         print("HuggingFace transformers/datasets not available.")
         print("   Using local LSTM/RNN models instead...")
-        return run_nlp_experiment_simple(results_dir, seeds, 3 if quick else 5, resume)
+        return run_nlp_experiment_simple(results_dir, seeds, 3 if quick else 5, resume, resume_behavior=resume_behavior)
 
     # Wrap entire HuggingFace experiment in try/except for robustness
     try:
@@ -4529,11 +4529,7 @@ def run_nlp_experiment(results_dir="results_nlp", seeds=None, quick=False, skip_
         print(f"\nHuggingFace experiment failed: {str(e)[:200]}")
         print("   This is often due to authentication or network issues.")
         print("   Falling back to local LSTM/RNN models (no download required)...")
-        return run_nlp_experiment_simple(results_dir, seeds, 3 if quick else 5, resume)
-
-
-def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
-    if seeds is None:
+        return run_nlp_experiment_simple(results_dir, seeds, 3 if quick else 5, resume, resume_behavior=resume_behavior)
         seeds = [1, 2, 3]
     """Internal function: Run NLP experiment using HuggingFace models"""
     print("   Attempting to use HuggingFace DistilBERT...")
@@ -4636,7 +4632,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
 
             if AutoTokenizer is None or AutoModelForSequenceClassification is None or load_dataset is None:
                 logging.warning("transformers/datasets not available. Falling back to simplified NLP experiment...")
-                return run_nlp_experiment_simple(results_dir, seeds, epochs, resume)
+                return run_nlp_experiment_simple(results_dir, seeds, epochs, resume, resume_behavior=resume_behavior)
 
             try:
                 tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -4646,7 +4642,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                 logging.warning(f"Failed to load model '{model_name}': {model_err}")
                 logging.warning("This is often due to HuggingFace authentication or network issues.")
                 logging.warning("Falling back to simplified NLP experiment...")
-                return run_nlp_experiment_simple(results_dir, seeds, epochs, resume)
+                return run_nlp_experiment_simple(results_dir, seeds, epochs, resume, resume_behavior=resume_behavior)
 
             # Load dataset with robust fallback for environment compatibility
             try:
@@ -4659,7 +4655,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                 logging.warning(f"Failed to load IMDB dataset via HuggingFace: {dataset_err}")
                 logging.warning("Falling back to simplified NLP experiment...")
                 # Fallback: run simplified experiment and return early
-                return run_nlp_experiment_simple(results_dir, seeds, epochs, resume)
+                return run_nlp_experiment_simple(results_dir, seeds, epochs, resume, resume_behavior=resume_behavior)
 
             def preprocess(examples):
                 return tokenizer(examples['text'], truncation=True, padding=False, max_length=256)
@@ -5152,7 +5148,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
 
     return df
 
-def run_nlp_experiment_simple(results_dir: Union[str, Path] = "results_nlp", seeds: Optional[List[int]] = None, epochs: int = 10, resume: bool = False):
+def run_nlp_experiment_simple(results_dir: Union[str, Path] = "results_nlp", seeds: Optional[List[int]] = None, epochs: int = 10, resume: bool = False, resume_behavior: str = None):
     if seeds is None:
         seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
     """Robust NLP experiment using local LSTM/RNN models with synthetic or IMDB data
