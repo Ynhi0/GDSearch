@@ -4490,30 +4490,26 @@ def run_nlp_experiment(results_dir="results_nlp", seeds=None, quick=False, skip_
         seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
     """Run full IMDB sentiment analysis with DistilBERT
 
-    This function attempts to use HuggingFace DistilBERT for NLP experiments.
-    If any error occurs (401 Unauthorized, network issues, etc.), it automatically
-    falls back to the local RNN/LSTM implementation which works offline.
-
-    Args:
-        resume: If True, skip experiments that already have result files
+    This function delegates to a dedicated HuggingFace implementation and
+    falls back to `run_nlp_experiment_simple` when HuggingFace is unavailable
+    or an error occurs.
     """
     # Clear GPU memory before starting new experiment
     logging.info("[*] Clearing GPU memory before NLP experiment...")
     clear_gpu_memory(force=True)
-    # Clear GPU memory before starting new experiment
     clear_gpu_memory()
 
     print("\n" + "="*80)
     print("NLP SENTIMENT ANALYSIS EXPERIMENT")
     print("="*80)
 
-    # Check if HuggingFace is available
+    # If HF deps aren't available, use the local fallback
     if not HAS_HF:
         print("HuggingFace transformers/datasets not available.")
         print("   Using local LSTM/RNN models instead...")
         return run_nlp_experiment_simple(results_dir, seeds, 3 if quick else 5, resume, resume_behavior=resume_behavior)
 
-    # Wrap entire HuggingFace experiment in try/except for robustness
+    # Delegate to the helper; catch any exception and fall back to the simple runner
     try:
         return _run_nlp_experiment_huggingface(
             results_dir=results_dir,
@@ -4523,15 +4519,24 @@ def run_nlp_experiment(results_dir="results_nlp", seeds=None, quick=False, skip_
             profiler=profiler,
             tracker=tracker,
             checkpoint_manager=checkpoint_manager,
-            resume=resume
+            resume=resume,
+            resume_behavior=resume_behavior,
         )
     except Exception as e:
         print(f"\nHuggingFace experiment failed: {str(e)[:200]}")
         print("   This is often due to authentication or network issues.")
         print("   Falling back to local LSTM/RNN models (no download required)...")
         return run_nlp_experiment_simple(results_dir, seeds, 3 if quick else 5, resume, resume_behavior=resume_behavior)
-        seeds = [1, 2, 3]
-    """Internal function: Run NLP experiment using HuggingFace models"""
+
+
+def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False, resume_behavior: str = None):
+    """Internal function: Run NLP experiment using HuggingFace models
+
+    This is the extracted HuggingFace implementation that was previously
+    inlined inside `run_nlp_experiment`. Keeping it separate fixes the
+    `name '_run_nlp_experiment_huggingface' is not defined` runtime error
+    and improves readability.
+    """
     print("   Attempting to use HuggingFace DistilBERT...")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -4550,13 +4555,10 @@ def run_nlp_experiment(results_dir="results_nlp", seeds=None, quick=False, skip_
         })
 
     # Set environment variables to avoid warnings
-
     os.environ['TOKENIZERS_PARALLELISM'] = 'false'  # Prevent tokenizer fork warnings
 
     # Suppress unnecessary transformers warnings
-
     warnings.filterwarnings('ignore', message='Some weights.*were not initialized')
-
 
     # Set transformers logging to ERROR to suppress weight initialization messages
     import transformers
@@ -4590,13 +4592,10 @@ def run_nlp_experiment(results_dir="results_nlp", seeds=None, quick=False, skip_
     }
 
     # Hyperparameter tuning (if enabled)
-    # NOTE: NLP tuning is more expensive due to transformer models
-    # For full tuning, a separate tuning dataset subset is created
     tuned_params = {}
     tuning_cache = create_tuning_cache(results_dir) if not skip_tuning else None
 
     # Build configs with tuned or default LRs
-    # Note: NLP experiment can use AUTO_LR in addition to cached tuned params
     configs = []
     for opt_name, default_lr in default_lrs.items():
         if tuning_cache is not None:
@@ -4663,7 +4662,6 @@ def run_nlp_experiment(results_dir="results_nlp", seeds=None, quick=False, skip_
             tokenized = raw.map(preprocess, batched=True)
 
             # Create proper train/val/test split to prevent test set leakage
-            # Validity requires validation set for early stopping, not test set
             train_size_total = min(train_size, len(tokenized['train']))
             val_size = max(int(train_size_total * 0.15), 100)  # 15% for validation, min 100 samples
             actual_train_size = train_size_total - val_size
