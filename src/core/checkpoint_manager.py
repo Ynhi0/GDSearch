@@ -490,3 +490,35 @@ class RobustCheckpointManager:
             logging.debug("Failed to validate checkpoint %s: %s", ckpt_path, e, exc_info=True)
             return False
 
+    def validate_optimizer_compatibility(self, checkpoint: Dict, opt_name: str) -> bool:
+        """
+        Validate that the checkpoint is compatible with the target optimizer.
+
+        Args:
+            checkpoint: Checkpoint dictionary
+            opt_name: Name of the current optimizer
+
+        Returns:
+            True if compatible, False otherwise
+        """
+        if not isinstance(checkpoint, dict):
+            return False
+
+        saved_opt = checkpoint.get('opt_name')
+        if saved_opt:
+            if str(saved_opt).lower() == str(opt_name).lower():
+                return True
+            logging.warning(
+                "Optimizer mismatch: Checkpoint used '%s', but current experiment uses '%s'",
+                saved_opt, opt_name
+            )
+            return False
+
+        # If opt_name is missing, check structure as fallback
+        if 'optimizer' in checkpoint:
+            opt_state = checkpoint['optimizer']
+            if isinstance(opt_state, dict) and 'param_groups' in opt_state:
+                return True
+
+        return False
+
