@@ -10222,7 +10222,7 @@ Examples:
     # and reproducibility. Checkpoints include model, optimizer, scheduler, RNG states.
     checkpoint_manager = RobustCheckpointManager(
         base_dir=str(results_dir / "checkpoints"),
-        max_backups=3
+        max_backups=1
     )
 
     # Initialize TimeBudgetManager for Kaggle 12h timeout protection

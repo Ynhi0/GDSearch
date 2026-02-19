@@ -64,7 +64,7 @@ class RobustCheckpointManager:
     - Disk space monitoring
     """
 
-    def __init__(self, base_dir: str, max_backups: int = 3, min_free_gb: float = 1.0, strict: bool = True, backup_lock_timeout: int = 30, stale_lock_seconds: int = 3600):
+    def __init__(self, base_dir: str, max_backups: int = 1, min_free_gb: float = 1.0, strict: bool = True, backup_lock_timeout: int = 30, stale_lock_seconds: int = 3600):
         """
         Initialize checkpoint manager.
 
