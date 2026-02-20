@@ -66,6 +66,29 @@ def test_experiment_mode_env_ultra_sets_ultra_flag(monkeypatch, tmp_path):
     assert rag.ULTRA_QUICK_MODE is True
 
 
+def test_summary_row_includes_loss(tmp_path):
+    # create fake history with a generic 'loss' key and call save_run_artifacts
+    from run_all_kaggle import save_run_artifacts
+    results_root = tmp_path / "results"
+    results_root.mkdir()
+    history = [{'iteration': 0, 'loss': 3.14}]
+    # call with dataset '2D' to mimic 2D experiment
+    csv_path, meta_path = save_run_artifacts(str(results_root), '2D', 'Rosenbrock', 'SGD', 42, history, {}, device=None, exp_tracker=None)
+    summary = pd.read_csv(results_root / 'summary_quantitative.csv')
+    assert not summary.empty
+    row = summary.iloc[-1]
+    assert row['final_loss'] == 3.14
+
+    # now test robustness-style history
+    results_root2 = tmp_path / "results2"
+    results_root2.mkdir()
+    history2 = [{'iteration': 10, 'loss': 0.5}]
+    save_run_artifacts(str(results_root2), 'Robustness', 'Rosenbrock', 'Adam', 99, history2, {}, device=None, exp_tracker=None)
+    summary2 = pd.read_csv(results_root2 / 'summary_quantitative.csv')
+    assert not summary2.empty
+    assert summary2.iloc[-1]['final_loss'] == 0.5
+
+
 def test_experiment_mode_cli_overrides_env(monkeypatch, tmp_path):
     # ENV says quick, CLI explicitly sets full -> should override
     monkeypatch.setenv('EXPERIMENT_MODE', 'quick')

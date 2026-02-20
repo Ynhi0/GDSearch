@@ -1564,14 +1564,20 @@ def save_run_artifacts(base_results_dir: Union[str, Path], dataset: str, model_n
             # Try extract final metrics if available
             if isinstance(history, list) and len(history) > 0:
                 last = history[-1]
+                # handle standard NN keys
                 if 'test_accuracy' in last:
                     summary_row['final_test_acc'] = last.get('test_accuracy')
                 elif 'test_acc' in last:
                     summary_row['final_test_acc'] = last.get('test_acc')
+                # generic loss keys
                 if 'test_loss' in last:
                     summary_row['final_loss'] = last.get('test_loss')
                 elif 'val_loss' in last:
                     summary_row['final_loss'] = last.get('val_loss')
+                elif 'loss' in last:
+                    summary_row['final_loss'] = last.get('loss')
+                # 2D summary: if loss present but no accuracy, record as final_loss
+                # and for robustness the same
 
             import csv
             # If file exists, append; otherwise create with header
@@ -8063,8 +8069,11 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, skip_t
     # Generate visualizations for 2D experiment
     try:
         twod_csvs = list(Path(results_dir).glob("*.csv"))
+        logging.debug(f"2D experiment found {len(twod_csvs)} CSVs in {results_dir}")
         if twod_csvs:
             create_experiment_visualizations('2D_Optimization', str(Path(results_dir).parent.parent), twod_csvs)
+        else:
+            logging.warning(f"No CSVs found for 2D visualization under {results_dir}")
     except Exception as viz_e:
         logging.warning(f"Could not create 2D visualizations: {viz_e}")
 
@@ -8239,6 +8248,13 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
                         # Stop this start-point's optimization loop and proceed to save whatever we have
                         break
 
+                    # record history entry for summary metrics and debugging
+                    try:
+                        hist_entry = {'iteration': i, 'loss': float(loss), 'grad_norm': float(torch.norm(x.grad)) if x.grad is not None else None}
+                    except Exception:
+                        hist_entry = {'iteration': i, 'loss': None}
+                    history.append(hist_entry)
+
                     # Periodic checkpointing
                     if checkpoint_manager and (i % ckpt_interval == 0 or i == max_iter - 1):
                         ckpt_data = {
@@ -8256,7 +8272,7 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
 
                     # Check convergence using last computed loss (if numeric)
                     try:
-                        if float(loss) < 1e-6:
+                        if isinstance(loss, (float, int)) and loss < 1e-6:
                             converged = True
                             break
                     except Exception:
@@ -8306,8 +8322,11 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
     # Generate visualizations for Robustness experiment
     try:
         robustness_csvs = list(Path(results_dir).glob("*.csv"))
+        logging.debug(f"Robustness experiment found {len(robustness_csvs)} CSVs in {results_dir}")
         if robustness_csvs:
             create_experiment_visualizations('Robustness', str(Path(results_dir).parent.parent), robustness_csvs)
+        else:
+            logging.warning(f"No CSVs found for Robustness visualization under {results_dir}")
     except Exception as viz_e:
         logging.warning(f"Could not create Robustness visualizations: {viz_e}")
 
@@ -8440,8 +8459,11 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=None, quick
     # Generate visualizations for SAM experiment
     try:
         sam_csvs = list(Path(results_dir).glob("*.csv"))
+        logging.debug(f"SAM sensitivity found {len(sam_csvs)} CSVs in {results_dir}")
         if sam_csvs:
             create_experiment_visualizations('SAM_Sensitivity', str(Path(results_dir).parent.parent), sam_csvs)
+        else:
+            logging.warning(f"No CSVs found for SAM visualization under {results_dir}")
     except Exception as viz_e:
         logging.warning(f"Could not create SAM visualizations: {viz_e}")
 
