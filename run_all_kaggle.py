@@ -7831,12 +7831,13 @@ class Rastrigin:
     def gradient(self, x):
         return 2*x + 2*np.pi*self.A*np.sin(2*np.pi*x)
 
-def run_2d_experiments(results_dir="results_2d", seeds=None, resume=False):
+def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, resume=False):
     if seeds is None:
-        seeds = [1, 2, 3]
+        seeds = [1, 2, 3] if not quick else [1, 2]
     """Run 2D optimization experiments on test functions
 
     Args:
+        quick: If True, run a smaller/faster subset for CI or debugging
         resume: If True, skip experiments that already have result files
     """
     print("\n" + "="*80)
@@ -7884,7 +7885,7 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, resume=False):
                 optimizer = opt_func([x])
 
                 history = []
-                max_iter = 1000
+                max_iter = 200 if quick else 1000
 
                 for i in range(max_iter):
                     optimizer.zero_grad()
@@ -7977,12 +7978,13 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, resume=False):
 
     return df
 
-def run_robustness_analysis(results_dir="results_robustness", seeds=None, resume=False):
+def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=False, resume=False):
     if seeds is None:
-        seeds = [42]
+        seeds = [42] if not quick else [42]
     """Run initial condition robustness analysis
 
     Args:
+        quick: If True, run a smaller/faster subset for CI or debugging
         seeds: List of seeds for reproducibility (uses first seed)
         resume: If True, skip experiments that already have result files
     """
@@ -7996,6 +7998,9 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, resume
         (2.0, -1.0), (-2.0, 1.0), (0.0, 0.0), (1.0, 1.0),
         (-1.0, -1.0), (0.5, -0.5)
     ]
+    if quick:
+        # Reduce coverage for quick/debug mode to save time
+        initial_points = initial_points[:4]
 
     optimizers_robust = []
     for opt_name in [OptimizerNames.SGD, OptimizerNames.ADAM, 'SAM_SGD']:
@@ -8048,7 +8053,7 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, resume
                 x = torch.tensor(start_point, dtype=torch.float32, requires_grad=True)
                 optimizer = opt_func([x])
 
-                max_iter = 2000
+                max_iter = 500 if quick else 2000
                 converged = False
 
                 for i in range(max_iter):
@@ -8107,12 +8112,13 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, resume
 
     return df
 
-def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=None, resume=False):
+def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=None, quick=False, resume=False):
     if seeds is None:
-        seeds = [42]
+        seeds = [42] if not quick else [42]
     """Run SAM sensitivity analysis with different rho values
 
     Args:
+        quick: If True, run a smaller/faster subset for CI or debugging
         seeds: List of seeds for reproducibility (uses first seed)
         resume: If True, skip experiments that already have result files
     """
@@ -8158,7 +8164,7 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=None, resum
     train_dataset = download_mnist()
     logging.info("MNIST dataset loaded successfully")
 
-    rho_values = [0.01, 0.02, 0.05, 0.1, 0.2]
+    rho_values = [0.05] if quick else [0.01, 0.02, 0.05, 0.1, 0.2]
     results = []
 
     for seed in seeds:
@@ -8181,8 +8187,8 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=None, resum
             optimizer = SAMWrapper(base_optimizer, rho=rho)  # Override rho for sensitivity analysis
             criterion = nn.CrossEntropyLoss()
 
-            # Quick training (3 epochs)
-            for epoch in range(3):
+            # Quick training (fewer epochs when requested)
+            for epoch in range(1 if quick else 3):
                 model.train()
                 epoch_loss = 0
 
@@ -8237,12 +8243,13 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=None, resum
 
     return df
 
-def run_ablation_study(results_dir="results_ablation", seeds=None, resume=False):
+def run_ablation_study(results_dir="results_ablation", seeds=None, quick=False, resume=False):
     if seeds is None:
         seeds = [42]
     """Run optimizer component ablation study
 
     Args:
+        quick: If True, run a smaller/faster subset for CI or debugging
         seeds: List of seeds for reproducibility (uses first seed)
         resume: If True, skip experiments that already have result files
     """
@@ -8305,7 +8312,7 @@ def run_ablation_study(results_dir="results_ablation", seeds=None, resume=False)
             if optimizer is None:
                 raise ValueError(f"Unsupported optimizer: {opt_name}")
 
-            max_iter = 1000
+            max_iter = 200 if quick else 1000
             for i in range(max_iter):
                 optimizer.zero_grad()  # type: ignore[union-attr]
 
