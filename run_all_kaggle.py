@@ -5528,7 +5528,7 @@ class BiLSTMLayer(nn.Module):
         return torch.cat([h_n[0], h_n[1]], dim=1)  # [batch, hidden*2]
 
 
-def run_medical_experiment(results_dir="results_medical", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False, require_medmnist=False):
+def run_medical_experiment(results_dir="results_medical", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False, resume_behavior: str = None, require_medmnist=False):
     if seeds is None:
         seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
     """Run full medical image segmentation with U-Net
@@ -7831,14 +7831,17 @@ class Rastrigin:
     def gradient(self, x):
         return 2*x + 2*np.pi*self.A*np.sin(2*np.pi*x)
 
-def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, resume=False):
+def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False, resume_behavior: str = None):
     if seeds is None:
         seeds = [1, 2, 3] if not quick else [1, 2]
     """Run 2D optimization experiments on test functions
 
     Args:
         quick: If True, run a smaller/faster subset for CI or debugging
+        skip_tuning: Ignored for 2D experiments but accepted for API compatibility
+        profiler, tracker, checkpoint_manager: Accepted for API compatibility
         resume: If True, skip experiments that already have result files
+        resume_behavior: Optional resume behavior string (accepted for compatibility)
     """
     print("\n" + "="*80)
     print("2D OPTIMIZATION EXPERIMENTS")
@@ -7873,21 +7876,91 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, resume
 
         for opt_name, opt_func in optimizers_2d:
             for seed in seeds:
-                # Check if this specific experiment is already completed
+                # Check if this specific experiment is already completed (results file shortcut)
                 if resume and is_experiment_completed(str(results_dir), '2D', func_name, opt_name, seed):
                     logging.info(f"Skipping 2D {func_name} {opt_name} seed {seed} (already completed)")
                     continue
 
                 set_seed(seed)
 
-                # Convert to torch tensors
-                x = torch.tensor(start_point, dtype=torch.float32, requires_grad=True)
+                # --- Resume / Checkpoint support (per-run) ---
+                ckpt_file = f"2D_{func_name}_{opt_name}_seed{seed}.pt"
+                start_iter = 0
+                history = []
+                checkpoint = None
+
+                run_sig = compute_run_signature({'experiment': '2D', 'function': func_name, 'optimizer': opt_name, 'seed': seed, 'max_iter': 1000 if not quick else 200, 'start_point': start_point})
+
+                # Try to load checkpoint if manager provided
+                if checkpoint_manager:
+                    checkpoint = checkpoint_manager.load_checkpoint(ckpt_file, f"2D_{func_name}_{opt_name}_seed{seed}")
+
+                # Decide resume action when requested
+                if resume and checkpoint is None:
+                    try:
+                        action = decide_resume_action(checkpoint, Path(results_dir), run_sig, resume_behavior or 'skip_if_results_exist')
+                    except RuntimeError as e:
+                        logging.error("Resume error for %s seed %s: %s", opt_name, seed, e)
+                        raise
+
+                    if action == 'skip':
+                        logging.info(f"Skipping 2D {func_name} {opt_name} seed {seed} per resume policy")
+                        continue
+                    else:
+                        logging.info(f"No checkpoint found for 2D {func_name} {opt_name} seed {seed}; proceeding (resume_behavior={resume_behavior})")
+
+                # Initialize tensor (use saved state when available)
+                if checkpoint and checkpoint_manager.validate_optimizer_compatibility(checkpoint, opt_name):
+                    saved_x = checkpoint.get('x') or checkpoint.get('state', {}).get('x')
+                    if saved_x is not None:
+                        x = torch.tensor(saved_x, dtype=torch.float32, requires_grad=True)
+                    else:
+                        x = torch.tensor(start_point, dtype=torch.float32, requires_grad=True)
+                else:
+                    x = torch.tensor(start_point, dtype=torch.float32, requires_grad=True)
+
+                # Create optimizer AFTER tensor creation so optimizer param refs match saved state
                 optimizer = opt_func([x])
 
-                history = []
-                max_iter = 200 if quick else 1000
+                # Restore optimizer / history / RNG state if checkpoint available
+                if checkpoint and checkpoint_manager.validate_optimizer_compatibility(checkpoint, opt_name):
+                    opt_state = checkpoint.get('optimizer', {})
 
-                for i in range(max_iter):
+                    def _optimizer_state_plausible(state, optimizer_obj):
+                        # Accept SAMWrapper-style (contains 'base_optimizer') or plain optimizer state
+                        if not isinstance(state, dict):
+                            return False
+                        inner = state.get('base_optimizer', state)
+                        if not isinstance(inner, dict):
+                            return False
+                        pgs = inner.get('param_groups')
+                        # Must have non-empty param_groups that match current optimizer
+                        if not isinstance(pgs, list) or len(pgs) == 0:
+                            return False
+                        try:
+                            if len(pgs) != len(getattr(optimizer_obj, 'param_groups', [])):
+                                return False
+                        except Exception:
+                            return False
+                        return True
+
+                    if _optimizer_state_plausible(opt_state, optimizer):
+                        try:
+                            optimizer.load_state_dict(opt_state)
+                        except Exception:
+                            logging.debug("Could not restore optimizer state for 2D run (continuing fresh)", exc_info=True)
+                    else:
+                        logging.warning("Skipping restore: checkpoint contains incomplete or incompatible optimizer state for %s", opt_name)
+
+                    start_iter = int(checkpoint.get('iteration', 0)) + 1
+                    history = checkpoint.get('history', []) or []
+                    checkpoint_manager.restore_rng_states(checkpoint)
+
+                max_iter = 200 if quick else 1000
+                ckpt_interval = max(1, max_iter // 10)
+
+                # Main optimization loop (may resume from start_iter)
+                for i in range(start_iter, max_iter):
                     optimizer.zero_grad()
 
                     # Evaluate function
@@ -7900,11 +7973,9 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, resume
                         grad = func.gradient(x_np)
                         x.grad = torch.tensor(grad, dtype=torch.float32)
                     else:
-                        # Skip if no gradient available
                         logging.warning(f"Function {func_name} has no gradient method")
                         break
 
-                    # Compute gradient norm for convergence analysis
                     grad_norm = float(np.linalg.norm(grad)) if grad is not None else 0.0
 
                     if opt_name.startswith('SAM'):
@@ -7920,26 +7991,32 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, resume
                     else:
                         optimizer.step()
 
-                    # Store full trajectory data for visualization and analysis
-                    # Proposal requirement: x, y coordinates, loss, gradient_norm
-                    history_entry = {
-                        'iteration': i,
-                        'loss': loss_value,
-                        'grad_norm': grad_norm
-                    }
-                    # Handle both 1D and 2D cases
+                    history_entry = {'iteration': i, 'loss': loss_value, 'grad_norm': grad_norm}
                     if len(x_np) >= 2:
-                        history_entry['x'] = float(x_np[0])
-                        history_entry['y'] = float(x_np[1])
+                        history_entry['x'] = float(x_np[0]); history_entry['y'] = float(x_np[1])
                     else:
-                        history_entry['x'] = float(x_np[0])
-                        history_entry['y'] = 0.0
+                        history_entry['x'] = float(x_np[0]); history_entry['y'] = 0.0
                     history.append(history_entry)
 
-                    # Convergence check
+                    # Periodic checkpointing for long 2D runs
+                    if checkpoint_manager and (i % ckpt_interval == 0 or i == max_iter - 1):
+                        ckpt_data = {
+                            'opt_name': opt_name,
+                            'optimizer': optimizer.state_dict(),
+                            'iteration': i,
+                            'x': x.detach().cpu().numpy().tolist(),
+                            'history': history,
+                            'metadata': {'experiment': '2D', 'function': func_name, 'seed': seed, 'completed': False}
+                        }
+                        try:
+                            checkpoint_manager.save_checkpoint(ckpt_data, ckpt_file, f"2D_{func_name}_{opt_name}_seed{seed}")
+                        except Exception as e:
+                            logging.warning("Failed to save 2D checkpoint: %s", e)
+
                     if loss_value < 1e-6:
                         break
 
+                # Finalize per-run results
                 results.append(normalize_metric_names({
                     'function': func_name,
                     'optimizer': opt_name,
@@ -7949,6 +8026,21 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, resume
                     'iterations': len(history),
                     'converged': loss_value < 1e-6 if history else False
                 }))
+
+                # Mark final checkpoint as completed
+                if checkpoint_manager:
+                    try:
+                        final_ckpt = {
+                            'opt_name': opt_name,
+                            'optimizer': optimizer.state_dict(),
+                            'iteration': i,
+                            'x': x.detach().cpu().numpy().tolist(),
+                            'history': history,
+                            'metadata': {'experiment': '2D', 'function': func_name, 'seed': seed, 'completed': True}
+                        }
+                        checkpoint_manager.save_checkpoint(final_ckpt, ckpt_file, f"2D_{func_name}_{opt_name}_seed{seed}")
+                    except Exception as e:
+                        logging.warning("Failed to save final 2D checkpoint: %s", e)
 
                 # Save per-run artifact for this 2D optimization run
                 try:
@@ -7978,15 +8070,18 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, resume
 
     return df
 
-def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=False, resume=False):
+def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False, resume_behavior: str = None):
     if seeds is None:
         seeds = [42] if not quick else [42]
     """Run initial condition robustness analysis
 
     Args:
         quick: If True, run a smaller/faster subset for CI or debugging
+        skip_tuning: Accepted for API compatibility (unused)
+        profiler, tracker, checkpoint_manager: Accepted for API compatibility
         seeds: List of seeds for reproducibility (uses first seed)
         resume: If True, skip experiments that already have result files
+        resume_behavior: Optional resume behavior string (accepted for compatibility)
     """
     print("\n" + "="*80)
     print("INITIAL CONDITION ROBUSTNESS ANALYSIS")
@@ -8049,33 +8144,124 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
             logging.info(f"\n[TESTING] Testing Optimizer: {opt_name}")
             logging.info("-" * 50)
 
-            for start_point in initial_points:
-                x = torch.tensor(start_point, dtype=torch.float32, requires_grad=True)
+            for idx, start_point in enumerate(initial_points):
+                # Per-start-point resume/checkpoint support
+                ckpt_file = f"Robustness_Rosenbrock_{opt_name}_seed{seed}_start{idx}.pt"
+                checkpoint = None
+                start_iter = 0
+                history = []
+
+                run_sig = compute_run_signature({'experiment': 'Robustness', 'function': 'Rosenbrock', 'optimizer': opt_name, 'seed': seed, 'start_point': start_point})
+                if checkpoint_manager:
+                    checkpoint = checkpoint_manager.load_checkpoint(ckpt_file, f"Robustness_Rosenbrock_{opt_name}_seed{seed}_start{idx}")
+
+                if resume and checkpoint is None:
+                    try:
+                        action = decide_resume_action(checkpoint, Path(results_dir), run_sig, resume_behavior or 'skip_if_results_exist')
+                    except RuntimeError as e:
+                        logging.error("Resume error for Robustness %s seed %s start %s: %s", opt_name, seed, start_point, e)
+                        raise
+
+                    if action == 'skip':
+                        logging.info(f"Skipping Robustness {opt_name} seed {seed} start {start_point} per resume policy")
+                        continue
+
+                # Initialize or restore tensor
+                if checkpoint and checkpoint_manager.validate_optimizer_compatibility(checkpoint, opt_name):
+                    saved_x = checkpoint.get('x') or checkpoint.get('state', {}).get('x')
+                    if saved_x is not None:
+                        x = torch.tensor(saved_x, dtype=torch.float32, requires_grad=True)
+                    else:
+                        x = torch.tensor(start_point, dtype=torch.float32, requires_grad=True)
+                else:
+                    x = torch.tensor(start_point, dtype=torch.float32, requires_grad=True)
+
                 optimizer = opt_func([x])
 
+                if checkpoint and checkpoint_manager.validate_optimizer_compatibility(checkpoint, opt_name):
+                    opt_state = checkpoint.get('optimizer', {})
+
+                    def _optimizer_state_plausible(state, optimizer_obj):
+                        # Accept SAMWrapper-style (contains 'base_optimizer') or plain optimizer state
+                        if not isinstance(state, dict):
+                            return False
+                        inner = state.get('base_optimizer', state)
+                        if not isinstance(inner, dict):
+                            return False
+                        pgs = inner.get('param_groups')
+                        if not isinstance(pgs, list) or len(pgs) == 0:
+                            return False
+                        try:
+                            if len(pgs) != len(getattr(optimizer_obj, 'param_groups', [])):
+                                return False
+                        except Exception:
+                            return False
+                        return True
+
+                    if _optimizer_state_plausible(opt_state, optimizer):
+                        try:
+                            optimizer.load_state_dict(opt_state)
+                        except Exception:
+                            logging.debug("Could not restore optimizer state for robustness run (continuing fresh)", exc_info=True)
+                    else:
+                        logging.warning("Skipping restore: checkpoint contains incomplete or incompatible optimizer state for %s", opt_name)
+
+                    start_iter = int(checkpoint.get('iteration', 0)) + 1
+                    history = checkpoint.get('history', []) or []
+                    checkpoint_manager.restore_rng_states(checkpoint)
+
                 max_iter = 500 if quick else 2000
+                ckpt_interval = max(1, max_iter // 10)
                 converged = False
 
-                for i in range(max_iter):
-                    optimizer.zero_grad()
+                # Ensure `loss` always exists in case optimizer throws (so we can still save results)
+                loss = torch.tensor(float('nan'))
 
-                    # Compute loss using PyTorch autograd
-                    loss = rosenbrock.torch_loss(x)
-                    loss.backward()
+                for i in range(start_iter, max_iter):
+                    try:
+                        optimizer.zero_grad()
+                        loss = rosenbrock.torch_loss(x)
+                        loss.backward()
 
-                    if opt_name.startswith('SAM'):
-                        def closure():
-                            optimizer.zero_grad()
-                            loss_c = rosenbrock.torch_loss(x)
-                            loss_c.backward()
-                            return loss_c
-                        optimizer.step(closure)
-                    else:
-                        optimizer.step()
+                        if opt_name.startswith('SAM'):
+                            def closure():
+                                optimizer.zero_grad()
+                                loss_c = rosenbrock.torch_loss(x)
+                                loss_c.backward()
+                                return loss_c
+                            optimizer.step(closure)
+                        else:
+                            optimizer.step()
 
-                    if loss.item() < 1e-6:
-                        converged = True
+                    except Exception as e:
+                        # Robustness analysis should continue across optimizer failures
+                        logging.warning("Robustness run failed for %s seed %s start %s at iter %s: %s", opt_name, seed, start_point, i, e, exc_info=True)
+                        # Stop this start-point's optimization loop and proceed to save whatever we have
                         break
+
+                    # Periodic checkpointing
+                    if checkpoint_manager and (i % ckpt_interval == 0 or i == max_iter - 1):
+                        ckpt_data = {
+                            'opt_name': opt_name,
+                            'optimizer': optimizer.state_dict(),
+                            'iteration': i,
+                            'x': x.detach().cpu().numpy().tolist(),
+                            'history': history,
+                            'metadata': {'experiment': 'Robustness', 'function': 'Rosenbrock', 'seed': seed, 'start_point': start_point, 'completed': False}
+                        }
+                        try:
+                            checkpoint_manager.save_checkpoint(ckpt_data, ckpt_file, f"Robustness_Rosenbrock_{opt_name}_seed{seed}_start{idx}")
+                        except Exception as e:
+                            logging.warning("Failed to save robustness checkpoint: %s", e)
+
+                    # Check convergence using last computed loss (if numeric)
+                    try:
+                        if float(loss) < 1e-6:
+                            converged = True
+                            break
+                    except Exception:
+                        # Non-numeric loss (nan/inf) -> cannot converge; continue to next iteration or break handled above
+                        pass
 
                 results.append({
                     'optimizer': opt_name,
@@ -8086,6 +8272,21 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
                     'iterations': i + 1,
                     'converged': converged
                 })
+
+                # Mark final checkpoint as completed
+                if checkpoint_manager:
+                    try:
+                        final_ckpt = {
+                            'opt_name': opt_name,
+                            'optimizer': optimizer.state_dict(),
+                            'iteration': i,
+                            'x': x.detach().cpu().numpy().tolist(),
+                            'history': history,
+                            'metadata': {'experiment': 'Robustness', 'function': 'Rosenbrock', 'seed': seed, 'start_point': start_point, 'completed': True}
+                        }
+                        checkpoint_manager.save_checkpoint(final_ckpt, ckpt_file, f"Robustness_Rosenbrock_{opt_name}_seed{seed}_start{idx}")
+                    except Exception as e:
+                        logging.warning("Failed to save final robustness checkpoint: %s", e)
 
                 # Save per-run artifact for robustness run
                 try:
@@ -8112,15 +8313,18 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
 
     return df
 
-def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=None, quick=False, resume=False):
+def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False, resume_behavior: str = None):
     if seeds is None:
         seeds = [42] if not quick else [42]
     """Run SAM sensitivity analysis with different rho values
 
     Args:
         quick: If True, run a smaller/faster subset for CI or debugging
+        skip_tuning: Accepted for API compatibility (unused)
+        profiler, tracker, checkpoint_manager: Accepted for API compatibility
         seeds: List of seeds for reproducibility (uses first seed)
         resume: If True, skip experiments that already have result files
+        resume_behavior: Optional resume behavior string (accepted for compatibility)
     """
     logging.info("\n" + "="*80)
     logging.info("🎛️  SAM SENSITIVITY ANALYSIS")
@@ -8243,15 +8447,18 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=None, quick
 
     return df
 
-def run_ablation_study(results_dir="results_ablation", seeds=None, quick=False, resume=False):
+def run_ablation_study(results_dir="results_ablation", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False, resume_behavior: str = None):
     if seeds is None:
         seeds = [42]
     """Run optimizer component ablation study
 
     Args:
         quick: If True, run a smaller/faster subset for CI or debugging
+        skip_tuning: Accepted for API compatibility (unused)
+        profiler, tracker, checkpoint_manager: Accepted for API compatibility
         seeds: List of seeds for reproducibility (uses first seed)
         resume: If True, skip experiments that already have result files
+        resume_behavior: Optional resume behavior string (accepted for compatibility)
     """
     logging.info("\n" + "="*80)
     logging.info("🔬 OPTIMIZER COMPONENT ABLATION STUDY")
@@ -8369,7 +8576,7 @@ def run_ablation_study(results_dir="results_ablation", seeds=None, quick=False, 
     return df
 
 
-def run_advanced_training_ablation(results_dir="results_advanced_ablation", seeds=None, quick=False, resume=False):
+def run_advanced_training_ablation(results_dir="results_advanced_ablation", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False, resume_behavior: str = None):
     if seeds is None:
         seeds = [1, 2, 3, 4, 5]
     """Run ablation study for advanced training features (AMP, Label Smoothing, EMA)
@@ -8444,7 +8651,7 @@ def run_advanced_training_ablation(results_dir="results_advanced_ablation", seed
         return pd.DataFrame()
 
 
-def run_initialization_ablation(device='cuda', epochs=10, seeds=None, quick=False, results_dir='results/initialization_ablation'):
+def run_initialization_ablation(device='cuda', epochs=10, seeds=None, quick=False, results_dir='results/initialization_ablation', skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False, resume_behavior: str = None):
     if seeds is None:
         seeds = [1, 2, 3, 4, 5]
     """
@@ -9193,7 +9400,7 @@ def print_system_info():
         print(f"  {k}: {v}")
     print()
 
-def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
+def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False, resume_behavior: str = None):
     if seeds is None:
         seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
     """Run ResNet18 experiment with enhanced monitoring
@@ -9473,7 +9680,7 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
     return df
 
 
-def run_highdim_experiment(results_dir="results_highdim", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False):
+def run_highdim_experiment(results_dir="results_highdim", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False, resume_behavior: str = None):
     if seeds is None:
         seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
     """Run high-dimensional optimization experiment
@@ -9765,8 +9972,14 @@ Examples:
                         help='Skip Optuna hyperparameter tuning (default: False - tuning enabled)')
     parser.add_argument('--seeds', type=str, default='42,123,456,789,1011,1213,1415,1617,1819,2021',
                         help='Comma-separated random seeds (default: 10 seeds for statistical validity)')
+
+    # High-level experiment selection (comma separated)
     parser.add_argument('--experiments', type=str, default='all',
                         help='Comma-separated experiment names (mnist,cifar10,nlp,medical,2d,robustness,sam,ablation,advanced_ablation,init_ablation,batch_ablation,lr_ablation,wd_ablation,scheduler_ablation,optimizer_comparison,resnet,highdim,hyperparam_sensitivity,convergence_validation,ablation_comprehensive,2d_visualization,dynamics_overhead,theory_practice,cross_optimizer_dynamics,label_noise,saddle_escape,hyperparameter_heatmaps,stochastic_2d_integrity,adam_adamw_comparison) or "all"')
+
+    # EXPERIMENT_MODE convenience: allow wrapper/CI to set quick/ultra_quick via ENV or CLI
+    parser.add_argument('--experiment-mode', type=str, choices=['full', 'quick', 'ultra_quick'], default=None,
+                        help="High-level run mode. Maps to flags: 'full' (no quick), 'quick' (reduced workloads), 'ultra_quick' (very small smoke test). Can also be set with ENV var EXPERIMENT_MODE")
     parser.add_argument('--results-dir', type=str, default='results',
                         help='Output directory for results (default: results/)')
     parser.add_argument('--config', type=str, default=None,
@@ -9839,6 +10052,26 @@ Examples:
                         help='STRICT MODE: Require real MedMNIST datasets for medical experiments (fail if unavailable, no synthetic fallback)')
 
     args = parser.parse_args()
+
+    # Allow ENV var EXPERIMENT_MODE to configure mode when CLI flag not provided
+    env_mode = os.getenv('EXPERIMENT_MODE')
+    chosen_mode = (args.experiment_mode or env_mode or '').strip() if (args.experiment_mode or env_mode) else None
+    if chosen_mode:
+        m = chosen_mode.strip().lower().replace('-', '_')
+        if m not in ('full', 'quick', 'ultra_quick', 'ultraquick'):
+            print(f"WARNING: Unknown EXPERIMENT_MODE='{chosen_mode}' (accepted: full, quick, ultra_quick). Ignoring.")
+        else:
+            # Map mode -> CLI flags
+            if m == 'full':
+                args.quick = False
+                args.ultra_quick = False
+            elif m == 'quick':
+                args.quick = True
+                # keep ultra_quick False
+            else:  # ultra_quick / ultraquick
+                args.ultra_quick = True
+                args.quick = True
+            print(f"Experiment mode set from {'CLI' if args.experiment_mode else 'ENV'}: '{chosen_mode}' -> quick={args.quick}, ultra_quick={args.ultra_quick}")
 
     # ========================================================================
     # PARALLEL EXECUTION: GPU Detection and Validation
@@ -10676,6 +10909,7 @@ Examples:
                 experiment_results['2d'] = run_2d_experiments(
                     results_dir=str(experiments_dir / "2d_optimization"),
                     seeds=seeds,
+                    quick=args.quick,
                     resume=args.resume
                 )
 
@@ -10686,6 +10920,7 @@ Examples:
                 experiment_results['robustness'] = run_robustness_analysis(
                     results_dir=str(experiments_dir / "robustness"),
                     seeds=seeds,
+                    quick=args.quick,
                     resume=args.resume
                 )
 
@@ -10694,6 +10929,7 @@ Examples:
                 experiment_results['sam'] = run_sam_sensitivity(
                     results_dir=str(experiments_dir / "sam_sensitivity"),
                     seeds=seeds,
+                    quick=args.quick,
                     resume=args.resume
                 )
 
@@ -10702,6 +10938,7 @@ Examples:
                 experiment_results['ablation'] = run_ablation_study(
                     results_dir=str(experiments_dir / "ablation"),
                     seeds=seeds,
+                    quick=args.quick,
                     resume=args.resume
                 )
 
