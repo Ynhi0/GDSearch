@@ -4612,9 +4612,9 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
     lr_adamw = 5e-5
     lr_sgd = 1e-3
     lr_default = 1e-4  # For new optimizers
-    train_size = 1000 if quick else (5000 if not torch.cuda.is_available() else 10000)  # Smaller for CPU
-    test_size = 500 if quick else 2000
-    epochs = 2 if ULTRA_QUICK_MODE else (5 if quick else 15)  # Increased for proper transformer fine-tuning
+    train_size = 1000 if quick else (2500 if not torch.cuda.is_available() else 5000)  # Reduced dataset size to improve runtime
+    test_size = 500 if quick else 1000
+    epochs = 2 if ULTRA_QUICK_MODE else (3 if quick else 5)  # Standard fine-tuning is typically 3-5 epochs (reduced from 15)
 
     results_dir = Path(results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
