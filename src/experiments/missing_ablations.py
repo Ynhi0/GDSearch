@@ -121,8 +121,11 @@ def train_and_evaluate_with_clipping(
     """Train model with optional gradient clipping and return final metrics"""
     model.to(device)
 
+    history = []
+    
     for epoch in range(epochs):
         model.train()
+        epoch_loss = 0.0
         for data, target in train_loader:
             data, target = data.to(device), target.to(device)
 
@@ -136,18 +139,27 @@ def train_and_evaluate_with_clipping(
                 torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
 
             optimizer.step()
-
-    # Evaluate
-    model.eval()
-    train_acc, train_loss = evaluate(model, train_loader, nn.CrossEntropyLoss(), device)
-    test_acc, test_loss = evaluate(model, test_loader, nn.CrossEntropyLoss(), device)
+            epoch_loss += loss.item() * data.size(0)
+            
+        # Evaluate at end of epoch
+        model.eval()
+        train_acc, train_avg_loss = evaluate(model, train_loader, nn.CrossEntropyLoss(), device)
+        test_acc, test_avg_loss = evaluate(model, test_loader, nn.CrossEntropyLoss(), device)
+        
+        history.append({
+            'epoch': epoch + 1,
+            'train_acc': train_acc,
+            'test_acc': test_acc,
+            'train_loss': train_avg_loss,
+            'test_loss': test_avg_loss
+        })
 
     return {
         'train_acc': train_acc,
         'test_acc': test_acc,
-        'train_loss': train_loss,
-        'test_loss': test_loss
-    }
+        'train_loss': train_avg_loss,
+        'test_loss': test_avg_loss
+    }, history
 
 
 def evaluate(model, loader, criterion, device):
@@ -177,7 +189,7 @@ def evaluate(model, loader, criterion, device):
 def run_gradient_clipping_ablation(
     clip_values: Optional[List[Optional[float]]] = None,
     epochs: int = 10,
-    seeds: List[int] = [42, 123, 456],
+    seeds: List[int] = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021],
     lr: float = 0.01,
     device: str = 'cpu',
     quick: bool = False,
@@ -220,7 +232,7 @@ def run_gradient_clipping_ablation(
             criterion = nn.CrossEntropyLoss()
 
             # Train
-            metrics = train_and_evaluate_with_clipping(
+            metrics, history = train_and_evaluate_with_clipping(
                 model, train_loader, test_loader, optimizer, criterion,
                 epochs, device, gradient_clip=clip_val
             )
@@ -234,6 +246,15 @@ def run_gradient_clipping_ablation(
                 'Train_Loss': metrics['train_loss'],
                 'Test_Loss': metrics['test_loss']
             })
+            
+            # Save per-run history for detailed analysis
+            try:
+                # Robustly import saving helper to avoid cyclical deps
+                from run_all_kaggle import save_run_artifacts
+                params = {'gradient_clip': clip_val, 'epochs': epochs, 'seed': seed}
+                save_run_artifacts(output_dir, 'MNIST', 'SimpleMLP', f'GradientClip_{clip_val}', seed, history, params, device=device)
+            except Exception as e:
+                print(f"  Warning: Could not save per-run artifact: {e}")
 
     df = pd.DataFrame(results)
     csv_path = os.path.join(output_dir, 'gradient_clipping_ablation.csv')
@@ -249,7 +270,7 @@ def run_gradient_clipping_ablation(
 def run_label_smoothing_ablation(
     smoothing_values: Optional[List[float]] = None,
     epochs: int = 10,
-    seeds: List[int] = [42, 123, 456],
+    seeds: List[int] = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021],
     lr: float = 0.01,
     device: str = 'cpu',
     quick: bool = False,
@@ -297,7 +318,7 @@ def run_label_smoothing_ablation(
                 criterion = nn.CrossEntropyLoss()
 
             # Train
-            metrics = train_and_evaluate_with_clipping(
+            metrics, history = train_and_evaluate_with_clipping(
                 model, train_loader, test_loader, optimizer, criterion,
                 epochs, device, gradient_clip=None
             )
@@ -310,6 +331,14 @@ def run_label_smoothing_ablation(
                 'Train_Loss': metrics['train_loss'],
                 'Test_Loss': metrics['test_loss']
             })
+
+            # Save per-run history
+            try:
+                from run_all_kaggle import save_run_artifacts
+                params = {'label_smoothing': smoothing, 'epochs': epochs, 'seed': seed}
+                save_run_artifacts(output_dir, 'MNIST', 'SimpleMLP', f'LabelSmoothing_{smoothing}', seed, history, params, device=device)
+            except Exception as e:
+                print(f"  Warning: Could not save per-run artifact: {e}")
 
     df = pd.DataFrame(results)
     csv_path = os.path.join(output_dir, 'label_smoothing_ablation.csv')
@@ -325,7 +354,7 @@ def run_label_smoothing_ablation(
 def run_data_augmentation_ablation(
     augmentation_configs: Optional[List[Dict]] = None,
     epochs: int = 10,
-    seeds: List[int] = [42, 123, 456],
+    seeds: List[int] = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021],
     lr: float = 0.01,
     device: str = 'cpu',
     quick: bool = False,
@@ -371,7 +400,7 @@ def run_data_augmentation_ablation(
             criterion = nn.CrossEntropyLoss()
 
             # Train
-            metrics = train_and_evaluate_with_clipping(
+            metrics, history = train_and_evaluate_with_clipping(
                 model, train_loader, test_loader, optimizer, criterion,
                 epochs, device, gradient_clip=None
             )
@@ -384,6 +413,14 @@ def run_data_augmentation_ablation(
                 'Train_Loss': metrics['train_loss'],
                 'Test_Loss': metrics['test_loss']
             })
+
+            # Save per-run history
+            try:
+                from run_all_kaggle import save_run_artifacts
+                params = {'augmentation': config['name'], 'epochs': epochs, 'seed': seed}
+                save_run_artifacts(output_dir, 'MNIST', 'SimpleMLP', f'Augmentation_{config["name"]}', seed, history, params, device=device)
+            except Exception as e:
+                print(f"  Warning: Could not save per-run artifact: {e}")
 
     df = pd.DataFrame(results)
     csv_path = os.path.join(output_dir, 'data_augmentation_ablation.csv')
@@ -399,7 +436,7 @@ def run_data_augmentation_ablation(
 def run_model_architecture_ablation(
     hidden_sizes: Optional[List[int]] = None,
     epochs: int = 10,
-    seeds: List[int] = [42, 123, 456],
+    seeds: List[int] = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021],
     lr: float = 0.01,
     device: str = 'cpu',
     quick: bool = False,
@@ -445,7 +482,7 @@ def run_model_architecture_ablation(
             num_params = sum(p.numel() for p in model.parameters())
 
             # Train
-            metrics = train_and_evaluate_with_clipping(
+            metrics, history = train_and_evaluate_with_clipping(
                 model, train_loader, test_loader, optimizer, criterion,
                 epochs, device, gradient_clip=None
             )
@@ -459,6 +496,14 @@ def run_model_architecture_ablation(
                 'Train_Loss': metrics['train_loss'],
                 'Test_Loss': metrics['test_loss']
             })
+
+            # Save per-run history
+            try:
+                from run_all_kaggle import save_run_artifacts
+                params = {'hidden_size': hidden_size, 'epochs': epochs, 'seed': seed}
+                save_run_artifacts(output_dir, 'MNIST', 'SimpleMLP', f'Arch_Hidden_{hidden_size}', seed, history, params, device=device)
+            except Exception as e:
+                print(f"  Warning: Could not save per-run artifact: {e}")
 
     df = pd.DataFrame(results)
     csv_path = os.path.join(output_dir, 'model_architecture_ablation.csv')
@@ -474,7 +519,7 @@ def run_model_architecture_ablation(
 def run_dropout_ablation(
     dropout_rates: Optional[List[float]] = None,
     epochs: int = 10,
-    seeds: List[int] = [42, 123, 456],
+    seeds: List[int] = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021],
     lr: float = 0.01,
     device: str = 'cpu',
     quick: bool = False,
@@ -517,7 +562,7 @@ def run_dropout_ablation(
             criterion = nn.CrossEntropyLoss()
 
             # Train
-            metrics = train_and_evaluate_with_clipping(
+            metrics, history = train_and_evaluate_with_clipping(
                 model, train_loader, test_loader, optimizer, criterion,
                 epochs, device, gradient_clip=None
             )
@@ -531,6 +576,14 @@ def run_dropout_ablation(
                 'Test_Loss': metrics['test_loss'],
                 'Overfit_Gap': metrics['train_acc'] - metrics['test_acc']
             })
+
+            # Save per-run history
+            try:
+                from run_all_kaggle import save_run_artifacts
+                params = {'dropout': dropout, 'epochs': epochs, 'seed': seed}
+                save_run_artifacts(output_dir, 'MNIST', 'SimpleMLP', f'Dropout_{dropout}', seed, history, params, device=device)
+            except Exception as e:
+                print(f"  Warning: Could not save per-run artifact: {e}")
 
     df = pd.DataFrame(results)
     csv_path = os.path.join(output_dir, 'dropout_ablation.csv')
@@ -653,7 +706,7 @@ def create_categorical_ablation_plot(df: pd.DataFrame, title: str, output_dir: s
 
 def run_all_missing_ablations(
     epochs: int = 10,
-    seeds: List[int] = [42, 123, 456],
+    seeds: List[int] = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021],
     device: str = 'cpu',
     quick: bool = False,
     output_dir: str = 'results/missing_ablations'

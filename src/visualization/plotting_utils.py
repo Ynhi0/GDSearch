@@ -53,7 +53,7 @@ def filter_time_series_files(csv_paths: List[Path]) -> List[Path]:
         try:
             # read only header to check columns
             df = pd.read_csv(p, nrows=1)
-            if 'epoch' in df.columns:
+            if 'epoch' in df.columns or 'iteration' in df.columns:
                 ts.append(p)
         except (pd.errors.EmptyDataError, pd.errors.ParserError, OSError, UnicodeDecodeError):
             # Skip files that cannot be read

@@ -136,7 +136,8 @@ def run_single_experiment(
     test_dataset,
     device: torch.device,
     epochs: int = 10,
-    seed: int = 42
+    seed: int = 42,
+    results_dir: Optional[str] = None
 ) -> Dict:
     """
     Run a single training experiment with given configuration.
@@ -243,6 +244,17 @@ def run_single_experiment(
 
     final_test_acc = history[-1]['test_acc']
     final_ema_acc = history[-1]['ema_test_acc']
+
+    # NEW: Save history to CSV for per-run analysis
+    if results_dir:
+        results_path = Path(results_dir)
+        results_path.mkdir(parents=True, exist_ok=True)
+        history_df = pd.DataFrame(history)
+        # Use sanitized filename: AdvAblation_{config_name}_seed{seed}.csv
+        config_name = config.get('name', 'unknown').replace('+', '_')
+        filename = f"AdvAblation_{config_name}_seed{seed}.csv"
+        history_df.to_csv(results_path / filename, index=False)
+        print(f"    Saved run history to {filename}")
 
     return {
         'config': config,
@@ -387,7 +399,8 @@ def run_ablation_study(
         for seed in seeds:
             print(f"  Running seed {seed}...")
             result = run_single_experiment(
-                config, train_dataset, test_dataset, device, epochs, seed
+                config, train_dataset, test_dataset, device, epochs, seed,
+                results_dir=results_dir
             )
             config_results.append(result)
 

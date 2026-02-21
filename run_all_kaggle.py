@@ -2166,45 +2166,57 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
                 print(f"    Epoch {epoch+1}/5: Loss={avg_loss:.4f}, Val Acc={val_accuracy:.2f}%, "
                       f"||∇f||={avg_grad_norm:.4e}, Time={epoch_time:.2f}s")
 
-            # Final test evaluation (only after training completes)
-            model.eval()
-            test_correct = 0
-            test_loss_total = 0.0
-            with torch.no_grad():
-                for data, target in test_loader:
-                    data, target = data.to(device), target.to(device)
-                    data = data.view(data.size(0), -1)
-                    output = model(data)
-                    loss = criterion(output, target)
-                    test_loss_total += loss.item()
-                    pred = output.argmax(dim=1)
-                    test_correct += pred.eq(target).sum().item()
+                # Final test evaluation (only after training completes)
+                model.eval()
+                test_correct = 0
+                test_loss_total = 0.0
+                with torch.no_grad():
+                    for data, target in test_loader:
+                        data, target = data.to(device), target.to(device)
+                        data = data.view(data.size(0), -1)
+                        output = model(data)
+                        loss = criterion(output, target)
+                        test_loss_total += loss.item()
+                        pred = output.argmax(dim=1)
+                        test_correct += pred.eq(target).sum().item()
 
-            final_test_accuracy = 100.0 * test_correct / max(1, _safe_len(test_dataset))
-            final_test_loss = test_loss_total / len(test_loader)
-            print(f"    Final Test: Loss={final_test_loss:.4f}, Acc={final_test_accuracy:.2f}%")
+                final_test_accuracy = 100.0 * test_correct / max(1, _safe_len(test_dataset))
+                final_test_loss = test_loss_total / len(test_loader)
+                print(f"    Final Test: Loss={final_test_loss:.4f}, Acc={final_test_accuracy:.2f}%")
 
-            # Save result with full trajectory data
-            # FIX: Include training trajectories to enable convergence rate analysis
-            # GAP 1: Include time_history for wall-clock analysis
-            # GAP 15: Include grad_norm_history for non-convex validation
-            result_dict = {
-                'dataset': dataset_name,
-                'optimizer': opt_name,
-                'batch_size': batch_size,
-                'seed': seed,
-                'base_lr': base_lr,
-                'scaled_lr': scaled_lr,
-                'final_loss': avg_loss,
-                'final_accuracy': final_test_accuracy,
-                'loss_history': loss_history,  # Full epoch-by-epoch loss trajectory
-                'val_acc_history': val_acc_history,  # Full validation accuracy trajectory
-                'grad_norm_history': grad_norm_history,  # GAP 15: Gradient norm decay
-                'time_history': time_history,  # GAP 1: Wall-clock time
-                'total_time': time.time() - start_time  # Total training time
-            }
-            # Apply metric name normalization (GAP 29: test_acc/test_accuracy/final_test_acc consistency)
-            batch_results.append(normalize_metric_names(result_dict))
+                # Save result with full trajectory data
+                # FIX: Include training trajectories to enable convergence rate analysis
+                # GAP 1: Include time_history for wall-clock analysis
+                # GAP 15: Include grad_norm_history for non-convex validation
+                result_dict = {
+                    'dataset': dataset_name,
+                    'optimizer': opt_name,
+                    'batch_size': batch_size,
+                    'seed': seed,
+                    'base_lr': base_lr,
+                    'scaled_lr': scaled_lr,
+                    'final_loss': avg_loss,
+                    'final_accuracy': final_test_accuracy,
+                }
+                # Apply metric name normalization (GAP 29: test_acc/test_accuracy/final_test_acc consistency)
+                norm_result = normalize_metric_names(result_dict)
+                batch_results.append(norm_result)
+
+                # Save per-run artifact with full trajectory data
+                try:
+                    history = []
+                    for i in range(len(loss_history)):
+                        history.append({
+                            'epoch': i + 1,
+                            'loss': loss_history[i],
+                            'val_acc': val_acc_history[i],
+                            'grad_norm': grad_norm_history[i],
+                            'time': time_history[i]
+                        })
+                    params = {'batch_size': batch_size, 'scaled_lr': scaled_lr, 'base_lr': base_lr}
+                    save_run_artifacts(results_dir, 'BatchAblation', dataset_name, opt_name, seed, history, params)
+                except Exception as e:
+                    logging.debug(f"Failed to save batch ablation artifact: {e}")
 
     # Save to CSV (one file with all seeds)
     df = pd.DataFrame(batch_results)
@@ -2391,6 +2403,16 @@ def run_scheduler_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, 
                 current_lr = optimizer.param_groups[0]['lr']
                 print(f"  Epoch {epoch+1}/10: Loss={avg_loss:.4f}, Val Acc={val_accuracy:.2f}%, LR={current_lr:.6f}")
 
+                # Record history for artifact saving
+                if 'history' not in locals():
+                    history = []
+                history.append({
+                    'epoch': epoch + 1,
+                    'loss': avg_loss,
+                    'val_acc': val_accuracy,
+                    'lr': current_lr
+                })
+
             # Final test evaluation (only after training completes)
             model.eval()
             test_correct = 0
@@ -2418,6 +2440,16 @@ def run_scheduler_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, 
                 'final_loss': avg_loss,
                 'final_accuracy': final_test_accuracy
             })
+
+            # Save per-run artifact with full trajectory data
+            try:
+                params = {'scheduler': sched_name}
+                save_run_artifacts(results_dir, 'SchedulerAblation', dataset_name, opt_name, seed, history, params)
+            except Exception as e:
+                logging.debug(f"Failed to save scheduler ablation artifact: {e}")
+            finally:
+                if 'history' in locals():
+                    del history
 
     # Save to CSV (one file with all seeds)
     df = pd.DataFrame(scheduler_results)
@@ -6452,32 +6484,35 @@ def create_experiment_visualizations(experiment_name, results_dir, csv_files):
 
     # Check what columns we have
     has_epoch = 'epoch' in combined_df.columns
+    has_iteration = 'iteration' in combined_df.columns
     has_optimizer = 'optimizer' in combined_df.columns
+
+    x_col = 'epoch' if has_epoch else ('iteration' if has_iteration else None)
+    x_label = 'Epoch' if has_epoch else ('Iteration' if has_iteration else 'Step')
 
     # === STATIC PLOTS (using matplotlib) ===
     # Using module-level matplotlib (imported at top of module)
 
     # 1. Training/Test Loss Curves
-    if has_epoch and has_optimizer and 'train_loss' in combined_df.columns:
+    if x_col and has_optimizer and 'train_loss' in combined_df.columns:
         try:
             plt.figure(figsize=(10, 6))
             opt_values = pd.unique(combined_df['optimizer'].dropna()) if 'optimizer' in combined_df.columns else []
             for opt in opt_values:
                 opt_data = combined_df[combined_df['optimizer'] == opt]
                 if 'seed' in opt_data.columns:
-                    # Plot mean with std band
-                    grouped = opt_data.groupby('epoch')['train_loss'].agg(['mean', 'std'])
+                    grouped = opt_data.groupby(x_col)['train_loss'].agg(['mean', 'std'])
                     plt.plot(arr_to_numpy_float(grouped.index), arr_to_numpy_float(grouped['mean']), label=opt, linewidth=2)
                     plt.fill_between(arr_to_numpy_float(grouped.index),
                                    arr_to_numpy_float(grouped['mean'] - grouped['std']),
                                    arr_to_numpy_float(grouped['mean'] + grouped['std']),
                                    alpha=0.2)
                 else:
-                    plt.plot(arr_to_numpy_float(opt_data['epoch']), arr_to_numpy_float(opt_data['train_loss']), label=opt, linewidth=2)
+                    plt.plot(arr_to_numpy_float(opt_data[x_col]), arr_to_numpy_float(opt_data['train_loss']), label=opt, linewidth=2)
 
-            plt.xlabel('Epoch', fontsize=12)
+            plt.xlabel(x_label, fontsize=12)
             plt.ylabel('Training Loss', fontsize=12)
-            plt.title(f'{experiment_name} - Training Loss over Epochs', fontsize=14, fontweight='bold')
+            plt.title(f'{experiment_name} - Training Loss over {x_label}s', fontsize=14, fontweight='bold')
             plt.legend()
             plt.grid(True, alpha=0.3)
             plt.tight_layout()
@@ -6506,7 +6541,7 @@ def create_experiment_visualizations(experiment_name, results_dir, csv_files):
                 metric_type = 'accuracy'
                 break
 
-    if has_epoch and has_optimizer and acc_col:
+    if x_col and has_optimizer and acc_col:
         try:
             from src.utils.metric_normalization import to_percent_series
 
@@ -6519,7 +6554,7 @@ def create_experiment_visualizations(experiment_name, results_dir, csv_files):
             for opt in opt_values:
                 opt_data = combined_df[combined_df['optimizer'] == opt]
                 if 'seed' in opt_data.columns:
-                    grouped = opt_data.groupby('epoch')['acc_pct'].agg(['mean', 'std'])
+                    grouped = opt_data.groupby(x_col)['acc_pct'].agg(['mean', 'std'])
                     plt.plot(arr_to_numpy_float(grouped.index), arr_to_numpy_float(grouped['mean']), label=opt, linewidth=2)
                     plt.fill_between(arr_to_numpy_float(grouped.index),
                                    arr_to_numpy_float((grouped['mean'] - grouped['std'])),
@@ -6528,13 +6563,13 @@ def create_experiment_visualizations(experiment_name, results_dir, csv_files):
                 else:
                     # single run
                     yvals = arr_to_numpy_float(opt_data['acc_pct'])
-                    plt.plot(arr_to_numpy_float(opt_data['epoch']), yvals, label=opt, linewidth=2)
+                    plt.plot(arr_to_numpy_float(opt_data[x_col]), yvals, label=opt, linewidth=2)
 
-            plt.xlabel('Epoch', fontsize=12)
+            plt.xlabel(x_label, fontsize=12)
             y_label = 'Dice Score (%)' if metric_type == 'dice' else 'Test Accuracy (%)'
             plt.ylabel(y_label, fontsize=12)
             title_metric = 'Dice Score' if metric_type == 'dice' else 'Test Accuracy'
-            plt.title(f'{experiment_name} - {title_metric} over Epochs', fontsize=14, fontweight='bold')
+            plt.title(f'{experiment_name} - {title_metric} over {x_label}s', fontsize=14, fontweight='bold')
             plt.legend()
             plt.grid(True, alpha=0.3)
             plt.ylim(0, 100)
@@ -6554,7 +6589,8 @@ def create_experiment_visualizations(experiment_name, results_dir, csv_files):
             # Try to use summary CSV if present
             summary_file = None
             for p in csv_paths:
-                if p.stem.lower() in ('summary', 'final') or 'summary' in p.name.lower():
+                stem_lower = p.stem.lower()
+                if stem_lower in ('summary', 'final', 'results') or 'summary' in stem_lower or 'results' in stem_lower:
                     summary_file = p
                     break
 
@@ -6596,6 +6632,37 @@ def create_experiment_visualizations(experiment_name, results_dir, csv_files):
                 plt.savefig(static_dir / f'{experiment_name.lower()}_final_comparison.png', dpi=300, bbox_inches='tight')
                 plt.close()
                 print(f"   Created {experiment_name.lower()}_final_comparison.png")
+
+                # NEW: Specialized Sweep Plots for SAM (rho) and Robustness (start_point)
+                if summary_df is not None:
+                    sweep_col = None
+                    for col in ['rho', 'start_point', 'beta', 'beta1', 'beta2', 'lr', 'dropout', 'label_smoothing', 'hidden_size', 'gradient_clip']:
+                        if col in summary_df.columns:
+                            sweep_col = col
+                            break
+                    
+                    if sweep_col:
+                        try:
+                            plt.figure(figsize=(10, 6))
+                            metric_col = 'final_loss' if 'final_loss' in summary_df.columns else ('loss' if 'loss' in summary_df.columns else ('test_acc' if 'test_acc' in summary_df.columns else 'mean'))
+                            
+                            if 'seed' in summary_df.columns:
+                                summary_grouped = summary_df.groupby(sweep_col)[metric_col].agg(['mean', 'std'])
+                                plt.errorbar(arr_to_numpy_float(summary_grouped.index), arr_to_numpy_float(summary_grouped['mean']), 
+                                            yerr=arr_to_numpy_float(summary_grouped['std']), fmt='o-', capsize=5, linewidth=2)
+                            else:
+                                plt.plot(arr_to_numpy_float(summary_df[sweep_col]), arr_to_numpy_float(summary_df[metric_col]), 'o-', linewidth=2)
+                            
+                            plt.xlabel(sweep_col.replace('_', ' ').title(), fontsize=12)
+                            plt.ylabel(metric_col.replace('_', ' ').title(), fontsize=12)
+                            plt.title(f'{experiment_name} sensitivity: {sweep_col} vs {metric_col}', fontsize=14, fontweight='bold')
+                            plt.grid(True, alpha=0.3)
+                            plt.tight_layout()
+                            plt.savefig(static_dir / f'{experiment_name.lower()}_{sweep_col}_sweep.png', dpi=300, bbox_inches='tight')
+                            plt.close()
+                            print(f"   Created {experiment_name.lower()}_{sweep_col}_sweep.png")
+                        except Exception as e:
+                            logging.debug(f"Could not create sweep plot for {sweep_col}: {e}")
         except Exception as e:
             logging.debug(f"Could not create comparison plot: {e}")
 
@@ -7839,7 +7906,7 @@ class Rastrigin:
 
 def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False, resume_behavior: str = None):
     if seeds is None:
-        seeds = [1, 2, 3] if not quick else [1, 2]
+        seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021] if not quick else [42, 123]
     """Run 2D optimization experiments on test functions
 
     Args:
@@ -8081,7 +8148,7 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, skip_t
 
 def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False, resume_behavior: str = None):
     if seeds is None:
-        seeds = [42] if not quick else [42]
+        seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021] if not quick else [42, 123]
     """Run initial condition robustness analysis
 
     Args:
@@ -8306,7 +8373,7 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
 
                 # Save per-run artifact for robustness run
                 try:
-                    save_run_artifacts(results_dir, 'Robustness', 'Rosenbrock', opt_name, seed, [{'final_loss': loss.item(), 'iterations': i+1, 'initial_point': start_point}], {'converged': converged}, device=None, exp_tracker=None)
+                    save_run_artifacts(results_dir, 'Robustness', 'Rosenbrock', f"{opt_name}_start{idx}", seed, history, {'converged': converged, 'start_point': start_point}, device=None, exp_tracker=None)
                 except Exception as e:
                     logging.debug("Failed to save robustness artifact for start %s seed %s: %s", start_point, seed, e, exc_info=True)
 
@@ -8334,7 +8401,7 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
 
 def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False, resume_behavior: str = None):
     if seeds is None:
-        seeds = [42] if not quick else [42]
+        seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021] if not quick else [42, 123]
     """Run SAM sensitivity analysis with different rho values
 
     Args:
@@ -8411,6 +8478,7 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=None, quick
             criterion = nn.CrossEntropyLoss()
 
             # Quick training (fewer epochs when requested)
+            history = []
             for epoch in range(1 if quick else 3):
                 model.train()
                 epoch_loss = 0
@@ -8436,6 +8504,12 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=None, quick
 
                 epoch_loss /= len(train_loader)
                 print(f"  Epoch {epoch+1}: Loss = {epoch_loss:.4f}")
+                history.append({
+                    'epoch': epoch + 1,
+                    'train_loss': epoch_loss,
+                    'loss': epoch_loss  # Alias for analyzer compatibility
+                })
+
             results.append({
                 'rho': rho,
                 'seed': seed,
@@ -8444,8 +8518,8 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=None, quick
 
             # Save per-run artifact for this rho
             try:
-                params = {'rho': rho, 'epochs': 3, 'batch_size': 256, 'seed': seed}
-                save_run_artifacts(results_dir, 'MNIST', 'SimpleMLP', f'SAM_rho_{rho}', seed, [{'final_loss': epoch_loss}], params, device=device, exp_tracker=None)
+                params = {'rho': rho, 'epochs': 3 if not quick else 1, 'batch_size': 256, 'seed': seed}
+                save_run_artifacts(results_dir, 'MNIST', 'SimpleMLP', f'SAM_rho_{rho}', seed, history, params, device=device, exp_tracker=None)
             except Exception as e:
                 logging.debug("Failed to save SAM sensitivity artifact for rho %s seed %s: %s", rho, seed, e, exc_info=True)
 
@@ -8542,25 +8616,28 @@ def run_ablation_study(results_dir="results_ablation", seeds=None, quick=False, 
                 raise ValueError(f"Unsupported optimizer: {opt_name}")
 
             max_iter = 200 if quick else 1000
+            history = []
             for i in range(max_iter):
                 optimizer.zero_grad()  # type: ignore[union-attr]
 
-            # Compute loss using PyTorch autograd
-            loss = rosenbrock.torch_loss(x)
-            loss.backward()
+                # Compute loss using PyTorch autograd
+                loss = rosenbrock.torch_loss(x)
+                loss.backward()
 
-            if opt_name.startswith('SAM'):
-                def closure():
-                    optimizer.zero_grad()  # type: ignore[union-attr]
-                    loss_c = rosenbrock.torch_loss(x)
-                    loss_c.backward()
-                    return loss_c
-                optimizer.step(closure)
-            else:
-                optimizer.step()
+                if opt_name.startswith('SAM'):
+                    def closure():
+                        optimizer.zero_grad()  # type: ignore[union-attr]
+                        loss_c = rosenbrock.torch_loss(x)
+                        loss_c.backward()
+                        return loss_c
+                    optimizer.step(closure)
+                else:
+                    optimizer.step()
 
-            if loss.item() < 1e-6:
-                break
+                history.append({'iteration': i, 'loss': loss.item()})
+
+                if loss.item() < 1e-6:
+                    break
 
             results.append({
                 'optimizer': opt_name,
@@ -8574,7 +8651,7 @@ def run_ablation_study(results_dir="results_ablation", seeds=None, quick=False, 
             try:
                 params_save = params if isinstance(params, dict) else {'params': params}
                 params_save['seed'] = seed
-                save_run_artifacts(results_dir, 'Ablation', '2D_Rosenbrock', opt_name, seed, [{'final_loss': loss.item(), 'iterations': i+1}], params_save, device=None, exp_tracker=None)
+                save_run_artifacts(results_dir, 'Ablation', '2D_Rosenbrock', opt_name, seed, history, params_save, device=None, exp_tracker=None)
             except Exception as e:
                 logging.debug("Failed to save ablation artifact for %s seed %s: %s", opt_name, seed, e, exc_info=True)
 
@@ -9665,22 +9742,22 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
         perf_metrics = profiler.end_profiling("ResNet18_Experiment")
         profiler.log_performance("ResNet18_Experiment")
 
-        # Save per-seed results
-        os.makedirs(results_dir, exist_ok=True)
-        df_seed = pd.DataFrame(results)
-        df_seed['seed'] = seed
-        result_filename = f"{results_dir}/ResNet18_CIFAR10_Adam_seed{seed}.csv"
-        df_seed.to_csv(result_filename, index=False)
-        all_results.extend(results)
+    # Save per-seed results
+    os.makedirs(results_dir, exist_ok=True)
+    df_seed = pd.DataFrame(results)
+    df_seed['seed'] = seed
+    result_filename = f"{results_dir}/ResNet18_CIFAR10_Adam_seed{seed}.csv"
+    df_seed.to_csv(result_filename, index=False)
+    all_results.extend(results)
 
-        # Save per-run artifact
-        try:
-            params = {'epochs': epochs, 'batch_size': train_bs, 'seed': seed}
-            save_run_artifacts(results_dir, 'ResNet18', 'CIFAR10', 'Adam', seed, results, params, device=device, exp_tracker=tracker)
-        except Exception:
-            logging.debug(f"Failed to save per-run ResNet artifact for seed={seed}")
+    # Save per-run artifact
+    try:
+        params = {'epochs': epochs, 'batch_size': train_bs, 'seed': seed}
+        save_run_artifacts(results_dir, 'ResNet18', 'CIFAR10', 'Adam', seed, results, params, device=device, exp_tracker=tracker)
+    except Exception:
+        logging.debug(f"Failed to save per-run ResNet artifact for seed={seed}")
 
-        logging.info(f"💾 Results for seed={seed} saved to {result_filename}")
+    logging.info(f"💾 Results for seed={seed} saved to {result_filename}")
 
     # Aggregate results across all seeds
     df = pd.DataFrame(all_results)
@@ -11102,7 +11179,7 @@ Examples:
                     else:
                         results_dict = run_all_missing_ablations(
                             epochs=10 if args.quick else 15,
-                            seeds=seeds[:2] if args.quick else seeds[:3],
+                            seeds=seeds if args.quick else seeds,
                             device='cuda' if torch.cuda.is_available() else 'cpu',
                             quick=args.quick,
                             output_dir=missing_abl_dir
@@ -11335,7 +11412,7 @@ Examples:
                         df = run_dynamics_overhead_ablation(
                             dataset='MNIST',
                             epochs=5 if args.quick else 10,
-                            seeds=seeds[:3] if args.quick else seeds,
+                            seeds=seeds if args.quick else seeds,
                             results_dir=ablation_dir,
                             quick=args.quick
                         )
@@ -11571,7 +11648,7 @@ Examples:
                             dataset='MNIST',
                             optimizers=[OptimizerNames.SGD, OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM] if args.quick else None,
                             epochs=20 if args.quick else 50,
-                            seeds=seeds[:2] if args.quick else seeds[:3],
+                            seeds=seeds if args.quick else seeds,
                             quick=args.quick,
                             results_dir=dynamics_comp_dir
                         )
@@ -11626,7 +11703,7 @@ Examples:
                             momentum_df = run_momentum_beta_sensitivity(
                                 beta_values=[0.0, 0.5, 0.9, 0.99] if args.quick else [0.0, 0.5, 0.7, 0.9, 0.95, 0.99],
                                 epochs=10 if args.quick else 20,
-                                seeds=seeds[:2] if args.quick else seeds[:3],
+                                seeds=seeds if args.quick else seeds,
                                 lr=lr,
                                 device=device,
                                 quick=args.quick,
@@ -11642,7 +11719,7 @@ Examples:
                             adam_beta1_df = run_adam_beta_sensitivity(
                                 beta1_values=[0.5, 0.9, 0.99] if args.quick else [0.5, 0.7, 0.9, 0.95, 0.99],
                                 epochs=10 if args.quick else 20,
-                                seeds=seeds[:2] if args.quick else seeds[:3],
+                                seeds=seeds if args.quick else seeds,
                                 lr=lr,
                                 device=device,
                                 quick=args.quick,
@@ -11657,7 +11734,7 @@ Examples:
                                 beta1=0.9,  # Fixed β1
                                 beta2_values=[0.95, 0.99, 0.999] if args.quick else [0.9, 0.95, 0.99, 0.999, 0.9999],
                                 epochs=10 if args.quick else 20,
-                                seeds=seeds[:2] if args.quick else seeds[:3],
+                                seeds=seeds if args.quick else seeds,
                                 lr=lr,  # Use same lr as above
                                 device=device,
                                 quick=args.quick,
@@ -11672,7 +11749,7 @@ Examples:
                                 beta1_values=[0.7, 0.9, 0.99] if args.quick else [0.7, 0.9, 0.95, 0.99],
                                 beta2_values=[0.9, 0.99, 0.999] if args.quick else [0.9, 0.99, 0.999, 0.9999],
                                 epochs=10 if args.quick else 15,
-                                seeds=seeds[:1] if args.quick else seeds[:2],
+                                seeds=seeds if args.quick else seeds,
                                 lr=lr,  # Use same lr as above
                                 device=device,
                                 quick=args.quick,
@@ -11716,7 +11793,7 @@ Examples:
                     # Configure label noise experiments
                     noise_config = LabelNoiseConfig(
                         noise_rates=[0.0, 0.1, 0.2, 0.4] if not args.quick else [0.0, 0.2],
-                        seeds=seeds[:3] if args.quick else seeds[:5],
+                        seeds=seeds if args.quick else seeds,
                         epochs=20 if args.quick else 50,
                         batch_size=128,
                         device='cuda' if torch.cuda.is_available() else 'cpu'
@@ -11894,15 +11971,39 @@ Examples:
             else:
                 print("\n[2] Interactive Visualizations: SKIPPED (install plotly)")
 
-    # Generate comprehensive summary report
-    print("\n[3] Final Summary Report...")
+    # Final summary reports
     try:
         generate_final_summary_report(results_dir, experiment_results)
         print("   [OK] Summary report generated")
     except Exception as e:
         logging.error(f"   Report generation failed: {e}")
 
-    # Final summary
+    # INTEGRATION FIX: Explicitly run analysis artifact generation (L, sigma^2)
+    # This populates results/analysis folder with scientific measurements
+    print("\n" + "="*80)
+    print("GENERATING SCIENTIFIC ANALYSIS ARTIFACTS")
+    print("="*80)
+    try:
+        analysis_script = Path(__file__).parent / "scripts" / "generate_analysis_artifacts.py"
+        if analysis_script.exists():
+            print(f"Running analysis script: {analysis_script}")
+            analysis_env = os.environ.copy()
+            analysis_env['PYTHONIOENCODING'] = 'utf-8'
+            analysis_env['PYTHONUTF8'] = '1'
+            # Use --results-dir and --output-dir consistently
+            result = subprocess.run([sys.executable, str(analysis_script), "--results-dir", str(results_dir), "--output-dir", str(results_dir)],
+                                   capture_output=True, text=True, encoding='utf-8', timeout=1200, env=analysis_env)
+            if result.returncode == 0:
+                print("Analysis artifacts generated successfully")
+            else:
+                print(f"Analysis generation completed with warnings (non-fatal)")
+                logging.debug(f"Analysis stdout: {result.stdout}")
+                logging.debug(f"Analysis stderr: {result.stderr}")
+        else:
+            print(f"Analysis script not found at: {analysis_script}")
+    except Exception as e:
+        print(f"Could not generate analysis artifacts: {str(e)[:100]} (non-fatal)")
+    print("="*80)
     print("\n" + "="*80)
     if _experiment_context.has_failures():
         print("BENCHMARK SUITE COMPLETED WITH ERRORS")
