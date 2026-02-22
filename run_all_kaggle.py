@@ -4647,6 +4647,41 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
             lr = default_lr
         configs.append((opt_name, lr))
 
+    # ==== MOVED DATASET AND TOKENIZER LOADING OUTSIDE LOOP ====
+    print("   Initializing HuggingFace Tokenizer and Dataset...")
+    nlp_deps = import_optional_nlp_dependencies()
+    AutoTokenizer = nlp_deps.get('AutoTokenizer')
+    AutoModelForSequenceClassification = nlp_deps.get('AutoModelForSequenceClassification')
+    load_dataset = nlp_deps.get('load_dataset')
+
+    if AutoTokenizer is None or AutoModelForSequenceClassification is None or load_dataset is None:
+        logging.warning("transformers/datasets not available. Falling back to simplified NLP experiment...")
+        return run_nlp_experiment_simple(results_dir, seeds, epochs, resume, resume_behavior=resume_behavior)
+
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+    except (OSError, RuntimeError, Exception) as err:
+        logging.warning(f"Failed to load tokenizer '{model_name}': {err}")
+        return run_nlp_experiment_simple(results_dir, seeds, epochs, resume, resume_behavior=resume_behavior)
+
+    try:
+        import tempfile
+        raw = load_dataset('imdb', cache_dir=None)
+    except (ValueError, Exception) as dataset_err:
+        logging.warning(f"Failed to load IMDB dataset via HuggingFace: {dataset_err}")
+        return run_nlp_experiment_simple(results_dir, seeds, epochs, resume, resume_behavior=resume_behavior)
+
+    def preprocess(examples):
+        return tokenizer(examples['text'], truncation=True, padding=False, max_length=256)
+
+    try:
+        print("   Tokenizing dataset (this only happens once)...")
+        tokenized = raw.map(preprocess, batched=True)
+    except Exception as map_err:
+        logging.warning(f"Failed to tokenize dataset: {map_err}")
+        return run_nlp_experiment_simple(results_dir, seeds, epochs, resume, resume_behavior=resume_behavior)
+    # ==========================================================
+
     results = []
 
     for opt_name, lr in configs:
@@ -4661,18 +4696,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
 
             set_seed(seed)
 
-            # Load tokenizer and model with robust error handling
-            nlp_deps = import_optional_nlp_dependencies()
-            AutoTokenizer = nlp_deps.get('AutoTokenizer')
-            AutoModelForSequenceClassification = nlp_deps.get('AutoModelForSequenceClassification')
-            load_dataset = nlp_deps.get('load_dataset')
-
-            if AutoTokenizer is None or AutoModelForSequenceClassification is None or load_dataset is None:
-                logging.warning("transformers/datasets not available. Falling back to simplified NLP experiment...")
-                return run_nlp_experiment_simple(results_dir, seeds, epochs, resume, resume_behavior=resume_behavior)
-
             try:
-                tokenizer = AutoTokenizer.from_pretrained(model_name)
                 model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2)
                 model = safe_device_transfer(model, device, operation=f"NLP {model_name} initialization")
             except (OSError, RuntimeError, Exception) as model_err:
@@ -4681,23 +4705,6 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                 logging.warning("Falling back to simplified NLP experiment...")
                 return run_nlp_experiment_simple(results_dir, seeds, epochs, resume, resume_behavior=resume_behavior)
 
-            # Load dataset with robust fallback for environment compatibility
-            try:
-                # Use platform-independent temp directory
-                import tempfile
-                cache_dir = tempfile.gettempdir()
-                # Try loading without cache_dir to avoid fsspec pattern issues on Windows
-                raw = load_dataset('imdb', cache_dir=None)
-            except (ValueError, Exception) as dataset_err:
-                logging.warning(f"Failed to load IMDB dataset via HuggingFace: {dataset_err}")
-                logging.warning("Falling back to simplified NLP experiment...")
-                # Fallback: run simplified experiment and return early
-                return run_nlp_experiment_simple(results_dir, seeds, epochs, resume, resume_behavior=resume_behavior)
-
-            def preprocess(examples):
-                return tokenizer(examples['text'], truncation=True, padding=False, max_length=256)
-
-            tokenized = raw.map(preprocess, batched=True)
 
             # Create proper train/val/test split to prevent test set leakage
             train_size_total = min(train_size, len(tokenized['train']))
@@ -6419,6 +6426,263 @@ def run_convergence_analysis_on_results(results_dir):
         print("   No convergence data to analyze")
 
 
+def _create_robustness_visualizations(csv_paths, static_dir, experiment_name):
+    """Generate plots for the Robustness/convergence experiment.
+
+    The robustness experiment produces:
+    - Per-run CSVs with columns: [iteration, loss, grad_norm]  (optimizer encoded in filename)
+    - A summary CSV (robustness_results.csv) with columns: [optimizer, start_point, iterations, loss, grad_norm]
+    """
+    from src.utils.filename import parse_experiment_filename
+
+    static_dir.mkdir(parents=True, exist_ok=True)
+    print(f"\nCreating Robustness visualizations in {static_dir}...")
+
+    # Load summary CSV (most useful for high-level plots)
+    summary_df = None
+    for p in csv_paths:
+        if 'robustness_results' in p.stem.lower() or p.stem.lower() in ('robustness_results', 'results'):
+            try:
+                summary_df = safe_read_csv(p)
+                if summary_df is not None and len(summary_df) > 0:
+                    break
+            except Exception:
+                pass
+
+    # Fallback: load per-run CSVs and combine
+    if summary_df is None or summary_df.empty:
+        per_run_dfs = []
+        for p in csv_paths:
+            stem = p.stem.lower()
+            if 'results' in stem:
+                continue
+            try:
+                df = safe_read_csv(p)
+                if df is None or df.empty:
+                    continue
+                # Extract optimizer from filename like Robustness_Rosenbrock_Adam_start0_seed42
+                parsed = parse_experiment_filename(p.stem)
+                opt = parsed.get('optimizer')
+                if opt is None:
+                    # Fallback: tokenize filename
+                    parts = p.stem.split('_')
+                    # Typical: Robustness_Rosenbrock_<Optimizer>_start<N>_seed<S>
+                    opt = parts[2] if len(parts) > 2 else 'Unknown'
+                df['optimizer'] = opt
+                # Extract start_point
+                for part in p.stem.split('_'):
+                    if part.startswith('start') and part[5:].isdigit():
+                        df['start_point'] = int(part[5:])
+                        break
+                per_run_dfs.append(df)
+            except Exception as e:
+                logging.debug("Could not load per-run robustness CSV %s: %s", p, e)
+        if per_run_dfs:
+            summary_df = pd.concat(per_run_dfs, ignore_index=True)
+
+    if summary_df is None or summary_df.empty:
+        logging.warning("No usable data found for Robustness visualizations")
+        return
+
+    # ── Plot 1: Loss trajectory per optimizer (if iteration column present) ──
+    if 'iteration' in summary_df.columns and 'optimizer' in summary_df.columns and 'loss' in summary_df.columns:
+        try:
+            plt.figure(figsize=(10, 6))
+            for opt, grp in summary_df.groupby('optimizer'):
+                agg = grp.groupby('iteration')['loss'].agg(['mean', 'std'])
+                niter = arr_to_numpy_float(agg.index)
+                nmean = arr_to_numpy_float(agg['mean'])
+                nstd = arr_to_numpy_float(agg['std'])
+                plt.plot(niter, nmean, label=str(opt), linewidth=2)
+                plt.fill_between(niter, nmean - nstd, nmean + nstd, alpha=0.2)
+            plt.xlabel('Iteration', fontsize=12)
+            plt.ylabel('Loss', fontsize=12)
+            plt.title(f'{experiment_name} - Loss Convergence by Optimizer', fontsize=14, fontweight='bold')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+            plt.yscale('log')
+            plt.tight_layout()
+            plt.savefig(static_dir / f'{experiment_name.lower()}_loss_convergence.png', dpi=300, bbox_inches='tight')
+            plt.close()
+            print(f"   Created {experiment_name.lower()}_loss_convergence.png")
+        except Exception as e:
+            logging.debug("Could not create robustness loss plot: %s", e, exc_info=True)
+
+    # ── Plot 2: Final loss / convergence rate per optimizer ──
+    if 'optimizer' in summary_df.columns:
+        metric_col = next((c for c in ['final_loss', 'loss', 'iterations'] if c in summary_df.columns), None)
+        if metric_col:
+            try:
+                agg = summary_df.groupby('optimizer')[metric_col].agg(['mean', 'std'])
+                plt.figure(figsize=(8, 5))
+                x = range(len(agg))
+                plt.bar(x, agg['mean'], yerr=agg['std'], capsize=5, alpha=0.7, edgecolor='black')
+                plt.xticks(x, [str(o) for o in agg.index], rotation=30, ha='right')
+                plt.ylabel(metric_col.replace('_', ' ').title(), fontsize=12)
+                plt.title(f'{experiment_name} - {metric_col.replace("_", " ").title()} by Optimizer', fontsize=13, fontweight='bold')
+                plt.grid(axis='y', alpha=0.3)
+                plt.tight_layout()
+                plt.savefig(static_dir / f'{experiment_name.lower()}_{metric_col}_by_optimizer.png', dpi=300, bbox_inches='tight')
+                plt.close()
+                print(f"   Created {experiment_name.lower()}_{metric_col}_by_optimizer.png")
+            except Exception as e:
+                logging.debug("Could not create robustness optimizer bar chart: %s", e, exc_info=True)
+
+    # ── Plot 3: Start point sensitivity (loss vs start_point, per optimizer) ──
+    if 'start_point' in summary_df.columns and 'optimizer' in summary_df.columns:
+        met = next((c for c in ['final_loss', 'loss', 'iterations'] if c in summary_df.columns), None)
+        if met:
+            try:
+                plt.figure(figsize=(10, 6))
+                for opt, grp in summary_df.groupby('optimizer'):
+                    agg = grp.groupby('start_point')[met].agg(['mean', 'std'])
+                    plt.errorbar(arr_to_numpy_float(agg.index), arr_to_numpy_float(agg['mean']),
+                                 yerr=arr_to_numpy_float(agg['std']), fmt='o-', capsize=4, linewidth=2, label=str(opt))
+                plt.xlabel('Start Point Index', fontsize=12)
+                plt.ylabel(met.replace('_', ' ').title(), fontsize=12)
+                plt.title(f'{experiment_name} - Sensitivity to Initialization', fontsize=14, fontweight='bold')
+                plt.legend()
+                plt.grid(True, alpha=0.3)
+                plt.tight_layout()
+                plt.savefig(static_dir / f'{experiment_name.lower()}_start_point_sensitivity.png', dpi=300, bbox_inches='tight')
+                plt.close()
+                print(f"   Created {experiment_name.lower()}_start_point_sensitivity.png")
+            except Exception as e:
+                logging.debug("Could not create start_point sensitivity plot: %s", e, exc_info=True)
+
+    print(f"   Robustness visualizations complete ({static_dir})")
+
+    # ── Plot 3: Convergence success rate per optimizer ──
+    if 'converged' in summary_df.columns and 'optimizer' in summary_df.columns:
+        try:
+            conv_rate = summary_df.groupby('optimizer')['converged'].apply(
+                lambda x: 100.0 * x.astype(bool).mean()
+            )
+            plt.figure(figsize=(8, 5))
+            x = range(len(conv_rate))
+            colors = ['#2ecc71' if v >= 80 else '#e67e22' if v >= 50 else '#e74c3c' for v in conv_rate.values]
+            bars = plt.bar(x, conv_rate.values, alpha=0.8, edgecolor='black', color=colors)
+            plt.xticks(x, [str(o) for o in conv_rate.index], rotation=30, ha='right')
+            plt.ylabel('Convergence Rate (%)', fontsize=12)
+            plt.title(f'{experiment_name} - Convergence Success Rate by Optimizer', fontsize=13, fontweight='bold')
+            plt.ylim(0, 105)
+            plt.grid(axis='y', alpha=0.3)
+            ax = plt.gca()
+            for i, v in enumerate(conv_rate.values):
+                ax.text(i, v + 1, f'{v:.0f}%', ha='center', va='bottom', fontsize=10, fontweight='bold')
+            plt.tight_layout()
+            plt.savefig(static_dir / f'{experiment_name.lower()}_convergence_rate.png', dpi=300, bbox_inches='tight')
+            plt.close()
+            print(f"   Created {experiment_name.lower()}_convergence_rate.png")
+        except Exception as e:
+            logging.debug("Could not create convergence rate plot: %s", e, exc_info=True)
+
+    # ── Plot 4: Mean iterations to convergence per optimizer ──
+    if 'iterations' in summary_df.columns and 'optimizer' in summary_df.columns:
+        try:
+            # Only count runs that actually converged
+            converged_mask = summary_df.get('converged', pd.Series([True] * len(summary_df))).astype(bool)
+            conv_df = summary_df[converged_mask] if converged_mask.any() else summary_df
+            agg_iters = conv_df.groupby('optimizer')['iterations'].agg(['mean', 'std'])
+            plt.figure(figsize=(8, 5))
+            x = range(len(agg_iters))
+            plt.bar(x, agg_iters['mean'], yerr=agg_iters['std'], capsize=5, alpha=0.7, edgecolor='black', color='steelblue')
+            plt.xticks(x, [str(o) for o in agg_iters.index], rotation=30, ha='right')
+            plt.ylabel('Mean Iterations to Convergence', fontsize=12)
+            plt.title(f'{experiment_name} - Convergence Speed by Optimizer', fontsize=13, fontweight='bold')
+            plt.grid(axis='y', alpha=0.3)
+            plt.tight_layout()
+            plt.savefig(static_dir / f'{experiment_name.lower()}_iterations_to_convergence.png', dpi=300, bbox_inches='tight')
+            plt.close()
+            print(f"   Created {experiment_name.lower()}_iterations_to_convergence.png")
+        except Exception as e:
+            logging.debug("Could not create iterations-to-convergence plot: %s", e, exc_info=True)
+
+    print(f"   Robustness visualizations complete ({static_dir})")
+
+
+
+def _create_sam_sensitivity_visualizations(csv_paths, static_dir, experiment_name):
+    """Generate plots for the SAM sensitivity (rho sweep) experiment.
+
+    The SAM experiment produces a summary CSV (sam_sensitivity_results.csv) with columns:
+    [rho, final_loss, test_acc, ...]  and per-epoch per-rho CSVs.
+    """
+    static_dir.mkdir(parents=True, exist_ok=True)
+    print(f"\nCreating SAM Sensitivity visualizations in {static_dir}...")
+
+    # Load summary CSV
+    summary_df = None
+    for p in csv_paths:
+        if 'sam_sensitivity' in p.stem.lower() or 'sensitivity' in p.stem.lower() or p.stem.lower() == 'results':
+            try:
+                df = safe_read_csv(p)
+                if df is not None and 'rho' in df.columns and len(df) > 0:
+                    summary_df = df
+                    break
+            except Exception:
+                pass
+
+    if summary_df is None or summary_df.empty:
+        logging.warning("No usable data found for SAM Sensitivity visualizations")
+        return
+
+    metric_col = next((c for c in ['test_acc', 'test_accuracy', 'final_loss', 'loss', 'val_acc'] if c in summary_df.columns), None)
+    if metric_col is None:
+        logging.warning("SAM sensitivity CSV has no recognisable metric column: %s", list(summary_df.columns))
+        return
+
+    # ── Plot 1: Rho sweep (metric vs rho) ──
+    try:
+        plt.figure(figsize=(9, 5))
+        if 'seed' in summary_df.columns:
+            agg = summary_df.groupby('rho')[metric_col].agg(['mean', 'std'])
+            plt.errorbar(arr_to_numpy_float(agg.index), arr_to_numpy_float(agg['mean']),
+                         yerr=arr_to_numpy_float(agg['std']), fmt='o-', capsize=5, linewidth=2, color='steelblue')
+        else:
+            plt.plot(arr_to_numpy_float(summary_df['rho']), arr_to_numpy_float(summary_df[metric_col]),
+                     'o-', linewidth=2, color='steelblue')
+        plt.xlabel('SAM Rho (ρ)', fontsize=12)
+        plt.ylabel(metric_col.replace('_', ' ').title(), fontsize=12)
+        plt.title('SAM Sensitivity: Effect of ρ on Performance', fontsize=14, fontweight='bold')
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(static_dir / 'sam_rho_sweep.png', dpi=300, bbox_inches='tight')
+        plt.close()
+        print("   Created sam_rho_sweep.png")
+    except Exception as e:
+        logging.debug("Could not create SAM rho sweep plot: %s", e, exc_info=True)
+
+    # ── Plot 2: If multiple metrics exist, side-by-side comparison ──
+    extra_metrics = [c for c in ['test_acc', 'final_loss', 'val_acc', 'train_loss'] if c in summary_df.columns and c != metric_col]
+    if extra_metrics:
+        try:
+            all_m = [metric_col] + extra_metrics[:3]
+            fig, axes = plt.subplots(1, len(all_m), figsize=(5 * len(all_m), 5))
+            if len(all_m) == 1:
+                axes = [axes]
+            for ax, m in zip(axes, all_m):
+                if 'seed' in summary_df.columns:
+                    agg = summary_df.groupby('rho')[m].agg(['mean', 'std'])
+                    ax.errorbar(arr_to_numpy_float(agg.index), arr_to_numpy_float(agg['mean']),
+                                yerr=arr_to_numpy_float(agg['std']), fmt='o-', capsize=4, linewidth=2)
+                else:
+                    ax.plot(arr_to_numpy_float(summary_df['rho']), arr_to_numpy_float(summary_df[m]), 'o-', linewidth=2)
+                ax.set_xlabel('ρ', fontsize=11)
+                ax.set_ylabel(m.replace('_', ' ').title(), fontsize=11)
+                ax.set_title(m.replace('_', ' ').title(), fontsize=12)
+                ax.grid(True, alpha=0.3)
+            fig.suptitle('SAM Rho Sensitivity', fontsize=14, fontweight='bold')
+            plt.tight_layout()
+            plt.savefig(static_dir / 'sam_all_metrics.png', dpi=300, bbox_inches='tight')
+            plt.close()
+            print("   Created sam_all_metrics.png")
+        except Exception as e:
+            logging.debug("Could not create SAM multi-metric plot: %s", e, exc_info=True)
+
+    print(f"   SAM sensitivity visualizations complete ({static_dir})")
+
+
 def create_experiment_visualizations(experiment_name, results_dir, csv_files):
     """Create both static and interactive visualizations for a single experiment
 
@@ -6454,6 +6718,22 @@ def create_experiment_visualizations(experiment_name, results_dir, csv_files):
             return create_cifar10_visualizations(results_path, csv_paths)
         except Exception as e:
             logging.debug("CIFAR10 dedicated visualizer failed, falling back to legacy plotting: %s", e, exc_info=True)
+
+    # Delegate Robustness to dedicated path that understands convergence/start_point data format
+    if str(experiment_name).upper() == 'ROBUSTNESS':
+        try:
+            _create_robustness_visualizations(csv_paths, static_dir, experiment_name)
+            return
+        except Exception as e:
+            logging.warning("Robustness visualizer failed: %s", e, exc_info=True)
+
+    # Delegate SAM sensitivity to dedicated path that understands rho-sweep data format
+    if str(experiment_name).upper() in ('SAM', 'SAM_SENSITIVITY'):
+        try:
+            _create_sam_sensitivity_visualizations(csv_paths, static_dir, experiment_name)
+            return
+        except Exception as e:
+            logging.warning("SAM sensitivity visualizer failed: %s", e, exc_info=True)
 
     time_series_paths = filter_time_series_files(csv_paths)
 
@@ -6493,22 +6773,23 @@ def create_experiment_visualizations(experiment_name, results_dir, csv_files):
     # === STATIC PLOTS (using matplotlib) ===
     # Using module-level matplotlib (imported at top of module)
 
-    # 1. Training/Test Loss Curves
-    if x_col and has_optimizer and 'train_loss' in combined_df.columns:
+    # 1. Training/Test Loss Curves (train_loss or generic loss column)
+    _loss_col = 'train_loss' if 'train_loss' in combined_df.columns else ('loss' if 'loss' in combined_df.columns else None)
+    if x_col and has_optimizer and _loss_col:
         try:
             plt.figure(figsize=(10, 6))
             opt_values = pd.unique(combined_df['optimizer'].dropna()) if 'optimizer' in combined_df.columns else []
             for opt in opt_values:
                 opt_data = combined_df[combined_df['optimizer'] == opt]
                 if 'seed' in opt_data.columns:
-                    grouped = opt_data.groupby(x_col)['train_loss'].agg(['mean', 'std'])
+                    grouped = opt_data.groupby(x_col)[_loss_col].agg(['mean', 'std'])
                     plt.plot(arr_to_numpy_float(grouped.index), arr_to_numpy_float(grouped['mean']), label=opt, linewidth=2)
                     plt.fill_between(arr_to_numpy_float(grouped.index),
                                    arr_to_numpy_float(grouped['mean'] - grouped['std']),
                                    arr_to_numpy_float(grouped['mean'] + grouped['std']),
                                    alpha=0.2)
                 else:
-                    plt.plot(arr_to_numpy_float(opt_data[x_col]), arr_to_numpy_float(opt_data['train_loss']), label=opt, linewidth=2)
+                    plt.plot(arr_to_numpy_float(opt_data[x_col]), arr_to_numpy_float(opt_data[_loss_col]), label=opt, linewidth=2)
 
             plt.xlabel(x_label, fontsize=12)
             plt.ylabel('Training Loss', fontsize=12)
@@ -6588,6 +6869,7 @@ def create_experiment_visualizations(experiment_name, results_dir, csv_files):
 
             # Try to use summary CSV if present
             summary_file = None
+            summary_df = None  # BUG FIX: initialize before conditional block to avoid NameError
             for p in csv_paths:
                 stem_lower = p.stem.lower()
                 if stem_lower in ('summary', 'final', 'results') or 'summary' in stem_lower or 'results' in stem_lower:
@@ -8298,12 +8580,14 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
                         optimizer.zero_grad()
                         loss = rosenbrock.torch_loss(x)
                         loss.backward()
+                        torch.nn.utils.clip_grad_norm_([x], 10.0)
 
                         if opt_name.startswith('SAM'):
                             def closure():
                                 optimizer.zero_grad()
                                 loss_c = rosenbrock.torch_loss(x)
                                 loss_c.backward()
+                                torch.nn.utils.clip_grad_norm_([x], 10.0)
                                 return loss_c
                             optimizer.step(closure)
                         else:
@@ -8337,13 +8621,14 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
                         except Exception as e:
                             logging.warning("Failed to save robustness checkpoint: %s", e)
 
-                    # Check convergence using last computed loss (if numeric)
+                    # Check convergence using last computed loss
                     try:
-                        if isinstance(loss, (float, int)) and loss < 1e-6:
+                        loss_val = float(loss)
+                        if loss_val < 1e-6:
                             converged = True
                             break
                     except Exception:
-                        # Non-numeric loss (nan/inf) -> cannot converge; continue to next iteration or break handled above
+                        # Non-numeric loss (nan/inf) -> cannot converge
                         pass
 
                 results.append({

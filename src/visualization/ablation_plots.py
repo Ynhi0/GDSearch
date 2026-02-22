@@ -238,10 +238,18 @@ def create_summary_table(
         count = grouped.loc[config, (value_col, 'count')]
         improvement = mean - baseline_value
 
+        
+        improvement_str = "N/A"
+        try:
+            if not pd.isna(baseline_value):
+                improvement_str = f"{float(mean) - float(baseline_value):+.2f}"
+        except: pass
+        std_str = f" ± {std:.2f}" if not pd.isna(std) else ""
+
         row = [
             config,
-            f"{mean:.2f} ± {std:.2f}",
-            f"{improvement:+.2f}",
+            f"{mean:.2f}{std_str}",
+            improvement_str,
             f"{int(count)} seeds"
         ]
 

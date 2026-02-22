@@ -70,7 +70,7 @@ def plot_training_curves(csv_files: List[str], output_dir: Path, title: str = "T
         norm_name = basename.replace('.csv', '').replace('-', '').replace('+', '_').upper()
         known_opts = [
             'SGD_MOMENTUM', 'SGDMOMENTUM', 'ADAMW', 'ADAM', 'RMSPROP', 'AMSGRAD',
-            'SAM_SGD', 'SAM_ADAM', 'LOOKAHEAD_SGD', 'LOOKAHEAD_ADAM', 'ADABOUND', 'RADAM', 'LAMB', 'SGD'
+            'SAM_SGD', 'SAM_ADAM', 'LOOKAHEAD_SGD', 'LOOKAHEAD_ADAM', 'ADABOUND', 'RADAM', 'LAMB', 'SGD', 'SAM'
         ]
         # Sort by length descending to match longest patterns first (e.g., SGD_MOMENTUM before SGD)
         known_opts.sort(key=len, reverse=True)
@@ -108,18 +108,35 @@ def plot_training_curves(csv_files: List[str], output_dir: Path, title: str = "T
     for i, (optimizer, dfs) in enumerate(sorted(results.items())):
         color = colors[i % len(colors)]
         for df in dfs:
-            if 'train_loss' in df.columns and 'epoch' in df.columns:
-                ax.plot(df['epoch'], df['train_loss'], color=color, alpha=0.3, linewidth=1)
+            x_col = 'epoch' if 'epoch' in df.columns else ('iteration' if 'iteration' in df.columns else None)
+            y_col = 'train_loss' if 'train_loss' in df.columns else ('loss' if 'loss' in df.columns else None)
+            if x_col and y_col:
+                ax.plot(df[x_col], df[y_col], color=color, alpha=0.3, linewidth=1)
 
         # Mean line
-        if dfs and 'train_loss' in dfs[0].columns:
-            epochs = dfs[0]['epoch'].values
-            losses = np.array([df['train_loss'].values for df in dfs if 'train_loss' in df.columns])
-            if len(losses) > 0:
-                mean_loss = losses.mean(axis=0)
-                ax.plot(epochs, mean_loss, color=color, linewidth=2.5, label=optimizer)
+        if dfs:
+            valid_dfs = []
+            x_col_mean = None
+            y_col_mean = None
+            for df in dfs:
+                x_col = 'epoch' if 'epoch' in df.columns else ('iteration' if 'iteration' in df.columns else None)
+                y_col = 'train_loss' if 'train_loss' in df.columns else ('loss' if 'loss' in df.columns else None)
+                if x_col and y_col:
+                    if not x_col_mean: x_col_mean, y_col_mean = x_col, y_col
+                    valid_dfs.append(df)
 
-    ax.set_xlabel('Epoch', fontsize=12, fontweight='bold')
+            if valid_dfs and x_col_mean and y_col_mean:
+                # Handle varying lengths (e.g. 2D might stop early)
+                max_len = max(len(d) for d in valid_dfs)
+                # Ensure all are interpolated to same length or just average up to min_len
+                min_len = min(len(d) for d in valid_dfs)
+                losses = np.array([d[y_col_mean].values[:min_len] for d in valid_dfs])
+                epochs = valid_dfs[0][x_col_mean].values[:min_len]
+                if len(losses) > 0:
+                    mean_loss = losses.mean(axis=0)
+                    ax.plot(epochs, mean_loss, color=color, linewidth=2.5, label=optimizer)
+
+    ax.set_xlabel('Epoch / Iteration', fontsize=12, fontweight='bold')
     ax.set_ylabel('Training Loss', fontsize=12, fontweight='bold')
     ax.set_title('Training Loss Curves', fontsize=13, fontweight='bold')
     ax.legend(fontsize=9)
