@@ -79,6 +79,19 @@ def configure_windows_console_encoding():
         os.environ.setdefault('PYTHONIOENCODING', 'utf-8')
         os.environ.setdefault('PYTHONUTF8', '1')
 
+def configure_realtime_output():
+    """Force line-buffered stdout/stderr so long runs show live progress in notebooks/CI."""
+    try:
+        if hasattr(sys.stdout, 'reconfigure'):
+            sys.stdout.reconfigure(line_buffering=True, write_through=True)
+    except Exception:
+        pass
+    try:
+        if hasattr(sys.stderr, 'reconfigure'):
+            sys.stderr.reconfigure(line_buffering=True, write_through=True)
+    except Exception:
+        pass
+
 def safe_print(*args, **kwargs):
     """
     Print with fallback for encoding errors (e.g., cp1252 can't handle Unicode checkmarks).
@@ -117,6 +130,7 @@ def safe_print(*args, **kwargs):
     # Pre-sanitize all arguments to avoid encoding errors
     safe_args = [sanitize_string(arg) for arg in args]
 
+    kwargs.setdefault('flush', True)
     try:
         print(*safe_args, **kwargs)
     except UnicodeEncodeError:
@@ -222,6 +236,7 @@ def configure_environment():
     """Configure environment variables for experimental runs (call in main())."""
     os.environ.setdefault('TF_CPP_MIN_LOG_LEVEL', '3')  # Suppress TensorFlow warnings
     os.environ.setdefault('CUDA_VISIBLE_DEVICES_ORDER', 'PCI_BUS_ID')
+    os.environ.setdefault('PYTHONUNBUFFERED', '1')
     # Suppress protobuf/gRPC warnings
     os.environ.setdefault('GRPC_VERBOSITY', 'ERROR')
     os.environ.setdefault('GLOG_minloglevel', '2')
@@ -4574,6 +4589,106 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
     return df
 
 
+def _resolve_results_base_for_dataset(results_dir: Union[str, Path], dataset: str) -> Path:
+    """Resolve canonical per-dataset results directory."""
+    rd = Path(results_dir)
+    if rd.name.lower() == dataset.lower():
+        return rd
+    if "experiments" in [p.lower() for p in rd.parts]:
+        return rd / dataset.lower()
+    return rd / "experiments" / dataset.lower()
+
+
+def _infer_epochs_completed_from_artifacts(csv_path: Path, meta_path: Path) -> int:
+    """Infer completed epochs from per-run CSV/metadata artifacts."""
+    epochs_done = 0
+    if csv_path.exists():
+        try:
+            df = safe_read_csv(csv_path)
+            if df is not None and len(df) > 0:
+                if 'epoch' in df.columns:
+                    ep = pd.to_numeric(df['epoch'], errors='coerce').dropna()
+                    if len(ep) > 0:
+                        epochs_done = max(epochs_done, int(ep.max()))
+                elif 'epochs_completed' in df.columns:
+                    ec = pd.to_numeric(df['epochs_completed'], errors='coerce').dropna()
+                    if len(ec) > 0:
+                        epochs_done = max(epochs_done, int(ec.max()))
+                else:
+                    epochs_done = max(epochs_done, int(len(df)))
+        except Exception:
+            logging.debug("Could not parse epochs from %s", csv_path, exc_info=True)
+    if meta_path.exists():
+        try:
+            with open(meta_path, 'r', encoding='utf-8') as f:
+                meta = json.load(f)
+            rows_original = meta.get('rows_original')
+            rows = meta.get('rows')
+            if rows_original is not None:
+                epochs_done = max(epochs_done, int(rows_original))
+            elif rows is not None:
+                epochs_done = max(epochs_done, int(rows))
+        except Exception:
+            logging.debug("Could not parse metadata from %s", meta_path, exc_info=True)
+    return epochs_done
+
+
+def _is_nlp_seed_complete(
+    results_dir: Union[str, Path],
+    model_name: str,
+    optimizer_name: str,
+    seed: int,
+    target_epochs: int,
+    checkpoint_manager=None,
+    checkpoint_filename: Optional[str] = None
+) -> Tuple[bool, int]:
+    """Return (is_complete, epochs_done) for a specific NLP run artifact."""
+    results_base = _resolve_results_base_for_dataset(results_dir, "IMDB")
+    file_stem = f"IMDB_{model_name}_{optimizer_name}_seed{seed}"
+    csv_path = results_base / f"{file_stem}.csv"
+    meta_path = results_base / f"{file_stem}.metadata.json"
+    epochs_done = _infer_epochs_completed_from_artifacts(csv_path, meta_path)
+    checkpoint_seen = False
+
+    completed_flag = False
+    if meta_path.exists():
+        try:
+            with open(meta_path, 'r', encoding='utf-8') as f:
+                meta = json.load(f)
+            completed_flag = bool(meta.get('completed', False))
+        except Exception:
+            logging.debug("Could not read completion flag from %s", meta_path, exc_info=True)
+
+    # Also consider checkpoint epoch progress for resume decisions (important when CSV sidecars lag behind).
+    if checkpoint_manager is not None and checkpoint_filename:
+        try:
+            checkpoint = checkpoint_manager.load_checkpoint(checkpoint_filename, file_stem)
+            if isinstance(checkpoint, dict) and len(checkpoint) > 0:
+                checkpoint_seen = True
+                ckpt_epoch = int(checkpoint.get('epoch', 0) or 0)
+                ckpt_meta = checkpoint.get('metadata', {}) if isinstance(checkpoint.get('metadata', {}), dict) else {}
+                ckpt_total = int(ckpt_meta.get('total_epochs_trained', 0) or 0)
+                hist = checkpoint.get('history', [])
+                hist_epoch = 0
+                if isinstance(hist, list) and len(hist) > 0:
+                    try:
+                        hist_epoch = max(
+                            int(item.get('epoch', 0) or 0)
+                            for item in hist
+                            if isinstance(item, dict)
+                        )
+                    except Exception:
+                        hist_epoch = 0
+                epochs_done = max(epochs_done, ckpt_epoch, ckpt_total, hist_epoch)
+                completed_flag = bool(completed_flag or ckpt_meta.get('completed', False))
+        except Exception:
+            logging.debug("Could not parse checkpoint progress from %s", checkpoint_filename, exc_info=True)
+
+    # Consider run complete only if it reached the requested epoch budget.
+    is_complete = bool(epochs_done >= int(target_epochs) and (completed_flag or csv_path.exists() or checkpoint_seen))
+    return is_complete, int(epochs_done)
+
+
 def run_nlp_experiment(results_dir="results_nlp", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False, resume_behavior: str = None):
     if seeds is None:
         seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
@@ -4596,7 +4711,15 @@ def run_nlp_experiment(results_dir="results_nlp", seeds=None, quick=False, skip_
     if not HAS_HF:
         print("HuggingFace transformers/datasets not available.")
         print("   Using local LSTM/RNN models instead...")
-        return run_nlp_experiment_simple(results_dir, seeds, 3 if quick else 5, resume, resume_behavior=resume_behavior)
+        target_epochs = 2 if ULTRA_QUICK_MODE else (3 if quick else 15)
+        return run_nlp_experiment_simple(
+            results_dir,
+            seeds,
+            target_epochs,
+            resume,
+            resume_behavior=resume_behavior,
+            checkpoint_manager=checkpoint_manager
+        )
 
     # Delegate to the helper; catch any exception and fall back to the simple runner
     try:
@@ -4615,7 +4738,15 @@ def run_nlp_experiment(results_dir="results_nlp", seeds=None, quick=False, skip_
         print(f"\nHuggingFace experiment failed: {str(e)[:200]}")
         print("   This is often due to authentication or network issues.")
         print("   Falling back to local LSTM/RNN models (no download required)...")
-        return run_nlp_experiment_simple(results_dir, seeds, 3 if quick else 5, resume, resume_behavior=resume_behavior)
+        target_epochs = 2 if ULTRA_QUICK_MODE else (3 if quick else 15)
+        return run_nlp_experiment_simple(
+            results_dir,
+            seeds,
+            target_epochs,
+            resume,
+            resume_behavior=resume_behavior,
+            checkpoint_manager=checkpoint_manager
+        )
 
 
 def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False, resume_behavior: str = None):
@@ -4665,7 +4796,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
     lr_default = 1e-4  # For new optimizers
     train_size = 1000 if quick else (2500 if not torch.cuda.is_available() else 5000)  # Reduced dataset size to improve runtime
     test_size = 500 if quick else 1000
-    epochs = 2 if ULTRA_QUICK_MODE else (3 if quick else 5)  # Standard fine-tuning is typically 3-5 epochs (reduced from 15)
+    epochs = 2 if ULTRA_QUICK_MODE else (3 if quick else 15)
 
     results_dir = Path(results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -4707,20 +4838,41 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
 
     if AutoTokenizer is None or AutoModelForSequenceClassification is None or load_dataset is None:
         logging.warning("transformers/datasets not available. Falling back to simplified NLP experiment...")
-        return run_nlp_experiment_simple(results_dir, seeds, epochs, resume, resume_behavior=resume_behavior)
+        return run_nlp_experiment_simple(
+            results_dir,
+            seeds,
+            epochs,
+            resume,
+            resume_behavior=resume_behavior,
+            checkpoint_manager=checkpoint_manager
+        )
 
     try:
         tokenizer = AutoTokenizer.from_pretrained(model_name)
     except (OSError, RuntimeError, Exception) as err:
         logging.warning(f"Failed to load tokenizer '{model_name}': {err}")
-        return run_nlp_experiment_simple(results_dir, seeds, epochs, resume, resume_behavior=resume_behavior)
+        return run_nlp_experiment_simple(
+            results_dir,
+            seeds,
+            epochs,
+            resume,
+            resume_behavior=resume_behavior,
+            checkpoint_manager=checkpoint_manager
+        )
 
     try:
         import tempfile
         raw = load_dataset('imdb', cache_dir=None)
     except (ValueError, Exception) as dataset_err:
         logging.warning(f"Failed to load IMDB dataset via HuggingFace: {dataset_err}")
-        return run_nlp_experiment_simple(results_dir, seeds, epochs, resume, resume_behavior=resume_behavior)
+        return run_nlp_experiment_simple(
+            results_dir,
+            seeds,
+            epochs,
+            resume,
+            resume_behavior=resume_behavior,
+            checkpoint_manager=checkpoint_manager
+        )
 
     def preprocess(examples):
         return tokenizer(examples['text'], truncation=True, padding=False, max_length=256)
@@ -4730,7 +4882,14 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
         tokenized = raw.map(preprocess, batched=True)
     except Exception as map_err:
         logging.warning(f"Failed to tokenize dataset: {map_err}")
-        return run_nlp_experiment_simple(results_dir, seeds, epochs, resume, resume_behavior=resume_behavior)
+        return run_nlp_experiment_simple(
+            results_dir,
+            seeds,
+            epochs,
+            resume,
+            resume_behavior=resume_behavior,
+            checkpoint_manager=checkpoint_manager
+        )
     # ==========================================================
 
     results = []
@@ -4741,9 +4900,21 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
 
         for seed in seeds:
             # Check if this specific experiment is already completed
-            if resume and is_experiment_completed(results_dir, 'IMDB', model_name.replace('/', '_'), opt_name, seed):
-                print(f"Skipping {model_name} {opt_name} seed {seed} (already completed)")
-                continue
+            if resume:
+                run_complete, epochs_done = _is_nlp_seed_complete(
+                    results_dir=results_dir,
+                    model_name=model_name.replace('/', '_'),
+                    optimizer_name=opt_name,
+                    seed=seed,
+                    target_epochs=epochs,
+                    checkpoint_manager=checkpoint_manager,
+                    checkpoint_filename=f"IMDB_{model_name.replace('/', '_')}_{opt_name}_lr{lr}_seed{seed}.pt"
+                )
+                if run_complete:
+                    print(f"Skipping {model_name} {opt_name} seed {seed} ({epochs_done}/{epochs} epochs, completed)")
+                    continue
+                if epochs_done > 0:
+                    print(f"Resuming {model_name} {opt_name} seed {seed} from artifacts ({epochs_done}/{epochs} epochs)")
 
             set_seed(seed)
 
@@ -4754,7 +4925,14 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                 logging.warning(f"Failed to load model '{model_name}': {model_err}")
                 logging.warning("This is often due to HuggingFace authentication or network issues.")
                 logging.warning("Falling back to simplified NLP experiment...")
-                return run_nlp_experiment_simple(results_dir, seeds, epochs, resume, resume_behavior=resume_behavior)
+                return run_nlp_experiment_simple(
+                    results_dir,
+                    seeds,
+                    epochs,
+                    resume,
+                    resume_behavior=resume_behavior,
+                    checkpoint_manager=checkpoint_manager
+                )
 
 
             # Create proper train/val/test split to prevent test set leakage
@@ -4863,20 +5041,12 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
             from src.core.lr_schedulers import CosineAnnealingLR
             scheduler = CosineAnnealingLR(optimizer, T_max=epochs, eta_min=lr*0.01)
 
-            # Restore scheduler state if resuming from checkpoint
-            # This ensures that learning rate scheduling continues correctly from the saved state
-            if 'checkpoint' in locals() and checkpoint and 'scheduler' in checkpoint:
-                try:
-                    scheduler.load_state_dict(checkpoint['scheduler'])
-                    logging.info(f"Restored scheduler state (last_epoch={scheduler.last_epoch})")
-                except Exception as e:
-                    logging.warning(f"Could not restore scheduler state: {e}. Using fresh scheduler.")
-
-            # Early stopping setup - Initialize defaults FIRST
+            # Early stopping setup - in full mode we enforce fixed epoch budget for fair optimizer comparison.
             best_val_acc = 0.0
             best_model_state = None
             patience = 5  # Shorter patience for transformers
             patience_counter = 0
+            enable_early_stopping = bool(quick or ULTRA_QUICK_MODE)
 
             # Initialize robust gradient handler for NLP
             robust_grad_handler = None
@@ -4901,7 +5071,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
             history = []
             checkpoint = None  # Initialize to prevent NameError if checkpoint_manager is None
 
-            if checkpoint_manager:
+            if checkpoint_manager and resume:
                 checkpoint = checkpoint_manager.load_checkpoint(ckpt_file, f"IMDB_{model_name.replace('/', '_')}_{opt_name}_lr{lr}_seed{seed}")
                 if checkpoint:
                     # Validate optimizer compatibility before loading
@@ -4924,11 +5094,23 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                         start_epoch = int(checkpoint.get('epoch', 0)) + 1
                         history = checkpoint.get('history', [])
 
+                        # Restore scheduler state for this specific checkpoint.
+                        if checkpoint.get('scheduler') is not None:
+                            try:
+                                scheduler.load_state_dict(checkpoint['scheduler'])
+                                logging.info("Restored scheduler state from checkpoint (last_epoch=%s)", scheduler.last_epoch)
+                            except Exception as e:
+                                logging.warning("Could not restore scheduler state: %s. Using fresh scheduler.", e)
+
                         # Scheduler will be created later, skip restore here
                         # AMP scaler and EMA not used in IMDB baseline
 
                         # Restore RNG states for reproducibility
                         checkpoint_manager.restore_rng_states(checkpoint)
+
+                        if resume and checkpoint.get('metadata', {}).get('completed', False) and int(checkpoint.get('epoch', 0)) >= int(epochs):
+                            logging.info("Checkpoint already marked complete at epoch %s (target=%s); skipping", checkpoint.get('epoch', 0), epochs)
+                            continue
 
                         logging.info(f"Resuming from epoch {start_epoch}")
                     else:
@@ -5023,12 +5205,11 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                     else:
                         patience_counter += 1
 
-                    # Early stopping
-                    if patience_counter >= patience:
+                    should_early_stop = bool(enable_early_stopping and patience_counter >= patience)
+                    if should_early_stop:
                         logging.info(f"Early stopping at epoch {epoch}")
                         if best_model_state is not None:
                             model.load_state_dict(best_model_state)
-                        break
 
                     history.append({
                         'epoch': epoch,
@@ -5066,8 +5247,8 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                                 'best_val_acc': best_val_acc if 'best_val_acc' in locals() else 0.0,
                                 'patience_counter': patience_counter if 'patience_counter' in locals() else 0,
                                 'training_time_sec': time.time() - training_start_time if 'training_start_time' in locals() else 0.0,
-                                'total_epochs_trained': epoch + 1,
-                                'completed': epoch >= epochs
+                                'total_epochs_trained': epoch,
+                                'completed': bool((epoch >= epochs) or should_early_stop)
                             }
                         }
                         try:
@@ -5081,6 +5262,9 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                         except Exception as e:
                             logging.exception("Unexpected error during checkpoint save for %s seed %s: %s", opt_name, seed, e)
                             raise
+
+                    if should_early_stop:
+                        break
 
                 # Restore best model before final evaluation
                 # If training completed without early stopping, model may not be at best checkpoint
@@ -5242,7 +5426,14 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
 
     return df
 
-def run_nlp_experiment_simple(results_dir: Union[str, Path] = "results_nlp", seeds: Optional[List[int]] = None, epochs: int = 10, resume: bool = False, resume_behavior: str = None):
+def run_nlp_experiment_simple(
+    results_dir: Union[str, Path] = "results_nlp",
+    seeds: Optional[List[int]] = None,
+    epochs: int = 15,
+    resume: bool = False,
+    resume_behavior: str = None,
+    checkpoint_manager=None
+):
     if seeds is None:
         seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
     """Robust NLP experiment using local LSTM/RNN models with synthetic or IMDB data
@@ -5470,11 +5661,22 @@ def run_nlp_experiment_simple(results_dir: Union[str, Path] = "results_nlp", see
     for model_name, model_fn in model_configs:
         for opt_name, opt_fn in optimizer_configs:
             for seed in seeds:
-                # Check if results already exist (RESUME LOGIC)
-                result_file = f"{results_dir}/nlp_imdb_simple_{model_name}_{opt_name}_seed{seed}.csv"
-                if resume and os.path.exists(result_file):
-                    print(f"   Skipping {model_name} + {opt_name} (seed {seed}) - results already exist")
-                    continue
+                # Resume logic from canonical per-run artifacts
+                if resume:
+                    run_complete, epochs_done = _is_nlp_seed_complete(
+                        results_dir=results_dir,
+                        model_name=f"Simple_{model_name}",
+                        optimizer_name=opt_name,
+                        seed=seed,
+                        target_epochs=epochs,
+                        checkpoint_manager=checkpoint_manager,
+                        checkpoint_filename=f"NLP_SIMPLE_IMDB_{model_name}_{opt_name}_seed{seed}.pt"
+                    )
+                    if run_complete:
+                        print(f"   Skipping {model_name} + {opt_name} (seed {seed}) - completed ({epochs_done}/{epochs} epochs)")
+                        continue
+                    if epochs_done > 0:
+                        print(f"   Found partial run for {model_name}+{opt_name} seed {seed}: {epochs_done}/{epochs} epochs")
 
                 print(f"\n   {model_name} + {opt_name} (seed {seed})")
                 set_seed(seed)
@@ -5484,13 +5686,31 @@ def run_nlp_experiment_simple(results_dir: Union[str, Path] = "results_nlp", see
                 model = safe_device_transfer(model, device, operation=f"Simple NLP {model_name} {opt_name} seed {seed}")
                 optimizer = opt_fn(model.parameters())
                 criterion = nn.CrossEntropyLoss()
+                ckpt_file = f"NLP_SIMPLE_IMDB_{model_name}_{opt_name}_seed{seed}.pt"
+                start_epoch = 1
+                history = []
+
+                if checkpoint_manager and resume:
+                    checkpoint = checkpoint_manager.load_checkpoint(ckpt_file, f"NLP_SIMPLE_IMDB_{model_name}_{opt_name}_seed{seed}")
+                    if checkpoint and checkpoint_manager.validate_optimizer_compatibility(checkpoint, opt_name):
+                        try:
+                            model.load_state_dict(checkpoint['model'], strict=False)
+                            optimizer.load_state_dict(checkpoint['optimizer'])
+                            history = checkpoint.get('history', []) or []
+                            start_epoch = int(checkpoint.get('epoch', 0)) + 1
+                            checkpoint_manager.restore_rng_states(checkpoint)
+                            logging.info("Simple NLP resume: %s %s seed=%s from epoch %s", model_name, opt_name, seed, start_epoch)
+                            if checkpoint.get('metadata', {}).get('completed', False) and int(checkpoint.get('epoch', 0)) >= int(epochs):
+                                print(f"   Skipping {model_name} + {opt_name} (seed {seed}) - checkpoint already complete ({checkpoint.get('epoch', 0)}/{epochs})")
+                                continue
+                        except Exception as e:
+                            logging.warning("Simple NLP checkpoint restore failed for %s %s seed %s: %s", model_name, opt_name, seed, e)
 
                 train_loader = make_dataloader(train_dataset, batch_size=batch_size, shuffle=True, seed=seed)
                 val_loader = make_dataloader(val_dataset, batch_size=batch_size, shuffle=False, seed=seed)
                 test_loader = make_dataloader(test_dataset, batch_size=batch_size, shuffle=False, seed=seed)
 
-                history = []
-                for epoch in range(epochs):
+                for epoch in range(start_epoch, epochs + 1):
                     # Training
                     model.train()
                     train_loss = 0
@@ -5536,15 +5756,33 @@ def run_nlp_experiment_simple(results_dir: Union[str, Path] = "results_nlp", see
                     val_acc = 100.0 * val_correct / max(1, val_total)  # Protect division by zero
 
                     history.append({
-                        'epoch': epoch + 1,
+                        'epoch': epoch,
+                        'model': model_name,
+                        'optimizer': opt_name,
+                        'seed': seed,
                         'train_loss': train_loss,
                         'train_acc': train_acc,
                         'val_loss': val_loss,
                         'val_acc': val_acc
                     })
 
-                    if epoch == epochs - 1 or epoch == 0:
-                        print(f"      Epoch {epoch+1}/{epochs} - Train: {train_acc:.1f}% | Val: {val_acc:.1f}%")
+                    if epoch == epochs or epoch == start_epoch:
+                        print(f"      Epoch {epoch}/{epochs} - Train: {train_acc:.1f}% | Val: {val_acc:.1f}%")
+
+                    if checkpoint_manager:
+                        ckpt_data = {
+                            'model': model.state_dict(),
+                            'optimizer': optimizer.state_dict(),
+                            'epoch': epoch,
+                            'history': history,
+                            'opt_name': opt_name,
+                            'seed': seed,
+                            'metadata': {
+                                'completed': bool(epoch >= epochs),
+                                'total_epochs_trained': int(epoch)
+                            }
+                        }
+                        checkpoint_manager.save_checkpoint(ckpt_data, ckpt_file, f"NLP_SIMPLE_IMDB_{model_name}_{opt_name}_seed{seed}")
 
                 # REPRODUCIBILITY: Final test evaluation AFTER training completes
                 # This ensures test set is only used once for unbiased generalization estimate
@@ -5584,14 +5822,57 @@ def run_nlp_experiment_simple(results_dir: Union[str, Path] = "results_nlp", see
                 })
                 all_history.extend(history)
 
+                # Save canonical per-run artifact so resume logic can reason about epoch completeness.
+                try:
+                    save_run_artifacts(
+                        base_results_dir=results_dir,
+                        dataset='IMDB',
+                        model_name=f"Simple_{model_name}",
+                        optimizer_name=opt_name,
+                        seed=seed,
+                        history=history,
+                        params={'epochs': epochs, 'batch_size': batch_size, 'data_source': 'IMDB' if use_real_data else 'Synthetic'},
+                        device=device,
+                        exp_tracker=None,
+                        model=model,
+                        save_model=False
+                    )
+                except Exception as e:
+                    logging.debug("Failed to save simple NLP per-run artifact for %s %s seed %s: %s", model_name, opt_name, seed, e, exc_info=True)
+
     os.makedirs(results_dir, exist_ok=True)
-    df = pd.DataFrame(results)
+    results_path = Path(results_dir) / "nlp_results.csv"
+    history_path = Path(results_dir) / "nlp_training_history.csv"
+    df_new = pd.DataFrame(results)
+    df_existing = safe_read_csv(results_path) if (resume and results_path.exists()) else None
+    if df_existing is not None and len(df_existing) > 0:
+        if df_new.empty:
+            df = df_existing.copy()
+        else:
+            df = pd.concat([df_existing, df_new], ignore_index=True)
+            dedup_cols = [c for c in ['model', 'optimizer', 'seed'] if c in df.columns]
+            if dedup_cols:
+                df = df.drop_duplicates(subset=dedup_cols, keep='last').reset_index(drop=True)
+    else:
+        df = df_new
+
     from src.utils.file_safety import safe_to_csv
-    safe_to_csv(df, f"{results_dir}/nlp_results.csv", index=False)
+    safe_to_csv(df, results_path, index=False)
 
     # Save detailed history
-    history_df = pd.DataFrame(all_history)
-    safe_to_csv(history_df, f"{results_dir}/nlp_training_history.csv", index=False)
+    history_new_df = pd.DataFrame(all_history)
+    history_existing_df = safe_read_csv(history_path) if (resume and history_path.exists()) else None
+    if history_existing_df is not None and len(history_existing_df) > 0:
+        if history_new_df.empty:
+            history_df = history_existing_df.copy()
+        else:
+            history_df = pd.concat([history_existing_df, history_new_df], ignore_index=True)
+            dedup_cols = [c for c in ['model', 'optimizer', 'seed', 'epoch'] if c in history_df.columns]
+            if dedup_cols:
+                history_df = history_df.drop_duplicates(subset=dedup_cols, keep='last').reset_index(drop=True)
+    else:
+        history_df = history_new_df
+    safe_to_csv(history_df, history_path, index=False)
 
     print(f"\nResults saved to {results_dir}/nlp_results.csv")
     print(f"   Data source: {'IMDB (real)' if use_real_data else 'Synthetic (demonstration)'}")
@@ -12420,6 +12701,7 @@ def main():  # type: ignore[misc]  # pyright: complexity limit exceeded (10k+ li
 
     # Configure environment & console encoding early for script execution
     configure_environment()
+    configure_realtime_output()
     configure_windows_console_encoding()
     import argparse
 
@@ -14623,7 +14905,8 @@ Examples:
 
 
 if __name__ == "__main__":
-    # Configure Windows console encoding (must be done before any output)
+    # Configure output streaming/encoding before any output
+    configure_realtime_output()
     configure_windows_console_encoding()
 
     results = main()
