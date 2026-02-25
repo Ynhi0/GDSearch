@@ -52,12 +52,12 @@ def run_beta_sensitivity_2d_demos():
         
         try:
             result = subprocess.run(cmd, check=True, capture_output=False, text=True)
-            print(f"\n✅ {demo['name']} completed successfully!")
+            print(f"\n[OK] {demo['name']} completed successfully!")
         except subprocess.CalledProcessError as e:
-            print(f"\n❌ {demo['name']} failed with error code {e.returncode}")
+            print(f"\n[ERROR] {demo['name']} failed with error code {e.returncode}")
             print("Continuing with remaining demonstrations...")
         except Exception as e:
-            print(f"\n❌ Unexpected error: {e}")
+            print(f"\n[ERROR] Unexpected error: {e}")
     
     print("\n" + "="*80)
     print("BETA SENSITIVITY 2D DEMONSTRATIONS COMPLETE")
@@ -66,7 +66,7 @@ def run_beta_sensitivity_2d_demos():
     print("  - results/beta_sensitivity_2d/rosenbrock/momentum/")
     print("  - results/beta_sensitivity_2d/saddle_point/adam/")
     print("\nThese plots are suitable for thesis inclusion.")
-   print("="*80)
+    print("="*80)
 
 if __name__ == '__main__':
     run_beta_sensitivity_2d_demos()

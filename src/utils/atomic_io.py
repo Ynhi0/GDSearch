@@ -38,6 +38,17 @@ def safe_write_csv(df: pd.DataFrame, path: Union[str, Path], **kwargs) -> None:
     temp_path = path.with_suffix('.csv.tmp')
     
     try:
+        # Large object-heavy DataFrames can transiently allocate a lot of memory
+        # during string conversion inside pandas.to_csv(). Chunked writes reduce
+        # peak memory and prevent sporadic OOMs on long histories.
+        if 'chunksize' not in kwargs:
+            try:
+                n_rows = len(df)
+                if n_rows >= 5000:
+                    kwargs['chunksize'] = 1000
+            except Exception:
+                pass
+
         # Write to temp file
         df.to_csv(temp_path, **kwargs)
         

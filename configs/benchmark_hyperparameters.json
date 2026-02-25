@@ -2,28 +2,84 @@
   "experiment_configs": {
     "2d_optimization": {
       "optimizers": {
-        "SGD": {"lr": 0.01},
-        "SGD_Momentum": {"lr": 0.01, "beta": 0.9},
-        "Adam": {"lr": 0.01, "beta1": 0.9, "beta2": 0.999, "eps": 1e-8},
-        "RMSProp": {"lr": 0.01, "decay_rate": 0.9, "eps": 1e-8}
+        "SGD": {
+          "lr": 0.001
+        },
+        "SGD_Momentum": {
+          "lr": 0.001,
+          "momentum": 0.9
+        },
+        "Adam": {
+          "lr": 0.05,
+          "beta1": 0.9,
+          "beta2": 0.999,
+          "eps": 1e-8
+        },
+        "RMSProp": {
+          "lr": 0.01,
+          "decay_rate": 0.9,
+          "eps": 1e-8
+        },
+        "SAM_SGD": {
+          "lr": 0.001,
+          "rho": 0.05
+        },
+        "SAM_Adam": {
+          "lr": 0.05,
+          "rho": 0.05
+        }
       },
       "num_iterations": 10000,
-      "test_functions": ["Rosenbrock", "Rastrigin", "Ackley", "IllConditionedQuadratic", "SaddlePoint"]
+      "test_functions": [
+        "Rosenbrock",
+        "Rastrigin",
+        "Ackley",
+        "IllConditionedQuadratic",
+        "SaddlePoint"
+      ]
     },
     "resnet_cifar10": {
       "optimizers": {
-        "SGD": {"lr": 0.001, "momentum": 0.9, "weight_decay": 0.0001},
-        "Adam": {"lr": 0.001, "beta1": 0.9, "beta2": 0.999, "weight_decay": 0.0001},
-        "AdamW": {"lr": 0.001, "beta1": 0.9, "beta2": 0.999, "weight_decay": 0.01}
+        "SGD": {
+          "lr": 0.001,
+          "momentum": 0.9,
+          "weight_decay": 0.0001
+        },
+        "Adam": {
+          "lr": 0.001,
+          "beta1": 0.9,
+          "beta2": 0.999,
+          "weight_decay": 0.0001
+        },
+        "AdamW": {
+          "lr": 0.001,
+          "beta1": 0.9,
+          "beta2": 0.999,
+          "weight_decay": 0.01
+        },
+        "SAM_SGD": {
+          "lr": 0.001,
+          "rho": 0.05,
+          "momentum": 0.9
+        }
       },
       "epochs": 50,
       "batch_size": 128
     },
     "highdim_optimization": {
       "optimizers": {
-        "SGD": {"lr": 0.01},
-        "SGD_Momentum": {"lr": 0.01, "beta": 0.9},
-        "Adam": {"lr": 0.01, "beta1": 0.9, "beta2": 0.999}
+        "SGD": {
+          "lr": 0.01
+        },
+        "SGD_Momentum": {
+          "lr": 0.01,
+          "beta": 0.9
+        },
+        "Adam": {
+          "lr": 0.01,
+          "beta1": 0.9,
+          "beta2": 0.999
+        }
       },
       "dimensions": 100,
       "num_iterations": 5000

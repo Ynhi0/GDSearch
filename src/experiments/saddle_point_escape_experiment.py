@@ -103,6 +103,8 @@ def run_saddle_point_escape_experiment(
 
         escaped_saddle = False
         escape_iteration = None
+        last_lambda_min = np.nan
+        last_lambda_max = np.nan
 
         for i in range(max_iters):
             loss = test_fn.compute(x, y)
@@ -124,11 +126,8 @@ def run_saddle_point_escape_experiment(
                     # This ensures the eigenvalues match the actual loss landscape
                     hessian = test_fn.hessian(x, y)
                     eigenvalues, _ = np.linalg.eig(hessian)
-                    lambda_min = float(np.min(eigenvalues))
-                    lambda_max = float(np.max(eigenvalues))
-
-                    history['lambda_min'].append(lambda_min)
-                    history['lambda_max'].append(lambda_max)
+                    last_lambda_min = float(np.min(eigenvalues))
+                    last_lambda_max = float(np.max(eigenvalues))
 
                     # Check if escaped saddle point
                     distance_from_saddle = np.sqrt(x**2 + y**2)
@@ -140,8 +139,9 @@ def run_saddle_point_escape_experiment(
 
                 except Exception as e:
                     logging.warning(f"Eigenvalue computation failed: {e}")
-                    history['lambda_min'].append(np.nan)
-                    history['lambda_max'].append(np.nan)
+
+            history['lambda_min'].append(last_lambda_min)
+            history['lambda_max'].append(last_lambda_max)
 
             # Update
             x, y = optimizer.step((x, y), (grad_x, grad_y))
@@ -166,39 +166,88 @@ def run_saddle_point_escape_experiment(
         print(f"  {opt_name}: Escape time = {escape_iteration if escaped_saddle else 'N/A'} iterations")
 
     # Generate comparison plot
+    # Focus visualization on the escape phase; very late iterations on this unbounded
+    # saddle objective can explode and make trajectories unreadable.
+    plot_histories = {}
+    for opt_name, result in all_results.items():
+        hist = result['history']
+        n = len(hist['iteration'])
+        escape_it = result.get('escape_iteration', None)
+        if escape_it is None:
+            cutoff = min(n, 400)
+        else:
+            cutoff = min(n, int(escape_it) + 150)
+        cutoff = max(50, cutoff)
+        plot_histories[opt_name] = {
+            k: v[:cutoff] for k, v in hist.items()
+        }
+
     fig, axes = plt.subplots(2, 2, figsize=(14, 12))
 
     # Plot 1: Trajectories
     ax1 = axes[0, 0]
-    for opt_name, result in all_results.items():
-        hist = result['history']
+    all_x, all_y = [], []
+    for opt_name, hist in plot_histories.items():
         ax1.plot(hist['x'], hist['y'], '-o', markersize=2, label=opt_name, alpha=0.7)
+        all_x.extend([v for v in hist['x'] if np.isfinite(v)])
+        all_y.extend([v for v in hist['y'] if np.isfinite(v)])
     ax1.scatter([0], [0], c='red', s=200, marker='X', label='Saddle Point', zorder=10)
+    if all_x and all_y:
+        x_arr = np.asarray(all_x, dtype=float)
+        y_arr = np.asarray(all_y, dtype=float)
+        x_lo, x_hi = np.percentile(x_arr, [5, 95])
+        y_lo, y_hi = np.percentile(y_arr, [5, 95])
+        x_span = max(1e-6, x_hi - x_lo)
+        y_span = max(1e-6, y_hi - y_lo)
+        ax1.set_xlim(x_lo - 0.1 * x_span, x_hi + 0.1 * x_span)
+        ax1.set_ylim(y_lo - 0.1 * y_span, y_hi + 0.1 * y_span)
     ax1.set_xlabel('x')
     ax1.set_ylabel('y')
-    ax1.set_title('Optimizer Trajectories Near Saddle Point')
+    ax1.set_title('Optimizer Trajectories Near Saddle Point (escape window)')
     ax1.legend()
     ax1.grid(alpha=0.3)
 
     # Plot 2: Loss over time
     ax2 = axes[0, 1]
-    for opt_name, result in all_results.items():
-        hist = result['history']
-        ax2.semilogy(hist['iteration'], np.abs(hist['loss']), label=opt_name, alpha=0.7)
+    loss_vals = []
+    for opt_name, hist in plot_histories.items():
+        abs_loss = np.abs(np.asarray(hist['loss'], dtype=float))
+        abs_loss = np.where(abs_loss <= 0, np.nan, abs_loss)
+        ax2.semilogy(hist['iteration'], abs_loss, label=opt_name, alpha=0.7)
+        finite = abs_loss[np.isfinite(abs_loss)]
+        if finite.size:
+            loss_vals.append(finite)
+    if loss_vals:
+        concat = np.concatenate(loss_vals)
+        lo, hi = np.percentile(concat, [1, 99.5])
+        lo = max(lo, 1e-20)
+        hi = max(hi, lo * 10)
+        ax2.set_ylim(lo, hi * 1.5)
     ax2.set_xlabel('Iteration')
     ax2.set_ylabel('|Loss|')
-    ax2.set_title('Loss Magnitude over Time')
+    ax2.set_title('Loss Magnitude over Time (escape window)')
     ax2.legend()
     ax2.grid(alpha=0.3)
 
     # Plot 3: Gradient norm
     ax3 = axes[1, 0]
-    for opt_name, result in all_results.items():
-        hist = result['history']
-        ax3.semilogy(hist['iteration'], hist['grad_norm'], label=opt_name, alpha=0.7)
+    grad_vals = []
+    for opt_name, hist in plot_histories.items():
+        grad_norm = np.asarray(hist['grad_norm'], dtype=float)
+        grad_norm = np.where(grad_norm <= 0, np.nan, grad_norm)
+        ax3.semilogy(hist['iteration'], grad_norm, label=opt_name, alpha=0.7)
+        finite = grad_norm[np.isfinite(grad_norm)]
+        if finite.size:
+            grad_vals.append(finite)
+    if grad_vals:
+        concat = np.concatenate(grad_vals)
+        lo, hi = np.percentile(concat, [1, 99.5])
+        lo = max(lo, 1e-20)
+        hi = max(hi, lo * 10)
+        ax3.set_ylim(lo, hi * 1.5)
     ax3.set_xlabel('Iteration')
     ax3.set_ylabel('Gradient Norm')
-    ax3.set_title('Gradient Norm over Time')
+    ax3.set_title('Gradient Norm over Time (escape window)')
     ax3.legend()
     ax3.grid(alpha=0.3)
 

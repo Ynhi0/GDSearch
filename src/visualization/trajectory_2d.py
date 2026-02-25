@@ -39,7 +39,9 @@ def run_optimizer_2d(
     grad_func: Callable[[float, float], np.ndarray],
     x0: np.ndarray,
     max_iters: int = 500,
-    tol: float = 1e-6
+    tol: float = 1e-6,
+    grad_clip: float | None = None,
+    max_param_abs: float = 1e6
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Run optimizer on 2D function and collect trajectory.
@@ -59,12 +61,16 @@ def run_optimizer_2d(
         grad = np.asarray(grad_raw, dtype=float)
         grad_norm = float(np.linalg.norm(grad))
 
+        if grad_clip is not None and grad_norm > grad_clip:
+            grad = grad * (grad_clip / (grad_norm + 1e-12))
+            grad_norm = float(np.linalg.norm(grad))
+
         if grad_norm < tol:
             break
 
         params = optimizer.step(params, grad)  # type: ignore[attr-defined]
         # Safety guard: if params diverge to non-finite or extremely large values, stop early
-        if not np.all(np.isfinite(params)) or np.any(np.abs(params) > 1e6):
+        if not np.all(np.isfinite(params)) or np.any(np.abs(params) > max_param_abs):
             logging.warning("Optimizer params diverged (non-finite or large). Stopping trajectory early.")
             break
         trajectory.append(params.copy())
@@ -83,7 +89,10 @@ def plot_contour_with_trajectories(
     ylim: Tuple[float, float],
     title: str,
     output_path: Path,
-    num_contours: int = 30
+    num_contours: int = 30,
+    run_max_iters: int = 500,
+    run_tol: float = 1e-6,
+    run_grad_clip: float | None = None
 ):
     """
     Create contour plot with multiple optimizer trajectories.
@@ -123,7 +132,15 @@ def plot_contour_with_trajectories(
 
     # Plot trajectories
     for idx, (opt_name, optimizer, grad_func) in enumerate(optimizers_config):
-        trajectory, _ = run_optimizer_2d(optimizer, func, grad_func, x0)
+        trajectory, _ = run_optimizer_2d(
+            optimizer,
+            func,
+            grad_func,
+            x0,
+            max_iters=run_max_iters,
+            tol=run_tol,
+            grad_clip=run_grad_clip
+        )
 
         color = colors[idx % len(colors)]
 
@@ -141,11 +158,13 @@ def plot_contour_with_trajectories(
 
         # Add arrow annotations to show direction every N steps
         arrow_interval = max(1, len(trajectory) // 10)
+        head_width = 0.015 * (ylim[1] - ylim[0])
+        head_length = 0.02 * (xlim[1] - xlim[0])
         for i in range(arrow_interval, len(trajectory), arrow_interval):
             dx = trajectory[i, 0] - trajectory[i-1, 0]
             dy = trajectory[i, 1] - trajectory[i-1, 1]
             ax.arrow(trajectory[i-1, 0], trajectory[i-1, 1], dx, dy,
-                    head_width=0.1, head_length=0.15, fc=color, ec=color, alpha=0.5)
+                    head_width=head_width, head_length=head_length, fc=color, ec=color, alpha=0.5)
 
     ax.set_xlim(xlim)
     ax.set_ylim(ylim)
@@ -256,12 +275,12 @@ def compare_momentum_beta_trajectories(
     output_dir: str | None = None
 ):
     """
-    Visualize effect of momentum β on trajectories.
+    Visualize effect of momentum beta on trajectories.
 
     Notes:
         Accepts either `save_dir` or `output_dir` for backward compatibility with callers.
 
-    Key research question: How does β shape the trajectory smoothness?
+    Key research question: How does beta shape the trajectory smoothness?
     """
     # Allow callers to pass `output_dir=` (used elsewhere in the codebase)
     if output_dir is not None:
@@ -279,37 +298,55 @@ def compare_momentum_beta_trajectories(
         grad_func = lambda x, y: np.array(test_fn.gradient(x, y))
         x0 = np.array([-1.5, 2.0])
         xlim, ylim = (-2, 2), (-1, 3)
-        title = 'Rosenbrock Function: Momentum β Effect on Trajectory'
+        lr_map = {0.0: 1e-3, 0.5: 1e-3, 0.9: 5e-4, 0.99: 2e-4}
+        run_max_iters = 5000
+        run_grad_clip = 100.0
+        title = 'Rosenbrock Function: Momentum beta Effect on Trajectory'
     elif test_function == 'ackley':
         test_fn = Ackley2D()
         func = test_fn.compute
         grad_func = lambda x, y: np.array(test_fn.gradient(x, y))
         x0 = np.array([2.0, 2.5])
         xlim, ylim = (-5, 5), (-5, 5)
-        title = 'Ackley Function: Momentum β Effect on Trajectory'
+        lr_map = {beta: 0.01 for beta in beta_values}
+        run_max_iters = 1200
+        run_grad_clip = None
+        title = 'Ackley Function: Momentum beta Effect on Trajectory'
     else:
         test_fn = IllConditionedQuadratic()
         func = test_fn.compute
         grad_func = lambda x, y: np.array(test_fn.gradient(x, y))
         x0 = np.array([-1.5, 2.0])
         xlim, ylim = (-2, 2), (-2, 2)
-        title = 'Ill-Conditioned Quadratic: Momentum β Effect'
+        lr_map = {beta: 0.01 for beta in beta_values}
+        run_max_iters = 1200
+        run_grad_clip = None
+        title = 'Ill-Conditioned Quadratic: Momentum beta Effect'
 
     # Build optimizer configs
     optimizers_config = []
     for beta in beta_values:
+        lr = float(lr_map.get(beta, 0.01))
         if beta == 0.0:
             opt_name = 'SGD (no momentum)'
-            optimizer = SGD(lr=0.01)
+            optimizer = SGD(lr=lr)
         else:
-            opt_name = f'Momentum β={beta}'
-            optimizer = SGDMomentum(lr=0.01, beta=beta)
+            opt_name = f'Momentum beta={beta}'
+            optimizer = SGDMomentum(lr=lr, beta=beta)
         optimizers_config.append((opt_name, optimizer, grad_func))
 
     output_path = Path(save_dir) / f'momentum_beta_trajectories_{test_function}.png'
 
     plot_contour_with_trajectories(
-        func, optimizers_config, x0, xlim, ylim, title, output_path
+        func,
+        optimizers_config,
+        x0,
+        xlim,
+        ylim,
+        title,
+        output_path,
+        run_max_iters=run_max_iters,
+        run_grad_clip=run_grad_clip
     )
 
 
@@ -320,12 +357,12 @@ def compare_adam_beta_trajectories(
     output_dir: str | None = None
 ):
     """
-    Visualize effect of Adam β1, β2 on trajectories.
+    Visualize effect of Adam beta1, beta2 on trajectories.
 
     Notes:
         Accepts either `save_dir` or `output_dir` for backward compatibility with callers.
 
-    Key research question: How do β1, β2 shape the optimization dynamics?
+    Key research question: How do beta1, beta2 shape the optimization dynamics?
     """
     # Allow callers to pass `output_dir=` (used elsewhere in the codebase)
     if output_dir is not None:
@@ -343,26 +380,38 @@ def compare_adam_beta_trajectories(
         grad_func = lambda x, y: np.array(test_fn.gradient(x, y))
         x0 = np.array([-1.5, 2.0])
         xlim, ylim = (-2, 2), (-1, 3)
-        title = 'Rosenbrock Function: Adam β1,β2 Effect on Trajectory'
+        run_max_iters = 4000
+        run_grad_clip = 100.0
+        title = 'Rosenbrock Function: Adam beta1,beta2 Effect on Trajectory'
     else:
         test_fn = Ackley2D()
         func = test_fn.compute
         grad_func = lambda x, y: np.array(test_fn.gradient(x, y))
         x0 = np.array([2.0, 2.5])
         xlim, ylim = (-5, 5), (-5, 5)
-        title = 'Ackley Function: Adam β1,β2 Effect on Trajectory'
+        run_max_iters = 1200
+        run_grad_clip = None
+        title = 'Ackley Function: Adam beta1,beta2 Effect on Trajectory'
 
     # Build optimizer configs
     optimizers_config = []
     for beta1, beta2 in beta_configs:
-        opt_name = f'Adam β1={beta1}, β2={beta2}'
+        opt_name = f'Adam beta1={beta1}, beta2={beta2}'
         optimizer = Adam(lr=0.01, beta1=beta1, beta2=beta2)
         optimizers_config.append((opt_name, optimizer, grad_func))
 
     output_path = Path(save_dir) / f'adam_beta_trajectories_{test_function}.png'
 
     plot_contour_with_trajectories(
-        func, optimizers_config, x0, xlim, ylim, title, output_path
+        func,
+        optimizers_config,
+        x0,
+        xlim,
+        ylim,
+        title,
+        output_path,
+        run_max_iters=run_max_iters,
+        run_grad_clip=run_grad_clip
     )
 
 
@@ -392,6 +441,9 @@ def compare_optimizer_families(
         grad_func = lambda x, y: np.array(test_fn.gradient(x, y))
         x0 = np.array([-1.5, 2.0])
         xlim, ylim = (-2, 2), (-1, 3)
+        lr_family = 0.001
+        run_max_iters = 5000
+        run_grad_clip = 100.0
         title = 'Rosenbrock: Optimizer Family Comparison'
     elif test_function == 'saddle':
         test_fn = SaddlePoint()
@@ -399,6 +451,9 @@ def compare_optimizer_families(
         grad_func = lambda x, y: np.array(test_fn.gradient(x, y))
         x0 = np.array([-1.5, 1.5])
         xlim, ylim = (-2, 2), (-2, 2)
+        lr_family = 0.01
+        run_max_iters = 2000
+        run_grad_clip = None
         title = 'Saddle Point: Optimizer Family Comparison'
     else:
         test_fn = IllConditionedQuadratic()
@@ -406,20 +461,31 @@ def compare_optimizer_families(
         grad_func = lambda x, y: np.array(test_fn.gradient(x, y))
         x0 = np.array([-1.5, 2.0])
         xlim, ylim = (-2, 2), (-2, 2)
+        lr_family = 0.01
+        run_max_iters = 2000
+        run_grad_clip = None
         title = 'Ill-Conditioned Quadratic: Optimizer Comparison'
 
     # Build optimizer configs
     optimizers_config = [
-        ('SGD', SGD(lr=0.01), grad_func),
-        ('SGD+Momentum', SGDMomentum(lr=0.01, beta=0.9), grad_func),
-        ('Nesterov', SGDNesterov(lr=0.01, beta=0.9), grad_func),
-        ('Adam', Adam(lr=0.01), grad_func)
+        ('SGD', SGD(lr=lr_family), grad_func),
+        ('SGD+Momentum', SGDMomentum(lr=lr_family, beta=0.9), grad_func),
+        ('Nesterov', SGDNesterov(lr=lr_family, beta=0.9), grad_func),
+        ('Adam', Adam(lr=lr_family), grad_func)
     ]
 
     output_path = Path(save_dir) / f'optimizer_comparison_{test_function}.png'
 
     plot_contour_with_trajectories(
-        func, optimizers_config, x0, xlim, ylim, title, output_path
+        func,
+        optimizers_config,
+        x0,
+        xlim,
+        ylim,
+        title,
+        output_path,
+        run_max_iters=run_max_iters,
+        run_grad_clip=run_grad_clip
     )
 
 
@@ -432,13 +498,13 @@ if __name__ == '__main__':
 
     viz_output_dir = 'results/trajectory_visualization'
 
-    # Study 1: Momentum β effect
-    print("\n1. Generating Momentum β trajectories...")
+    # Study 1: Momentum beta effect
+    print("\n1. Generating Momentum beta trajectories...")
     compare_momentum_beta_trajectories('rosenbrock', save_dir=viz_output_dir)
     compare_momentum_beta_trajectories('ackley', save_dir=viz_output_dir)
 
-    # Study 2: Adam β1, β2 effect
-    print("\n2. Generating Adam β1,β2 trajectories...")
+    # Study 2: Adam beta1, beta2 effect
+    print("\n2. Generating Adam beta1,beta2 trajectories...")
     compare_adam_beta_trajectories('rosenbrock', save_dir=viz_output_dir)
     compare_adam_beta_trajectories('ackley', save_dir=viz_output_dir)
 
@@ -451,5 +517,7 @@ if __name__ == '__main__':
     print(f"\nAll visualizations saved to {viz_output_dir}/")
     print("\nGenerated plots show:")
     print("  - Trajectory smoothness differences")
-    print("  - Effect of hyperparameters (β, β1, β2)")
+    print("  - Effect of hyperparameters (beta, beta1, beta2)")
     print("  - Optimizer behavior on different landscapes")
+
+

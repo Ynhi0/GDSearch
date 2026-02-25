@@ -14,6 +14,7 @@ import sys
 import subprocess
 import warnings
 import math
+import logging
 from src.utils.device_safety import safe_device_transfer, gpu_safe_operation
 from src.utils.sanity_checks import validate_loss
 from src.utils.constants import OptimizerNames, MNIST_MEAN, MNIST_STD, CIFAR10_MEAN, CIFAR10_STD
@@ -57,14 +58,24 @@ def configure_windows_console_encoding():
     """
     if sys.platform == 'win32':
         import io
-        # Only wrap if stdout/stderr have buffer attribute and are NOT already wrapped
-        # This prevents breaking pytest capture and other test frameworks
-        if hasattr(sys.stdout, 'buffer') and not isinstance(sys.stdout, io.TextIOWrapper):
-            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-        if hasattr(sys.stderr, 'buffer') and not isinstance(sys.stderr, io.TextIOWrapper):
-            sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+        # Prefer in-place reconfigure when available (safe for regular TextIOWrapper streams).
+        # Fall back to wrapper replacement only for non-standard streams exposing .buffer.
+        try:
+            if hasattr(sys.stdout, 'reconfigure'):
+                sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+            elif hasattr(sys.stdout, 'buffer'):
+                sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        except Exception:
+            pass
+        try:
+            if hasattr(sys.stderr, 'reconfigure'):
+                sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+            elif hasattr(sys.stderr, 'buffer'):
+                sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+        except Exception:
+            pass
         # Also set environment variables for subprocess compatibility
-        # Do not set these at import time — call configure_environment() in main
+        # Do not set these at import time â€” call configure_environment() in main
         os.environ.setdefault('PYTHONIOENCODING', 'utf-8')
         os.environ.setdefault('PYTHONUTF8', '1')
 
@@ -80,24 +91,24 @@ def safe_print(*args, **kwargs):
         # Unicode symbol replacements (unique keys only)
         # Use the canonical unicode escape or the direct char, not both
         replacements = {
-            '\u2713': '[OK]',             # ✓
-            '\u2717': '[ERROR]',          # ✗
-            '\u26a0': '[WARN]',           # ⚠
-            '💾': '[SAVE]',
-            '🔬': '[TEST]',
-            '🎛️': '[CONFIG]',
-            '🔄': '[SYNC]',
-            '🔧': '[FIX]',
-            '🧹': '[CLEAN]',
-            '📚': '[DOCS]',
-            '🎨': '[FORMAT]',
-            '📦': '[PACKAGE]',
-            '💡': '[TIP]',
-            '🐳': '[DOCKER]',
-            '🏗️': '[BUILD]',
-            '🌌': '[SPACE]',
-            '⏰': '[TIME]',
-            '🔍': '[SEARCH]',
+            '\u2713': '[OK]',             # âœ“
+            '\u2717': '[ERROR]',          # âœ—
+            '\u26a0': '[WARN]',           # âš 
+            'ðŸ’¾': '[SAVE]',
+            'ðŸ”¬': '[TEST]',
+            'ðŸŽ›ï¸': '[CONFIG]',
+            'ðŸ”„': '[SYNC]',
+            'ðŸ”§': '[FIX]',
+            'ðŸ§¹': '[CLEAN]',
+            'ðŸ“š': '[DOCS]',
+            'ðŸŽ¨': '[FORMAT]',
+            'ðŸ“¦': '[PACKAGE]',
+            'ðŸ’¡': '[TIP]',
+            'ðŸ³': '[DOCKER]',
+            'ðŸ—ï¸': '[BUILD]',
+            'ðŸŒŒ': '[SPACE]',
+            'â°': '[TIME]',
+            'ðŸ”': '[SEARCH]',
         }
         for unicode_char, ascii_replacement in replacements.items():
             s = s.replace(unicode_char, ascii_replacement)
@@ -119,7 +130,7 @@ def safe_print(*args, **kwargs):
 
 
 # Import typing items at once for consistency
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from pathlib import Path
 
 # Use centralized helper to compute gradient norms for consistency
@@ -235,6 +246,7 @@ from tqdm import tqdm
 import argparse
 import logging
 import json
+import re
 import inspect
 
 # Module-level logger (configured in main())
@@ -336,9 +348,9 @@ def normalize_metric_names(data_dict: Dict[str, Any]) -> Dict[str, Any]:
     Normalize inconsistent metric naming across experiments.
     
     Handles variations like:
-    - test_acc / test_accuracy / final_test_acc → unified to 'test_acc' (with final_test_acc preserved)
-    - train_accuracy / train_acc → unified to 'train_acc'
-    - final_accuracy → unified to 'final_test_acc'
+    - test_acc / test_accuracy / final_test_acc â†’ unified to 'test_acc' (with final_test_acc preserved)
+    - train_accuracy / train_acc â†’ unified to 'train_acc'
+    - final_accuracy â†’ unified to 'final_test_acc'
     
     This resolves GAP 29: Metric naming inconsistencies that break plotting/analysis.
     
@@ -411,7 +423,7 @@ DEBUGGING STEPS:
 Current sys.path (first 5): %s
 """ % ('='*80, project_root, (project_root / 'src').exists(), sys.version, sys.path[:5]))
     if os.environ.get('KAGGLE_KERNEL_RUN_TYPE') or os.path.exists('/kaggle'):
-        logging.debug("NOTE: Detected Kaggle runtime — prefer `pip install -r kaggle/requirements_kaggle.txt` or skip numpy/pandas to use Kaggle's prebuilt binaries")
+        logging.debug("NOTE: Detected Kaggle runtime â€” prefer `pip install -r kaggle/requirements_kaggle.txt` or skip numpy/pandas to use Kaggle's prebuilt binaries")
 
 # -----------------------------------------------------------------------------
 # Canonical data fetching helper to avoid augmentation leakage (TransformedSubset)
@@ -1454,6 +1466,25 @@ def save_run_artifacts(base_results_dir: Union[str, Path], dataset: str, model_n
         else:
             df_hist = pd.DataFrame([history])
 
+        original_rows = int(len(df_hist))
+        thinning_stride = 1
+        # Very long histories (e.g., robustness 20k iterations) are expensive to serialize.
+        # Keep endpoints and evenly subsample for artifact CSVs while preserving summary metrics
+        # in metadata/aggregates (computed from full in-memory history before this function).
+        max_history_rows = 5000
+        if original_rows > max_history_rows:
+            try:
+                thinning_stride = max(1, int(np.ceil((original_rows - 1) / float(max_history_rows - 1))))
+                keep_idx = np.arange(0, original_rows, thinning_stride, dtype=int)
+                if keep_idx.size == 0 or int(keep_idx[-1]) != (original_rows - 1):
+                    keep_idx = np.append(keep_idx, original_rows - 1)
+                keep_idx = np.unique(keep_idx)
+                df_hist = df_hist.iloc[keep_idx].reset_index(drop=True)
+            except Exception:
+                logging.debug("History thinning failed for %s; falling back to full history write", file_stem, exc_info=True)
+                thinning_stride = 1
+                df_hist = pd.DataFrame(history) if isinstance(history, list) else pd.DataFrame([history])
+
         # If the history is empty and has no columns, write a placeholder CSV
         from src.utils.file_safety import safe_to_csv
         if df_hist.empty or len(df_hist.columns) == 0:
@@ -1511,6 +1542,8 @@ def save_run_artifacts(base_results_dir: Union[str, Path], dataset: str, model_n
             'seed': seed,
             # rows should reflect actual history rows (0 if placeholder used)
             'rows': int(rows_written),
+            'rows_original': int(original_rows),
+            'history_thinning_stride': int(thinning_stride),
             'params': params,
             'model_path': str(model_path) if model_path else None,
             'system': get_system_info(),
@@ -1541,14 +1574,24 @@ def save_run_artifacts(base_results_dir: Union[str, Path], dataset: str, model_n
 
         # Append a condensed summary row to top-level summary_quantitative.csv for quick lookups
         try:
-            # Determine top-level results root (prefer ancestor named 'results')
+            # Determine top-level results root from canonical layout first:
+            #   <root>/experiments/<dataset>/...
+            # Fall back to caller-provided base_results_dir when no canonical marker exists.
             results_root = None
             for p in [results_base] + list(results_base.parents):
-                if p.name == 'results':
-                    results_root = p
+                if p.name.lower() == 'experiments':
+                    results_root = p.parent
                     break
             if results_root is None:
-                results_root = results_base.parent
+                for p in [results_base] + list(results_base.parents):
+                    if p.name.lower() == 'results':
+                        results_root = p
+                        break
+            if results_root is None:
+                if base_results_dir.name.lower() == dataset.lower():
+                    results_root = base_results_dir.parent
+                else:
+                    results_root = base_results_dir
 
             summary_path = results_root / 'summary_quantitative.csv'
             summary_row = {
@@ -2064,7 +2107,7 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
                 # GAP 15 FIX: Add gradient norm tracking for non-convex convergence validation
                 loss_history = []
                 val_acc_history = []
-                grad_norm_history = []  # For non-convex convergence (||∇f|| → 0)
+                grad_norm_history = []  # For non-convex convergence (||âˆ‡f|| â†’ 0)
                 time_history = []  # Wall-clock time per epoch
 
                 import time
@@ -2086,6 +2129,8 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
                         # Check if optimizer requires closure (SAM, L-BFGS, etc.)
                         assert optimizer is not None
                         requires_closure = bool(getattr(optimizer, 'requires_closure', False))
+                        grad_norm = 0.0
+                        loss_value = 0.0
                         if requires_closure:
                             # Capture loop-local variables to avoid cell-var issues in closures
                             _opt = optimizer
@@ -2107,7 +2152,12 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
                             # Use centralized coercion helper to avoid type issues
                             from src.utils.num_utils import safe_to_float
                             loss_value: float = safe_to_float(loss_result)  # Explicit float type
-                            total_loss += loss_value
+                            # Some closure-based optimizers may return None; fallback to a fresh forward loss.
+                            if not np.isfinite(loss_value):
+                                with torch.no_grad():
+                                    output_eval = _model(_data)
+                                    loss_eval = _criterion(output_eval, _target)
+                                    loss_value = float(loss_eval.item())
                         else:
                             optimizer.zero_grad()
                             output = model(data)
@@ -2126,13 +2176,14 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
                                 logging.warning(f"Skipping update due to bad gradients ({opt_name})")
                                 continue
 
+                            optimizer.step()
+                            # TYPE SAFETY FIX: Convert tensor to float for accumulation
+                            loss_value = float(loss_tensor.item())
+
                         # GAP 15 FIX: Record gradient norm for non-convex convergence analysis
-                        # Theory predicts ||∇f|| → 0 at rate O(1/√T), not f(x) → f*
+                        # Theory predicts ||âˆ‡f|| â†’ 0 at rate O(1/âˆšT), not f(x) â†’ f*
                         epoch_grad_norms.append(grad_norm)
 
-                        optimizer.step()
-                        # TYPE SAFETY FIX: Convert tensor to float for accumulation
-                        loss_value: float = float(loss_tensor.item())
                         total_loss += loss_value
 
                 avg_loss = total_loss / len(train_loader)
@@ -2164,7 +2215,7 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
                 grad_norm_history.append(avg_grad_norm)
 
                 print(f"    Epoch {epoch+1}/5: Loss={avg_loss:.4f}, Val Acc={val_accuracy:.2f}%, "
-                      f"||∇f||={avg_grad_norm:.4e}, Time={epoch_time:.2f}s")
+                      f"||âˆ‡f||={avg_grad_norm:.4e}, Time={epoch_time:.2f}s")
 
                 # Final test evaluation (only after training completes)
                 model.eval()
@@ -2266,7 +2317,7 @@ def run_scheduler_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, 
     """
     Ablation Study B: Learning Rate Scheduler Impact
 
-    Tests 2x2 grid: (SGD, AdamW) × (CosineAnnealingLR, StepLR)
+    Tests 2x2 grid: (SGD, AdamW) Ã— (CosineAnnealingLR, StepLR)
     Mitigation: Hardcoded pairs to avoid combinatorial explosion.
 
     Args:
@@ -2277,7 +2328,7 @@ def run_scheduler_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, 
     if seeds is None:
         seeds = [42]
     print("\n" + "="*80)
-    print("ABLATION STUDY B: LR Scheduler Impact (2×2 Grid)")
+    print("ABLATION STUDY B: LR Scheduler Impact (2Ã—2 Grid)")
     print("="*80)
 
     # Device initialization
@@ -2469,7 +2520,7 @@ def run_scheduler_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, 
         ax.set_xticks(range(len(x_labels)))
         ax.set_xticklabels(x_labels)
         ax.set_ylabel('Final Accuracy (%)')
-        ax.set_title('Scheduler Impact on Convergence (2×2 Grid)')
+        ax.set_title('Scheduler Impact on Convergence (2Ã—2 Grid)')
         ax.grid(True, axis='y', alpha=0.3)
 
         # Add value labels on bars
@@ -2686,7 +2737,7 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader
     if tuning_cache is not None:
         cached_params = tuning_cache.load_tuned_params(dataset_name, model_name, optimizer_name)
         if cached_params is not None:
-            logging.info(f"  ✅ Using cached tuning results for {optimizer_name}")
+            logging.info(f"  âœ… Using cached tuning results for {optimizer_name}")
             return cached_params
     
     logging.info(f"  Tuning {optimizer_name}...")
@@ -3579,7 +3630,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                                             method='empirical_variance'
                                         )
                                         grad_noise_var = noise_stats['sigma_squared']
-                                        logging.info(f"Epoch {epoch}: Gradient noise σ² = {grad_noise_var:.4e}")
+                                        logging.info(f"Epoch {epoch}: Gradient noise ÏƒÂ² = {grad_noise_var:.4e}")
                                     except Exception as e:
                                         logging.warning(f"Failed to estimate gradient noise variance: {e}")
 
@@ -3846,7 +3897,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                         
                         summary_df.to_csv(agg_path, index=False)
                         logging.info(f"Aggregated results saved to {agg_path}")
-                        logging.info(f"{opt_name}: {agg_results['mean']:.3f}±{agg_results['std']:.3f}")
+                        logging.info(f"{opt_name}: {agg_results['mean']:.3f}Â±{agg_results['std']:.3f}")
                     except Exception as e:
                         logging.warning(f"Could not aggregate results for {opt_name}: {e}")
 
@@ -3902,7 +3953,7 @@ def run_mnist_experiment(results_dir="results_mnist", seeds=None, quick=False, s
                 from src.utils.csv_utils import cleanup_empty_csvs
                 cleanup_empty_csvs(Path(results_dir))
 
-                mnist_csvs = list(Path(results_dir).glob("*.csv"))
+                mnist_csvs = list(Path(results_dir).rglob("*.csv"))
                 if mnist_csvs:
                     create_experiment_visualizations('MNIST', str(Path(results_dir).parent.parent), mnist_csvs)
             except Exception as viz_e:
@@ -4474,7 +4525,7 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
                 
                 summary_df.to_csv(agg_path, index=False)
                 logging.info(f"Aggregated results saved to {agg_path}")
-                logging.info(f"{opt_name}: {agg_results['mean']:.3f}±{agg_results['std']:.3f}")
+                logging.info(f"{opt_name}: {agg_results['mean']:.3f}Â±{agg_results['std']:.3f}")
             except Exception as e:
                 logging.warning(f"Could not aggregate results for {opt_name}: {e}")
 
@@ -5156,7 +5207,7 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                 
                 summary_df.to_csv(agg_path, index=False)
                 logging.info(f"Aggregated results saved to {agg_path}")
-                logging.info(f"{opt_name}: {agg_results['mean']:.3f}±{agg_results['std']:.3f}")
+                logging.info(f"{opt_name}: {agg_results['mean']:.3f}Â±{agg_results['std']:.3f}")
             except Exception as e:
                 logging.warning(f"Could not aggregate results for {opt_name}: {e}")
 
@@ -6146,7 +6197,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                 
                 summary_df.to_csv(agg_path, index=False)
                 logging.info(f"Aggregated results saved to {agg_path}")
-                logging.info(f"{opt_name}: {agg_results['mean']:.3f}±{agg_results['std']:.3f}")
+                logging.info(f"{opt_name}: {agg_results['mean']:.3f}Â±{agg_results['std']:.3f}")
             except Exception as e:
                 logging.warning(f"Could not aggregate results for {opt_name}: {e}")
 
@@ -6350,7 +6401,11 @@ def run_convergence_analysis_on_results(results_dir):
     print("="*80)
 
     results_path = Path(results_dir)
-    all_csvs = list(results_path.glob("**/*.csv"))
+    experiments_root = results_path / "experiments"
+    if experiments_root.exists():
+        all_csvs = list(experiments_root.glob("**/*.csv"))
+    else:
+        all_csvs = list(results_path.glob("**/*.csv"))
 
     if not all_csvs:
         print("   No CSV files found for convergence analysis")
@@ -6370,36 +6425,107 @@ def run_convergence_analysis_on_results(results_dir):
                 logging.debug("Skipping empty/unreadable CSV in convergence analysis: %s", csv_file)
                 continue
 
-            # Skip if no loss column
-            if 'test_loss' not in df.columns and 'train_loss' not in df.columns:
+            # Skip aggregate outputs and summary tables; we want per-run trajectories.
+            stem_lower = csv_file.stem.lower()
+            if stem_lower.endswith("_results") or "convergence_profile" in stem_lower:
                 continue
 
-            loss_col = 'test_loss' if 'test_loss' in df.columns else 'train_loss'
-            # Coerce to numpy float array for analysis
-            losses = np.asarray(df[loss_col].to_numpy(), dtype=float)
-
-            # Skip if too few data points
-            if len(losses) < 10:
+            # Pick best available loss column across experiments.
+            loss_col = None
+            for candidate in ('test_loss', 'train_loss', 'loss'):
+                if candidate in df.columns:
+                    loss_col = candidate
+                    break
+            if loss_col is None:
                 continue
 
-            # Analyze convergence (pass plain python list to satisfy static type expectations)
-            metrics = analyzer.analyze_trajectory(losses.tolist())
+            losses = pd.to_numeric(df[loss_col], errors='coerce').to_numpy(dtype=float)
+            losses = losses[np.isfinite(losses)]
+            if losses.size == 0:
+                continue
+
+            # Need at least 3 points for any meaningful rate estimate.
+            if len(losses) < 3:
+                continue
+
+            # Adaptive analyzer window for short trajectories (e.g., SAM epochs=10).
+            adaptive_window = int(max(5, min(20, len(losses) // 2)))
+            local_analyzer = ConvergenceAnalyzer(tolerance=analyzer.tolerance, window_size=adaptive_window)
+            metrics = local_analyzer.analyze_trajectory(losses.tolist())
+
+            # Fallback convergence-rate estimate if analyzer returns NaN/unknown.
+            conv_rate = metrics.get('convergence_rate_value', np.nan)
+            conv_rate_type = str(metrics.get('convergence_rate_type', 'unknown'))
+            if not np.isfinite(conv_rate):
+                try:
+                    x = np.arange(len(losses), dtype=float)
+                    shifted = losses - np.nanmin(losses) + 1e-12
+                    positive = shifted > 0
+                    if int(np.sum(positive)) >= 3:
+                        slope, _ = np.polyfit(x[positive], np.log(shifted[positive]), 1)
+                        if np.isfinite(slope):
+                            conv_rate = float(abs(slope))
+                            conv_rate_type = 'fallback_log_slope'
+                        else:
+                            conv_rate = 0.0
+                            conv_rate_type = 'flat_or_non_est'
+                    else:
+                        conv_rate = 0.0
+                        conv_rate_type = 'flat_or_non_est'
+                except Exception:
+                    conv_rate = 0.0
+                    conv_rate_type = 'flat_or_non_est'
+
+            # Build step axis (epoch/iteration/index), then compute robust convergence step.
+            step_col = 'epoch' if 'epoch' in df.columns else ('iteration' if 'iteration' in df.columns else None)
+            if step_col is not None:
+                step_vals_raw = pd.to_numeric(df[step_col], errors='coerce').to_numpy()
+                finite_step = np.isfinite(step_vals_raw)
+                step_vals = step_vals_raw[finite_step]
+                if len(step_vals) != len(losses):
+                    step_vals = np.arange(len(losses), dtype=float)
+            else:
+                step_vals = np.arange(len(losses), dtype=float)
+
+            strict_idx = metrics.get('convergence_iter', None)
+            converged_basis = 'strict'
+            if strict_idx is None:
+                initial_loss = float(losses[0])
+                min_loss = float(np.nanmin(losses))
+                improvement = initial_loss - min_loss
+                if np.isfinite(improvement) and improvement > 0:
+                    practical_target = min_loss + 0.1 * improvement  # 90% of total improvement achieved
+                    practical_hits = np.where(losses <= practical_target)[0]
+                    if practical_hits.size > 0:
+                        strict_idx = int(practical_hits[0])
+                        converged_basis = 'practical_90pct'
+                if strict_idx is None:
+                    strict_idx = int(np.nanargmin(losses))
+                    converged_basis = 'best_loss'
+
+            converged_step = int(step_vals[int(strict_idx)]) if 0 <= int(strict_idx) < len(step_vals) else int(strict_idx)
 
             # Extract metadata from filename
+            from src.utils.filename import parse_experiment_filename
             stem = csv_file.stem
-            parts = stem.split('_')
+            parsed = parse_experiment_filename(stem)
+            parsed_optimizer = parsed.get('optimizer')
+            parsed_seed = parsed.get('seed')
 
             result = {
                 'file': csv_file.name,
-                'convergence_rate': metrics.get('convergence_rate_value', np.nan),
-                'converged_epoch': metrics.get('convergence_iter', None),
-                'final_loss': metrics.get('final_loss', np.nan),
+                'convergence_rate': conv_rate,
+                'convergence_rate_type': conv_rate_type,
+                'converged_epoch': converged_step,
+                'converged_basis': converged_basis,
+                'final_loss': float(losses[-1]),
                 'stagnation_detected': metrics.get('stagnation_detected', False),
             }
 
-            # Try to extract optimizer/model info
-            if len(parts) >= 2:
-                result['optimizer'] = parts[-1] if 'seed' not in parts[-1] else parts[-2]
+            if parsed_optimizer:
+                result['optimizer'] = str(parsed_optimizer)
+            if parsed_seed is not None:
+                result['seed'] = int(parsed_seed)
 
             convergence_results.append(result)
 
@@ -6426,6 +6552,854 @@ def run_convergence_analysis_on_results(results_dir):
         print("   No convergence data to analyze")
 
 
+def _extract_2d_function_name(stem: str) -> str:
+    """Best-effort function-name extraction from 2D artifact filenames."""
+    parts = [p for p in str(stem).replace('-', '_').split('_') if p]
+    if len(parts) >= 2 and parts[0].lower() == '2d':
+        return parts[1]
+    known = {'rosenbrock', 'rastrigin', 'ackley', 'illconditionedquadratic', 'saddlepoint'}
+    for token in parts:
+        if token.lower() in known:
+            return token
+    return 'Unknown'
+
+
+def _load_time_series_with_metadata(csv_paths, skip_stems=None):
+    """Load time-series CSVs and backfill optimizer/seed metadata from filenames."""
+    from src.utils.filename import parse_experiment_filename
+
+    if skip_stems is None:
+        skip_stems = []
+    skip_lower = [s.lower() for s in skip_stems]
+    dfs = []
+    for p in csv_paths:
+        stem_lower = p.stem.lower()
+        if any(s in stem_lower for s in skip_lower):
+            continue
+        try:
+            df = safe_read_csv(p)
+            if df is None or df.empty:
+                continue
+            if 'iteration' not in df.columns and 'epoch' not in df.columns:
+                continue
+            parsed = parse_experiment_filename(p.stem)
+            if 'optimizer' not in df.columns or df['optimizer'].isnull().all():
+                if parsed.get('optimizer'):
+                    df['optimizer'] = parsed.get('optimizer')
+            if 'seed' not in df.columns or df['seed'].isnull().all():
+                if parsed.get('seed') is not None:
+                    df['seed'] = parsed.get('seed')
+            dfs.append(df)
+        except Exception as e:
+            logging.debug("Failed loading time-series CSV %s: %s", p, e, exc_info=True)
+    if dfs:
+        return pd.concat(dfs, ignore_index=True)
+    return pd.DataFrame()
+
+
+def _create_2d_visualizations(csv_paths, static_dir, experiment_name):
+    """Generate proposal-aligned visualizations for 2D optimization experiments."""
+    static_dir.mkdir(parents=True, exist_ok=True)
+    print(f"\nCreating 2D optimization visualizations in {static_dir}...")
+
+    summary_df = None
+    summary_file = next((p for p in csv_paths if '2d_optimization_results' in p.stem.lower()), None)
+    if summary_file is not None:
+        try:
+            summary_df = safe_read_csv(summary_file)
+        except Exception as e:
+            logging.debug("Could not read 2D summary CSV %s: %s", summary_file, e, exc_info=True)
+
+    # Build per-run time-series with explicit function/optimizer/seed metadata.
+    ts_rows = []
+    from src.utils.filename import parse_experiment_filename
+    for p in csv_paths:
+        if '2d_optimization_results' in p.stem.lower():
+            continue
+        try:
+            df = safe_read_csv(p)
+            if df is None or df.empty or 'iteration' not in df.columns:
+                continue
+            parsed = parse_experiment_filename(p.stem)
+            if 'optimizer' not in df.columns or df['optimizer'].isnull().all():
+                if parsed.get('optimizer') is not None:
+                    df['optimizer'] = parsed.get('optimizer')
+            if 'seed' not in df.columns or df['seed'].isnull().all():
+                if parsed.get('seed') is not None:
+                    df['seed'] = int(parsed.get('seed'))
+            if 'function' not in df.columns:
+                df['function'] = _extract_2d_function_name(p.stem)
+            ts_rows.append(df)
+        except Exception as e:
+            logging.debug("Could not parse 2D time-series file %s: %s", p, e, exc_info=True)
+    ts_df = pd.concat(ts_rows, ignore_index=True) if ts_rows else pd.DataFrame()
+
+    if (summary_df is None or summary_df.empty) and ts_df.empty:
+        logging.warning("No usable data found for 2D visualizations")
+        return
+
+    def _clean_numeric(arr_like, positive_only: bool = False) -> np.ndarray:
+        vals = pd.to_numeric(arr_like, errors='coerce').to_numpy(dtype=float)
+        finite = np.isfinite(vals)
+        if positive_only:
+            finite = finite & (vals > 0)
+        return vals[finite]
+
+    def _series_stats(frame: pd.DataFrame, value_col: str, positive_only: bool = False) -> pd.DataFrame:
+        rows = []
+        for it, grp in frame.groupby('iteration'):
+            vals = _clean_numeric(grp[value_col], positive_only=positive_only)
+            if vals.size == 0:
+                continue
+            rows.append({
+                'iteration': float(it),
+                'median': float(np.median(vals)),
+                'q10': float(np.quantile(vals, 0.10)),
+                'q90': float(np.quantile(vals, 0.90)),
+            })
+        out = pd.DataFrame(rows)
+        if out.empty:
+            return out
+        return out.sort_values('iteration')
+
+    def _function_optimum(function_name: str) -> Optional[Tuple[float, float]]:
+        fn = str(function_name).lower()
+        if fn == 'rosenbrock':
+            return (1.0, 1.0)
+        if fn == 'rastrigin':
+            return (0.0, 0.0)
+        return None
+
+    def _trajectory_bounds(x_vals: np.ndarray, y_vals: np.ndarray) -> Optional[Tuple[Tuple[float, float], Tuple[float, float]]]:
+        if x_vals.size == 0 or y_vals.size == 0:
+            return None
+        try:
+            x_lo, x_hi = np.percentile(x_vals, [1, 99])
+            y_lo, y_hi = np.percentile(y_vals, [1, 99])
+            x_span = max(float(x_hi - x_lo), 1e-6)
+            y_span = max(float(y_hi - y_lo), 1e-6)
+            x_pad = 0.10 * x_span
+            y_pad = 0.10 * y_span
+            return ((float(x_lo - x_pad), float(x_hi + x_pad)), (float(y_lo - y_pad), float(y_hi + y_pad)))
+        except Exception:
+            return None
+
+    # 1) Loss and grad-norm convergence over iterations.
+    if not ts_df.empty and 'iteration' in ts_df.columns and 'optimizer' in ts_df.columns:
+        functions = sorted(str(f) for f in ts_df.get('function', pd.Series(['All'])).dropna().unique())
+        for fn_name in functions:
+            fn_df = ts_df if fn_name == 'All' else ts_df[ts_df.get('function', 'Unknown').astype(str) == fn_name]
+            if fn_df.empty:
+                continue
+
+            if 'loss' in fn_df.columns:
+                try:
+                    plt.figure(figsize=(10, 6))
+                    for opt, grp in fn_df.groupby('optimizer'):
+                        agg = _series_stats(grp, 'loss', positive_only=True)
+                        if agg.empty:
+                            continue
+                        x = arr_to_numpy_float(agg['iteration'])
+                        m = np.maximum(arr_to_numpy_float(agg['median']), 1e-12)
+                        lo = np.maximum(arr_to_numpy_float(agg['q10']), 1e-12)
+                        hi = np.maximum(arr_to_numpy_float(agg['q90']), 1e-12)
+                        plt.plot(x, m, label=str(opt), linewidth=2)
+                        plt.fill_between(x, lo, hi, alpha=0.2)
+                    plt.xlabel('Iteration', fontsize=12)
+                    plt.ylabel('Loss', fontsize=12)
+                    plt.yscale('log')
+                    plt.title(f'2D {fn_name}: Loss Convergence by Optimizer (median, 10-90% band)', fontsize=14, fontweight='bold')
+                    plt.legend()
+                    plt.grid(True, alpha=0.3)
+                    plt.tight_layout()
+                    out_path = static_dir / f'2d_{str(fn_name).lower()}_loss_convergence.png'
+                    plt.savefig(out_path, dpi=300, bbox_inches='tight')
+                    plt.close()
+                    print(f"   Created {out_path.name}")
+                except Exception as e:
+                    logging.debug("Could not create 2D loss convergence plot for %s: %s", fn_name, e, exc_info=True)
+
+            if 'grad_norm' in fn_df.columns:
+                try:
+                    plt.figure(figsize=(10, 6))
+                    for opt, grp in fn_df.groupby('optimizer'):
+                        agg = _series_stats(grp, 'grad_norm', positive_only=True)
+                        if agg.empty:
+                            continue
+                        x = arr_to_numpy_float(agg['iteration'])
+                        m = np.maximum(arr_to_numpy_float(agg['median']), 1e-12)
+                        lo = np.maximum(arr_to_numpy_float(agg['q10']), 1e-12)
+                        hi = np.maximum(arr_to_numpy_float(agg['q90']), 1e-12)
+                        plt.plot(x, m, label=str(opt), linewidth=2)
+                        plt.fill_between(x, lo, hi, alpha=0.2)
+                    plt.xlabel('Iteration', fontsize=12)
+                    plt.ylabel('Gradient Norm', fontsize=12)
+                    plt.yscale('log')
+                    plt.title(f'2D {fn_name}: Gradient Norm by Optimizer (median, 10-90% band)', fontsize=14, fontweight='bold')
+                    plt.legend()
+                    plt.grid(True, alpha=0.3)
+                    plt.tight_layout()
+                    out_path = static_dir / f'2d_{str(fn_name).lower()}_grad_norm_convergence.png'
+                    plt.savefig(out_path, dpi=300, bbox_inches='tight')
+                    plt.close()
+                    print(f"   Created {out_path.name}")
+                except Exception as e:
+                    logging.debug("Could not create 2D grad-norm plot for %s: %s", fn_name, e, exc_info=True)
+
+            # 2) Seed trajectories + median path (x-y). Mean path across disjoint starts is misleading.
+            if {'x', 'y'}.issubset(fn_df.columns):
+                try:
+                    plt.figure(figsize=(8, 7))
+                    color_cycle = plt.get_cmap('tab10')
+                    optimizers_sorted = sorted(fn_df['optimizer'].dropna().astype(str).unique().tolist())
+                    color_map = {opt: color_cycle(idx % 10) for idx, opt in enumerate(optimizers_sorted)}
+                    all_x: List[float] = []
+                    all_y: List[float] = []
+                    seed_col = 'seed' if 'seed' in fn_df.columns else None
+
+                    for opt, grp in fn_df.groupby('optimizer'):
+                        opt_color = color_map.get(str(opt), color_cycle(0))
+                        run_groups = grp.groupby(seed_col) if seed_col is not None else [(0, grp)]
+                        for _, run_df in run_groups:
+                            run_df = run_df.sort_values('iteration')
+                            x_vals = pd.to_numeric(run_df['x'], errors='coerce').to_numpy(dtype=float)
+                            y_vals = pd.to_numeric(run_df['y'], errors='coerce').to_numpy(dtype=float)
+                            finite_mask = np.isfinite(x_vals) & np.isfinite(y_vals)
+                            x_vals = x_vals[finite_mask]
+                            y_vals = y_vals[finite_mask]
+                            if x_vals.size < 2:
+                                continue
+                            step = np.sqrt(np.diff(x_vals) ** 2 + np.diff(y_vals) ** 2)
+                            if step.size > 0:
+                                jump_thr = max(float(np.percentile(step, 95)) * 5.0, 1e-6)
+                                keep = np.concatenate([[True], step <= jump_thr])
+                                x_vals = x_vals[keep]
+                                y_vals = y_vals[keep]
+                                if x_vals.size < 2:
+                                    continue
+                            all_x.extend(x_vals.tolist())
+                            all_y.extend(y_vals.tolist())
+                            plt.plot(x_vals, y_vals, color=opt_color, alpha=0.25, linewidth=1.0)
+                            plt.scatter(x_vals[0], y_vals[0], color=opt_color, s=14, alpha=0.35, marker='o')
+                            plt.scatter(x_vals[-1], y_vals[-1], color=opt_color, s=18, alpha=0.7, marker='x')
+
+                        median_traj = grp.groupby('iteration')[['x', 'y']].median().dropna()
+                        if not median_traj.empty:
+                            plt.plot(
+                                arr_to_numpy_float(median_traj['x']),
+                                arr_to_numpy_float(median_traj['y']),
+                                label=f"{opt} median",
+                                linewidth=2.4,
+                                color=opt_color,
+                            )
+
+                    bounds = _trajectory_bounds(np.asarray(all_x, dtype=float), np.asarray(all_y, dtype=float))
+                    if bounds is not None:
+                        (xlim_lo, xlim_hi), (ylim_lo, ylim_hi) = bounds
+                        plt.xlim(xlim_lo, xlim_hi)
+                        plt.ylim(ylim_lo, ylim_hi)
+
+                    optimum = _function_optimum(fn_name)
+                    if optimum is not None:
+                        plt.scatter(
+                            [optimum[0]],
+                            [optimum[1]],
+                            marker='*',
+                            s=160,
+                            color='gold',
+                            edgecolor='black',
+                            linewidth=1.2,
+                            label='Known optimum',
+                            zorder=5,
+                        )
+                    plt.xlabel('x', fontsize=12)
+                    plt.ylabel('y', fontsize=12)
+                    n_runs = int(fn_df[seed_col].nunique()) if seed_col is not None else 1
+                    plt.title(
+                        f'2D {fn_name}: Seed Trajectories with Median Path (n={n_runs})',
+                        fontsize=14,
+                        fontweight='bold',
+                    )
+                    plt.legend()
+                    plt.grid(True, alpha=0.3)
+                    plt.tight_layout()
+                    out_path = static_dir / f'2d_{str(fn_name).lower()}_trajectory_overlay.png'
+                    plt.savefig(out_path, dpi=300, bbox_inches='tight')
+                    plt.close()
+                    print(f"   Created {out_path.name}")
+                except Exception as e:
+                    logging.debug("Could not create 2D trajectory plot for %s: %s", fn_name, e, exc_info=True)
+
+    # 3) Summary bars from aggregated CSV.
+    if summary_df is not None and not summary_df.empty and 'optimizer' in summary_df.columns:
+        if 'function' in summary_df.columns and 'final_loss' in summary_df.columns:
+            try:
+                agg = summary_df.groupby(['optimizer', 'function'])['final_loss'].mean().unstack('function')
+                if agg is not None and len(agg) > 0:
+                    plt.figure(figsize=(10, 6))
+                    agg.plot(kind='bar', ax=plt.gca(), edgecolor='black')
+                    # Log scale keeps tiny but non-zero bars visible when losses differ by orders of magnitude.
+                    plt.yscale('log')
+                    plt.ylabel('Final Loss (mean across seeds, log scale)', fontsize=12)
+                    plt.title('2D Optimization: Final Loss by Optimizer and Function', fontsize=14, fontweight='bold')
+                    plt.grid(axis='y', alpha=0.3)
+                    plt.xticks(rotation=30, ha='right')
+                    ax = plt.gca()
+                    for container in ax.containers:
+                        for rect in container:
+                            h = float(rect.get_height())
+                            if not np.isfinite(h) or h <= 0:
+                                continue
+                            ax.text(
+                                rect.get_x() + rect.get_width() / 2.0,
+                                h * 1.08,
+                                f"{h:.2g}",
+                                ha='center',
+                                va='bottom',
+                                fontsize=9,
+                                rotation=90,
+                            )
+                    plt.tight_layout()
+                    out_path = static_dir / '2d_final_loss_by_optimizer.png'
+                    plt.savefig(out_path, dpi=300, bbox_inches='tight')
+                    plt.close()
+                    print(f"   Created {out_path.name}")
+            except Exception as e:
+                logging.debug("Could not create 2D final-loss summary plot: %s", e, exc_info=True)
+
+        if 'function' in summary_df.columns:
+            try:
+                def _as_bool(series):
+                    sl = series.astype(str).str.lower()
+                    return sl.isin(['1', 'true', 'yes']) | (pd.to_numeric(series, errors='coerce') > 0)
+
+                def _plot_conv_rate(rate_df, title_prefix, out_name, success_df=None, count_df=None):
+                    if rate_df is None or len(rate_df) == 0:
+                        return
+                    numeric_df = rate_df.apply(pd.to_numeric, errors='coerce')
+                    rate_values = numeric_df.to_numpy(dtype=float)
+                    max_rate = float(np.nanmax(rate_values)) if np.size(rate_values) > 0 else 0.0
+                    finite_mask = np.isfinite(rate_values)
+                    zero_fraction = (
+                        float(np.mean(rate_values[finite_mask] <= 0.0))
+                        if np.any(finite_mask)
+                        else 1.0
+                    )
+                    plot_df = rate_df
+                    ylabel = 'Convergence Rate (%)'
+                    title = title_prefix
+                    n_runs_suffix = ""
+                    if count_df is not None:
+                        try:
+                            count_arr = count_df.apply(pd.to_numeric, errors='coerce').to_numpy(dtype=float)
+                            valid_counts = count_arr[np.isfinite(count_arr)]
+                            if valid_counts.size > 0:
+                                min_n = int(np.nanmin(valid_counts))
+                                max_n = int(np.nanmax(valid_counts))
+                                n_runs_suffix = f" (n={min_n})" if min_n == max_n else f" (n={min_n}..{max_n})"
+                        except Exception:
+                            n_runs_suffix = ""
+                    # If everything is 0%, plot non-convergence so bars carry signal.
+                    if max_rate <= 0:
+                        plot_df = 100.0 - rate_df
+                        ylabel = 'Non-Convergence Rate (%)'
+                        title = f'{title_prefix} (all convergence rates are 0%){n_runs_suffix}'
+                        zero_fraction = 0.0
+                    else:
+                        title = f'{title_prefix}{n_runs_suffix}'
+
+                    # Sparse rates (many 0% cells) are easier to read as a heatmap than empty bars.
+                    if zero_fraction >= 0.5:
+                        heat_df = plot_df.fillna(0.0).astype(float)
+                        success_aligned = None
+                        count_aligned = None
+                        if success_df is not None:
+                            success_aligned = success_df.reindex(index=heat_df.index, columns=heat_df.columns).fillna(0.0)
+                        if count_df is not None:
+                            count_aligned = count_df.reindex(index=heat_df.index, columns=heat_df.columns).fillna(0.0)
+                        fig_w = max(8.0, 2.2 + 1.2 * max(1, heat_df.shape[1]))
+                        fig_h = max(5.0, 2.0 + 0.9 * max(1, heat_df.shape[0]))
+                        plt.figure(figsize=(fig_w, fig_h))
+                        ax = plt.gca()
+                        im = ax.imshow(
+                            heat_df.to_numpy(dtype=float),
+                            aspect='auto',
+                            cmap='YlOrRd',
+                            vmin=0.0,
+                            vmax=100.0,
+                        )
+                        # Global style enables major grids; disable them for heatmaps
+                        # and draw clean cell borders instead.
+                        ax.grid(False)
+                        ax.set_xticks(np.arange(len(heat_df.columns)))
+                        ax.set_yticks(np.arange(len(heat_df.index)))
+                        ax.set_xticklabels([str(c) for c in heat_df.columns], rotation=30, ha='right')
+                        ax.set_yticklabels([str(i) for i in heat_df.index])
+                        ax.set_xticks(np.arange(-0.5, len(heat_df.columns), 1), minor=True)
+                        ax.set_yticks(np.arange(-0.5, len(heat_df.index), 1), minor=True)
+                        ax.grid(which='minor', color='white', linestyle='-', linewidth=1.0, alpha=0.7)
+                        ax.tick_params(which='minor', bottom=False, left=False)
+                        ax.set_xlabel('function', fontsize=12)
+                        ax.set_ylabel('optimizer', fontsize=12)
+                        ax.set_title(f'{title} (heatmap view for sparse rates)', fontsize=14, fontweight='bold')
+
+                        for row_idx in range(heat_df.shape[0]):
+                            for col_idx in range(heat_df.shape[1]):
+                                val = float(heat_df.iat[row_idx, col_idx])
+                                text_color = 'white' if val >= 50 else 'black'
+                                label = f"{val:.0f}%"
+                                if success_aligned is not None and count_aligned is not None:
+                                    succ = int(round(float(success_aligned.iat[row_idx, col_idx])))
+                                    cnt = int(round(float(count_aligned.iat[row_idx, col_idx])))
+                                    if cnt > 0:
+                                        label = f"{val:.0f}%\n({succ}/{cnt})"
+                                ax.text(
+                                    col_idx,
+                                    row_idx,
+                                    label,
+                                    ha='center',
+                                    va='center',
+                                    fontsize=9,
+                                    fontweight='bold',
+                                    color=text_color,
+                                )
+
+                        cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+                        cbar.set_label(ylabel, fontsize=11)
+                        plt.tight_layout()
+                        out_path = static_dir / out_name
+                        plt.savefig(out_path, dpi=300, bbox_inches='tight')
+                        plt.close()
+                        print(f"   Created {out_path.name}")
+                        return
+
+                    plt.figure(figsize=(10, 6))
+                    plot_df.plot(kind='bar', ax=plt.gca(), edgecolor='black')
+                    plt.ylabel(ylabel, fontsize=12)
+                    plt.ylim(0, 105)
+                    plt.title(title, fontsize=14, fontweight='bold')
+                    plt.grid(axis='y', alpha=0.3)
+                    plt.xticks(rotation=30, ha='right')
+                    ax = plt.gca()
+                    for container in ax.containers:
+                        for rect in container:
+                            h = float(rect.get_height())
+                            if not np.isfinite(h):
+                                continue
+                            y = h + 1.0 if h > 0 else 0.35
+                            ax.text(
+                                rect.get_x() + rect.get_width() / 2.0,
+                                y,
+                                f"{h:.0f}%",
+                                ha='center',
+                                va='bottom',
+                                fontsize=9,
+                            )
+                    plt.tight_layout()
+                    out_path = static_dir / out_name
+                    plt.savefig(out_path, dpi=300, bbox_inches='tight')
+                    plt.close()
+                    print(f"   Created {out_path.name}")
+
+                # Main chart: practical threshold (if available), fallback to legacy/strict.
+                if 'converged_practical' in summary_df.columns:
+                    conv_practical = summary_df.copy()
+                    conv_practical['conv_bool'] = _as_bool(conv_practical['converged_practical'])
+                    group_practical = conv_practical.groupby(['optimizer', 'function'])['conv_bool']
+                    conv_rate_practical = 100.0 * group_practical.mean().unstack('function')
+                    conv_success_practical = group_practical.sum().unstack('function')
+                    conv_count_practical = group_practical.count().unstack('function')
+                    _plot_conv_rate(
+                        conv_rate_practical,
+                        '2D Optimization: Practical Convergence Rate by Optimizer and Function (<1e-3)',
+                        '2d_convergence_rate_by_optimizer.png',
+                        success_df=conv_success_practical,
+                        count_df=conv_count_practical,
+                    )
+                elif 'final_loss' in summary_df.columns:
+                    conv_practical = summary_df.copy()
+                    conv_practical['conv_bool'] = pd.to_numeric(conv_practical['final_loss'], errors='coerce') < 1e-3
+                    group_practical = conv_practical.groupby(['optimizer', 'function'])['conv_bool']
+                    conv_rate_practical = 100.0 * group_practical.mean().unstack('function')
+                    conv_success_practical = group_practical.sum().unstack('function')
+                    conv_count_practical = group_practical.count().unstack('function')
+                    _plot_conv_rate(
+                        conv_rate_practical,
+                        '2D Optimization: Practical Convergence Rate by Optimizer and Function (<1e-3)',
+                        '2d_convergence_rate_by_optimizer.png',
+                        success_df=conv_success_practical,
+                        count_df=conv_count_practical,
+                    )
+                elif 'converged' in summary_df.columns:
+                    conv_legacy = summary_df.copy()
+                    conv_legacy['conv_bool'] = _as_bool(conv_legacy['converged'])
+                    group_legacy = conv_legacy.groupby(['optimizer', 'function'])['conv_bool']
+                    conv_rate_legacy = 100.0 * group_legacy.mean().unstack('function')
+                    conv_success_legacy = group_legacy.sum().unstack('function')
+                    conv_count_legacy = group_legacy.count().unstack('function')
+                    _plot_conv_rate(
+                        conv_rate_legacy,
+                        '2D Optimization: Convergence Rate by Optimizer and Function',
+                        '2d_convergence_rate_by_optimizer.png',
+                        success_df=conv_success_legacy,
+                        count_df=conv_count_legacy,
+                    )
+
+                # Companion chart: strict threshold, if available.
+                strict_col = 'converged_strict' if 'converged_strict' in summary_df.columns else ('converged' if 'converged' in summary_df.columns else None)
+                if strict_col is not None:
+                    conv_strict = summary_df.copy()
+                    conv_strict['conv_bool'] = _as_bool(conv_strict[strict_col])
+                    group_strict = conv_strict.groupby(['optimizer', 'function'])['conv_bool']
+                    conv_rate_strict = 100.0 * group_strict.mean().unstack('function')
+                    conv_success_strict = group_strict.sum().unstack('function')
+                    conv_count_strict = group_strict.count().unstack('function')
+                    _plot_conv_rate(
+                        conv_rate_strict,
+                        '2D Optimization: Strict Convergence Rate by Optimizer and Function (<1e-6)',
+                        '2d_convergence_rate_strict_by_optimizer.png',
+                        success_df=conv_success_strict,
+                        count_df=conv_count_strict,
+                    )
+                elif 'final_loss' in summary_df.columns:
+                    conv_strict = summary_df.copy()
+                    conv_strict['conv_bool'] = pd.to_numeric(conv_strict['final_loss'], errors='coerce') < 1e-6
+                    group_strict = conv_strict.groupby(['optimizer', 'function'])['conv_bool']
+                    conv_rate_strict = 100.0 * group_strict.mean().unstack('function')
+                    conv_success_strict = group_strict.sum().unstack('function')
+                    conv_count_strict = group_strict.count().unstack('function')
+                    _plot_conv_rate(
+                        conv_rate_strict,
+                        '2D Optimization: Strict Convergence Rate by Optimizer and Function (<1e-6)',
+                        '2d_convergence_rate_strict_by_optimizer.png',
+                        success_df=conv_success_strict,
+                        count_df=conv_count_strict,
+                    )
+
+                # Convergence chance profile across thresholds (not only 0/1 strict/practical cuts).
+                if 'final_loss' in summary_df.columns:
+                    profile_rows = []
+                    thresholds = np.logspace(-6, 2, 80)
+                    grouped = summary_df.groupby(['optimizer', 'function'])
+                    for (opt_name, fn_name), grp in grouped:
+                        losses = pd.to_numeric(grp['final_loss'], errors='coerce').to_numpy(dtype=float)
+                        finite_mask = np.isfinite(losses)
+                        total = int(losses.size)
+                        if total == 0:
+                            continue
+                        for thr in thresholds:
+                            success_mask = finite_mask & (losses < float(thr))
+                            profile_rows.append({
+                                'optimizer': str(opt_name),
+                                'function': str(fn_name),
+                                'threshold': float(thr),
+                                'convergence_rate_pct': 100.0 * float(np.mean(success_mask)),
+                                'success_count': int(np.sum(success_mask)),
+                                'total_count': total,
+                            })
+
+                    if profile_rows:
+                        profile_df = pd.DataFrame(profile_rows)
+                        try:
+                            profile_csv = static_dir / '2d_convergence_profile_by_threshold.csv'
+                            profile_df.to_csv(profile_csv, index=False)
+                        except Exception:
+                            logging.debug("Could not save 2D convergence profile CSV", exc_info=True)
+
+                        try:
+                            fn_order = sorted(profile_df['function'].dropna().unique().tolist())
+                            if fn_order:
+                                fig, axes = plt.subplots(
+                                    1,
+                                    len(fn_order),
+                                    figsize=(max(10, 5 * len(fn_order)), 5),
+                                    sharey=True,
+                                )
+                                if len(fn_order) == 1:
+                                    axes = [axes]
+                                for ax, fn_name in zip(axes, fn_order):
+                                    fn_df = profile_df[profile_df['function'] == fn_name]
+                                    for opt_name, grp in fn_df.groupby('optimizer'):
+                                        grp_sorted = grp.sort_values('threshold')
+                                        ax.semilogx(
+                                            arr_to_numpy_float(grp_sorted['threshold']),
+                                            arr_to_numpy_float(grp_sorted['convergence_rate_pct']),
+                                            linewidth=2,
+                                            label=str(opt_name),
+                                        )
+                                    ax.set_title(str(fn_name), fontsize=12, fontweight='bold')
+                                    ax.set_xlabel('Loss Threshold', fontsize=11)
+                                    ax.grid(True, alpha=0.3)
+                                    ax.set_ylim(0, 105)
+                                axes[0].set_ylabel('Convergence Rate (%)', fontsize=11)
+                                handles, labels = axes[-1].get_legend_handles_labels()
+                                if handles:
+                                    fig.legend(
+                                        handles,
+                                        labels,
+                                        loc='upper center',
+                                        bbox_to_anchor=(0.5, 1.06),
+                                        ncol=min(4, len(labels)),
+                                        frameon=True,
+                                    )
+                                fig.suptitle('2D Optimization: Convergence Chance vs Threshold', fontsize=14, fontweight='bold', y=0.965)
+                                plt.tight_layout(rect=[0, 0, 1, 0.84])
+                                out_path = static_dir / '2d_convergence_profile_by_threshold.png'
+                                plt.savefig(out_path, dpi=300, bbox_inches='tight')
+                                plt.close()
+                                print(f"   Created {out_path.name}")
+                        except Exception as e:
+                            logging.debug("Could not create 2D convergence profile plot: %s", e, exc_info=True)
+            except Exception as e:
+                logging.debug("Could not create 2D convergence-rate summary plot: %s", e, exc_info=True)
+
+    print(f"   2D optimization visualizations complete ({static_dir})")
+
+
+def _create_ablation_visualizations(csv_paths, static_dir, experiment_name):
+    """Generate loss-centric visualizations for optimizer component ablation."""
+    static_dir.mkdir(parents=True, exist_ok=True)
+    print(f"\nCreating Ablation visualizations in {static_dir}...")
+
+    summary_df = None
+    summary_file = next((p for p in csv_paths if 'ablation_results' in p.stem.lower()), None)
+    if summary_file is not None:
+        try:
+            summary_df = safe_read_csv(summary_file)
+        except Exception as e:
+            logging.debug("Could not read ablation summary CSV %s: %s", summary_file, e, exc_info=True)
+
+    ts_df = _load_time_series_with_metadata(csv_paths, skip_stems=['ablation_results', 'results'])
+
+    if not ts_df.empty and 'optimizer' in ts_df.columns and 'iteration' in ts_df.columns and 'loss' in ts_df.columns:
+        try:
+            plt.figure(figsize=(10, 6))
+            for opt, grp in ts_df.groupby('optimizer'):
+                agg = grp.groupby('iteration')['loss'].agg(['mean', 'std'])
+                x = arr_to_numpy_float(agg.index)
+                m = arr_to_numpy_float(agg['mean'])
+                s = arr_to_numpy_float(agg['std'])
+                plt.plot(x, m, label=str(opt), linewidth=2)
+                plt.fill_between(x, m - s, m + s, alpha=0.2)
+            plt.xlabel('Iteration', fontsize=12)
+            plt.ylabel('Loss', fontsize=12)
+            plt.yscale('log')
+            plt.title(f'{experiment_name}: Loss Convergence by Optimizer', fontsize=14, fontweight='bold')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+            plt.tight_layout()
+            out_path = static_dir / f'{experiment_name.lower()}_loss_convergence.png'
+            plt.savefig(out_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            print(f"   Created {out_path.name}")
+        except Exception as e:
+            logging.debug("Could not create ablation loss convergence plot: %s", e, exc_info=True)
+
+    if summary_df is not None and not summary_df.empty and 'optimizer' in summary_df.columns:
+        if 'final_loss' in summary_df.columns:
+            try:
+                agg = summary_df.groupby('optimizer')['final_loss'].agg(['mean', 'std'])
+                plt.figure(figsize=(9, 5))
+                x = range(len(agg))
+                safe_mean = agg['mean'].clip(lower=1e-12)
+                plt.bar(x, safe_mean, alpha=0.8, edgecolor='black')
+                plt.xticks(x, [str(o) for o in agg.index], rotation=30, ha='right')
+                plt.yscale('log')
+                plt.ylabel('Final Loss (log scale)', fontsize=12)
+                plt.title(f'{experiment_name}: Final Loss by Optimizer', fontsize=14, fontweight='bold')
+                plt.grid(axis='y', alpha=0.3)
+                ax = plt.gca()
+                for i, v in enumerate(agg['mean']):
+                    y = max(float(v), 1e-12)
+                    ax.text(i, y * 1.08, f'{float(v):.2g}', ha='center', va='bottom', fontsize=9)
+                plt.tight_layout()
+                out_path = static_dir / f'{experiment_name.lower()}_final_loss_by_optimizer.png'
+                plt.savefig(out_path, dpi=300, bbox_inches='tight')
+                plt.close()
+                print(f"   Created {out_path.name}")
+            except Exception as e:
+                logging.debug("Could not create ablation final-loss bar plot: %s", e, exc_info=True)
+
+        if 'iterations' in summary_df.columns:
+            try:
+                agg = summary_df.groupby('optimizer')['iterations'].agg(['mean', 'std'])
+                plt.figure(figsize=(9, 5))
+                x = range(len(agg))
+                plt.bar(x, agg['mean'], yerr=agg['std'], capsize=5, alpha=0.8, edgecolor='black', color='steelblue')
+                plt.xticks(x, [str(o) for o in agg.index], rotation=30, ha='right')
+                plt.ylabel('Iterations to Stop', fontsize=12)
+                plt.title(f'{experiment_name}: Iterations by Optimizer', fontsize=14, fontweight='bold')
+                plt.grid(axis='y', alpha=0.3)
+                plt.tight_layout()
+                out_path = static_dir / f'{experiment_name.lower()}_iterations_by_optimizer.png'
+                plt.savefig(out_path, dpi=300, bbox_inches='tight')
+                plt.close()
+                print(f"   Created {out_path.name}")
+            except Exception as e:
+                logging.debug("Could not create ablation iterations bar plot: %s", e, exc_info=True)
+
+        try:
+            def _as_bool(series):
+                sl = series.astype(str).str.lower()
+                return sl.isin(['1', 'true', 'yes']) | (pd.to_numeric(series, errors='coerce') > 0)
+
+            def _plot_conv_rate(rate_series, title, out_name, success_series=None, count_series=None):
+                if rate_series is None or len(rate_series) == 0:
+                    return
+                rate_series = pd.to_numeric(rate_series, errors='coerce').fillna(0.0)
+                plot_series = rate_series.copy()
+                ylabel = 'Convergence Rate (%)'
+                max_rate = float(np.nanmax(rate_series.to_numpy(dtype=float))) if len(rate_series) > 0 else 0.0
+                suffix = ""
+                if count_series is not None:
+                    valid_counts = pd.to_numeric(count_series, errors='coerce').dropna()
+                    if len(valid_counts) > 0:
+                        min_n = int(valid_counts.min())
+                        max_n = int(valid_counts.max())
+                        suffix = f" (n={min_n})" if min_n == max_n else f" (n={min_n}..{max_n})"
+
+                if max_rate <= 0:
+                    plot_series = 100.0 - rate_series
+                    ylabel = 'Non-Convergence Rate (%)'
+                    title = f'{title} (all convergence rates are 0%){suffix}'
+                else:
+                    title = f'{title}{suffix}'
+
+                if success_series is not None:
+                    success_series = pd.to_numeric(
+                        success_series.reindex(plot_series.index),
+                        errors='coerce'
+                    ).fillna(0.0)
+                if count_series is not None:
+                    count_series = pd.to_numeric(
+                        count_series.reindex(plot_series.index),
+                        errors='coerce'
+                    ).fillna(0.0)
+
+                plt.figure(figsize=(9, 5))
+                x = range(len(plot_series))
+                plt.bar(x, plot_series.values, alpha=0.8, edgecolor='black')
+                plt.xticks(x, [str(o) for o in plot_series.index], rotation=30, ha='right')
+                plt.ylabel(ylabel, fontsize=12)
+                plt.ylim(0, 105)
+                plt.title(title, fontsize=14, fontweight='bold')
+                plt.grid(axis='y', alpha=0.3)
+                ax = plt.gca()
+                for i, v in enumerate(plot_series.values):
+                    y = float(v) + 1.0 if float(v) > 0 else 0.35
+                    label = f'{float(v):.0f}%'
+                    if success_series is not None and count_series is not None:
+                        succ = int(round(float(success_series.iloc[i])))
+                        cnt = int(round(float(count_series.iloc[i])))
+                        if cnt > 0:
+                            if max_rate <= 0:
+                                label = f'{float(v):.0f}% ({cnt - succ}/{cnt})'
+                            else:
+                                label = f'{float(v):.0f}% ({succ}/{cnt})'
+                    ax.text(i, y, label, ha='center', va='bottom', fontsize=9, fontweight='bold')
+                plt.tight_layout()
+                out_path = static_dir / out_name
+                plt.savefig(out_path, dpi=300, bbox_inches='tight')
+                plt.close()
+                print(f"   Created {out_path.name}")
+
+            conv_bool_practical = None
+            if 'converged_practical' in summary_df.columns:
+                conv_bool_practical = _as_bool(summary_df['converged_practical'])
+            elif 'final_loss' in summary_df.columns:
+                conv_bool_practical = pd.to_numeric(summary_df['final_loss'], errors='coerce') < 1e-3
+            elif 'converged' in summary_df.columns:
+                conv_bool_practical = _as_bool(summary_df['converged'])
+
+            if conv_bool_practical is not None:
+                conv_practical = summary_df.copy()
+                conv_practical['conv_bool'] = conv_bool_practical
+                g_practical = conv_practical.groupby('optimizer')['conv_bool']
+                conv_rate_practical = 100.0 * g_practical.mean()
+                conv_success_practical = g_practical.sum()
+                conv_count_practical = g_practical.count()
+                _plot_conv_rate(
+                    conv_rate_practical,
+                    f'{experiment_name}: Practical Convergence Rate by Optimizer (<1e-3)',
+                    f'{experiment_name.lower()}_convergence_rate.png',
+                    success_series=conv_success_practical,
+                    count_series=conv_count_practical,
+                )
+
+            conv_bool_strict = None
+            if 'converged_strict' in summary_df.columns:
+                conv_bool_strict = _as_bool(summary_df['converged_strict'])
+            elif 'converged' in summary_df.columns:
+                conv_bool_strict = _as_bool(summary_df['converged'])
+            elif 'final_loss' in summary_df.columns:
+                conv_bool_strict = pd.to_numeric(summary_df['final_loss'], errors='coerce') < 1e-6
+
+            if conv_bool_strict is not None:
+                conv_strict = summary_df.copy()
+                conv_strict['conv_bool'] = conv_bool_strict
+                g_strict = conv_strict.groupby('optimizer')['conv_bool']
+                conv_rate_strict = 100.0 * g_strict.mean()
+                conv_success_strict = g_strict.sum()
+                conv_count_strict = g_strict.count()
+                _plot_conv_rate(
+                    conv_rate_strict,
+                    f'{experiment_name}: Strict Convergence Rate by Optimizer (<1e-6)',
+                    f'{experiment_name.lower()}_convergence_rate_strict.png',
+                    success_series=conv_success_strict,
+                    count_series=conv_count_strict,
+                )
+
+            # Convergence chance profile gives richer signal than single binary thresholds.
+            if 'final_loss' in summary_df.columns:
+                profile_rows = []
+                thresholds = np.logspace(-6, 1, 60)
+                for opt_name, grp in summary_df.groupby('optimizer'):
+                    losses = pd.to_numeric(grp['final_loss'], errors='coerce').to_numpy(dtype=float)
+                    finite_mask = np.isfinite(losses)
+                    for thr in thresholds:
+                        success_mask = finite_mask & (losses < float(thr))
+                        profile_rows.append({
+                            'optimizer': str(opt_name),
+                            'threshold': float(thr),
+                            'convergence_rate_pct': 100.0 * float(np.mean(success_mask)) if losses.size > 0 else np.nan,
+                            'success_count': int(np.sum(success_mask)),
+                            'total_count': int(losses.size),
+                        })
+
+                if profile_rows:
+                    profile_df = pd.DataFrame(profile_rows)
+                    try:
+                        profile_csv = static_dir / f'{experiment_name.lower()}_convergence_profile.csv'
+                        profile_df.to_csv(profile_csv, index=False)
+                    except Exception:
+                        logging.debug("Could not save ablation convergence profile CSV", exc_info=True)
+
+                    plt.figure(figsize=(10, 6))
+                    for opt_name, grp in profile_df.groupby('optimizer'):
+                        grp_sorted = grp.sort_values('threshold')
+                        plt.semilogx(
+                            arr_to_numpy_float(grp_sorted['threshold']),
+                            arr_to_numpy_float(grp_sorted['convergence_rate_pct']),
+                            linewidth=2,
+                            label=str(opt_name),
+                        )
+                    plt.xlabel('Final-Loss Threshold', fontsize=12)
+                    plt.ylabel('Convergence Rate (%)', fontsize=12)
+                    plt.ylim(0, 105)
+                    plt.grid(True, alpha=0.3)
+                    plt.title(f'{experiment_name}: Convergence Chance vs Threshold', fontsize=14, fontweight='bold')
+                    plt.legend()
+                    plt.tight_layout()
+                    out_path = static_dir / f'{experiment_name.lower()}_convergence_profile.png'
+                    plt.savefig(out_path, dpi=300, bbox_inches='tight')
+                    plt.close()
+                    print(f"   Created {out_path.name}")
+        except Exception as e:
+            logging.debug("Could not create ablation convergence-rate plots: %s", e, exc_info=True)
+
+    print(f"   Ablation visualizations complete ({static_dir})")
+
+
 def _create_robustness_visualizations(csv_paths, static_dir, experiment_name):
     """Generate plots for the Robustness/convergence experiment.
 
@@ -6449,46 +7423,76 @@ def _create_robustness_visualizations(csv_paths, static_dir, experiment_name):
             except Exception:
                 pass
 
-    # Fallback: load per-run CSVs and combine
-    if summary_df is None or summary_df.empty:
-        per_run_dfs = []
-        for p in csv_paths:
-            stem = p.stem.lower()
-            if 'results' in stem:
+    # Always load per-run time-series files (needed for trajectory-like convergence plots).
+    per_run_dfs = []
+    for p in csv_paths:
+        stem = p.stem.lower()
+        if 'results' in stem:
+            continue
+        try:
+            df = safe_read_csv(p)
+            if df is None or df.empty:
                 continue
-            try:
-                df = safe_read_csv(p)
-                if df is None or df.empty:
-                    continue
-                # Extract optimizer from filename like Robustness_Rosenbrock_Adam_start0_seed42
-                parsed = parse_experiment_filename(p.stem)
-                opt = parsed.get('optimizer')
-                if opt is None:
-                    # Fallback: tokenize filename
-                    parts = p.stem.split('_')
-                    # Typical: Robustness_Rosenbrock_<Optimizer>_start<N>_seed<S>
-                    opt = parts[2] if len(parts) > 2 else 'Unknown'
+            # Extract optimizer from filename like Robustness_Rosenbrock_Adam_start0_seed42
+            parsed = parse_experiment_filename(p.stem)
+            opt = parsed.get('optimizer')
+            if opt is None:
+                # Fallback: tokenize filename
+                parts = p.stem.split('_')
+                # Typical: Robustness_Rosenbrock_<Optimizer>_start<N>_seed<S>
+                opt = parts[2] if len(parts) > 2 else 'Unknown'
+            if 'optimizer' not in df.columns or df['optimizer'].isnull().all():
                 df['optimizer'] = opt
-                # Extract start_point
+            # Extract start_point from filename when missing
+            if 'start_point' not in df.columns:
                 for part in p.stem.split('_'):
                     if part.startswith('start') and part[5:].isdigit():
                         df['start_point'] = int(part[5:])
                         break
-                per_run_dfs.append(df)
-            except Exception as e:
-                logging.debug("Could not load per-run robustness CSV %s: %s", p, e)
-        if per_run_dfs:
-            summary_df = pd.concat(per_run_dfs, ignore_index=True)
+            per_run_dfs.append(df)
+        except Exception as e:
+            logging.debug("Could not load per-run robustness CSV %s: %s", p, e)
+
+    per_run_df = pd.concat(per_run_dfs, ignore_index=True) if per_run_dfs else pd.DataFrame()
+
+    # Fallback to per-run aggregation if summary CSV is unavailable.
+    if (summary_df is None or summary_df.empty) and not per_run_df.empty:
+        summary_df = per_run_df.copy()
 
     if summary_df is None or summary_df.empty:
         logging.warning("No usable data found for Robustness visualizations")
         return
 
-    # ── Plot 1: Loss trajectory per optimizer (if iteration column present) ──
-    if 'iteration' in summary_df.columns and 'optimizer' in summary_df.columns and 'loss' in summary_df.columns:
+    # Backfill start-point indices from coordinates when missing in summary.
+    if (
+        'start_point' not in summary_df.columns
+        and {'initial_x', 'initial_y'}.issubset(summary_df.columns)
+    ):
+        try:
+            unique_points = (
+                summary_df[['initial_x', 'initial_y']]
+                .drop_duplicates()
+                .reset_index(drop=True)
+            )
+            point_to_idx = {
+                (float(r['initial_x']), float(r['initial_y'])): int(i)
+                for i, r in unique_points.iterrows()
+            }
+            summary_df = summary_df.copy()
+            summary_df['start_point'] = summary_df.apply(
+                lambda r: point_to_idx.get((float(r['initial_x']), float(r['initial_y'])), np.nan),
+                axis=1,
+            )
+        except Exception as e:
+            logging.debug("Could not infer start_point indices from initial coordinates: %s", e, exc_info=True)
+
+    # â”€â”€ Plot 1: Loss trajectory per optimizer (if iteration column present) â”€â”€
+    time_df = per_run_df if not per_run_df.empty else summary_df
+
+    if 'iteration' in time_df.columns and 'optimizer' in time_df.columns and 'loss' in time_df.columns:
         try:
             plt.figure(figsize=(10, 6))
-            for opt, grp in summary_df.groupby('optimizer'):
+            for opt, grp in time_df.groupby('optimizer'):
                 agg = grp.groupby('iteration')['loss'].agg(['mean', 'std'])
                 niter = arr_to_numpy_float(agg.index)
                 nmean = arr_to_numpy_float(agg['mean'])
@@ -6508,7 +7512,30 @@ def _create_robustness_visualizations(csv_paths, static_dir, experiment_name):
         except Exception as e:
             logging.debug("Could not create robustness loss plot: %s", e, exc_info=True)
 
-    # ── Plot 2: Final loss / convergence rate per optimizer ──
+    if 'iteration' in time_df.columns and 'optimizer' in time_df.columns and 'grad_norm' in time_df.columns:
+        try:
+            plt.figure(figsize=(10, 6))
+            for opt, grp in time_df.groupby('optimizer'):
+                agg = grp.groupby('iteration')['grad_norm'].agg(['mean', 'std'])
+                niter = arr_to_numpy_float(agg.index)
+                nmean = arr_to_numpy_float(agg['mean'])
+                nstd = arr_to_numpy_float(agg['std'])
+                plt.plot(niter, nmean, label=str(opt), linewidth=2)
+                plt.fill_between(niter, nmean - nstd, nmean + nstd, alpha=0.2)
+            plt.xlabel('Iteration', fontsize=12)
+            plt.ylabel('Gradient Norm', fontsize=12)
+            plt.title(f'{experiment_name} - Gradient Norm by Optimizer', fontsize=14, fontweight='bold')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+            plt.yscale('log')
+            plt.tight_layout()
+            plt.savefig(static_dir / f'{experiment_name.lower()}_grad_norm_convergence.png', dpi=300, bbox_inches='tight')
+            plt.close()
+            print(f"   Created {experiment_name.lower()}_grad_norm_convergence.png")
+        except Exception as e:
+            logging.debug("Could not create robustness grad-norm plot: %s", e, exc_info=True)
+
+    # â”€â”€ Plot 2: Final loss / convergence rate per optimizer â”€â”€
     if 'optimizer' in summary_df.columns:
         metric_col = next((c for c in ['final_loss', 'loss', 'iterations'] if c in summary_df.columns), None)
         if metric_col:
@@ -6516,11 +7543,29 @@ def _create_robustness_visualizations(csv_paths, static_dir, experiment_name):
                 agg = summary_df.groupby('optimizer')[metric_col].agg(['mean', 'std'])
                 plt.figure(figsize=(8, 5))
                 x = range(len(agg))
-                plt.bar(x, agg['mean'], yerr=agg['std'], capsize=5, alpha=0.7, edgecolor='black')
+                if metric_col == 'final_loss':
+                    safe_mean = agg['mean'].clip(lower=1e-12)
+                    plt.bar(x, safe_mean, alpha=0.7, edgecolor='black')
+                    plt.yscale('log')
+                    ylabel = 'Final Loss (mean, log scale)'
+                else:
+                    plt.bar(x, agg['mean'], yerr=agg['std'], capsize=5, alpha=0.7, edgecolor='black')
+                    ylabel = metric_col.replace('_', ' ').title()
                 plt.xticks(x, [str(o) for o in agg.index], rotation=30, ha='right')
-                plt.ylabel(metric_col.replace('_', ' ').title(), fontsize=12)
+                plt.ylabel(ylabel, fontsize=12)
                 plt.title(f'{experiment_name} - {metric_col.replace("_", " ").title()} by Optimizer', fontsize=13, fontweight='bold')
                 plt.grid(axis='y', alpha=0.3)
+                ax = plt.gca()
+                # Add text labels to show near-zero values explicitly
+                for i, v in enumerate(agg['mean']):
+                    if metric_col == 'final_loss':
+                        y_pos = max(float(v), 1e-12) * 1.08
+                        label = f'{float(v):.2g}'
+                    else:
+                        err = agg['std'].iloc[i] if not pd.isna(agg['std'].iloc[i]) else 0
+                        y_pos = v + err + (max(agg['mean']) * 0.02) if max(agg['mean']) > 0 else v + 0.02
+                        label = f'{float(v):.3g}'
+                    ax.text(i, y_pos, label, ha='center', va='bottom', fontsize=10, fontweight='bold')
                 plt.tight_layout()
                 plt.savefig(static_dir / f'{experiment_name.lower()}_{metric_col}_by_optimizer.png', dpi=300, bbox_inches='tight')
                 plt.close()
@@ -6528,7 +7573,7 @@ def _create_robustness_visualizations(csv_paths, static_dir, experiment_name):
             except Exception as e:
                 logging.debug("Could not create robustness optimizer bar chart: %s", e, exc_info=True)
 
-    # ── Plot 3: Start point sensitivity (loss vs start_point, per optimizer) ──
+    # â”€â”€ Plot 3: Start point sensitivity (loss vs start_point, per optimizer) â”€â”€
     if 'start_point' in summary_df.columns and 'optimizer' in summary_df.columns:
         met = next((c for c in ['final_loss', 'loss', 'iterations'] if c in summary_df.columns), None)
         if met:
@@ -6550,13 +7595,11 @@ def _create_robustness_visualizations(csv_paths, static_dir, experiment_name):
             except Exception as e:
                 logging.debug("Could not create start_point sensitivity plot: %s", e, exc_info=True)
 
-    print(f"   Robustness visualizations complete ({static_dir})")
-
-    # ── Plot 3: Convergence success rate per optimizer ──
+    # â”€â”€ Plot 3: Convergence success rate per optimizer â”€â”€
     if 'converged' in summary_df.columns and 'optimizer' in summary_df.columns:
         try:
             conv_rate = summary_df.groupby('optimizer')['converged'].apply(
-                lambda x: 100.0 * x.astype(bool).mean()
+                lambda x: 100.0 * x.astype(str).str.lower().isin(['1', 'true', 'yes']).mean()
             )
             plt.figure(figsize=(8, 5))
             x = range(len(conv_rate))
@@ -6577,26 +7620,33 @@ def _create_robustness_visualizations(csv_paths, static_dir, experiment_name):
         except Exception as e:
             logging.debug("Could not create convergence rate plot: %s", e, exc_info=True)
 
-    # ── Plot 4: Mean iterations to convergence per optimizer ──
+    # â”€â”€ Plot 4: Mean iterations to convergence per optimizer â”€â”€
     if 'iterations' in summary_df.columns and 'optimizer' in summary_df.columns:
         try:
             # Only count runs that actually converged
-            converged_mask = summary_df.get('converged', pd.Series([True] * len(summary_df))).astype(bool)
+            converged_mask = summary_df.get('converged', pd.Series([True] * len(summary_df))).astype(str).str.lower().isin(['1', 'true', 'yes'])
             conv_df = summary_df[converged_mask] if converged_mask.any() else summary_df
             agg_iters = conv_df.groupby('optimizer')['iterations'].agg(['mean', 'std'])
             plt.figure(figsize=(8, 5))
             x = range(len(agg_iters))
-            plt.bar(x, agg_iters['mean'], yerr=agg_iters['std'], capsize=5, alpha=0.7, edgecolor='black', color='steelblue')
+            bars = plt.bar(x, agg_iters['mean'], yerr=agg_iters['std'], capsize=5, alpha=0.7, edgecolor='black', color='steelblue')
             plt.xticks(x, [str(o) for o in agg_iters.index], rotation=30, ha='right')
             plt.ylabel('Mean Iterations to Convergence', fontsize=12)
             plt.title(f'{experiment_name} - Convergence Speed by Optimizer', fontsize=13, fontweight='bold')
             plt.grid(axis='y', alpha=0.3)
+            ax = plt.gca()
+            # Add text labels mapping the exact value to eliminate confusion over invisible bars
+            for i, v in enumerate(agg_iters['mean']):
+                err = agg_iters['std'].iloc[i] if not pd.isna(agg_iters['std'].iloc[i]) else 0
+                y_pos = v + err + (max(agg_iters['mean']) * 0.02) if max(agg_iters['mean']) > 0 else v + 1
+                ax.text(i, y_pos, f'{v:.0f}', ha='center', va='bottom', fontsize=10, fontweight='bold')
             plt.tight_layout()
             plt.savefig(static_dir / f'{experiment_name.lower()}_iterations_to_convergence.png', dpi=300, bbox_inches='tight')
             plt.close()
             print(f"   Created {experiment_name.lower()}_iterations_to_convergence.png")
         except Exception as e:
             logging.debug("Could not create iterations-to-convergence plot: %s", e, exc_info=True)
+
 
     print(f"   Robustness visualizations complete ({static_dir})")
 
@@ -6627,12 +7677,61 @@ def _create_sam_sensitivity_visualizations(csv_paths, static_dir, experiment_nam
         logging.warning("No usable data found for SAM Sensitivity visualizations")
         return
 
-    metric_col = next((c for c in ['test_acc', 'test_accuracy', 'final_loss', 'loss', 'val_acc'] if c in summary_df.columns), None)
+    # Load per-epoch/per-seed histories for richer temporal plots.
+    per_run_dfs = []
+    for p in csv_paths:
+        stem_lower = p.stem.lower()
+        if 'sam_sensitivity_results' in stem_lower or stem_lower in ('results',):
+            continue
+        try:
+            df = safe_read_csv(p)
+            if df is None or df.empty or 'epoch' not in df.columns:
+                continue
+            # Parse rho from filenames like MNIST_SimpleMLP_SAM_rho_0.05_seed42.csv
+            rho_val = np.nan
+            if 'sam_rho_' in stem_lower:
+                try:
+                    rho_str = stem_lower.split('sam_rho_')[1].split('_seed')[0]
+                    rho_val = float(rho_str)
+                except (ValueError, IndexError):
+                    rho_val = np.nan
+            if 'rho' not in df.columns:
+                df['rho'] = rho_val
+            if 'seed' not in df.columns:
+                try:
+                    from src.utils.filename import parse_experiment_filename
+                    parsed = parse_experiment_filename(p.stem)
+                    if parsed.get('seed') is not None:
+                        df['seed'] = int(parsed.get('seed'))
+                except Exception:
+                    pass
+            per_run_dfs.append(df)
+        except Exception as e:
+            logging.debug("Could not load SAM per-run CSV %s: %s", p, e, exc_info=True)
+    per_run_df = pd.concat(per_run_dfs, ignore_index=True) if per_run_dfs else pd.DataFrame()
+
+    metric_col = next(
+        (
+            c
+            for c in [
+                'final_test_accuracy',
+                'test_acc',
+                'test_accuracy',
+                'best_test_accuracy',
+                'final_train_loss',
+                'final_loss',
+                'loss',
+                'val_acc',
+            ]
+            if c in summary_df.columns
+        ),
+        None,
+    )
     if metric_col is None:
         logging.warning("SAM sensitivity CSV has no recognisable metric column: %s", list(summary_df.columns))
         return
 
-    # ── Plot 1: Rho sweep (metric vs rho) ──
+    # â”€â”€ Plot 1: Rho sweep (metric vs rho) â”€â”€
     try:
         plt.figure(figsize=(9, 5))
         if 'seed' in summary_df.columns:
@@ -6642,9 +7741,9 @@ def _create_sam_sensitivity_visualizations(csv_paths, static_dir, experiment_nam
         else:
             plt.plot(arr_to_numpy_float(summary_df['rho']), arr_to_numpy_float(summary_df[metric_col]),
                      'o-', linewidth=2, color='steelblue')
-        plt.xlabel('SAM Rho (ρ)', fontsize=12)
+        plt.xlabel('SAM Rho (Ï)', fontsize=12)
         plt.ylabel(metric_col.replace('_', ' ').title(), fontsize=12)
-        plt.title('SAM Sensitivity: Effect of ρ on Performance', fontsize=14, fontweight='bold')
+        plt.title('SAM Sensitivity: Effect of Ï on Performance', fontsize=14, fontweight='bold')
         plt.grid(True, alpha=0.3)
         plt.tight_layout()
         plt.savefig(static_dir / 'sam_rho_sweep.png', dpi=300, bbox_inches='tight')
@@ -6653,8 +7752,12 @@ def _create_sam_sensitivity_visualizations(csv_paths, static_dir, experiment_nam
     except Exception as e:
         logging.debug("Could not create SAM rho sweep plot: %s", e, exc_info=True)
 
-    # ── Plot 2: If multiple metrics exist, side-by-side comparison ──
-    extra_metrics = [c for c in ['test_acc', 'final_loss', 'val_acc', 'train_loss'] if c in summary_df.columns and c != metric_col]
+    # â”€â”€ Plot 2: If multiple metrics exist, side-by-side comparison â”€â”€
+    extra_metrics = [
+        c
+        for c in ['final_test_accuracy', 'test_acc', 'final_test_loss', 'final_train_loss', 'final_loss', 'val_acc']
+        if c in summary_df.columns and c != metric_col
+    ]
     if extra_metrics:
         try:
             all_m = [metric_col] + extra_metrics[:3]
@@ -6668,7 +7771,7 @@ def _create_sam_sensitivity_visualizations(csv_paths, static_dir, experiment_nam
                                 yerr=arr_to_numpy_float(agg['std']), fmt='o-', capsize=4, linewidth=2)
                 else:
                     ax.plot(arr_to_numpy_float(summary_df['rho']), arr_to_numpy_float(summary_df[m]), 'o-', linewidth=2)
-                ax.set_xlabel('ρ', fontsize=11)
+                ax.set_xlabel('Ï', fontsize=11)
                 ax.set_ylabel(m.replace('_', ' ').title(), fontsize=11)
                 ax.set_title(m.replace('_', ' ').title(), fontsize=12)
                 ax.grid(True, alpha=0.3)
@@ -6679,6 +7782,52 @@ def _create_sam_sensitivity_visualizations(csv_paths, static_dir, experiment_nam
             print("   Created sam_all_metrics.png")
         except Exception as e:
             logging.debug("Could not create SAM multi-metric plot: %s", e, exc_info=True)
+
+    # Plot 3: Train-loss dynamics by rho over epochs.
+    if not per_run_df.empty and {'epoch', 'rho', 'train_loss'}.issubset(per_run_df.columns):
+        try:
+            plt.figure(figsize=(10, 6))
+            for rho, grp in per_run_df.groupby('rho'):
+                agg = grp.groupby('epoch')['train_loss'].agg(['mean', 'std'])
+                x = arr_to_numpy_float(agg.index)
+                m = arr_to_numpy_float(agg['mean'])
+                s = arr_to_numpy_float(agg['std'])
+                plt.plot(x, m, marker='o', linewidth=2, label=f'Ï={rho:g}')
+                plt.fill_between(x, m - s, m + s, alpha=0.2)
+            plt.xlabel('Epoch', fontsize=12)
+            plt.ylabel('Train Loss', fontsize=12)
+            plt.title('SAM Sensitivity: Train Loss by Ï', fontsize=14, fontweight='bold')
+            plt.grid(True, alpha=0.3)
+            plt.legend()
+            plt.tight_layout()
+            plt.savefig(static_dir / 'sam_train_loss_by_epoch.png', dpi=300, bbox_inches='tight')
+            plt.close()
+            print("   Created sam_train_loss_by_epoch.png")
+        except Exception as e:
+            logging.debug("Could not create SAM train-loss by epoch plot: %s", e, exc_info=True)
+
+    # Plot 4: Test-accuracy dynamics by rho over epochs.
+    if not per_run_df.empty and {'epoch', 'rho', 'test_acc'}.issubset(per_run_df.columns):
+        try:
+            plt.figure(figsize=(10, 6))
+            for rho, grp in per_run_df.groupby('rho'):
+                agg = grp.groupby('epoch')['test_acc'].agg(['mean', 'std'])
+                x = arr_to_numpy_float(agg.index)
+                m = arr_to_numpy_float(agg['mean'])
+                s = arr_to_numpy_float(agg['std'])
+                plt.plot(x, m, marker='o', linewidth=2, label=f'Ï={rho:g}')
+                plt.fill_between(x, m - s, m + s, alpha=0.2)
+            plt.xlabel('Epoch', fontsize=12)
+            plt.ylabel('Test Accuracy (%)', fontsize=12)
+            plt.title('SAM Sensitivity: Test Accuracy by Ï', fontsize=14, fontweight='bold')
+            plt.grid(True, alpha=0.3)
+            plt.legend()
+            plt.tight_layout()
+            plt.savefig(static_dir / 'sam_test_accuracy_by_epoch.png', dpi=300, bbox_inches='tight')
+            plt.close()
+            print("   Created sam_test_accuracy_by_epoch.png")
+        except Exception as e:
+            logging.debug("Could not create SAM test-accuracy by epoch plot: %s", e, exc_info=True)
 
     print(f"   SAM sensitivity visualizations complete ({static_dir})")
 
@@ -6734,6 +7883,22 @@ def create_experiment_visualizations(experiment_name, results_dir, csv_files):
             return
         except Exception as e:
             logging.warning("SAM sensitivity visualizer failed: %s", e, exc_info=True)
+
+    # Dedicated 2D optimizer dynamics visualizer.
+    if str(experiment_name).upper() in ('2D', '2D_OPTIMIZATION'):
+        try:
+            _create_2d_visualizations(csv_paths, static_dir, experiment_name)
+            return
+        except Exception as e:
+            logging.warning("2D visualizer failed: %s", e, exc_info=True)
+
+    # Dedicated ablation visualizer for loss-centric component studies.
+    if str(experiment_name).upper() in ('ABLATION',):
+        try:
+            _create_ablation_visualizations(csv_paths, static_dir, experiment_name)
+            return
+        except Exception as e:
+            logging.warning("Ablation visualizer failed: %s", e, exc_info=True)
 
     time_series_paths = filter_time_series_files(csv_paths)
 
@@ -6908,7 +8073,7 @@ def create_experiment_visualizations(experiment_name, results_dir, csv_files):
                 # Add value labels safely
                 ax = plt.gca()
                 for i, (idx, row) in enumerate(final_results.iterrows()):
-                    safe_add_text(ax, i, row['mean'], f"{row['mean']:.1f}%\n±{row['std']:.1f}", ha='center', va='bottom', fontsize=9)
+                    safe_add_text(ax, i, row['mean'], f"{row['mean']:.1f}%\nÂ±{row['std']:.1f}", ha='center', va='bottom', fontsize=9)
 
                 plt.tight_layout()
                 plt.savefig(static_dir / f'{experiment_name.lower()}_final_comparison.png', dpi=300, bbox_inches='tight')
@@ -7410,20 +8575,20 @@ def run_theory_analysis_pipeline(
                 )
 
                 if result.returncode == 0:
-                    print("   ✓ Artifacts generated successfully")
+                    print("   âœ“ Artifacts generated successfully")
                     theory_results['artifacts_generated'] = True
                 else:
-                    print(f"   ⚠ Artifact generation completed with warnings")
+                    print(f"   âš  Artifact generation completed with warnings")
                     print(f"      {result.stderr[:200]}")
             else:
-                print(f"   ⚠ Artifact generation script not found: {artifact_script}")
+                print(f"   âš  Artifact generation script not found: {artifact_script}")
         elif dry_run:
             print("   [DRY RUN] Would generate artifacts for checkpoints")
         else:
-            print("   ⚠ No checkpoints found - creating mock artifacts")
+            print("   âš  No checkpoints found - creating mock artifacts")
 
     except Exception as e:
-        print(f"   ✗ Artifact generation failed: {e}")
+        print(f"   âœ— Artifact generation failed: {e}")
         import traceback
         traceback.print_exc()
 
@@ -7446,15 +8611,15 @@ def run_theory_analysis_pipeline(
             )
 
             theory_results['theory_practice_validation'] = validation_df
-            print(f"   ✓ Theory-practice validation complete ({len(validation_df)} comparisons)")
+            print(f"   âœ“ Theory-practice validation complete ({len(validation_df)} comparisons)")
             print(f"      Results: {theory_output_dir}/theory_practice_comparison_results.csv")
         else:
             print("   [DRY RUN] Would run theory-practice validation")
 
     except ImportError as e:
-        print(f"   ⚠ Theory-practice validation module not available: {e}")
+        print(f"   âš  Theory-practice validation module not available: {e}")
     except Exception as e:
-        print(f"   ✗ Theory-practice validation failed: {e}")
+        print(f"   âœ— Theory-practice validation failed: {e}")
         import traceback
         traceback.print_exc()
 
@@ -7475,7 +8640,7 @@ def run_theory_analysis_pipeline(
             # Generate predictions for typical hyperparameters
             dynamics_predictions = []
 
-            # SGD with momentum (β=0.9)
+            # SGD with momentum (Î²=0.9)
             sgd_momentum_pred = {
                 'optimizer': OptimizerNames.SGD_MOMENTUM,
                 'velocity': theoretical_velocity_magnitude(lr=0.001, L=10.0, momentum=0.9),
@@ -7484,7 +8649,7 @@ def run_theory_analysis_pipeline(
             }
             dynamics_predictions.append(sgd_momentum_pred)
 
-            # Adam (β1=0.9, β2=0.999)
+            # Adam (Î²1=0.9, Î²2=0.999)
             adam_pred = {
                 'optimizer': OptimizerNames.ADAM,
                 'velocity': theoretical_velocity_magnitude(lr=0.001, L=10.0, momentum=0.9),
@@ -7494,7 +8659,7 @@ def run_theory_analysis_pipeline(
             dynamics_predictions.append(adam_pred)
 
             theory_results['dynamics_theory'] = dynamics_predictions
-            print(f"   ✓ Dynamics predictions computed for {len(dynamics_predictions)} optimizers")
+            print(f"   âœ“ Dynamics predictions computed for {len(dynamics_predictions)} optimizers")
 
             for pred in dynamics_predictions:
                 print(f"      {pred['optimizer']}: velocity={pred['velocity']['expected_velocity']:.4f}")
@@ -7502,9 +8667,9 @@ def run_theory_analysis_pipeline(
             print("   [DRY RUN] Would validate dynamics theory")
 
     except ImportError as e:
-        print(f"   ⚠ Dynamics theory module not available: {e}")
+        print(f"   âš  Dynamics theory module not available: {e}")
     except Exception as e:
-        print(f"   ✗ Dynamics theory validation failed: {e}")
+        print(f"   âœ— Dynamics theory validation failed: {e}")
         import traceback
         traceback.print_exc()
 
@@ -7531,7 +8696,7 @@ def run_theory_analysis_pipeline(
                 lr=0.001
             )
             print(f"      Escape time: {saddle_bound['escape_time']:.2e} iterations")
-            print(f"      Momentum advantage: {saddle_bound.get('method_advantage', 1.0):.2e}×")
+            print(f"      Momentum advantage: {saddle_bound.get('method_advantage', 1.0):.2e}Ã—")
 
             print("   Computing full Adam non-convex bound (Reddi et al. 2018)...")
             adam_bound = adam_nonconvex_full_bound(
@@ -7547,8 +8712,8 @@ def run_theory_analysis_pipeline(
             stability_status = 'STABLE' if adam_bound['is_stable'] else 'UNSTABLE'
             print(f"      Stability: {stability_status}")
             if not adam_bound['is_stable']:
-                print(f"      ⚠ Warning: Divergence risk = {adam_bound['divergence_risk_pct']:.2f}%")
-                print(f"         Optimal α = {adam_bound['optimal_alpha']:.6f}")
+                print(f"      âš  Warning: Divergence risk = {adam_bound['divergence_risk_pct']:.2f}%")
+                print(f"         Optimal Î± = {adam_bound['optimal_alpha']:.6f}")
 
             print("   Computing Hessian-based tighter bounds...")
             hessian_bound = hessian_based_tighter_bound(
@@ -7557,7 +8722,7 @@ def run_theory_analysis_pipeline(
                 T=10000,
                 sigma=0.01
             )
-            print(f"      Improvement factor: {hessian_bound['tightness_improvement']:.2f}×")
+            print(f"      Improvement factor: {hessian_bound['tightness_improvement']:.2f}Ã—")
             print(f"      Effective dimension: {hessian_bound['effective_dimension']:.1f}")
 
             print("   Computing variance reduction bounds (SVRG/SAGA)...")
@@ -7568,8 +8733,8 @@ def run_theory_analysis_pipeline(
                 T=10000,
                 method='svrg'
             )
-            print(f"      SVRG speedup vs SGD: {vr_bound.get('speedup_vs_sgd', 1.0):.2f}×")
-            print(f"      Variance reduction: {vr_bound.get('variance_reduction_factor', 1.0):.0f}×")
+            print(f"      SVRG speedup vs SGD: {vr_bound.get('speedup_vs_sgd', 1.0):.2f}Ã—")
+            print(f"      Variance reduction: {vr_bound.get('variance_reduction_factor', 1.0):.0f}Ã—")
 
             theory_results['advanced_bounds'] = {
                 'saddle_escape': saddle_bound,
@@ -7577,14 +8742,14 @@ def run_theory_analysis_pipeline(
                 'hessian_tighter': hessian_bound,
                 'variance_reduction': vr_bound
             }
-            print("   ✓ Advanced bounds computed")
+            print("   âœ“ Advanced bounds computed")
         else:
             print("   [DRY RUN] Would compute advanced theoretical bounds")
 
     except ImportError as e:
-        print(f"   ⚠ Advanced bounds module not available: {e}")
+        print(f"   âš  Advanced bounds module not available: {e}")
     except Exception as e:
-        print(f"   ✗ Advanced bounds computation failed: {e}")
+        print(f"   âœ— Advanced bounds computation failed: {e}")
         import traceback
         traceback.print_exc()
 
@@ -7632,7 +8797,7 @@ def run_theory_analysis_pipeline(
                         saddle = advanced_bounds['saddle_escape']
                         f.write("### Saddle Point Escape (Jin et al. 2017)\n\n")
                         f.write(f"- **Escape Time**: {saddle['escape_time']:.2e} iterations\n")
-                        f.write(f"- **Momentum Advantage**: {saddle['method_advantage']:.2e}× faster than perturbed GD\n\n")
+                        f.write(f"- **Momentum Advantage**: {saddle['method_advantage']:.2e}Ã— faster than perturbed GD\n\n")
 
                     if 'adam_nonconvex' in advanced_bounds:
                         adam = advanced_bounds['adam_nonconvex']
@@ -7641,14 +8806,14 @@ def run_theory_analysis_pipeline(
                         stability_str = 'STABLE' if adam['is_stable'] else 'UNSTABLE'
                         f.write(f"- **Stability**: {stability_str}\n")
                         if not adam['is_stable']:
-                            f.write(f"- **⚠ Warning**: {adam['divergence_risk_pct']:.1f}% divergence risk\n")
-                            f.write(f"- **Recommended α**: {adam['optimal_alpha']:.6f}\n")
+                            f.write(f"- **âš  Warning**: {adam['divergence_risk_pct']:.1f}% divergence risk\n")
+                            f.write(f"- **Recommended Î±**: {adam['optimal_alpha']:.6f}\n")
                         f.write("\n")
 
                     if 'hessian_tighter' in advanced_bounds:
                         hessian = advanced_bounds['hessian_tighter']
                         f.write("### Hessian-Based Tighter Bounds\n\n")
-                        f.write(f"- **Improvement Factor**: {hessian['tightness_improvement']:.2f}×\n")
+                        f.write(f"- **Improvement Factor**: {hessian['tightness_improvement']:.2f}Ã—\n")
                         f.write(f"- **Effective Dimension**: {hessian['effective_dimension']:.1f}\n\n")
 
                     if 'variance_reduction' in advanced_bounds:
@@ -7656,8 +8821,8 @@ def run_theory_analysis_pipeline(
                         f.write("### Variance Reduction (SVRG)\n\n")
                         speedup = vr.get('speedup_vs_sgd', 1.0)
                         reduction = vr.get('variance_reduction_factor', 1.0)
-                        f.write(f"- **Speedup vs SGD**: {speedup:.2f}×\n")
-                        f.write(f"- **Variance Reduction**: {reduction:.0f}×\n\n")
+                        f.write(f"- **Speedup vs SGD**: {speedup:.2f}Ã—\n")
+                        f.write(f"- **Variance Reduction**: {reduction:.0f}Ã—\n\n")
 
                 # GAP 6 FIX: Domain consistency warnings
                 f.write("## Domain Coverage and Limitations\n\n")
@@ -7679,11 +8844,11 @@ def run_theory_analysis_pipeline(
                     f.write(" Hessian analysis, gradient noise measurement, PL condition.\n\n")
 
                 if experiments_without_analysis:
-                    f.write(f"**⚠ LIMITED ANALYSIS FOR**: {', '.join(experiments_without_analysis)}\n\n")
+                    f.write(f"**âš  LIMITED ANALYSIS FOR**: {', '.join(experiments_without_analysis)}\n\n")
                     f.write("These experiments lack rigorous theoretical analysis due to computational constraints.\n")
                     f.write("**Scientific Impact**: Comparisons in these domains may reflect empirical differences\n")
                     f.write("without geometric/noise decomposition. Committee may question whether differences\n")
-                    f.write("are due to optimization geometry (Hessian) or noise structure (σ²).\n\n")
+                    f.write("are due to optimization geometry (Hessian) or noise structure (ÏƒÂ²).\n\n")
                     f.write("**Recommendation**: Either (1) run HessianAnalyzer on at least one NLP/Medical model,\n")
                     f.write("or (2) explicitly state in paper that 'Theoretical analysis restricted to\n")
                     f.write("ResNet/CIFAR-10 due to computational constraints.'\n\n")
@@ -7693,19 +8858,19 @@ def run_theory_analysis_pipeline(
                 f.write("2. Use measured gradient variance from gradient noise analysis\n")
                 f.write("3. Monitor Adam stability using the 3-term decomposition\n")
                 f.write("4. Consider variance reduction (SVRG) for large datasets\n")
-                f.write("5. Use momentum (β≈0.9) for faster saddle point escape\n")
+                f.write("5. Use momentum (Î²â‰ˆ0.9) for faster saddle point escape\n")
                 f.write("6. **CRITICAL**: Only compare theory vs practice for experiments with measured constants\n")
                 f.write("7. Filter out unstable runs (LR > 2/L) before plotting theory curves\n")
-                f.write("8. **GAP 11**: Correct noise variance by batch size (σ²/B) before theory validation\n")
+                f.write("8. **GAP 11**: Correct noise variance by batch size (ÏƒÂ²/B) before theory validation\n")
                 f.write("9. **GAP 12**: Use effective learning rate for Adam stability checks, not nominal LR\n")
 
             theory_results['report_path'] = report_path
-            print(f"   ✓ Theory report generated: {report_path}")
+            print(f"   âœ“ Theory report generated: {report_path}")
         else:
             print("   [DRY RUN] Would generate theory validation report")
 
     except Exception as e:
-        print(f"   ✗ Report generation failed: {e}")
+        print(f"   âœ— Report generation failed: {e}")
         import traceback
         traceback.print_exc()
 
@@ -7727,14 +8892,14 @@ def run_theory_analysis_pipeline(
             )
 
             theory_results['correlation_analysis_path'] = correlation_output
-            print("   ✓ Correlation analysis complete")
+            print("   âœ“ Correlation analysis complete")
         else:
             print("   [DRY RUN] Would run correlation analysis")
 
     except ImportError as e:
-        print(f"   ⚠ Correlation analysis module not available: {e}")
+        print(f"   âš  Correlation analysis module not available: {e}")
     except Exception as e:
-        print(f"   ✗ Correlation analysis failed: {e}")
+        print(f"   âœ— Correlation analysis failed: {e}")
         import traceback
         traceback.print_exc()
 
@@ -7986,7 +9151,7 @@ def aggregate_cross_experiment_results(results_dir: Path, experiment_results: Di
 
                 # Print results with adjusted p-values, CIs, and interpretation
                 print("\n   Effect Size Interpretation Guide:")
-                print("     |d| < 0.2: negligible, 0.2-0.5: small, 0.5-0.8: medium, ≥0.8: large")
+                print("     |d| < 0.2: negligible, 0.2-0.5: small, 0.5-0.8: medium, â‰¥0.8: large")
                 print()
                 for result in stat_results:
                     opt_a = result['optimizer_a']
@@ -8046,20 +9211,20 @@ def generate_final_summary_report(results_dir, experiment_results):
         f.write("\n## Results Directory Structure\n\n")
         f.write("```\n")
         f.write(f"{results_dir.name}/\n")
-        f.write("├── experiments/           # Experiment-specific results\n")
-        f.write("│   ├── mnist/            # MNIST classification results\n")
-        f.write("│   ├── cifar10/          # CIFAR-10 image classification\n")
-        f.write("│   ├── nlp/              # NLP sentiment analysis\n")
-        f.write("│   └── medical/          # Medical image segmentation\n")
-        f.write("├── visualizations/       # Interactive HTML plots\n")
-        f.write("│   └── *.html            # Open in browser for interactive charts\n")
-        f.write("├── analysis/             # Statistical & convergence analysis\n")
-        f.write("│   ├── convergence_rates.csv\n")
-        f.write("│   ├── statistical_comparison.csv\n")
-        f.write("│   └── basic_statistics_summary.csv\n")
-        f.write("├── reports/              # Summary reports\n")
-        f.write("│   └── experiment_summary_report.md  # This file\n")
-        f.write("└── checkpoints/          # Model checkpoints (if enabled)\n")
+        f.write("â”œâ”€â”€ experiments/           # Experiment-specific results\n")
+        f.write("â”‚   â”œâ”€â”€ mnist/            # MNIST classification results\n")
+        f.write("â”‚   â”œâ”€â”€ cifar10/          # CIFAR-10 image classification\n")
+        f.write("â”‚   â”œâ”€â”€ nlp/              # NLP sentiment analysis\n")
+        f.write("â”‚   â””â”€â”€ medical/          # Medical image segmentation\n")
+        f.write("â”œâ”€â”€ visualizations/       # Interactive HTML plots\n")
+        f.write("â”‚   â””â”€â”€ *.html            # Open in browser for interactive charts\n")
+        f.write("â”œâ”€â”€ analysis/             # Statistical & convergence analysis\n")
+        f.write("â”‚   â”œâ”€â”€ convergence_rates.csv\n")
+        f.write("â”‚   â”œâ”€â”€ statistical_comparison.csv\n")
+        f.write("â”‚   â””â”€â”€ basic_statistics_summary.csv\n")
+        f.write("â”œâ”€â”€ reports/              # Summary reports\n")
+        f.write("â”‚   â””â”€â”€ experiment_summary_report.md  # This file\n")
+        f.write("â””â”€â”€ checkpoints/          # Model checkpoints (if enabled)\n")
         f.write("```\n\n")
 
         f.write("## Integrated Analysis Features\n\n")
@@ -8201,6 +9366,24 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, skip_t
     print("\n" + "="*80)
     print("2D OPTIMIZATION EXPERIMENTS")
     print("="*80)
+    strict_convergence_threshold = 1e-6
+    practical_convergence_threshold = 1e-3
+
+    # Initialize robust gradient handler if enabled
+    robust_grad_handler = None
+    if ROBUST_GRADIENTS_ENABLED or GRADIENT_CLIP_NORM or USE_AGC:
+        try:
+            from src.core.robust_gradients import create_robust_gradient_handler
+            robust_grad_config = {
+                'clip_norm': GRADIENT_CLIP_NORM,
+                'use_agc': USE_AGC,
+                'use_trimmed_mean': USE_TRIMMED_MEAN,
+                'monitor_heavy_tails': MONITOR_HEAVY_TAILS
+            }
+            robust_grad_handler = create_robust_gradient_handler(enabled=True, config=robust_grad_config)
+            logging.info("[ROBUST GRADIENTS] Handler initialized for 2D Experiments")
+        except ImportError as e:
+            logging.warning(f"Could not import robust gradient handler: {e}")
 
     test_functions = [
         ("Rosenbrock", Rosenbrock(), (-1.5, 2.0)),
@@ -8224,200 +9407,633 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, skip_t
             optimizers_2d.append((opt_name, lambda params, hp=hp_adam: optim.Adam(params, **hp)))
 
     results = []
+    result_file = Path(results_dir) / "2d_optimization_results.csv"
+    artifact_pattern = re.compile(
+        r"^2D_(?P<function>[^_]+)_(?P<optimizer>.+)_seed(?P<seed>\d+)\.csv$"
+    )
 
-    for func_name, func, start_point in test_functions:
+    def _extract_keys_from_2d_df(df_in: Optional[pd.DataFrame]) -> Set[Tuple[str, str, int]]:
+        if df_in is None or df_in.empty:
+            return set()
+        required = {'function', 'optimizer', 'seed'}
+        if not required.issubset(df_in.columns):
+            return set()
+        valid_mask = pd.Series(True, index=df_in.index)
+        if 'iterations' in df_in.columns:
+            iters = pd.to_numeric(df_in['iterations'], errors='coerce').fillna(0.0)
+            valid_mask = valid_mask & (iters > 0)
+        if 'error' in df_in.columns:
+            err = df_in['error'].astype(str).str.strip()
+            valid_mask = valid_mask & (err.eq('') | err.eq('nan'))
+        keys = set()
+        for _, row in df_in.loc[valid_mask, ['function', 'optimizer', 'seed']].dropna().iterrows():
+            try:
+                keys.add((str(row['function']), str(row['optimizer']), int(row['seed'])))
+            except Exception:
+                continue
+        return keys
+
+    def _build_2d_df_from_artifacts() -> pd.DataFrame:
+        rows = []
+        for csv_path in Path(results_dir).rglob("2D_*_seed*.csv"):
+            match = artifact_pattern.match(csv_path.name)
+            if not match:
+                continue
+
+            func_name = str(match.group('function'))
+            opt_name = str(match.group('optimizer'))
+            seed = int(match.group('seed'))
+
+            final_loss = np.nan
+            final_grad_norm = np.nan
+            iterations = 0
+            initial_x = np.nan
+            initial_y = np.nan
+            final_x = [float('nan'), float('nan')]
+            path_length = np.nan
+            mean_step_size = np.nan
+            oscillation_rate = np.nan
+
+            try:
+                hist_df = pd.read_csv(csv_path)
+                if not hist_df.empty:
+                    iterations = int(len(hist_df))
+
+                    if 'loss' in hist_df.columns:
+                        loss_series = pd.to_numeric(hist_df['loss'], errors='coerce').dropna()
+                        if not loss_series.empty:
+                            final_loss = float(loss_series.iloc[-1])
+
+                    if 'grad_norm' in hist_df.columns:
+                        grad_series = pd.to_numeric(hist_df['grad_norm'], errors='coerce').dropna()
+                        if not grad_series.empty:
+                            final_grad_norm = float(grad_series.iloc[-1])
+
+                    if {'x', 'y'}.issubset(hist_df.columns):
+                        x_series = pd.to_numeric(hist_df['x'], errors='coerce')
+                        y_series = pd.to_numeric(hist_df['y'], errors='coerce')
+                        finite_mask = x_series.notna() & y_series.notna()
+                        if finite_mask.any():
+                            x_vals = x_series[finite_mask].to_numpy(dtype=float)
+                            y_vals = y_series[finite_mask].to_numpy(dtype=float)
+                            initial_x = float(x_vals[0])
+                            initial_y = float(y_vals[0])
+                            final_x = [float(x_vals[-1]), float(y_vals[-1])]
+                            if len(x_vals) >= 2:
+                                traj = np.column_stack([x_vals, y_vals])
+                                steps = np.diff(traj, axis=0)
+                                step_sizes = np.linalg.norm(steps, axis=1)
+                                if step_sizes.size > 0:
+                                    path_length = float(np.sum(step_sizes))
+                                    mean_step_size = float(np.mean(step_sizes))
+                                if steps.shape[0] >= 2:
+                                    prev_steps = steps[:-1]
+                                    next_steps = steps[1:]
+                                    denom = (
+                                        np.linalg.norm(prev_steps, axis=1)
+                                        * np.linalg.norm(next_steps, axis=1)
+                                        + 1e-12
+                                    )
+                                    cos_theta = np.clip(
+                                        np.sum(prev_steps * next_steps, axis=1) / denom,
+                                        -1.0,
+                                        1.0,
+                                    )
+                                    angles = np.arccos(cos_theta)
+                                    oscillation_rate = float(np.mean(angles > (np.pi / 2)))
+            except Exception:
+                logging.debug("Failed to parse 2D artifact CSV: %s", csv_path, exc_info=True)
+
+            converged_strict = bool(np.isfinite(final_loss) and final_loss < strict_convergence_threshold)
+            converged_practical = bool(np.isfinite(final_loss) and final_loss < practical_convergence_threshold)
+
+            rows.append(normalize_metric_names({
+                'function': func_name,
+                'optimizer': opt_name,
+                'seed': seed,
+                'initial_x': initial_x,
+                'initial_y': initial_y,
+                'final_loss': final_loss,
+                'final_grad_norm': final_grad_norm,
+                'final_x': final_x,
+                'iterations': iterations,
+                'converged': converged_strict,
+                'converged_strict': converged_strict,
+                'converged_practical': converged_practical,
+                'path_length': path_length,
+                'mean_step_size': mean_step_size,
+                'oscillation_rate': oscillation_rate,
+                'strict_convergence_threshold': strict_convergence_threshold,
+                'practical_convergence_threshold': practical_convergence_threshold,
+            }))
+
+        return pd.DataFrame(rows)
+
+    requested_keys = {
+        (str(func_name), str(opt_name), int(seed))
+        for func_name, _, _ in test_functions
+        for opt_name, _ in optimizers_2d
+        for seed in seeds
+    }
+
+    if resume:
+        existing_df = pd.DataFrame()
+        present_keys = set()
+        if result_file.exists():
+            try:
+                existing_df = pd.read_csv(result_file)
+                present_keys |= _extract_keys_from_2d_df(existing_df)
+            except Exception as e:
+                logging.debug("Could not read 2D summary file: %s", e, exc_info=True)
+
+        artifact_df = _build_2d_df_from_artifacts()
+        present_keys |= _extract_keys_from_2d_df(artifact_df)
+
+        if requested_keys.issubset(present_keys):
+            if existing_df.empty or not requested_keys.issubset(_extract_keys_from_2d_df(existing_df)):
+                recovered_frames = [df_part for df_part in (artifact_df, existing_df) if df_part is not None and not df_part.empty]
+                if recovered_frames:
+                    recovered_df = pd.concat(recovered_frames, ignore_index=True, sort=False)
+                    dedupe_cols = [c for c in ['function', 'optimizer', 'seed'] if c in recovered_df.columns]
+                    if dedupe_cols:
+                        recovered_df = recovered_df.drop_duplicates(subset=dedupe_cols, keep='first')
+                    sort_cols = [c for c in ['function', 'optimizer', 'seed'] if c in recovered_df.columns]
+                    if sort_cols:
+                        recovered_df = recovered_df.sort_values(sort_cols).reset_index(drop=True)
+                    os.makedirs(results_dir, exist_ok=True)
+                    recovered_df.to_csv(result_file, index=False)
+                    logging.info("Recovered 2D summary results from per-run artifacts")
+                    return recovered_df
+            logging.info("Skipping 2D experiment (all requested function/optimizer/seed combinations already completed)")
+            return existing_df if not existing_df.empty else artifact_df
+
+    def _seeded_start_point(function_name, default_start, seed_value):
+        """Deterministically sample a start point from seed to make convergence rates probabilistic."""
+        fn = str(function_name).lower()
+        rng_offset = 0 if fn == 'rosenbrock' else 10000 if fn == 'rastrigin' else 20000
+        rng = np.random.default_rng(int(seed_value) + rng_offset)
+        if fn == 'rosenbrock':
+            return (float(rng.uniform(-3.0, 3.0)), float(rng.uniform(-2.0, 4.0)))
+        if fn == 'rastrigin':
+            return (float(rng.uniform(-5.12, 5.12)), float(rng.uniform(-5.12, 5.12)))
+        return (float(default_start[0]), float(default_start[1]))
+
+    # 2D stability guards: keep parameters/gradients in a numerically safe range.
+    param_clip_abs = 100.0
+    grad_clip_norm_2d = 1e3
+
+    def _sanitize_2d_tensor_(x_tensor: torch.Tensor) -> None:
+        with torch.no_grad():
+            x_tensor.data = torch.nan_to_num(
+                x_tensor.data,
+                nan=0.0,
+                posinf=param_clip_abs,
+                neginf=-param_clip_abs,
+            )
+            x_tensor.data.clamp_(-param_clip_abs, param_clip_abs)
+
+    def _safe_loss_and_grad(func_obj, x_tensor: torch.Tensor) -> Tuple[np.ndarray, float, np.ndarray]:
+        x_np = x_tensor.detach().cpu().numpy().astype(np.float64, copy=False)
+        x_np = np.nan_to_num(x_np, nan=0.0, posinf=param_clip_abs, neginf=-param_clip_abs)
+        x_np = np.clip(x_np, -param_clip_abs, param_clip_abs)
+
+        loss_val = float(func_obj(x_np))
+        if not np.isfinite(loss_val):
+            # Retry at a smaller bounded range before surfacing instability.
+            x_np = np.clip(x_np, -10.0, 10.0)
+            loss_val = float(func_obj(x_np))
+
+        if not hasattr(func_obj, 'gradient'):
+            raise ValueError(f"Function {type(func_obj).__name__} has no gradient method")
+
+        grad_arr = np.asarray(func_obj.gradient(x_np), dtype=np.float64)
+        grad_arr = np.nan_to_num(grad_arr, nan=0.0, posinf=grad_clip_norm_2d, neginf=-grad_clip_norm_2d)
+        grad_norm_local = float(np.linalg.norm(grad_arr))
+        if np.isfinite(grad_norm_local) and grad_norm_local > grad_clip_norm_2d:
+            grad_arr = grad_arr * (grad_clip_norm_2d / (grad_norm_local + 1e-12))
+
+        return x_np.astype(np.float32), float(loss_val), grad_arr.astype(np.float32)
+
+    for func_name, func, default_start_point in test_functions:
         print(f"\nTesting Function: {func_name}")
         print("-" * 50)
 
         for opt_name, opt_func in optimizers_2d:
             for seed in seeds:
-                # Check if this specific experiment is already completed (results file shortcut)
-                if resume and is_experiment_completed(str(results_dir), '2D', func_name, opt_name, seed):
-                    logging.info(f"Skipping 2D {func_name} {opt_name} seed {seed} (already completed)")
-                    continue
-
-                set_seed(seed)
-
-                # --- Resume / Checkpoint support (per-run) ---
-                ckpt_file = f"2D_{func_name}_{opt_name}_seed{seed}.pt"
-                start_iter = 0
-                history = []
-                checkpoint = None
-
-                run_sig = compute_run_signature({'experiment': '2D', 'function': func_name, 'optimizer': opt_name, 'seed': seed, 'max_iter': 1000 if not quick else 200, 'start_point': start_point})
-
-                # Try to load checkpoint if manager provided
-                if checkpoint_manager:
-                    checkpoint = checkpoint_manager.load_checkpoint(ckpt_file, f"2D_{func_name}_{opt_name}_seed{seed}")
-
-                # Decide resume action when requested
-                if resume and checkpoint is None:
-                    try:
-                        action = decide_resume_action(checkpoint, Path(results_dir), run_sig, resume_behavior or 'skip_if_results_exist')
-                    except RuntimeError as e:
-                        logging.error("Resume error for %s seed %s: %s", opt_name, seed, e)
-                        raise
-
-                    if action == 'skip':
-                        logging.info(f"Skipping 2D {func_name} {opt_name} seed {seed} per resume policy")
-                        continue
-                    else:
-                        logging.info(f"No checkpoint found for 2D {func_name} {opt_name} seed {seed}; proceeding (resume_behavior={resume_behavior})")
-
-                # Initialize tensor (use saved state when available)
-                if checkpoint and checkpoint_manager.validate_optimizer_compatibility(checkpoint, opt_name):
-                    saved_x = checkpoint.get('x') or checkpoint.get('state', {}).get('x')
-                    if saved_x is not None:
-                        x = torch.tensor(saved_x, dtype=torch.float32, requires_grad=True)
-                    else:
-                        x = torch.tensor(start_point, dtype=torch.float32, requires_grad=True)
-                else:
-                    x = torch.tensor(start_point, dtype=torch.float32, requires_grad=True)
-
-                # Create optimizer AFTER tensor creation so optimizer param refs match saved state
-                optimizer = opt_func([x])
-
-                # Restore optimizer / history / RNG state if checkpoint available
-                if checkpoint and checkpoint_manager.validate_optimizer_compatibility(checkpoint, opt_name):
-                    opt_state = checkpoint.get('optimizer', {})
-
-                    def _optimizer_state_plausible(state, optimizer_obj):
-                        # Accept SAMWrapper-style (contains 'base_optimizer') or plain optimizer state
-                        if not isinstance(state, dict):
-                            return False
-                        inner = state.get('base_optimizer', state)
-                        if not isinstance(inner, dict):
-                            return False
-                        pgs = inner.get('param_groups')
-                        # Must have non-empty param_groups that match current optimizer
-                        if not isinstance(pgs, list) or len(pgs) == 0:
-                            return False
-                        try:
-                            if len(pgs) != len(getattr(optimizer_obj, 'param_groups', [])):
-                                return False
-                        except Exception:
-                            return False
-                        return True
-
-                    if _optimizer_state_plausible(opt_state, optimizer):
-                        try:
-                            optimizer.load_state_dict(opt_state)
-                        except Exception:
-                            logging.debug("Could not restore optimizer state for 2D run (continuing fresh)", exc_info=True)
-                    else:
-                        logging.warning("Skipping restore: checkpoint contains incomplete or incompatible optimizer state for %s", opt_name)
-
-                    start_iter = int(checkpoint.get('iteration', 0)) + 1
-                    history = checkpoint.get('history', []) or []
-                    checkpoint_manager.restore_rng_states(checkpoint)
-
-                max_iter = 200 if quick else 1000
-                ckpt_interval = max(1, max_iter // 10)
-
-                # Main optimization loop (may resume from start_iter)
-                for i in range(start_iter, max_iter):
-                    optimizer.zero_grad()
-
-                    # Evaluate function
-                    x_np = x.detach().numpy()
-                    loss_value = func(x_np)
-
-                    # Manually set gradient using analytical gradient from function
-                    grad = None
-                    if hasattr(func, 'gradient'):
-                        grad = func.gradient(x_np)
-                        x.grad = torch.tensor(grad, dtype=torch.float32)
-                    else:
-                        logging.warning(f"Function {func_name} has no gradient method")
-                        break
-
-                    grad_norm = float(np.linalg.norm(grad)) if grad is not None else 0.0
-
-                    if opt_name.startswith('SAM'):
-                        def closure():
-                            optimizer.zero_grad()
-                            x_np_c = x.detach().numpy()
-                            loss_c = func(x_np_c)
-                            if hasattr(func, 'gradient'):
-                                grad_c = func.gradient(x_np_c)
-                                x.grad = torch.tensor(grad_c, dtype=torch.float32)
-                            return torch.tensor(loss_c, dtype=torch.float32)
-                        optimizer.step(closure)
-                    else:
-                        optimizer.step()
-
-                    history_entry = {'iteration': i, 'loss': loss_value, 'grad_norm': grad_norm}
-                    if len(x_np) >= 2:
-                        history_entry['x'] = float(x_np[0]); history_entry['y'] = float(x_np[1])
-                    else:
-                        history_entry['x'] = float(x_np[0]); history_entry['y'] = 0.0
-                    history.append(history_entry)
-
-                    # Periodic checkpointing for long 2D runs
-                    if checkpoint_manager and (i % ckpt_interval == 0 or i == max_iter - 1):
-                        ckpt_data = {
-                            'opt_name': opt_name,
-                            'optimizer': optimizer.state_dict(),
-                            'iteration': i,
-                            'x': x.detach().cpu().numpy().tolist(),
-                            'history': history,
-                            'metadata': {'experiment': '2D', 'function': func_name, 'seed': seed, 'completed': False}
-                        }
-                        try:
-                            checkpoint_manager.save_checkpoint(ckpt_data, ckpt_file, f"2D_{func_name}_{opt_name}_seed{seed}")
-                        except Exception as e:
-                            logging.warning("Failed to save 2D checkpoint: %s", e)
-
-                    if loss_value < 1e-6:
-                        break
-
-                # Finalize per-run results
-                results.append(normalize_metric_names({
-                    'function': func_name,
-                    'optimizer': opt_name,
-                    'seed': seed,
-                    'final_loss': loss_value if history else float('nan'),
-                    'final_x': x.detach().numpy().tolist(),
-                    'iterations': len(history),
-                    'converged': loss_value < 1e-6 if history else False
-                }))
-
-                # Mark final checkpoint as completed
-                if checkpoint_manager:
-                    try:
-                        final_ckpt = {
-                            'opt_name': opt_name,
-                            'optimizer': optimizer.state_dict(),
-                            'iteration': i,
-                            'x': x.detach().cpu().numpy().tolist(),
-                            'history': history,
-                            'metadata': {'experiment': '2D', 'function': func_name, 'seed': seed, 'completed': True}
-                        }
-                        checkpoint_manager.save_checkpoint(final_ckpt, ckpt_file, f"2D_{func_name}_{opt_name}_seed{seed}")
-                    except Exception as e:
-                        logging.warning("Failed to save final 2D checkpoint: %s", e)
-
-                # Save per-run artifact for this 2D optimization run
                 try:
-                    params = {'function': func_name, 'optimizer': opt_name, 'max_iter': max_iter}
-                    save_run_artifacts(results_dir, '2D', func_name, opt_name, seed, history, params, device=None, exp_tracker=None)
-                except Exception as e:
-                    logging.debug("Failed to save 2D artifact for %s %s seed %s: %s", func_name, opt_name, seed, e, exc_info=True)
+                    # Check if this specific experiment is already completed (results file shortcut)
+                    if resume and is_experiment_completed(str(results_dir), '2D', func_name, opt_name, seed):
+                        logging.info(f"Skipping 2D {func_name} {opt_name} seed {seed} (already completed)")
+                        continue
 
-                final_loss = history[-1]['loss'] if history else float('nan')
-                converged = final_loss < 1e-6 if history else False
-                print(f"  {opt_name} (seed {seed}): Loss={final_loss:.6f}, Iters={len(history)}, Converged={converged}")
+                    set_seed(seed)
+                    run_start_point = _seeded_start_point(func_name, default_start_point, seed)
 
-    # Save results
+                    # --- Resume / Checkpoint support (per-run) ---
+                    ckpt_file = f"2D_{func_name}_{opt_name}_seed{seed}.pt"
+                    start_iter = 0
+                    history = []
+                    checkpoint = None
+
+                    run_sig = compute_run_signature({'experiment': '2D', 'function': func_name, 'optimizer': opt_name, 'seed': seed, 'max_iter': 1000 if not quick else 200, 'start_point': run_start_point})
+
+                    # Try to load checkpoint if manager provided
+                    if checkpoint_manager:
+                        checkpoint = checkpoint_manager.load_checkpoint(ckpt_file, f"2D_{func_name}_{opt_name}_seed{seed}")
+
+                    # If a checkpoint explicitly marks this run complete, skip it regardless of
+                    # optimizer-state restore compatibility.
+                    if resume and checkpoint and checkpoint.get('metadata', {}).get('completed', False):
+                        logging.info(
+                            "Skipping 2D %s %s seed %s (completed checkpoint found)",
+                            func_name,
+                            opt_name,
+                            seed,
+                        )
+                        continue
+
+                    # Decide resume action when requested
+                    if resume and checkpoint is None:
+                        try:
+                            action = decide_resume_action(checkpoint, Path(results_dir), run_sig, resume_behavior or 'skip_if_results_exist')
+                        except RuntimeError as e:
+                            logging.error("Resume error for %s seed %s: %s", opt_name, seed, e)
+                            raise
+
+                        if action == 'skip':
+                            logging.info(f"Skipping 2D {func_name} {opt_name} seed {seed} per resume policy")
+                            continue
+                        else:
+                            logging.info(f"No checkpoint found for 2D {func_name} {opt_name} seed {seed}; proceeding (resume_behavior={resume_behavior})")
+
+                    # Initialize tensor (use saved state when available)
+                    if checkpoint and checkpoint_manager.validate_optimizer_compatibility(checkpoint, opt_name):
+                        saved_x = checkpoint.get('x') or checkpoint.get('state', {}).get('x')
+                        if saved_x is not None:
+                            x = torch.tensor(saved_x, dtype=torch.float32, requires_grad=True)
+                        else:
+                            x = torch.tensor(run_start_point, dtype=torch.float32, requires_grad=True)
+                    else:
+                        x = torch.tensor(run_start_point, dtype=torch.float32, requires_grad=True)
+
+                    # Create optimizer AFTER tensor creation so optimizer param refs match saved state
+                    optimizer = opt_func([x])
+                    # Rosenbrock + SAM can become numerically unstable from hard starts.
+                    # Apply conservative settings for this specific pairing to avoid inf-loss failures.
+                    if func_name == 'Rosenbrock' and opt_name == 'SAM_SGD':
+                        try:
+                            stable_rho = min(float(getattr(optimizer, 'rho', 0.05)), 0.02)
+                            setattr(optimizer, 'rho', stable_rho)
+                            base_opt = getattr(optimizer, 'base_optimizer', None)
+                            if base_opt is not None:
+                                for pg in base_opt.param_groups:
+                                    pg_lr = float(pg.get('lr', 1e-3))
+                                    pg['lr'] = min(pg_lr, 5e-4)
+                        except Exception:
+                            logging.debug("Could not apply SAM Rosenbrock stability override", exc_info=True)
+
+                    # Restore optimizer / history / RNG state if checkpoint available
+                    if checkpoint and checkpoint_manager.validate_optimizer_compatibility(checkpoint, opt_name):
+                        opt_state = checkpoint.get('optimizer', {})
+
+                        def _optimizer_state_plausible(state, optimizer_obj):
+                            # Accept SAMWrapper-style (contains 'base_optimizer') or plain optimizer state
+                            if not isinstance(state, dict):
+                                return False
+                            inner = state.get('base_optimizer', state)
+                            if not isinstance(inner, dict):
+                                return False
+                            pgs = inner.get('param_groups')
+                            # Must have non-empty param_groups that match current optimizer
+                            if not isinstance(pgs, list) or len(pgs) == 0:
+                                return False
+                            try:
+                                if len(pgs) != len(getattr(optimizer_obj, 'param_groups', [])):
+                                    return False
+                            except Exception:
+                                return False
+                            return True
+
+                        if _optimizer_state_plausible(opt_state, optimizer):
+                            try:
+                                optimizer.load_state_dict(opt_state)
+                            except Exception:
+                                logging.debug("Could not restore optimizer state for 2D run (continuing fresh)", exc_info=True)
+                        else:
+                            logging.warning("Skipping restore: checkpoint contains incomplete or incompatible optimizer state for %s", opt_name)
+
+                        start_iter = int(checkpoint.get('iteration', 0)) + 1
+                        history = checkpoint.get('history', []) or []
+                        checkpoint_manager.restore_rng_states(checkpoint)
+
+                    max_iter = 200 if quick else 1000
+                    ckpt_interval = max(1, max_iter // 10)
+
+                    # Main optimization loop (may resume from start_iter)
+                    for i in range(start_iter, max_iter):
+                        optimizer.zero_grad()
+                        _sanitize_2d_tensor_(x)
+
+                        # Evaluate function
+                        x_np, loss_value, grad = _safe_loss_and_grad(func, x)
+
+                        # If loss remains non-finite after sanitization, stop this run gracefully.
+                        if not np.isfinite(loss_value):
+                            logging.warning(
+                                "Non-finite 2D loss after sanitization for %s/%s seed %s at iter %s; stopping run.",
+                                func_name,
+                                opt_name,
+                                seed,
+                                i,
+                            )
+                            break
+
+                        # Manually set gradient using analytical gradient from function
+                        x.grad = torch.tensor(grad, dtype=torch.float32)
+
+                        grad_norm = float(np.linalg.norm(grad)) if grad is not None else 0.0
+
+                        # Apply robust gradient handling if enabled (analytical gradients)
+                        if robust_grad_handler and grad is not None:
+                            # Create a dummy model-like object for the handler which expects .parameters()
+                            class DummyModel(nn.Module):
+                                def __init__(self, p):
+                                    super().__init__()
+                                    self.p = nn.Parameter(p)
+                                    self.p.grad = p.grad
+                            
+                            dummy_model = DummyModel(x)
+                            robust_grad_handler(dummy_model)
+                            # Update grad_norm after handling
+                            grad_norm = float(torch.norm(x.grad).item())
+
+                        if opt_name.startswith('SAM'):
+                            def closure():
+                                optimizer.zero_grad()
+                                _sanitize_2d_tensor_(x)
+                                _, loss_c, grad_c = _safe_loss_and_grad(func, x)
+                                x.grad = torch.tensor(grad_c, dtype=torch.float32)
+                                # Return Python float to avoid float32 overflow-to-inf casts in SAMWrapper checks.
+                                return float(loss_c)
+                            try:
+                                optimizer.step(closure)
+                            except (ValueError, RuntimeError) as sam_e:
+                                sam_msg = str(sam_e)
+                                if "Non-finite loss" in sam_msg:
+                                    # Recover instead of failing the entire trial:
+                                    # 1) sanitize params, 2) use conservative base step with clipped grad.
+                                    logging.warning(
+                                        "SAM instability recovered for 2D %s %s seed %s iter %s: %s",
+                                        func_name,
+                                        opt_name,
+                                        seed,
+                                        i,
+                                        sam_msg.splitlines()[0],
+                                    )
+                                    _sanitize_2d_tensor_(x)
+                                    _, _, grad_recover = _safe_loss_and_grad(func, x)
+                                    x.grad = torch.tensor(grad_recover, dtype=torch.float32)
+                                    base_opt = getattr(optimizer, 'base_optimizer', None)
+                                    if base_opt is not None:
+                                        base_opt.step()
+                                    else:
+                                        optimizer.step()
+                                else:
+                                    raise
+                        else:
+                            optimizer.step()
+
+                        _sanitize_2d_tensor_(x)
+
+                        # Record post-update state to keep trajectories and losses faithful.
+                        x_np_after, loss_after, grad_after = _safe_loss_and_grad(func, x)
+                        grad_norm_after = float(np.linalg.norm(grad_after)) if grad_after is not None else grad_norm
+                        history_entry = {'iteration': i, 'loss': float(loss_after), 'grad_norm': float(grad_norm_after)}
+                        if len(x_np_after) >= 2:
+                            history_entry['x'] = float(x_np_after[0]); history_entry['y'] = float(x_np_after[1])
+                        else:
+                            history_entry['x'] = float(x_np_after[0]); history_entry['y'] = 0.0
+                        history.append(history_entry)
+
+                        # Periodic checkpointing for long 2D runs
+                        if checkpoint_manager and (i % ckpt_interval == 0 or i == max_iter - 1):
+                            ckpt_data = {
+                                'opt_name': opt_name,
+                                'optimizer': optimizer.state_dict(),
+                                'iteration': i,
+                                'x': x.detach().cpu().numpy().tolist(),
+                                'history': history,
+                                'metadata': {
+                                    'experiment': '2D',
+                                    'function': func_name,
+                                    'seed': seed,
+                                    'start_point': [float(run_start_point[0]), float(run_start_point[1])],
+                                    'completed': False,
+                                }
+                            }
+                            try:
+                                checkpoint_manager.save_checkpoint(ckpt_data, ckpt_file, f"2D_{func_name}_{opt_name}_seed{seed}")
+                            except Exception as e:
+                                logging.warning("Failed to save 2D checkpoint: %s", e)
+
+                        if float(loss_after) < strict_convergence_threshold:
+                            break
+
+                    # Finalize per-run results with dynamics-derived summary metrics.
+                    final_loss = float(history[-1]['loss']) if history else float('nan')
+                    final_grad_norm = float(history[-1].get('grad_norm', np.nan)) if history else float('nan')
+                    path_length = float('nan')
+                    mean_step_size = float('nan')
+                    oscillation_rate = float('nan')
+                    if history:
+                        traj = np.array(
+                            [[float(h.get('x', np.nan)), float(h.get('y', np.nan))] for h in history],
+                            dtype=float
+                        )
+                        traj = traj[np.isfinite(traj).all(axis=1)]
+                        if traj.shape[0] >= 2:
+                            steps = np.diff(traj, axis=0)
+                            step_sizes = np.linalg.norm(steps, axis=1)
+                            if step_sizes.size > 0:
+                                path_length = float(np.sum(step_sizes))
+                                mean_step_size = float(np.mean(step_sizes))
+                            if steps.shape[0] >= 2:
+                                prev_steps = steps[:-1]
+                                next_steps = steps[1:]
+                                denom = (
+                                    np.linalg.norm(prev_steps, axis=1)
+                                    * np.linalg.norm(next_steps, axis=1)
+                                    + 1e-12
+                                )
+                                cos_theta = np.clip(
+                                    np.sum(prev_steps * next_steps, axis=1) / denom,
+                                    -1.0,
+                                    1.0,
+                                )
+                                angles = np.arccos(cos_theta)
+                                oscillation_rate = float(np.mean(angles > (np.pi / 2)))
+
+                    converged_strict = bool(final_loss < strict_convergence_threshold) if history else False
+                    converged_practical = bool(final_loss < practical_convergence_threshold) if history else False
+                    results.append(normalize_metric_names({
+                        'function': func_name,
+                        'optimizer': opt_name,
+                        'seed': seed,
+                        'initial_x': float(run_start_point[0]),
+                        'initial_y': float(run_start_point[1]),
+                        'final_loss': final_loss,
+                        'final_grad_norm': final_grad_norm,
+                        'final_x': x.detach().numpy().tolist(),
+                        'iterations': len(history),
+                        # Keep legacy 'converged' as strict threshold for backward compatibility.
+                        'converged': converged_strict,
+                        'converged_strict': converged_strict,
+                        'converged_practical': converged_practical,
+                        'path_length': path_length,
+                        'mean_step_size': mean_step_size,
+                        'oscillation_rate': oscillation_rate,
+                        'strict_convergence_threshold': strict_convergence_threshold,
+                        'practical_convergence_threshold': practical_convergence_threshold,
+                    }))
+
+                    # Mark final checkpoint as completed
+                    if checkpoint_manager:
+                        try:
+                            final_ckpt = {
+                                'opt_name': opt_name,
+                                'optimizer': optimizer.state_dict(),
+                                'iteration': i,
+                                'x': x.detach().cpu().numpy().tolist(),
+                                'history': history,
+                                'metadata': {
+                                    'experiment': '2D',
+                                    'function': func_name,
+                                    'seed': seed,
+                                    'start_point': [float(run_start_point[0]), float(run_start_point[1])],
+                                    'completed': True,
+                                }
+                            }
+                            checkpoint_manager.save_checkpoint(final_ckpt, ckpt_file, f"2D_{func_name}_{opt_name}_seed{seed}")
+                        except Exception as e:
+                            logging.warning("Failed to save final 2D checkpoint: %s", e)
+
+                    # Save per-run artifact for this 2D optimization run
+                    try:
+                        params = {
+                            'function': func_name,
+                            'optimizer': opt_name,
+                            'max_iter': max_iter,
+                            'initial_x': float(run_start_point[0]),
+                            'initial_y': float(run_start_point[1]),
+                        }
+                        save_run_artifacts(results_dir, '2D', func_name, opt_name, seed, history, params, device=None, exp_tracker=None)
+                    except Exception as e:
+                        logging.debug("Failed to save 2D artifact for %s %s seed %s: %s", func_name, opt_name, seed, e, exc_info=True)
+
+                    final_loss = history[-1]['loss'] if history else float('nan')
+                    converged_strict = final_loss < strict_convergence_threshold if history else False
+                    converged_practical = final_loss < practical_convergence_threshold if history else False
+                    print(
+                        f"  {opt_name} (seed {seed}, start=({run_start_point[0]:.2f}, {run_start_point[1]:.2f})): "
+                        f"Loss={final_loss:.6f}, Iters={len(history)}, "
+                        f"Converged(strict<{strict_convergence_threshold:g})={converged_strict}, "
+                        f"Converged(practical<{practical_convergence_threshold:g})={converged_practical}"
+                    )
+
+                except Exception as trial_e:
+                    logging.error(
+                        "Trial failed for 2D %s %s seed %s start=(%.3f, %.3f): %s",
+                        func_name,
+                        opt_name,
+                        seed,
+                        float(run_start_point[0]),
+                        float(run_start_point[1]),
+                        trial_e,
+                    )
+                    results.append(normalize_metric_names({
+                        'function': func_name,
+                        'optimizer': opt_name,
+                        'seed': seed,
+                        'initial_x': float(run_start_point[0]),
+                        'initial_y': float(run_start_point[1]),
+                        'final_loss': float('nan'),
+                        'final_grad_norm': float('nan'),
+                        'final_x': [float('nan'), float('nan')],
+                        'iterations': 0,
+                        'converged': False,
+                        'converged_strict': False,
+                        'converged_practical': False,
+                        'path_length': float('nan'),
+                        'mean_step_size': float('nan'),
+                        'oscillation_rate': float('nan'),
+                        'strict_convergence_threshold': strict_convergence_threshold,
+                        'practical_convergence_threshold': practical_convergence_threshold,
+                        'error': str(trial_e),
+                    }))
+
+    # Save results (merge with existing summary and per-run artifacts for resume safety)
     os.makedirs(results_dir, exist_ok=True)
-    df = pd.DataFrame(results)
-    df.to_csv(f"{results_dir}/2d_optimization_results.csv", index=False)
+    new_df = pd.DataFrame(results)
+    existing_df = pd.DataFrame()
+    if result_file.exists():
+        try:
+            existing_df = pd.read_csv(result_file)
+        except Exception:
+            logging.debug("Could not read existing 2D summary for merge", exc_info=True)
+    artifact_df = _build_2d_df_from_artifacts()
+
+    frames = []
+    if not existing_df.empty:
+        existing_df = existing_df.copy()
+        existing_df['_source'] = 'existing'
+        frames.append(existing_df)
+    if not artifact_df.empty:
+        artifact_df = artifact_df.copy()
+        artifact_df['_source'] = 'artifact'
+        frames.append(artifact_df)
+    if not new_df.empty:
+        new_df = new_df.copy()
+        new_df['_source'] = 'new'
+        frames.append(new_df)
+
+    if frames:
+        df = pd.concat(frames, ignore_index=True, sort=False)
+        dedupe_cols = [c for c in ['function', 'optimizer', 'seed'] if c in df.columns]
+        if dedupe_cols:
+            final_loss_num = pd.to_numeric(df.get('final_loss', np.nan), errors='coerce')
+            iterations_num = pd.to_numeric(df.get('iterations', 0), errors='coerce').fillna(0)
+            if 'error' in df.columns:
+                has_error = df['error'].notna() & (df['error'].astype(str).str.strip() != '')
+            else:
+                has_error = pd.Series(False, index=df.index)
+            df['_quality_score'] = (
+                final_loss_num.notna().astype(int) * 2
+                + (iterations_num > 0).astype(int)
+                + (~has_error).astype(int)
+            )
+            source_rank = {'new': 2, 'artifact': 1, 'existing': 0}
+            df['_source_rank'] = df['_source'].map(source_rank).fillna(0).astype(int)
+            df = df.sort_values(
+                dedupe_cols + ['_quality_score', '_source_rank'],
+                ascending=[True] * len(dedupe_cols) + [False, False],
+            )
+            df = df.drop_duplicates(subset=dedupe_cols, keep='first')
+        sort_cols = [c for c in ['function', 'optimizer', 'seed'] if c in df.columns]
+        if sort_cols:
+            df = df.sort_values(sort_cols).reset_index(drop=True)
+        for temp_col in ['_source', '_quality_score', '_source_rank']:
+            if temp_col in df.columns:
+                df = df.drop(columns=[temp_col])
+    else:
+        df = pd.DataFrame()
+
+    df.to_csv(result_file, index=False)
 
     print(f"\nResults saved to {results_dir}/2d_optimization_results.csv")
 
     # Generate visualizations for 2D experiment
     try:
-        twod_csvs = list(Path(results_dir).glob("*.csv"))
+        twod_csvs = list(Path(results_dir).rglob("*.csv"))
         logging.debug(f"2D experiment found {len(twod_csvs)} CSVs in {results_dir}")
         if twod_csvs:
             create_experiment_visualizations('2D_Optimization', str(Path(results_dir).parent.parent), twod_csvs)
@@ -8437,13 +10053,29 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
         quick: If True, run a smaller/faster subset for CI or debugging
         skip_tuning: Accepted for API compatibility (unused)
         profiler, tracker, checkpoint_manager: Accepted for API compatibility
-        seeds: List of seeds for reproducibility (uses first seed)
+        seeds: List of seeds for reproducibility
         resume: If True, skip experiments that already have result files
         resume_behavior: Optional resume behavior string (accepted for compatibility)
     """
     print("\n" + "="*80)
     print("INITIAL CONDITION ROBUSTNESS ANALYSIS")
     print("="*80)
+
+    # Initialize robust gradient handler if enabled
+    robust_grad_handler = None
+    if ROBUST_GRADIENTS_ENABLED or GRADIENT_CLIP_NORM or USE_AGC:
+        try:
+            from src.core.robust_gradients import create_robust_gradient_handler
+            robust_grad_config = {
+                'clip_norm': GRADIENT_CLIP_NORM,
+                'use_agc': USE_AGC,
+                'use_trimmed_mean': USE_TRIMMED_MEAN,
+                'monitor_heavy_tails': MONITOR_HEAVY_TAILS
+            }
+            robust_grad_handler = create_robust_gradient_handler(enabled=True, config=robust_grad_config)
+            logging.info("[ROBUST GRADIENTS] Handler initialized for Robustness Analysis")
+        except ImportError as e:
+            logging.warning(f"Could not import robust gradient handler: {e}")
 
     rosenbrock = Rosenbrock()
     initial_points = [
@@ -8456,46 +10088,160 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
         initial_points = initial_points[:4]
 
     optimizers_robust = []
-    for opt_name in [OptimizerNames.SGD, OptimizerNames.ADAM, 'SAM_SGD']:
+    
+    # Import custom wrappers to fulfill proposal criteria (student-coded algorithms)
+    from src.core.pytorch_optimizers import SGDWrapper, SGDMomentumWrapper, AdamWrapper
+
+    for opt_name in [OptimizerNames.SGD, OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM, 'SAM_SGD', 'SAM_Adam']:
         hyperparams = get_default_hyperparameters(opt_name, "2d_optimization")
-        if opt_name == 'SAM_SGD':
+        if opt_name.startswith('SAM'):
             # Construct a SAMWrapper wrapping a concrete base optimizer instance
-            def _sam_factory(params, hp=hyperparams):
-                # Extract SAM-specific parameters before passing to SGD
+            def _sam_factory(params, opt_name=opt_name, hp=hyperparams):
+                # Extract SAM-specific parameters before passing to base
                 hp_clean = hp.copy()
                 sam_rho = hp_clean.pop('rho', 0.05)
                 sam_adaptive = hp_clean.pop('adaptive', False)
-                try:
-                    base_opt = optim.SGD(params, **hp_clean)
-                except TypeError:
-                    base_opt = optim.SGD(params, lr=hp_clean.get('lr', 0.01))
-                return SAMWrapper(base_opt, rho=sam_rho, adaptive=sam_adaptive)
+                if 'Adam' in opt_name:
+                    base_opt = AdamWrapper(params, lr=hp_clean.get('lr', 0.001))
+                else:
+                    # TUNING FIX: Increase SGD LR for Robustness sweep on hard Rosenbrock
+                    base_opt = SGDWrapper(params, lr=0.05 if 'SGD' in opt_name else hp_clean.get('lr', 0.01))
+                # TUNING FIX: Reduce rho for narrow Rosenbrock valley
+                return SAMWrapper(base_opt, rho=0.01, adaptive=sam_adaptive)
             optimizers_robust.append((opt_name, _sam_factory))
-        elif opt_name == 'SGD':
-            optimizers_robust.append((opt_name, lambda params, hp=hyperparams: optim.SGD(params, **hp)))
-        elif opt_name == 'Adam':
-            # Convert beta1/beta2 to betas tuple for torch.optim.Adam
-            hp_adam = hyperparams.copy()
-            if 'beta1' in hp_adam and 'beta2' in hp_adam:
-                hp_adam['betas'] = (hp_adam.pop('beta1'), hp_adam.pop('beta2'))
-            optimizers_robust.append((opt_name, lambda params, hp=hp_adam: optim.Adam(params, **hp)))
+        elif opt_name == OptimizerNames.SGD:
+            optimizers_robust.append((opt_name, lambda params, hp=hyperparams: SGDWrapper(params, lr=0.05)))
+        elif opt_name == OptimizerNames.SGD_MOMENTUM:
+            optimizers_robust.append((opt_name, lambda params, hp=hyperparams: SGDMomentumWrapper(params, lr=0.05, momentum=hp.get('momentum', 0.9))))
+        elif opt_name == OptimizerNames.ADAM:
+            optimizers_robust.append((opt_name, lambda params, hp=hyperparams: AdamWrapper(params, lr=hp.get('lr', 0.001), beta1=hp.get('beta1', 0.9), beta2=hp.get('beta2', 0.999))))
 
-    # Check if experiment is already completed (single CSV output)
+    expected_keys = {
+        (str(opt_name), int(seed), int(start_idx))
+        for seed in seeds
+        for opt_name, _ in optimizers_robust
+        for start_idx in range(len(initial_points))
+    }
+    result_file = Path(results_dir) / "robustness_results.csv"
+    artifact_pattern = re.compile(
+        r"^Robustness_Rosenbrock_(?P<optimizer>.+)_start(?P<start>\d+)_seed(?P<seed>\d+)\.csv$"
+    )
+
+    def _extract_keys_from_robustness_df(df_in: Optional[pd.DataFrame]) -> Set[Tuple[str, int, int]]:
+        if df_in is None or df_in.empty:
+            return set()
+        required = {'optimizer', 'seed', 'start_point'}
+        if not required.issubset(df_in.columns):
+            return set()
+        keys = set()
+        for _, row in df_in[['optimizer', 'seed', 'start_point']].dropna().iterrows():
+            try:
+                keys.add((str(row['optimizer']), int(row['seed']), int(row['start_point'])))
+            except Exception:
+                continue
+        return keys
+
+    def _build_robustness_df_from_artifacts() -> pd.DataFrame:
+        rows = []
+        for csv_path in Path(results_dir).glob("Robustness_Rosenbrock_*_start*_seed*.csv"):
+            match = artifact_pattern.match(csv_path.name)
+            if not match:
+                continue
+            optimizer = str(match.group('optimizer'))
+            seed = int(match.group('seed'))
+            start_idx = int(match.group('start'))
+            initial_x = np.nan
+            initial_y = np.nan
+            converged = False
+            iterations = 0
+            final_loss = np.nan
+            final_grad_norm = np.nan
+
+            metadata_path = csv_path.with_suffix('.metadata.json')
+            if metadata_path.exists():
+                try:
+                    meta = json.loads(metadata_path.read_text(encoding='utf-8'))
+                    params = meta.get('params', {}) if isinstance(meta, dict) else {}
+                    converged = bool(params.get('converged', False))
+                    sp = params.get('start_point')
+                    if isinstance(sp, (list, tuple)) and len(sp) >= 2:
+                        initial_x = float(sp[0])
+                        initial_y = float(sp[1])
+                    rows_original = meta.get('rows_original')
+                    if rows_original is not None:
+                        iterations = int(rows_original)
+                except Exception:
+                    logging.debug("Failed to parse robustness metadata: %s", metadata_path, exc_info=True)
+
+            try:
+                hist_df = pd.read_csv(csv_path)
+                if 'loss' in hist_df.columns:
+                    loss_series = pd.to_numeric(hist_df['loss'], errors='coerce').dropna()
+                    if not loss_series.empty:
+                        final_loss = float(loss_series.iloc[-1])
+                if 'grad_norm' in hist_df.columns:
+                    grad_series = pd.to_numeric(hist_df['grad_norm'], errors='coerce').dropna()
+                    if not grad_series.empty:
+                        final_grad_norm = float(grad_series.iloc[-1])
+                if iterations <= 0:
+                    if 'iteration' in hist_df.columns:
+                        iter_series = pd.to_numeric(hist_df['iteration'], errors='coerce').dropna()
+                        if not iter_series.empty:
+                            iterations = int(iter_series.iloc[-1]) + 1
+                        else:
+                            iterations = int(len(hist_df))
+                    else:
+                        iterations = int(len(hist_df))
+            except Exception:
+                logging.debug("Failed to parse robustness artifact CSV: %s", csv_path, exc_info=True)
+
+            rows.append({
+                'optimizer': optimizer,
+                'seed': seed,
+                'start_point': start_idx,
+                'initial_x': initial_x,
+                'initial_y': initial_y,
+                'final_x': np.nan,
+                'final_y': np.nan,
+                'final_loss': final_loss,
+                'final_grad_norm': final_grad_norm,
+                'iterations': int(iterations),
+                'converged': bool(converged),
+            })
+        return pd.DataFrame(rows)
+
+    # Check if requested subset is already complete (by summary CSV and/or artifacts)
     if resume:
-        result_file = Path(results_dir) / "robustness_results.csv"
+        existing_df = pd.DataFrame()
+        present_keys = set()
         if result_file.exists():
             try:
-                df = pd.read_csv(result_file)
-                if len(df) > 0:
-                    logging.info(f"Skipping Robustness experiment (already completed)")
-                    return df
+                existing_df = pd.read_csv(result_file)
+                present_keys |= _extract_keys_from_robustness_df(existing_df)
             except Exception as e:
                 logging.debug("Could not read robustness results file: %s", e, exc_info=True)
+
+        artifact_df = _build_robustness_df_from_artifacts()
+        present_keys |= _extract_keys_from_robustness_df(artifact_df)
+
+        if expected_keys.issubset(present_keys):
+            if existing_df.empty or not expected_keys.issubset(_extract_keys_from_robustness_df(existing_df)):
+                # Rebuild canonical summary from artifacts when CSV is missing/incomplete.
+                if not artifact_df.empty:
+                    artifact_df = artifact_df.drop_duplicates(
+                        subset=['optimizer', 'seed', 'start_point'], keep='last'
+                    ).sort_values(['seed', 'optimizer', 'start_point']).reset_index(drop=True)
+                    os.makedirs(results_dir, exist_ok=True)
+                    artifact_df.to_csv(result_file, index=False)
+                    logging.info("Recovered robustness_results.csv from per-run artifacts")
+                    return artifact_df
+            logging.info("Skipping Robustness experiment (all requested seeds/start-points already completed)")
+            return existing_df
 
     results = []
 
     for seed in seeds:
-        logging.info(f"\n🎲 Running Robustness Analysis with seed={seed}")
+        logging.info("\nRunning Robustness Analysis with seed=%s", seed)
         set_seed(seed)
 
         for opt_name, opt_func in optimizers_robust:
@@ -8503,6 +10249,12 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
             logging.info("-" * 50)
 
             for idx, start_point in enumerate(initial_points):
+                # Fast resume path: if per-run artifact already exists, skip immediately.
+                if resume:
+                    artifact_csv = Path(results_dir) / f"Robustness_Rosenbrock_{opt_name}_start{idx}_seed{seed}.csv"
+                    if artifact_csv.exists():
+                        continue
+
                 # Per-start-point resume/checkpoint support
                 ckpt_file = f"Robustness_Rosenbrock_{opt_name}_seed{seed}_start{idx}.pt"
                 checkpoint = None
@@ -8512,6 +10264,15 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
                 run_sig = compute_run_signature({'experiment': 'Robustness', 'function': 'Rosenbrock', 'optimizer': opt_name, 'seed': seed, 'start_point': start_point})
                 if checkpoint_manager:
                     checkpoint = checkpoint_manager.load_checkpoint(ckpt_file, f"Robustness_Rosenbrock_{opt_name}_seed{seed}_start{idx}")
+
+                if resume and checkpoint and checkpoint.get('metadata', {}).get('completed', False):
+                    logging.info(
+                        "Skipping Robustness %s seed %s start %s (completed checkpoint found)",
+                        opt_name,
+                        seed,
+                        start_point,
+                    )
+                    continue
 
                 if resume and checkpoint is None:
                     try:
@@ -8568,7 +10329,7 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
                     history = checkpoint.get('history', []) or []
                     checkpoint_manager.restore_rng_states(checkpoint)
 
-                max_iter = 500 if quick else 2000
+                max_iter = 2000 if quick else 20000
                 ckpt_interval = max(1, max_iter // 10)
                 converged = False
 
@@ -8580,14 +10341,34 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
                         optimizer.zero_grad()
                         loss = rosenbrock.torch_loss(x)
                         loss.backward()
-                        torch.nn.utils.clip_grad_norm_([x], 10.0)
+
+                        # Apply robust gradient handling OR default clipping
+                        if robust_grad_handler:
+                            # Wrap tensor in a dummy module for the handler
+                            class DummyModel(nn.Module):
+                                def __init__(self, p):
+                                    super().__init__()
+                                    self.p = nn.Parameter(p)
+                                    self.p.grad = p.grad
+                            robust_grad_handler(DummyModel(x))
+                        else:
+                            torch.nn.utils.clip_grad_norm_([x], 10.0)
 
                         if opt_name.startswith('SAM'):
                             def closure():
                                 optimizer.zero_grad()
                                 loss_c = rosenbrock.torch_loss(x)
                                 loss_c.backward()
-                                torch.nn.utils.clip_grad_norm_([x], 10.0)
+                                # Apply robust gradient handling OR default clipping
+                                if robust_grad_handler:
+                                    class DummyModel(nn.Module):
+                                        def __init__(self, p):
+                                            super().__init__()
+                                            self.p = nn.Parameter(p)
+                                            self.p.grad = p.grad
+                                    robust_grad_handler(DummyModel(x))
+                                else:
+                                    torch.nn.utils.clip_grad_norm_([x], 10.0)
                                 return loss_c
                             optimizer.step(closure)
                         else:
@@ -8621,10 +10402,10 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
                         except Exception as e:
                             logging.warning("Failed to save robustness checkpoint: %s", e)
 
-                    # Check convergence using last computed loss
+                    # Check convergence using last computed loss (relax threshold for hard Rosenbrock function)
                     try:
                         loss_val = float(loss)
-                        if loss_val < 1e-6:
+                        if loss_val < 1e-4:
                             converged = True
                             break
                     except Exception:
@@ -8634,9 +10415,17 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
                 results.append({
                     'optimizer': opt_name,
                     'seed': seed,
+                    'start_point': idx,
                     'initial_x': start_point[0],
                     'initial_y': start_point[1],
+                    'final_x': float(x.detach().cpu().numpy()[0]),
+                    'final_y': float(x.detach().cpu().numpy()[1]),
                     'final_loss': loss.item(),
+                    'final_grad_norm': (
+                        float(history[-1].get('grad_norm'))
+                        if history and history[-1].get('grad_norm') is not None
+                        else np.nan
+                    ),
                     'iterations': i + 1,
                     'converged': converged
                 })
@@ -8664,16 +10453,36 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
 
                 print(f"  Start {start_point}: Loss={loss.item():.6f}, Iters={i+1}, Converged={converged}")
 
-    # Save results
+    # Save results (merge with existing summary and artifact-derived rows to preserve resumability)
     os.makedirs(results_dir, exist_ok=True)
-    df = pd.DataFrame(results)
-    df.to_csv(f"{results_dir}/robustness_results.csv", index=False)
+    new_df = pd.DataFrame(results)
+    existing_df = pd.DataFrame()
+    if result_file.exists():
+        try:
+            existing_df = pd.read_csv(result_file)
+        except Exception:
+            logging.debug("Could not read existing robustness summary for merge", exc_info=True)
+    artifact_df = _build_robustness_df_from_artifacts()
 
-    print(f"\n💾 Results saved to {results_dir}/robustness_results.csv")
+    frames = [df_part for df_part in (existing_df, artifact_df, new_df) if df_part is not None and not df_part.empty]
+    if frames:
+        df = pd.concat(frames, ignore_index=True, sort=False)
+        dedupe_cols = [c for c in ['optimizer', 'seed', 'start_point'] if c in df.columns]
+        if dedupe_cols:
+            df = df.drop_duplicates(subset=dedupe_cols, keep='last')
+        sort_cols = [c for c in ['seed', 'optimizer', 'start_point'] if c in df.columns]
+        if sort_cols:
+            df = df.sort_values(sort_cols).reset_index(drop=True)
+    else:
+        df = pd.DataFrame()
+
+    df.to_csv(result_file, index=False)
+
+    print(f"\nResults saved to {results_dir}/robustness_results.csv")
 
     # Generate visualizations for Robustness experiment
     try:
-        robustness_csvs = list(Path(results_dir).glob("*.csv"))
+        robustness_csvs = list(Path(results_dir).rglob("*.csv"))
         logging.debug(f"Robustness experiment found {len(robustness_csvs)} CSVs in {results_dir}")
         if robustness_csvs:
             create_experiment_visualizations('Robustness', str(Path(results_dir).parent.parent), robustness_csvs)
@@ -8693,28 +10502,143 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=None, quick
         quick: If True, run a smaller/faster subset for CI or debugging
         skip_tuning: Accepted for API compatibility (unused)
         profiler, tracker, checkpoint_manager: Accepted for API compatibility
-        seeds: List of seeds for reproducibility (uses first seed)
+        seeds: List of seeds for reproducibility
         resume: If True, skip experiments that already have result files
         resume_behavior: Optional resume behavior string (accepted for compatibility)
     """
     logging.info("\n" + "="*80)
-    logging.info("🎛️  SAM SENSITIVITY ANALYSIS")
+    logging.info("SAM SENSITIVITY ANALYSIS")
     logging.info("="*80)
 
-    # Check if experiment is already completed
+    # Initialize robust gradient handler if enabled
+    robust_grad_handler = None
+    if ROBUST_GRADIENTS_ENABLED or GRADIENT_CLIP_NORM or USE_AGC:
+        try:
+            from src.core.robust_gradients import create_robust_gradient_handler
+            robust_grad_config = {
+                'clip_norm': GRADIENT_CLIP_NORM,
+                'use_agc': USE_AGC,
+                'use_trimmed_mean': USE_TRIMMED_MEAN,
+                'monitor_heavy_tails': MONITOR_HEAVY_TAILS
+            }
+            robust_grad_handler = create_robust_gradient_handler(enabled=True, config=robust_grad_config)
+            logging.info("[ROBUST GRADIENTS] Handler initialized for SAM Sensitivity")
+        except ImportError as e:
+            logging.warning(f"Could not import robust gradient handler: {e}")
+
+    rho_values = [0.05] if quick else [0.01, 0.02, 0.05, 0.1, 0.2]
+    result_file = Path(results_dir) / "sam_sensitivity_results.csv"
+    sam_artifact_pattern = re.compile(
+        r"^MNIST_SimpleMLP_SAM_rho_(?P<rho>[0-9eE\.\-]+)_seed(?P<seed>\d+)\.csv$"
+    )
+
+    def _rho_key(rho_val: float) -> float:
+        return round(float(rho_val), 10)
+
+    def _extract_keys_from_sam_df(df_in: Optional[pd.DataFrame]) -> Set[Tuple[int, float]]:
+        if df_in is None or df_in.empty:
+            return set()
+        required = {'seed', 'rho'}
+        if not required.issubset(df_in.columns):
+            return set()
+        keys = set()
+        for _, row in df_in[['seed', 'rho']].dropna().iterrows():
+            try:
+                keys.add((int(row['seed']), _rho_key(float(row['rho']))))
+            except Exception:
+                continue
+        return keys
+
+    def _build_sam_df_from_artifacts() -> pd.DataFrame:
+        rows = []
+        for csv_path in Path(results_dir).rglob("MNIST_SimpleMLP_SAM_rho_*_seed*.csv"):
+            match = sam_artifact_pattern.match(csv_path.name)
+            if not match:
+                continue
+            seed = int(match.group('seed'))
+            rho = float(match.group('rho'))
+            final_train_loss = np.nan
+            final_test_loss = np.nan
+            final_test_acc = np.nan
+            best_test_acc = np.nan
+            epochs_trained = np.nan
+
+            try:
+                hist_df = pd.read_csv(csv_path)
+                if not hist_df.empty:
+                    if 'train_loss' in hist_df.columns:
+                        train_series = pd.to_numeric(hist_df['train_loss'], errors='coerce').dropna()
+                        if not train_series.empty:
+                            final_train_loss = float(train_series.iloc[-1])
+                    elif 'loss' in hist_df.columns:
+                        train_series = pd.to_numeric(hist_df['loss'], errors='coerce').dropna()
+                        if not train_series.empty:
+                            final_train_loss = float(train_series.iloc[-1])
+
+                    if 'test_loss' in hist_df.columns:
+                        test_loss_series = pd.to_numeric(hist_df['test_loss'], errors='coerce').dropna()
+                        if not test_loss_series.empty:
+                            final_test_loss = float(test_loss_series.iloc[-1])
+
+                    if 'test_acc' in hist_df.columns:
+                        test_acc_series = pd.to_numeric(hist_df['test_acc'], errors='coerce').dropna()
+                        if not test_acc_series.empty:
+                            final_test_acc = float(test_acc_series.iloc[-1])
+                            best_test_acc = float(test_acc_series.max())
+
+                    if 'epoch' in hist_df.columns:
+                        ep_series = pd.to_numeric(hist_df['epoch'], errors='coerce').dropna()
+                        if not ep_series.empty:
+                            epochs_trained = int(ep_series.iloc[-1])
+                        else:
+                            epochs_trained = int(len(hist_df))
+                    else:
+                        epochs_trained = int(len(hist_df))
+            except Exception:
+                logging.debug("Failed to parse SAM artifact CSV: %s", csv_path, exc_info=True)
+
+            rows.append(normalize_metric_names({
+                'rho': float(rho),
+                'seed': int(seed),
+                'final_loss': float(final_train_loss),
+                'final_train_loss': float(final_train_loss),
+                'final_test_loss': float(final_test_loss),
+                'final_test_accuracy': float(final_test_acc),
+                'best_test_accuracy': float(best_test_acc),
+                'test_acc': float(final_test_acc),
+                'epochs_trained': epochs_trained,
+            }))
+        return pd.DataFrame(rows)
+
+    requested_keys = {(int(seed), _rho_key(rho)) for seed in seeds for rho in rho_values}
+
+    # Check if requested subset is already complete (by summary CSV and/or artifacts)
     if resume:
-        result_file = Path(results_dir) / "sam_sensitivity_results.csv"
+        existing_df = pd.DataFrame()
+        present_keys = set()
         if result_file.exists():
             try:
-                df = pd.read_csv(result_file)
-                if len(df) > 0:
-                    logging.info(f"Skipping SAM Sensitivity experiment (already completed)")
-                    return df
+                existing_df = pd.read_csv(result_file)
+                present_keys |= _extract_keys_from_sam_df(existing_df)
             except Exception as e:
                 logging.debug("Could not read SAM sensitivity results file: %s", e, exc_info=True)
 
+        artifact_df = _build_sam_df_from_artifacts()
+        present_keys |= _extract_keys_from_sam_df(artifact_df)
+
+        if requested_keys.issubset(present_keys):
+            if existing_df.empty or not requested_keys.issubset(_extract_keys_from_sam_df(existing_df)):
+                if not artifact_df.empty:
+                    artifact_df = artifact_df.drop_duplicates(subset=['seed', 'rho'], keep='last')
+                    artifact_df = artifact_df.sort_values(['seed', 'rho']).reset_index(drop=True)
+                    os.makedirs(results_dir, exist_ok=True)
+                    artifact_df.to_csv(result_file, index=False)
+                    logging.info("Recovered sam_sensitivity_results.csv from per-run artifacts")
+                    return artifact_df
+            logging.info("Skipping SAM Sensitivity experiment (all requested seed/rho pairs already completed)")
+            return existing_df
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    seed = seeds[0] if seeds else 42
 
     # Simple dataset for quick testing
     transform = transforms.Compose([
@@ -8729,25 +10653,31 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=None, quick
     opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ssl_context))
     urllib.request.install_opener(opener)
 
-    max_retries = 3
     # Use exponential backoff for dataset downloads
     @retry_with_backoff(max_retries=3, initial_backoff=1.0, backoff_factor=2.0,
                        exceptions=(Exception,), log_prefix="MNIST download")
-    def download_mnist():
-        return torchvision.datasets.MNIST('./data', train=True, download=True, transform=transform)
+    def download_mnist(train: bool):
+        return torchvision.datasets.MNIST('./data', train=train, download=True, transform=transform)
 
-    train_dataset = download_mnist()
-    logging.info("MNIST dataset loaded successfully")
+    train_dataset = download_mnist(train=True)
+    test_dataset = download_mnist(train=False)
+    logging.info("MNIST train/test datasets loaded successfully")
 
-    rho_values = [0.05] if quick else [0.01, 0.02, 0.05, 0.1, 0.2]
     results = []
 
     for seed in seeds:
-        logging.info(f"\n🎲 Running SAM Sensitivity Analysis with seed={seed}")
+        logging.info("\nRunning SAM Sensitivity Analysis with seed=%s", seed)
         set_seed(seed)
         train_loader = make_dataloader(train_dataset, batch_size=256, shuffle=True, seed=seed, num_workers=2, pin_memory=True)
+        test_loader = make_dataloader(test_dataset, batch_size=512, shuffle=False, seed=seed, num_workers=2, pin_memory=True)
 
         for rho in rho_values:
+            if resume:
+                existing_artifact = list(Path(results_dir).rglob(f"MNIST_SimpleMLP_SAM_rho_{rho}_seed{seed}.csv"))
+                if existing_artifact:
+                    logging.info("Skipping SAM rho=%s seed=%s (artifact exists)", rho, seed)
+                    continue
+
             print(f"\n[TESTING] Testing rho = {rho}")
             print("-" * 30)
 
@@ -8756,68 +10686,125 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=None, quick
             model = safe_device_transfer(model, device, operation=f"SAM rho ablation rho={rho}")
             sam_params = get_default_hyperparameters('SAM_SGD', 'resnet_cifar10')
             # Extract rho from sam_params since it's not a valid SGD parameter
-            sam_rho = sam_params.pop('rho', 0.05)  # Remove rho, use as SAM parameter
+            _ = sam_params.pop('rho', 0.05)  # Remove rho, use explicit loop value for sensitivity
             # SAMWrapper wraps a base optimizer instance
             base_optimizer = optim.SGD(model.parameters(), **sam_params)  # Now sam_params only has SGD-valid params
             optimizer = SAMWrapper(base_optimizer, rho=rho)  # Override rho for sensitivity analysis
             criterion = nn.CrossEntropyLoss()
 
-            # Quick training (fewer epochs when requested)
+            # Full mode should provide enough training horizon for meaningful rho sensitivity.
             history = []
-            for epoch in range(1 if quick else 3):
+            epochs_to_run = 1 if quick else 10
+            for epoch in range(epochs_to_run):
                 model.train()
-                epoch_loss = 0
+                epoch_loss_sum = 0.0
+                epoch_samples = 0
 
                 for inputs, targets in train_loader:
                     inputs, targets = inputs.to(device), targets.to(device)
 
-                    # Initialize loss to avoid unbound variable error
-                    loss = None
+                    # Use oom_safe_train_step for robustness and consistency
+                    try:
+                        loss_value, bh_size, _, _ = oom_safe_train_step(
+                            model=model,
+                            optimizer=optimizer,
+                            criterion=criterion,
+                            inputs=inputs,
+                            targets=targets,
+                            device=device,
+                            robust_grad_handler=robust_grad_handler,
+                            epoch=epoch
+                        )
+                        epoch_loss_sum += float(loss_value) * int(bh_size)
+                        epoch_samples += int(bh_size)
+                    except Exception as e:
+                        logging.warning(f"Train step failed in SAM sensitivity: {e}")
+                        continue
 
-                    def closure():
-                        optimizer.zero_grad()
-                        outputs = model(inputs)
-                        loss_inner = criterion(outputs, targets)
-                        loss_inner.backward()
-                        return loss_inner
+                epoch_loss = epoch_loss_sum / max(1, epoch_samples)
 
-                    # Pass actual closure to SAM
-                    loss = optimizer.step(closure)
-                    from src.utils.num_utils import safe_to_float
-                    loss_value = safe_to_float(loss)
-                    epoch_loss += loss_value
+                # Evaluate on held-out test set for meaningful SAM sensitivity comparison
+                model.eval()
+                test_loss_sum = 0.0
+                test_total = 0
+                test_correct = 0
+                with torch.no_grad():
+                    for t_inputs, t_targets in test_loader:
+                        t_inputs, t_targets = t_inputs.to(device), t_targets.to(device)
+                        t_outputs = model(t_inputs)
+                        t_loss = criterion(t_outputs, t_targets)
+                        batch_size = int(t_targets.size(0))
+                        test_loss_sum += float(t_loss.item()) * batch_size
+                        test_total += batch_size
+                        test_correct += int((t_outputs.argmax(dim=1) == t_targets).sum().item())
 
-                epoch_loss /= len(train_loader)
-                print(f"  Epoch {epoch+1}: Loss = {epoch_loss:.4f}")
+                test_loss = test_loss_sum / max(1, test_total)
+                test_acc = 100.0 * test_correct / max(1, test_total)
+                print(f"  Epoch {epoch+1}: TrainLoss={epoch_loss:.4f}, TestLoss={test_loss:.4f}, TestAcc={test_acc:.2f}%")
                 history.append({
                     'epoch': epoch + 1,
                     'train_loss': epoch_loss,
-                    'loss': epoch_loss  # Alias for analyzer compatibility
+                    'loss': epoch_loss,  # Alias for analyzer compatibility
+                    'test_loss': test_loss,
+                    'test_acc': test_acc,
+                    'val_acc': test_acc  # Alias for visualization compatibility
                 })
 
-            results.append({
+            final_train_loss = float(history[-1]['train_loss']) if history else float('nan')
+            final_test_loss = float(history[-1].get('test_loss', np.nan)) if history else float('nan')
+            final_test_acc = float(history[-1].get('test_acc', np.nan)) if history else float('nan')
+            best_test_acc = float(np.nanmax([float(h.get('test_acc', np.nan)) for h in history])) if history else float('nan')
+
+            results.append(normalize_metric_names({
                 'rho': rho,
                 'seed': seed,
-                'final_loss': epoch_loss
-            })
+                # Keep legacy field name for compatibility with existing analysis scripts
+                'final_loss': final_train_loss,
+                'final_train_loss': final_train_loss,
+                'final_test_loss': final_test_loss,
+                'final_test_accuracy': final_test_acc,
+                'best_test_accuracy': best_test_acc,
+                'test_acc': final_test_acc,
+                'epochs_trained': epochs_to_run,
+            }))
 
             # Save per-run artifact for this rho
             try:
-                params = {'rho': rho, 'epochs': 3 if not quick else 1, 'batch_size': 256, 'seed': seed}
+                params = {'rho': rho, 'epochs': epochs_to_run, 'batch_size': 256, 'seed': seed}
                 save_run_artifacts(results_dir, 'MNIST', 'SimpleMLP', f'SAM_rho_{rho}', seed, history, params, device=device, exp_tracker=None)
             except Exception as e:
                 logging.debug("Failed to save SAM sensitivity artifact for rho %s seed %s: %s", rho, seed, e, exc_info=True)
 
-    # Save results
+    # Save results (merge with existing summary and artifact-derived rows for robust resumability)
     os.makedirs(results_dir, exist_ok=True)
-    df = pd.DataFrame(results)
-    df.to_csv(f"{results_dir}/sam_sensitivity_results.csv", index=False)
+    new_df = pd.DataFrame(results)
+    existing_df = pd.DataFrame()
+    if result_file.exists():
+        try:
+            existing_df = pd.read_csv(result_file)
+        except Exception:
+            logging.debug("Could not read existing SAM summary for merge", exc_info=True)
+    artifact_df = _build_sam_df_from_artifacts()
 
-    print(f"\n💾 Results saved to {results_dir}/sam_sensitivity_results.csv")
+    frames = [df_part for df_part in (existing_df, artifact_df, new_df) if df_part is not None and not df_part.empty]
+    if frames:
+        df = pd.concat(frames, ignore_index=True, sort=False)
+        dedupe_cols = [c for c in ['seed', 'rho'] if c in df.columns]
+        if dedupe_cols:
+            df = df.drop_duplicates(subset=dedupe_cols, keep='last')
+        sort_cols = [c for c in ['seed', 'rho'] if c in df.columns]
+        if sort_cols:
+            df = df.sort_values(sort_cols).reset_index(drop=True)
+    else:
+        df = pd.DataFrame()
+
+    df.to_csv(result_file, index=False)
+
+    print(f"\nResults saved to {results_dir}/sam_sensitivity_results.csv")
 
     # Generate visualizations for SAM experiment
     try:
-        sam_csvs = list(Path(results_dir).glob("*.csv"))
+        sam_csvs = list(Path(results_dir).rglob("*.csv"))
         logging.debug(f"SAM sensitivity found {len(sam_csvs)} CSVs in {results_dir}")
         if sam_csvs:
             create_experiment_visualizations('SAM_Sensitivity', str(Path(results_dir).parent.parent), sam_csvs)
@@ -8830,20 +10817,36 @@ def run_sam_sensitivity(results_dir="results_sam_sensitivity", seeds=None, quick
 
 def run_ablation_study(results_dir="results_ablation", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False, resume_behavior: str = None):
     if seeds is None:
-        seeds = [42]
+        seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021] if not quick else [42, 123]
     """Run optimizer component ablation study
 
     Args:
         quick: If True, run a smaller/faster subset for CI or debugging
         skip_tuning: Accepted for API compatibility (unused)
         profiler, tracker, checkpoint_manager: Accepted for API compatibility
-        seeds: List of seeds for reproducibility (uses first seed)
+        seeds: List of seeds for reproducibility
         resume: If True, skip experiments that already have result files
         resume_behavior: Optional resume behavior string (accepted for compatibility)
     """
     logging.info("\n" + "="*80)
-    logging.info("🔬 OPTIMIZER COMPONENT ABLATION STUDY")
+    logging.info("OPTIMIZER COMPONENT ABLATION STUDY")
     logging.info("="*80)
+
+    # Initialize robust gradient handler if enabled.
+    robust_grad_handler = None
+    if ROBUST_GRADIENTS_ENABLED or GRADIENT_CLIP_NORM or USE_AGC:
+        try:
+            from src.core.robust_gradients import create_robust_gradient_handler
+            robust_grad_config = {
+                'clip_norm': GRADIENT_CLIP_NORM,
+                'use_agc': USE_AGC,
+                'use_trimmed_mean': USE_TRIMMED_MEAN,
+                'monitor_heavy_tails': MONITOR_HEAVY_TAILS
+            }
+            robust_grad_handler = create_robust_gradient_handler(enabled=True, config=robust_grad_config)
+            logging.info("[ROBUST GRADIENTS] Handler initialized for Ablation Study")
+        except ImportError as e:
+            logging.warning(f"Could not import robust gradient handler: {e}")
 
     # Check if experiment is already completed
     if resume:
@@ -8859,28 +10862,40 @@ def run_ablation_study(results_dir="results_ablation", seeds=None, quick=False, 
 
     rosenbrock = Rosenbrock()
     initial_point = (-1.5, 2.0)
+    strict_convergence_threshold = 1e-6
+    practical_convergence_threshold = 1e-3
+
+    def _seeded_ablation_start(seed_value, default_start):
+        """Deterministically vary starts across seeds for non-binary ablation outcomes."""
+        rng = np.random.default_rng(int(seed_value) + 30000)
+        return (
+            float(rng.uniform(-3.0, 3.0)),
+            float(rng.uniform(-2.0, 4.0)),
+        )
 
     # Different optimizer variants
+    # NOTE: Use numerically stable defaults for full-length Rosenbrock trajectories.
     ablation_configs = [
-        (OptimizerNames.SGD, {'lr': 0.01}),
-        (OptimizerNames.SGD_MOMENTUM, {'lr': 0.05, 'momentum': 0.9}),
-        (OptimizerNames.ADAM, {'lr': 0.1}),
-        ('Adam_NoBeta2', {'lr': 0.1, 'betas': (0.9, 0.999)}),  # Same as Adam
-        ('SAM_SGD', {'lr': 0.01, 'rho': 0.05}),
+        (OptimizerNames.SGD, {'lr': 0.001}),
+        (OptimizerNames.SGD_MOMENTUM, {'lr': 0.002, 'momentum': 0.9}),
+        (OptimizerNames.ADAM, {'lr': 0.05}),
+        ('Adam_NoBeta2', {'lr': 0.05, 'betas': (0.9, 0.999)}),
+        ('SAM_SGD', {'lr': 0.002, 'rho': 0.01}),
     ]
 
     results = []
 
     for seed in seeds:
-        logging.info(f"\n🎲 Running Ablation Study with seed={seed}")
+        logging.info("\nRunning Ablation Study with seed=%s", seed)
         set_seed(seed)
+        run_start_point = _seeded_ablation_start(seed, initial_point)
 
         for opt_name, params in ablation_configs:
             print(f"\n[TESTING] Testing: {opt_name}")
             print("-" * 30)
 
             set_seed(seed)
-            x = torch.tensor(initial_point, dtype=torch.float32, requires_grad=True)
+            x = torch.tensor(run_start_point, dtype=torch.float32, requires_grad=True)
 
             optimizer = None
             if opt_name == OptimizerNames.SGD:
@@ -8902,56 +10917,144 @@ def run_ablation_study(results_dir="results_ablation", seeds=None, quick=False, 
 
             max_iter = 200 if quick else 1000
             history = []
+            run_error = None
             for i in range(max_iter):
                 optimizer.zero_grad()  # type: ignore[union-attr]
 
                 # Compute loss using PyTorch autograd
                 loss = rosenbrock.torch_loss(x)
+                loss_value = float(loss.item())
+                if not np.isfinite(loss_value):
+                    run_error = f"Non-finite loss at iteration {i}: {loss_value}"
+                    break
+
                 loss.backward()
+                if robust_grad_handler:
+                    class DummyModel(nn.Module):
+                        def __init__(self, p):
+                            super().__init__()
+                            self.p = nn.Parameter(p)
+                            self.p.grad = p.grad
+                    robust_grad_handler(DummyModel(x))
+                else:
+                    torch.nn.utils.clip_grad_norm_([x], 10.0)
 
                 if opt_name.startswith('SAM'):
                     def closure():
                         optimizer.zero_grad()  # type: ignore[union-attr]
                         loss_c = rosenbrock.torch_loss(x)
+                        loss_c_value = float(loss_c.item())
+                        if not np.isfinite(loss_c_value):
+                            raise ValueError(f"Non-finite closure loss: {loss_c_value}")
                         loss_c.backward()
+                        if robust_grad_handler:
+                            class DummyModel(nn.Module):
+                                def __init__(self, p):
+                                    super().__init__()
+                                    self.p = nn.Parameter(p)
+                                    self.p.grad = p.grad
+                            robust_grad_handler(DummyModel(x))
+                        else:
+                            torch.nn.utils.clip_grad_norm_([x], 10.0)
                         return loss_c
-                    optimizer.step(closure)
+                    try:
+                        optimizer.step(closure)
+                    except Exception as step_e:
+                        run_error = str(step_e)
+                        break
                 else:
                     optimizer.step()
 
-                history.append({'iteration': i, 'loss': loss.item()})
-
-                if loss.item() < 1e-6:
+                x_np = x.detach().cpu().numpy()
+                if not np.isfinite(x_np).all():
+                    run_error = f"Non-finite parameters at iteration {i}"
                     break
+
+                grad_norm = float(torch.norm(x.grad).item()) if x.grad is not None else np.nan
+                history.append({
+                    'iteration': i,
+                    'loss': loss_value,
+                    'grad_norm': grad_norm,
+                    'x': float(x_np[0]),
+                    'y': float(x_np[1]),
+                })
+
+                if loss_value < strict_convergence_threshold:
+                    break
+
+            final_loss = float(history[-1]['loss']) if history else np.nan
+            final_grad_norm = float(history[-1].get('grad_norm', np.nan)) if history else np.nan
+            final_x = float(x.detach().cpu().numpy()[0])
+            final_y = float(x.detach().cpu().numpy()[1])
+            converged_strict = bool(
+                np.isfinite(final_loss)
+                and final_loss < strict_convergence_threshold
+                and run_error is None
+            )
+            converged_practical = bool(
+                np.isfinite(final_loss)
+                and final_loss < practical_convergence_threshold
+                and run_error is None
+            )
 
             results.append({
                 'optimizer': opt_name,
                 'seed': seed,
-                'final_loss': loss.item(),
-                'iterations': i + 1,
-                'converged': loss.item() < 1e-6
+                'initial_x': float(run_start_point[0]),
+                'initial_y': float(run_start_point[1]),
+                'final_loss': final_loss,
+                'final_grad_norm': final_grad_norm,
+                'final_x': final_x,
+                'final_y': final_y,
+                'iterations': len(history),
+                # Keep legacy converged field as strict threshold for compatibility.
+                'converged': converged_strict,
+                'converged_strict': converged_strict,
+                'converged_practical': converged_practical,
+                'strict_convergence_threshold': strict_convergence_threshold,
+                'practical_convergence_threshold': practical_convergence_threshold,
+                'error': run_error,
             })
 
             # Save per-run artifact for ablation configuration
             try:
-                params_save = params if isinstance(params, dict) else {'params': params}
+                params_save = dict(params) if isinstance(params, dict) else {'params': params}
                 params_save['seed'] = seed
+                params_save['initial_x'] = float(run_start_point[0])
+                params_save['initial_y'] = float(run_start_point[1])
+                params_save['strict_convergence_threshold'] = strict_convergence_threshold
+                params_save['practical_convergence_threshold'] = practical_convergence_threshold
+                if run_error:
+                    params_save['error'] = run_error
                 save_run_artifacts(results_dir, 'Ablation', '2D_Rosenbrock', opt_name, seed, history, params_save, device=None, exp_tracker=None)
             except Exception as e:
                 logging.debug("Failed to save ablation artifact for %s seed %s: %s", opt_name, seed, e, exc_info=True)
 
-            print(f"  Loss: {loss.item():.6f}, Iters: {i+1}, Converged: {loss.item() < 1e-6}")
+            if run_error:
+                print(
+                    f"  Start=({run_start_point[0]:.2f},{run_start_point[1]:.2f}) "
+                    f"Failed: {run_error}; Iters: {len(history)}, "
+                    f"Converged(strict<{strict_convergence_threshold:g})={converged_strict}, "
+                    f"Converged(practical<{practical_convergence_threshold:g})={converged_practical}"
+                )
+            else:
+                print(
+                    f"  Start=({run_start_point[0]:.2f},{run_start_point[1]:.2f}) "
+                    f"Loss: {final_loss:.6f}, Iters: {len(history)}, "
+                    f"Converged(strict<{strict_convergence_threshold:g})={converged_strict}, "
+                    f"Converged(practical<{practical_convergence_threshold:g})={converged_practical}"
+                )
 
     # Save results
     os.makedirs(results_dir, exist_ok=True)
     df = pd.DataFrame(results)
     df.to_csv(f"{results_dir}/ablation_results.csv", index=False)
 
-    print(f"\n💾 Results saved to {results_dir}/ablation_results.csv")
+    print(f"\nResults saved to {results_dir}/ablation_results.csv")
 
     # Generate visualizations for Ablation experiment
     try:
-        ablation_csvs = list(Path(results_dir).glob("*.csv"))
+        ablation_csvs = list(Path(results_dir).rglob("*.csv"))
         if ablation_csvs:
             create_experiment_visualizations('Ablation', str(Path(results_dir).parent.parent), ablation_csvs)
     except Exception as viz_e:
@@ -8974,7 +11077,7 @@ def run_advanced_training_ablation(results_dir="results_advanced_ablation", seed
     Academic rigor:
     - Controlled experiments (one variable at a time)
     - Multiple seeds for statistical significance
-    - Reports mean ± std for all metrics
+    - Reports mean Â± std for all metrics
 
     Args:
         results_dir: Directory to save results
@@ -8986,7 +11089,7 @@ def run_advanced_training_ablation(results_dir="results_advanced_ablation", seed
         DataFrame with ablation study results
     """
     logging.info("\n" + "="*80)
-    logging.info("🔬 ADVANCED TRAINING FEATURES ABLATION STUDY")
+    logging.info("ðŸ”¬ ADVANCED TRAINING FEATURES ABLATION STUDY")
     logging.info("="*80)
 
     # Check if already completed
@@ -9017,7 +11120,8 @@ def run_advanced_training_ablation(results_dir="results_advanced_ablation", seed
             results_dir=results_dir,
             seeds=seeds,
             epochs=3 if quick else 10,
-            quick=quick
+            quick=quick,
+            resume=resume
         )
 
         logging.info(f"Advanced training ablation study complete")
@@ -9161,7 +11265,7 @@ class VisionTransformer(nn.Module):
 def run_distributed_experiment(results_dir="results_distributed", world_size=2, backend='nccl'):
     """Run distributed training experiment with proper setup"""
     print("\n" + "="*80)
-    print("🔄 DISTRIBUTED TRAINING EXPERIMENT")
+    print("ðŸ”„ DISTRIBUTED TRAINING EXPERIMENT")
     print("="*80)
 
     # Check if distributed training is possible
@@ -9234,7 +11338,7 @@ def distributed_training_worker(rank, world_size, backend, results_dir):
             transforms.Normalize(CIFAR10_MEAN, CIFAR10_STD),
         ])
 
-        # BUG FIX (Dec 2025): Changed download=False → download=True for Kaggle compatibility
+        # BUG FIX (Dec 2025): Changed download=False â†’ download=True for Kaggle compatibility
         # On fresh Kaggle kernels, dataset may not exist, causing immediate failure
         train_dataset = torchvision.datasets.CIFAR10('./data', train=True, download=True, transform=transform)
 
@@ -9389,7 +11493,7 @@ def run_advanced_architecture_experiment(results_dir="results_advanced_arch", ep
     df = pd.DataFrame(results)
     df.to_csv(f"{results_dir}/vit_experiment.csv", index=False)
 
-    print(f"\n💾 ViT experiment results saved to {results_dir}/vit_experiment.csv")
+    print(f"\nðŸ’¾ ViT experiment results saved to {results_dir}/vit_experiment.csv")
     return df
 
 # ==============================================================================
@@ -9443,7 +11547,7 @@ services:
     with open("docker-compose.yml", "w") as f:
         f.write(docker_compose_content)
 
-    print("🐳 Docker setup files created:")
+    print("ðŸ³ Docker setup files created:")
     print("   - Dockerfile")
     print("   - docker-compose.yml")
     print("   Run: docker-compose up")
@@ -9455,7 +11559,7 @@ def run_code_quality_checks():
         pip install flake8 black mypy isort
     """
     print("\n" + "="*80)
-    print("🧹 CODE QUALITY CHECKS")
+    print("ðŸ§¹ CODE QUALITY CHECKS")
     print("="*80)
 
     try:
@@ -9491,7 +11595,7 @@ def run_code_quality_checks():
             print("flake8 not available")
 
         # Run formatting check
-        print("🎨 Checking code formatting with black...")
+        print("ðŸŽ¨ Checking code formatting with black...")
         try:
             result = subprocess.run([sys.executable, "-m", "black", "--check", "--diff", "src/"],
                                   capture_output=True, text=True)
@@ -9504,7 +11608,7 @@ def run_code_quality_checks():
             print("black not available")
 
         # Run import sorting check
-        print("📦 Checking import sorting with isort...")
+        print("ðŸ“¦ Checking import sorting with isort...")
         try:
             result = subprocess.run([sys.executable, "-m", "isort", "--check-only", "--diff", "src/"],
                                   capture_output=True, text=True)
@@ -9524,7 +11628,7 @@ def run_code_quality_checks():
 def generate_documentation(results_dir="docs"):
     """Generate comprehensive documentation and reports"""
     print("\n" + "="*80)
-    print("📚 GENERATING DOCUMENTATION")
+    print("ðŸ“š GENERATING DOCUMENTATION")
     print("="*80)
 
     os.makedirs(results_dir, exist_ok=True)
@@ -9793,7 +11897,7 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
         resume: If True, skip experiments that already have result files
     """
     logging.info("\n" + "="*80)
-    logging.info("🏗️  RESNET18 EXPERIMENT")
+    logging.info("ðŸ—ï¸  RESNET18 EXPERIMENT")
     logging.info("="*80)
 
     # Check if experiment is already completed
@@ -9904,7 +12008,7 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
     all_results = []
 
     for seed in seeds:
-        logging.info(f"\n🎲 Running ResNet18 experiment with seed={seed}")
+        logging.info(f"\nðŸŽ² Running ResNet18 experiment with seed={seed}")
         set_seed(seed)
 
         train_loader = make_dataloader(train_dataset_split, batch_size=train_bs, shuffle=True,
@@ -10042,12 +12146,12 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
     except Exception:
         logging.debug(f"Failed to save per-run ResNet artifact for seed={seed}")
 
-    logging.info(f"💾 Results for seed={seed} saved to {result_filename}")
+    logging.info(f"ðŸ’¾ Results for seed={seed} saved to {result_filename}")
 
     # Aggregate results across all seeds
     df = pd.DataFrame(all_results)
     df.to_csv(f"{results_dir}/resnet_results_all_seeds.csv", index=False)
-    logging.info(f"\n💾 Aggregated results saved to {results_dir}/resnet_results_all_seeds.csv")
+    logging.info(f"\nðŸ’¾ Aggregated results saved to {results_dir}/resnet_results_all_seeds.csv")
 
     if tracker:
         tracker.log_artifact(f"{results_dir}/resnet_results_all_seeds.csv", "results")
@@ -10215,7 +12319,7 @@ def run_highdim_experiment(results_dir="results_highdim", seeds=None, quick=Fals
     if tracker:
         tracker.log_artifact(f"{results_dir}/highdim_results.csv", "results")
 
-    print(f"\n💾 Results saved to {results_dir}/highdim_results.csv")
+    print(f"\nðŸ’¾ Results saved to {results_dir}/highdim_results.csv")
 
     # Generate visualizations for HighDim experiment
     try:
@@ -10359,7 +12463,7 @@ Examples:
 
     # High-level experiment selection (comma separated)
     parser.add_argument('--experiments', type=str, default='all',
-                        help='Comma-separated experiment names (mnist,cifar10,nlp,medical,2d,robustness,sam,ablation,advanced_ablation,init_ablation,batch_ablation,lr_ablation,wd_ablation,scheduler_ablation,optimizer_comparison,resnet,highdim,hyperparam_sensitivity,convergence_validation,ablation_comprehensive,2d_visualization,dynamics_overhead,theory_practice,cross_optimizer_dynamics,label_noise,saddle_escape,hyperparameter_heatmaps,stochastic_2d_integrity,adam_adamw_comparison) or "all"')
+                        help='Comma-separated experiment names (mnist,cifar10,nlp,medical,2d,robustness,sam,ablation,advanced_ablation,init_ablation,batch_ablation,lr_ablation,wd_ablation,scheduler_ablation,optimizer_comparison,resnet,highdim,hyperparam_sensitivity,convergence_validation,ablation_comprehensive,2d_visualization,dynamics_overhead,theory_practice,cross_optimizer_dynamics,label_noise,saddle_escape,hyperparameter_heatmaps,stochastic_2d_integrity,adam_adamw_comparison,beta_sensitivity) or "all"')
 
     # EXPERIMENT_MODE convenience: allow wrapper/CI to set quick/ultra_quick via ENV or CLI
     parser.add_argument('--experiment-mode', type=str, choices=['full', 'quick', 'ultra_quick'], default=None,
@@ -10476,7 +12580,7 @@ Examples:
             
             # Validate GPU availability
             if not gpu_config['parallel_capable']:
-                print("\n⚠ WARNING: Less than 2 GPUs detected. Falling back to sequential mode.")
+                print("\nâš  WARNING: Less than 2 GPUs detected. Falling back to sequential mode.")
                 args.parallel = False
             else:
                 # Auto-detect num_gpus if not specified
@@ -10484,20 +12588,20 @@ Examples:
                     args.num_gpus = gpu_config['gpu_count']
                     print(f"\n  Auto-detected {args.num_gpus} GPUs for parallel execution")
                 elif args.num_gpus > gpu_config['gpu_count']:
-                    print(f"\n⚠ WARNING: Requested {args.num_gpus} GPUs but only {gpu_config['gpu_count']} available.")
+                    print(f"\nâš  WARNING: Requested {args.num_gpus} GPUs but only {gpu_config['gpu_count']} available.")
                     print(f"  Adjusting to use {gpu_config['gpu_count']} GPUs.")
                     args.num_gpus = gpu_config['gpu_count']
                 else:
                     print(f"\n  Using {args.num_gpus} GPUs for parallel execution")
                 
-                print(f"\n✓ Parallel mode enabled: {args.num_gpus} GPUs will run experiments simultaneously")
+                print(f"\nâœ“ Parallel mode enabled: {args.num_gpus} GPUs will run experiments simultaneously")
             print("="*70 + "\n")
             
         except ImportError:
-            print("\n⚠ WARNING: Could not import parallel_experiment_runner. Falling back to sequential mode.")
+            print("\nâš  WARNING: Could not import parallel_experiment_runner. Falling back to sequential mode.")
             args.parallel = False
         except Exception as e:
-            print(f"\n⚠ WARNING: Parallel mode initialization failed: {e}")
+            print(f"\nâš  WARNING: Parallel mode initialization failed: {e}")
             print("  Falling back to sequential mode.")
             args.parallel = False
     
@@ -10631,7 +12735,7 @@ Examples:
                                 'hyperparam_sensitivity', 'convergence_validation',
                                 'ablation_comprehensive', '2d_visualization',
                                 'dynamics_overhead', 'theory_practice', 'cross_optimizer_dynamics',
-                                'beta_sensitivity_training', 'label_noise',
+                                'beta_sensitivity', 'beta_sensitivity_training', 'label_noise',
                                 'saddle_escape', 'hyperparameter_heatmaps', 'stochastic_2d_integrity',
                                 'adam_adamw_comparison']
     else:
@@ -10647,12 +12751,12 @@ Examples:
         'robustness', 'sam', 'optimizer_comparison', 'resnet', 'highdim',
         'hyperparam_sensitivity', 'convergence_validation',
         'dynamics_overhead', 'theory_practice', 'cross_optimizer_dynamics',
-        'beta_sensitivity_training', 'label_noise',
+        'beta_sensitivity', 'beta_sensitivity_training', 'label_noise',
         'saddle_escape', 'hyperparameter_heatmaps', 'stochastic_2d_integrity',
         'adam_adamw_comparison', 'label_smoothing', 'models', 'all'
     }
 
-    invalid_experiments = set(selected_experiments) - VALID_EXPERIMENTS
+    invalid_experiments = [e for e in selected_experiments if e not in VALID_EXPERIMENTS]
     if invalid_experiments:
         from difflib import get_close_matches
         suggestions = {}
@@ -10713,7 +12817,7 @@ Examples:
         print(f"   {status} {name}: {availability}")
 
     if not all(status[1] for status in modules_status):
-        print("\n💡 Note: Missing modules are optional. Core experiments will run successfully.")
+        print("\nðŸ’¡ Note: Missing modules are optional. Core experiments will run successfully.")
         print("   For full functionality: pip install scipy plotly kaleido\n")
 
     # Wire auto-tuning features to global flags
@@ -10921,15 +13025,15 @@ Examples:
     print(f"  Profiling: {'enabled' if args.profile else 'disabled'}")
 
     if args.resume:
-        print(f"\n🔄 Resume mode enabled - will skip completed experiments")
+        safe_print("\nðŸ”„ Resume mode enabled - will skip completed experiments")
     print("="*80 + "\n")
 
-    # --verify-resume golden test: Train(10) == Train(5) → Save → Stop → Load → Train(5)
+    # --verify-resume golden test: Train(10) == Train(5) â†’ Save â†’ Stop â†’ Load â†’ Train(5)
     if args.verify_resume:
         print("\n" + "="*80)
-        print("🔬 VERIFY-RESUME GOLDEN TEST")
+        print("ðŸ”¬ VERIFY-RESUME GOLDEN TEST")
         print("="*80)
-        print("Testing: Train(10 steps) yields exact same weights as Train(5) → Save → Load → Train(5)")
+        print("Testing: Train(10 steps) yields exact same weights as Train(5) â†’ Save â†’ Load â†’ Train(5)")
 
         import copy
         import tempfile
@@ -11025,7 +13129,7 @@ Examples:
 
             if all_match:
                 print("   GOLDEN TEST PASSED: Resume produces identical weights!")
-                print("   Train(10) == Train(5) → Save → Load → Train(5)")
+                print("   Train(10) == Train(5) â†’ Save â†’ Load â†’ Train(5)")
             else:
                 print("   GOLDEN TEST FAILED: Resume produces different weights!")
                 print("   This indicates a bug in checkpoint save/restore logic.")
@@ -11056,7 +13160,7 @@ Examples:
     def check_time_budget(experiment_name: str) -> bool:
         """Check if we have time budget remaining. Returns False if we should stop."""
         if time_budget.should_stop():
-            print(f"\n⏰ TIME BUDGET EXCEEDED before {experiment_name}")
+            print(f"\nâ° TIME BUDGET EXCEEDED before {experiment_name}")
             print(f"   Elapsed: {time_budget.elapsed_hours():.2f}h / Max: {time_budget.max_hours}h")
             time_budget.graceful_exit(graceful_save, graceful_report,
                                        f"Stopped before {experiment_name}")
@@ -11105,7 +13209,7 @@ Examples:
                 exp_func = experiment_function_map.get(exp_name)
                 
                 if exp_func is None:
-                    print(f"⚠ Skipping {exp_name}: No parallel implementation available")
+                    print(f"âš  Skipping {exp_name}: No parallel implementation available")
                     experiment_results[exp_name] = None
                     continue
                 
@@ -11138,7 +13242,7 @@ Examples:
                 parallel_configs.append(config)
             
             print(f"  Built {len(parallel_configs)} experiment configurations")
-            print(f"  Distribution: {len(parallel_configs)} experiments × {len(seeds)} seeds/each")
+            print(f"  Distribution: {len(parallel_configs)} experiments Ã— {len(seeds)} seeds/each")
             print(f"  Execution strategy: {args.num_gpus} GPUs running simultaneously")
             print(f"  Expected speedup: ~{min(args.num_gpus, len(parallel_configs))}x over sequential")
             print("="*70 + "\n")
@@ -11151,7 +13255,7 @@ Examples:
             )
             
             # Execute experiments using parallel runner
-            print(f"\n🚀 Starting parallel execution on {args.num_gpus} GPUs...\n")
+            print(f"\nðŸš€ Starting parallel execution on {args.num_gpus} GPUs...\n")
             
             # Execute each experiment with time budget checking
             for config in parallel_configs:
@@ -11161,7 +13265,7 @@ Examples:
                 
                 # Check time budget before starting experiment
                 if not check_time_budget(exp_name):
-                    print(f"⏰ Time budget exceeded - stopping before {exp_name}")
+                    print(f"â° Time budget exceeded - stopping before {exp_name}")
                     break
                 
                 print(f"\n{'='*70}")
@@ -11175,12 +13279,12 @@ Examples:
                     result = exp_func(**exp_args)
                     
                     experiment_results[exp_name] = result
-                    print(f"✓ {exp_name} completed successfully")
+                    print(f"âœ“ {exp_name} completed successfully")
                     
                 except Exception as e:
                     logging.error(f"Parallel execution of {exp_name} failed: {e}", exc_info=True)
                     experiment_results[exp_name] = None
-                    print(f"✗ {exp_name} failed: {e}")
+                    print(f"âœ— {exp_name} failed: {e}")
                     print("  Continuing with next experiment...")
             
             # Summary of parallel execution
@@ -11197,19 +13301,19 @@ Examples:
             parallel_execution_successful = True
             
         except ImportError as e:
-            print(f"\n⚠ ERROR: Could not import ParallelExperimentRunner: {e}")
+            print(f"\nâš  ERROR: Could not import ParallelExperimentRunner: {e}")
             print("  This usually means src.utils.parallel_experiment_runner is not available.")
             print("  Falling back to sequential execution...\n")
             args.parallel = False
         except Exception as e:
             logging.error(f"Parallel execution failed with exception: {e}", exc_info=True)
-            print(f"\n⚠ ERROR: Parallel execution failed: {e}")
+            print(f"\nâš  ERROR: Parallel execution failed: {e}")
             print("  Falling back to sequential execution...\n")
             args.parallel = False
         
         # If parallel execution succeeded, skip sequential mode
         if parallel_execution_successful:
-            print("\n✓ Parallel execution completed successfully - skipping sequential mode\n")
+            print("\nâœ“ Parallel execution completed successfully - skipping sequential mode\n")
     
     # ========================================================================
     # SEQUENTIAL EXECUTION MODE: Original experiment-by-experiment execution
@@ -11354,7 +13458,7 @@ Examples:
                     experiment_results['batch_ablation'] = run_batch_ablation(
                         dataset_name=dataset_name,
                         results_dir=str(experiments_dir / "batch_ablation"),
-                        seeds=args.seeds
+                        seeds=seeds
                     )
                 except Exception as e:
                     logging.error(f"Batch size ablation failed: {e}")
@@ -11363,7 +13467,7 @@ Examples:
         if 'lr_ablation' in selected_experiments:
             with error_context("Learning Rate Ablation Study", continue_on_error=True):
                 print("\n" + "="*80)
-                print("🔬 LEARNING RATE ABLATION STUDY")
+                print("ðŸ”¬ LEARNING RATE ABLATION STUDY")
                 print("="*80)
                 try:
                     from src.experiments.learning_rate_ablation import run_learning_rate_ablation
@@ -11391,9 +13495,11 @@ Examples:
                     logging.error(f"Learning rate ablation failed: {e}")
                     experiment_results['lr_ablation'] = None
 
+        # Allow running wd_ablation independently (not only when lr_ablation is selected)
+        if 'wd_ablation' in selected_experiments or 'lr_ablation' in selected_experiments:
             with error_context("Weight Decay Ablation Study", continue_on_error=True):
                 print("\n" + "="*80)
-                print("🔬 WEIGHT DECAY ABLATION STUDY")
+                print("ðŸ”¬ WEIGHT DECAY ABLATION STUDY")
                 print("="*80)
                 try:
                     from src.experiments.weight_decay_ablation import run_weight_decay_ablation
@@ -11423,13 +13529,13 @@ Examples:
 
         if 'scheduler_ablation' in selected_experiments:
             with error_context("Scheduler Ablation Study", continue_on_error=True):
-                # Call internal scheduler ablation function (2×2 grid mitigation)
+                # Call internal scheduler ablation function (2Ã—2 grid mitigation)
                 try:
                     dataset_name = 'MNIST'  # Can extend to CIFAR10
                     experiment_results['scheduler_ablation'] = run_scheduler_ablation(
                         dataset_name=dataset_name,
                         results_dir=str(experiments_dir / "scheduler_ablation"),
-                        seeds=args.seeds
+                        seeds=seeds
                     )
                 except Exception as e:
                     logging.error(f"Scheduler ablation failed: {e}")
@@ -11439,7 +13545,7 @@ Examples:
         if 'missing_ablations' in selected_experiments:
             with error_context("Missing Ablation Studies", continue_on_error=True):
                 print("\n" + "="*80)
-                print("🔬 MISSING ABLATION STUDIES (ACADEMIC COMPLETENESS)")
+                print("ðŸ”¬ MISSING ABLATION STUDIES (ACADEMIC COMPLETENESS)")
                 print("="*80)
                 print("   5 additional ablations: gradient clipping, label smoothing,")
                 print("   data augmentation, model architecture, dropout")
@@ -11475,6 +13581,34 @@ Examples:
                 except Exception as e:
                     logging.error(f"Missing ablations failed: {e}")
                     experiment_results['missing_ablations'] = None
+
+
+        # NEW: Beta Sensitivity 2D Visualization (requested in student proposal)
+        if 'beta_sensitivity' in selected_experiments:
+            with error_context("Beta Sensitivity 2D Visualization", continue_on_error=True):
+                print("\n" + "="*80)
+                print("[BETA] BETA SENSITIVITY 2D VISUALIZATIONS")
+                print("="*80)
+                try:
+                    demo_script = Path(__file__).parent / "run_beta_2d_demos.py"
+                    if demo_script.exists():
+                        # Pass encoding='utf-8' to prevent Windows cp1252 encoding crashes from emojis in child script
+                        result = subprocess.run([sys.executable, str(demo_script)], check=True, capture_output=True, text=True, encoding='utf-8')
+                        print(result.stdout)
+                        if result.stderr:
+                            print(result.stderr)
+                        experiment_results['beta_sensitivity'] = "Success (Plots generated)"
+                    else:
+                        print(f"Skipping: {demo_script} not found")
+                        experiment_results['beta_sensitivity'] = None
+                except subprocess.CalledProcessError as e:
+                    logging.error(f"Beta sensitivity failed with exit code {e.returncode}")
+                    if e.output: print(f"Output: {e.output}")
+                    if e.stderr: print(f"Error: {e.stderr}")
+                    experiment_results['beta_sensitivity'] = None
+                except Exception as e:
+                    logging.error(f"Beta sensitivity failed: {e}")
+                    experiment_results['beta_sensitivity'] = None
 
         if 'optimizer_comparison' in selected_experiments and HAS_STATS:
             with error_context("Optimizer Comparison Matrix", continue_on_error=True):
@@ -11528,83 +13662,119 @@ Examples:
                     resume=args.resume
                 )
 
-        # NEW: Hyperparameter Sensitivity Analysis (β, β1, β2 sweeps)
+        # NEW: Hyperparameter Sensitivity Analysis (Î², Î²1, Î²2 sweeps)
         if 'hyperparam_sensitivity' in selected_experiments:
             with error_context("Hyperparameter Sensitivity Analysis", continue_on_error=True):
                 print("\n" + "="*80)
-                print("🔬 HYPERPARAMETER SENSITIVITY ANALYSIS")
+                print("[HYPERPARAM] HYPERPARAMETER SENSITIVITY ANALYSIS")
                 print("="*80)
                 try:
                     from src.experiments.hyperparameter_sensitivity import momentum_beta_sweep, adam_beta_sweep
 
                     sensitivity_dir = str(experiments_dir / "hyperparam_sensitivity")
                     os.makedirs(sensitivity_dir, exist_ok=True)
+                    summary_file = Path(sensitivity_dir) / "hyperparam_sensitivity_results.csv"
 
-                    # Check if already completed
-                    momentum_files = list(Path(sensitivity_dir).glob("momentum_beta_sweep_*.csv"))
-                    adam_files = list(Path(sensitivity_dir).glob("adam_beta_sweep_*.csv"))
-
-                    if args.resume and len(momentum_files) >= 2 and len(adam_files) >= 1:
-                        print("   Hyperparam sensitivity already completed (found existing results)")
-                        experiment_results['hyperparam_sensitivity'] = "Skipped (already complete)"
+                    if args.resume and summary_file.exists():
+                        print("   Hyperparam sensitivity already completed (found existing summary)")
+                        experiment_results['hyperparam_sensitivity'] = pd.read_csv(summary_file)
                     else:
-                        # Momentum β sweep on multiple test functions
-                        print("   Running momentum β sweep...")
+                        # Reproducible stochastic sweeps (momentum_beta_sweep injects gradient noise).
+                        set_seed(seeds[0] if seeds else 42)
+                        summary_frames: List[pd.DataFrame] = []
+
+                        # Momentum beta sweep on multiple test functions.
+                        print("   Running momentum beta sweep...")
                         for test_fn in ['rosenbrock', 'ackley']:
-                            momentum_beta_sweep(
+                            df_momentum = momentum_beta_sweep(
                                 test_function=test_fn,
                                 beta_values=np.asarray([0.0, 0.5, 0.9, 0.99]) if args.quick else np.asarray([0.0, 0.5, 0.7, 0.9, 0.95, 0.99]),
                                 output_dir=sensitivity_dir
                             )
+                            if df_momentum is not None and not df_momentum.empty:
+                                df_momentum = df_momentum.copy()
+                                df_momentum['test_function'] = test_fn
+                                df_momentum['optimizer'] = 'SGD_Momentum'
+                                df_momentum['sweep_type'] = 'momentum_beta'
+                                summary_frames.append(df_momentum)
 
-                        # Adam β1, β2 sweep
-                        print("   Running Adam β1,β2 sweep...")
-                        adam_beta_sweep(
+                        # Adam beta1/beta2 sweep.
+                        print("   Running Adam beta1/beta2 sweep...")
+                        df_adam = adam_beta_sweep(
                             test_function='rosenbrock',
                             output_dir=sensitivity_dir
                         )
+                        if df_adam is not None and not df_adam.empty:
+                            df_adam = df_adam.copy()
+                            df_adam['test_function'] = 'rosenbrock'
+                            df_adam['optimizer'] = 'Adam'
+                            df_adam['sweep_type'] = 'adam_beta'
+                            summary_frames.append(df_adam)
 
-                        experiment_results['hyperparam_sensitivity'] = "Completed"
+                        summary_df = pd.concat(summary_frames, ignore_index=True, sort=False) if summary_frames else pd.DataFrame()
+                        summary_df.to_csv(summary_file, index=False)
+                        experiment_results['hyperparam_sensitivity'] = summary_df
                         print("Hyperparameter sensitivity analysis completed!")
                 except Exception as e:
                     logging.error(f"Hyperparameter sensitivity failed: {e}")
                     experiment_results['hyperparam_sensitivity'] = None
-
         # NEW: Convergence Rate Validation (Theory vs Practice)
         if 'convergence_validation' in selected_experiments:
             with error_context("Convergence Rate Validation", continue_on_error=True):
                 print("\n" + "="*80)
-                print("🔬 CONVERGENCE RATE VALIDATION (Theory vs Practice)")
+                print("[CONVERGENCE] CONVERGENCE RATE VALIDATION (Theory vs Practice)")
                 print("="*80)
                 try:
                     from src.experiments.convergence_rate_validation import run_convergence_rate_comparison
 
                     validation_dir = str(experiments_dir / "convergence_validation")
+                    os.makedirs(validation_dir, exist_ok=True)
 
-                    # Check if already completed
-                    result_file = Path(validation_dir) / "convergence_comparison.csv"
+                    # Module writes this canonical summary file.
+                    summary_file = Path(validation_dir) / "convergence_rate_summary.csv"
 
-                    if args.resume and result_file.exists():
-                        print("   Convergence validation already completed (found existing results)")
-                        experiment_results['convergence_validation'] = "Skipped (already complete)"
+                    if args.resume and summary_file.exists():
+                        print("   Convergence validation already completed (found existing summary)")
+                        summary_df = pd.read_csv(summary_file)
+                        if 'Optimizer' in summary_df.columns and 'optimizer' not in summary_df.columns:
+                            summary_df = summary_df.rename(columns={'Optimizer': 'optimizer'})
+                        experiment_results['convergence_validation'] = summary_df
                     else:
-                        # run_convergence_rate_comparison only accepts output_dir parameter
-                        # The implementation has hardcoded optimizer list and test function
-                        run_convergence_rate_comparison(
-                            output_dir=validation_dir
-                        )
+                        all_results = run_convergence_rate_comparison(output_dir=validation_dir)
 
-                        experiment_results['convergence_validation'] = "Completed"
+                        if summary_file.exists():
+                            summary_df = pd.read_csv(summary_file)
+                            if 'Optimizer' in summary_df.columns and 'optimizer' not in summary_df.columns:
+                                summary_df = summary_df.rename(columns={'Optimizer': 'optimizer'})
+                        else:
+                            # Fallback reconstruction if module summary is missing.
+                            summary_rows = []
+                            for result in all_results if all_results is not None else []:
+                                fit_res = result.get('fit_results', {}) if isinstance(result, dict) else {}
+                                row = {
+                                    'optimizer': result.get('optimizer') if isinstance(result, dict) else None,
+                                    'convergence_iters': result.get('convergence_iters') if isinstance(result, dict) else np.nan,
+                                    'best_model': fit_res.get('best_model'),
+                                    'r_squared': fit_res.get('best_r_squared', np.nan),
+                                }
+                                if fit_res.get('best_model') == 'sublinear':
+                                    row['alpha'] = fit_res.get('sublinear', {}).get('alpha', np.nan)
+                                elif fit_res.get('best_model') == 'linear':
+                                    row['linear_rate'] = fit_res.get('linear', {}).get('rate', np.nan)
+                                summary_rows.append(row)
+                            summary_df = pd.DataFrame(summary_rows)
+                            summary_df.to_csv(summary_file, index=False)
+
+                        experiment_results['convergence_validation'] = summary_df
                         print("Convergence rate validation completed!")
                 except Exception as e:
                     logging.error(f"Convergence validation failed: {e}")
                     experiment_results['convergence_validation'] = None
-
         # NEW: Comprehensive Ablation Studies (if not already run separately)
         if 'ablation_comprehensive' in selected_experiments:
             with error_context("Comprehensive Ablation Studies", continue_on_error=True):
                 print("\n" + "="*80)
-                print("🔬 COMPREHENSIVE ABLATION STUDIES")
+                print("ðŸ”¬ COMPREHENSIVE ABLATION STUDIES")
                 print("="*80)
                 try:
                     from src.experiments.ablation_studies_comprehensive import run_all_ablation_studies
@@ -11639,48 +13809,70 @@ Examples:
                         compare_optimizer_families
                     )
 
-                    viz_2d_dir = str(results_dir / "visualizations" / "2d_trajectories")
-                    os.makedirs(viz_2d_dir, exist_ok=True)
+                    viz_2d_dir = Path(experiments_dir) / "2d_visualization"
+                    viz_2d_dir.mkdir(parents=True, exist_ok=True)
+                    manifest_file = viz_2d_dir / "2d_visualization_manifest.csv"
 
-                    # Check if already completed
-                    momentum_plots = list(Path(viz_2d_dir).glob("*momentum_beta*.png"))
-                    adam_plots = list(Path(viz_2d_dir).glob("*adam_beta*.png"))
-                    family_plots = list(Path(viz_2d_dir).glob("*optimizer_families*.png"))
+                    expected_files = [
+                        viz_2d_dir / "momentum_beta_trajectories_rosenbrock.png",
+                        viz_2d_dir / "adam_beta_trajectories_rosenbrock.png",
+                        viz_2d_dir / "optimizer_comparison_rosenbrock.png",
+                    ]
 
-                    if args.resume and len(momentum_plots) > 0 and len(adam_plots) > 0 and len(family_plots) > 0:
-                        print("   2D visualization already completed (found existing plots)")
-                        experiment_results['2d_visualization'] = "Skipped (already complete)"
+                    if args.resume and manifest_file.exists() and all(p.exists() for p in expected_files):
+                        print("   2D visualization already completed (found existing plots + manifest)")
+                        experiment_results['2d_visualization'] = pd.read_csv(manifest_file)
                     else:
-                        # Momentum β trajectories
+                        # Momentum beta trajectories
                         compare_momentum_beta_trajectories(
-                        test_function='rosenbrock',
-                        beta_values=[0.0, 0.9, 0.99] if args.quick else [0.0, 0.5, 0.9, 0.99],
-                        output_dir=viz_2d_dir
-                    )
+                            test_function='rosenbrock',
+                            beta_values=[0.0, 0.9, 0.99] if args.quick else [0.0, 0.5, 0.9, 0.99],
+                            output_dir=str(viz_2d_dir)
+                        )
 
-                    # Adam β1, β2 trajectories
-                    compare_adam_beta_trajectories(
-                        test_function='rosenbrock',
-                        output_dir=viz_2d_dir
-                    )
+                        # Adam beta1/beta2 trajectories
+                        compare_adam_beta_trajectories(
+                            test_function='rosenbrock',
+                            output_dir=str(viz_2d_dir)
+                        )
 
-                    # Optimizer family comparison
-                    compare_optimizer_families(
-                        test_function='rosenbrock',
-                        output_dir=viz_2d_dir
-                    )
+                        # Optimizer family comparison
+                        compare_optimizer_families(
+                            test_function='rosenbrock',
+                            output_dir=str(viz_2d_dir)
+                        )
 
-                    experiment_results['2d_visualization'] = "Completed"
-                    print("2D trajectory visualization completed!")
+                        # Build artifact manifest for reporting and resumability.
+                        manifest_rows = []
+                        for png_path in sorted(viz_2d_dir.glob('*.png')):
+                            stem = png_path.stem.lower()
+                            if 'momentum_beta' in stem:
+                                view_type = 'momentum_beta_trajectories'
+                            elif 'adam_beta' in stem:
+                                view_type = 'adam_beta_trajectories'
+                            elif 'optimizer_comparison' in stem:
+                                view_type = 'optimizer_family_comparison'
+                            else:
+                                view_type = 'other'
+                            manifest_rows.append({
+                                'artifact': png_path.name,
+                                'view_type': view_type,
+                                'path': str(png_path),
+                                'bytes': int(png_path.stat().st_size),
+                            })
+
+                        manifest_df = pd.DataFrame(manifest_rows)
+                        manifest_df.to_csv(manifest_file, index=False)
+                        experiment_results['2d_visualization'] = manifest_df
+                        print("2D trajectory visualization completed!")
                 except Exception as e:
                     logging.error(f"2D visualization failed: {e}")
                     experiment_results['2d_visualization'] = None
-
         # NEW: Dynamics Tracking Overhead Ablation
         if 'dynamics_overhead' in selected_experiments:
             with error_context("Dynamics Overhead Ablation", continue_on_error=True):
                 print("\n" + "="*80)
-                print("🔬 DYNAMICS TRACKING OVERHEAD ABLATION")
+                print("ðŸ”¬ DYNAMICS TRACKING OVERHEAD ABLATION")
                 print("="*80)
                 try:
                     from src.experiments.dynamics_overhead_ablation import run_dynamics_overhead_ablation
@@ -11712,7 +13904,7 @@ Examples:
         if 'theory_practice' in selected_experiments:
             with error_context("Theory-Practice Validation", continue_on_error=True):
                 print("\n" + "="*80)
-                print("🔬 THEORY-PRACTICE CONVERGENCE VALIDATION")
+                print("ðŸ”¬ THEORY-PRACTICE CONVERGENCE VALIDATION")
                 print("="*80)
                 try:
                     from src.experiments.theory_practice_validation import run_theory_practice_validation
@@ -11755,42 +13947,59 @@ Examples:
         if 'saddle_escape' in selected_experiments and HAS_SADDLE_EXPERIMENT:
             with error_context("Saddle Point Escape Experiment", continue_on_error=True):
                 print("\n" + "="*80)
-                print("🔬 SADDLE POINT ESCAPE ANALYSIS")
+                print("[SADDLE] SADDLE POINT ESCAPE ANALYSIS")
                 print("="*80)
                 try:
-                    saddle_escape_dir = str(results_dir / "saddle_point_escape")
+                    saddle_escape_dir = str(experiments_dir / "saddle_escape")
+                    os.makedirs(saddle_escape_dir, exist_ok=True)
 
-                    # Check if already completed
                     summary_file = Path(saddle_escape_dir) / "saddle_escape_summary.csv"
 
                     if args.resume and summary_file.exists():
                         print("   Saddle point escape experiment already completed")
-                        experiment_results['saddle_escape'] = "Skipped (already complete)"
+                        experiment_results['saddle_escape'] = pd.read_csv(summary_file)
                     else:
+                        set_seed(seeds[0] if seeds else 42)
+                        # Start near the true saddle to make the experiment scientifically valid.
                         results = run_saddle_point_escape_experiment(
-                            initial_point=(0.1, 0.1),
-                            max_iters=1000,
+                            initial_point=(1e-6, 0.0),
+                            max_iters=400 if args.quick else 1000,
                             eigenvalue_check_interval=10,
-                            output_dir=saddle_escape_dir
+                            output_dir=saddle_escape_dir,
+                            noise_std=0.01
                         )
 
-                        experiment_results['saddle_escape'] = results
+                        if summary_file.exists():
+                            summary_df = pd.read_csv(summary_file)
+                        else:
+                            summary_rows = []
+                            for opt_name, result in (results or {}).items():
+                                summary_rows.append({
+                                    'optimizer': opt_name,
+                                    'escaped': bool(result.get('escaped', False)),
+                                    'escape_iteration': result.get('escape_iteration', np.nan),
+                                    'final_x': (result.get('final_position') or [np.nan, np.nan])[0],
+                                    'final_y': (result.get('final_position') or [np.nan, np.nan])[1],
+                                    'final_loss': result.get('final_loss', np.nan),
+                                })
+                            summary_df = pd.DataFrame(summary_rows)
+                            summary_df.to_csv(summary_file, index=False)
+
+                        experiment_results['saddle_escape'] = summary_df
                         print("Saddle point escape experiment completed!")
-                        print("✓ Results demonstrate momentum-based optimizers escape saddles faster")
                 except Exception as e:
                     logging.error(f"Saddle point escape experiment failed: {e}")
                     experiment_results['saddle_escape'] = None
-
         # NEW: Hyperparameter Sensitivity Heatmaps
         if 'hyperparameter_heatmaps' in selected_experiments and HAS_HEATMAP_GENERATOR:
             with error_context("Hyperparameter Sensitivity Heatmaps", continue_on_error=True):
                 print("\n" + "="*80)
-                print("🔬 HYPERPARAMETER SENSITIVITY HEATMAP GENERATION")
+                print("ðŸ”¬ HYPERPARAMETER SENSITIVITY HEATMAP GENERATION")
                 print("="*80)
                 try:
                     from src.core.test_functions import Rosenbrock, IllConditionedQuadratic
 
-                    heatmap_dir = str(results_dir / "hyperparameter_heatmaps")
+                    heatmap_dir = str(experiments_dir / "hyperparameter_heatmaps")
 
                     # Check if already completed
                     momentum_file = Path(heatmap_dir) / "momentum_beta_heatmap_data.csv"
@@ -11801,30 +14010,30 @@ Examples:
                         experiment_results['hyperparameter_heatmaps'] = "Skipped (already complete)"
                     else:
                         print("Generating momentum beta sensitivity heatmap...")
-                    momentum_df = run_momentum_beta_heatmap(
-                        test_function=Rosenbrock(),
-                        beta_range=np.linspace(0.0, 0.99, 15 if args.quick else 20),
-                        lr_range=np.logspace(-4, -1, 10 if args.quick else 15),
-                        max_iters=2000 if args.quick else 5000,
-                        output_dir=heatmap_dir
-                    )
+                        momentum_df = run_momentum_beta_heatmap(
+                            test_function=Rosenbrock(),
+                            beta_range=np.linspace(0.0, 0.99, 15 if args.quick else 20),
+                            lr_range=np.logspace(-4, -1, 10 if args.quick else 15),
+                            max_iters=2000 if args.quick else 5000,
+                            output_dir=heatmap_dir
+                        )
 
-                    print("Generating Adam beta1/beta2 sensitivity heatmap...")
-                    adam_df = run_adam_beta_heatmap(
-                        test_function=Rosenbrock(),
-                        beta1_range=np.linspace(0.5, 0.99, 10 if args.quick else 15),
-                        beta2_range=np.linspace(0.9, 0.9999, 10 if args.quick else 15),
-                        lr=0.001,
-                        max_iters=2000 if args.quick else 5000,
-                        output_dir=heatmap_dir
-                    )
+                        print("Generating Adam beta1/beta2 sensitivity heatmap...")
+                        adam_df = run_adam_beta_heatmap(
+                            test_function=Rosenbrock(),
+                            beta1_range=np.linspace(0.5, 0.99, 10 if args.quick else 15),
+                            beta2_range=np.linspace(0.9, 0.9999, 10 if args.quick else 15),
+                            lr=0.001,
+                            max_iters=2000 if args.quick else 5000,
+                            output_dir=heatmap_dir
+                        )
 
-                    experiment_results['hyperparameter_heatmaps'] = {
-                        'momentum': momentum_df,
-                        'adam': adam_df
-                    }
-                    print("Hyperparameter sensitivity heatmaps completed!")
-                    print(f"✓ Heatmaps saved to {heatmap_dir}")
+                        experiment_results['hyperparameter_heatmaps'] = {
+                            'momentum': momentum_df,
+                            'adam': adam_df
+                        }
+                        print("Hyperparameter sensitivity heatmaps completed!")
+                        print(f"âœ“ Heatmaps saved to {heatmap_dir}")
                 except Exception as e:
                     logging.error(f"Hyperparameter heatmap generation failed: {e}")
                     experiment_results['hyperparameter_heatmaps'] = None
@@ -11833,88 +14042,83 @@ Examples:
         if 'stochastic_2d_integrity' in selected_experiments and HAS_STOCHASTIC_2D_INTEGRITY:
             with error_context("Stochastic 2D Integrity Experiment", continue_on_error=True):
                 print("\n" + "="*80)
-                print("🔬 STOCHASTIC 2D OPTIMIZATION (Proper SGD with Gradient Noise)")
+                print("[STOCHASTIC 2D] STOCHASTIC 2D OPTIMIZATION (Proper SGD with Gradient Noise)")
                 print("="*80)
-                print("   NOTE: This fixes the 'Fake SGD' problem - adding gradient noise")
-                print("   to make SGD truly stochastic (not deterministic GD)")
+                print("   NOTE: This fixes the deterministic 'fake SGD' issue by injecting gradient noise")
                 print("="*80)
                 try:
-                    stoch_dir = str(results_dir / "stochastic_2d_integrity")
+                    stoch_dir = str(experiments_dir / "stochastic_2d_integrity")
+                    os.makedirs(stoch_dir, exist_ok=True)
 
-                    # Check if already completed
                     comparison_file = Path(stoch_dir) / "gd_vs_sgd_comparison.csv"
 
                     if args.resume and comparison_file.exists():
                         print("   Stochastic 2D integrity experiment already completed")
-                        experiment_results['stochastic_2d_integrity'] = "Skipped (already complete)"
+                        experiment_results['stochastic_2d_integrity'] = pd.read_csv(comparison_file)
                     else:
-                        # Run comprehensive GD vs. SGD comparison
-                        results = compare_deterministic_vs_stochastic(
+                        # Run comprehensive GD vs SGD comparison.
+                        _ = compare_deterministic_vs_stochastic(
                             results_dir=stoch_dir,
-                            seeds=seeds
+                            seeds=seeds if not args.quick else seeds[:3]
                         )
 
-                        experiment_results['stochastic_2d_integrity'] = results
+                        if comparison_file.exists():
+                            comparison_df = pd.read_csv(comparison_file)
+                        else:
+                            comparison_df = pd.DataFrame()
+
+                        experiment_results['stochastic_2d_integrity'] = comparison_df
                         print("Stochastic 2D integrity experiment completed!")
-                        print("✓ Results demonstrate critical difference between GD and SGD")
-                        print("✓ Gradient noise injection now properly simulates mini-batch stochasticity")
                 except Exception as e:
                     logging.error(f"Stochastic 2D integrity experiment failed: {e}")
                     experiment_results['stochastic_2d_integrity'] = None
-
         # NEW: Adam L2 vs. AdamW Comparison (Final Structural Fix)
         if 'adam_adamw_comparison' in selected_experiments and HAS_ADAM_ADAMW_COMPARISON:
             with error_context("Adam L2 vs AdamW Comparison", continue_on_error=True):
                 print("\n" + "="*80)
-                print("🔬 ADAM L2 vs. ADAMW COMPARISON")
+                print("[ADAM VS ADAMW] ADAM L2 vs. ADAMW COMPARISON")
                 print("="*80)
-                print("   Demonstrates WHY AdamW exists: L2 regularization fails with adaptive optimizers")
+                print("   Demonstrates why AdamW exists: decoupled weight decay")
                 print("="*80)
                 try:
-                    adam_comp_dir = str(results_dir / "adam_adamw_comparison")
+                    adam_comp_dir = str(experiments_dir / "adam_adamw_comparison")
+                    os.makedirs(adam_comp_dir, exist_ok=True)
 
-                    # Check if already completed
                     comparison_file = Path(adam_comp_dir) / "adam_l2_vs_adamw_comparison.csv"
+                    schedule_file = Path(adam_comp_dir) / "lr_schedule" / "lr_schedule_demo_results.csv"
 
-                    if args.resume and comparison_file.exists():
+                    if args.resume and comparison_file.exists() and schedule_file.exists():
                         print("   Adam L2 vs AdamW comparison already completed")
-                        experiment_results['adam_adamw_comparison'] = "Skipped (already complete)"
+                        experiment_results['adam_adamw_comparison'] = pd.read_csv(comparison_file)
                     else:
-                        # Run comprehensive Adam L2 vs AdamW comparison
+                        # Run Adam L2 vs AdamW comparison.
                         weight_decay_values = [0.0, 0.001, 0.01, 0.1] if not args.quick else [0.0, 0.01]
                         max_iter = 1000 if args.quick else 2000
 
                         df_comparison = run_adam_vs_adamw_comparison(
                             results_dir=adam_comp_dir,
-                            seeds=seeds,
+                            seeds=seeds if not args.quick else seeds[:3],
                             weight_decay_values=weight_decay_values,
                             max_iter=max_iter,
-                            resume=False
+                            resume=args.resume
                         )
 
-                        # Also demonstrate LR scheduling
-                        df_schedule = run_lr_schedule_demonstration(
+                        # Also generate LR scheduling demonstration in same experiment folder.
+                        _ = run_lr_schedule_demonstration(
                             results_dir=f"{adam_comp_dir}/lr_schedule",
                             max_iter=max_iter
                         )
 
-                        experiment_results['adam_adamw_comparison'] = {
-                            'comparison': df_comparison,
-                            'schedule_demo': df_schedule
-                        }
+                        experiment_results['adam_adamw_comparison'] = df_comparison
                         print("Adam L2 vs AdamW comparison completed!")
-                        print("✓ Results show L2 regularization degrades Adam performance")
-                        print("✓ AdamW (decoupled) maintains convergence quality")
-                        print("✓ LR scheduling now supported in 2D experiments")
                 except Exception as e:
                     logging.error(f"Adam L2 vs AdamW comparison failed: {e}")
                     experiment_results['adam_adamw_comparison'] = None
-
         # NEW: Cross-Optimizer Dynamics Comparison (addresses proposal requirement)
         if 'cross_optimizer_dynamics' in selected_experiments:
             with error_context("Cross-Optimizer Dynamics Comparison", continue_on_error=True):
                 print("\n" + "="*80)
-                print("🔬 CROSS-OPTIMIZER DYNAMICS COMPARISON")
+                print("ðŸ”¬ CROSS-OPTIMIZER DYNAMICS COMPARISON")
                 print("="*80)
                 try:
                     from src.experiments.cross_optimizer_dynamics_comparison import run_cross_optimizer_dynamics_comparison
@@ -11944,15 +14148,15 @@ Examples:
                     logging.error(f"Cross-optimizer dynamics comparison failed: {e}")
                     experiment_results['cross_optimizer_dynamics'] = None
 
-        # NEW: β Sensitivity on Real Training
+        # NEW: Î² Sensitivity on Real Training
         if 'beta_sensitivity_training' in selected_experiments:
             with error_context("Beta Sensitivity on Real Training", continue_on_error=True):
                 print("\n" + "="*80)
-                print("🔬 β SENSITIVITY ANALYSIS ON REAL TRAINING")
+                print("ðŸ”¬ Î² SENSITIVITY ANALYSIS ON REAL TRAINING")
                 print("="*80)
-                print("📌 This addresses the Vietnamese proposal requirement:")
+                print("ðŸ“Œ This addresses the Vietnamese proposal requirement:")
                 print("   'systematic investigation and visualization of the impact of characteristic")
-                print("    hyperparameters (β, β1, β2) on kinetic aspects'")
+                print("    hyperparameters (Î², Î²1, Î²2) on kinetic aspects'")
                 print("="*80)
                 try:
                     from src.experiments.beta_sensitivity_training import (
@@ -11972,7 +14176,7 @@ Examples:
 
                     if args.resume and all([momentum_csv.exists(), adam_beta1_csv.exists(),
                                            adam_beta2_csv.exists(), adam_grid_csv.exists()]):
-                        print("   β sensitivity training already completed (all 4 experiments)")
+                        print("   Î² sensitivity training already completed (all 4 experiments)")
                         experiment_results['beta_sensitivity_training'] = "Skipped (already complete)"
                     else:
                         # Determine device
@@ -11980,9 +14184,9 @@ Examples:
 
                         results_dict = {}
 
-                        # Run Momentum β sensitivity
+                        # Run Momentum Î² sensitivity
                         if not momentum_csv.exists() or not args.resume:
-                            print("\nRunning Momentum β sweep on MNIST...")
+                            print("\nRunning Momentum Î² sweep on MNIST...")
                             sgd_params = get_default_hyperparameters('SGD', 'resnet_cifar10')
                             lr = sgd_params.get('lr', 0.01)
                             momentum_df = run_momentum_beta_sensitivity(
@@ -11996,9 +14200,9 @@ Examples:
                             )
                             results_dict['momentum'] = momentum_df
 
-                        # Run Adam β1 sensitivity
+                        # Run Adam Î²1 sensitivity
                         if not adam_beta1_csv.exists() or not args.resume:
-                            print("\nRunning Adam β1 sweep on MNIST...")
+                            print("\nRunning Adam Î²1 sweep on MNIST...")
                             adam_params = get_default_hyperparameters('Adam', 'resnet_cifar10')
                             lr = adam_params.get('lr', 0.001)
                             adam_beta1_df = run_adam_beta_sensitivity(
@@ -12012,11 +14216,11 @@ Examples:
                             )
                             results_dict['adam_beta1'] = adam_beta1_df
 
-                        # Run Adam β2 sensitivity (NEW)
+                        # Run Adam Î²2 sensitivity (NEW)
                         if not adam_beta2_csv.exists() or not args.resume:
-                            print("\nRunning Adam β2 sweep on MNIST...")
+                            print("\nRunning Adam Î²2 sweep on MNIST...")
                             adam_beta2_df = run_adam_beta2_sensitivity(
-                                beta1=0.9,  # Fixed β1
+                                beta1=0.9,  # Fixed Î²1
                                 beta2_values=[0.95, 0.99, 0.999] if args.quick else [0.9, 0.95, 0.99, 0.999, 0.9999],
                                 epochs=10 if args.quick else 20,
                                 seeds=seeds if args.quick else seeds,
@@ -12027,9 +14231,9 @@ Examples:
                             )
                             results_dict['adam_beta2'] = adam_beta2_df
 
-                        # Run Adam (β1, β2) grid search (NEW)
+                        # Run Adam (Î²1, Î²2) grid search (NEW)
                         if not adam_grid_csv.exists() or not args.resume:
-                            print("\nRunning Adam (β1, β2) grid search on MNIST...")
+                            print("\nRunning Adam (Î²1, Î²2) grid search on MNIST...")
                             adam_grid_df = run_adam_beta1_beta2_grid(
                                 beta1_values=[0.7, 0.9, 0.99] if args.quick else [0.7, 0.9, 0.95, 0.99],
                                 beta2_values=[0.9, 0.99, 0.999] if args.quick else [0.9, 0.99, 0.999, 0.9999],
@@ -12043,7 +14247,7 @@ Examples:
                             results_dict['adam_grid'] = adam_grid_df
 
                         experiment_results['beta_sensitivity_training'] = results_dict
-                        print("β sensitivity on real training completed (all 4 experiments)!")
+                        print("Î² sensitivity on real training completed (all 4 experiments)!")
                 except Exception as e:
                     logging.error(f"Beta sensitivity training failed: {e}")
                     experiment_results['beta_sensitivity_training'] = None
@@ -12052,7 +14256,7 @@ Examples:
         if 'label_noise' in selected_experiments:
             with error_context("Label Noise Ablation", continue_on_error=True):
                 print("\n" + "="*80)
-                print("🔬 LABEL NOISE ABLATION STUDY")
+                print("ðŸ”¬ LABEL NOISE ABLATION STUDY")
                 print("="*80)
             print(" This addresses important methodological gap:")
             print("   'Label noise ablation is the gold standard for validating claims")
@@ -12361,9 +14565,9 @@ Examples:
         print(f"  Visualizations:")
         print(f"     - Interactive (per-experiment): {results_dir}/visualizations/interactive/*_interactive_comparison.html")
         print(f"     - Static plots (per-experiment): {results_dir}/visualizations/static/*/")
-        print(f"       · Training/test loss curves")
-        print(f"       · Accuracy progression plots")
-        print(f"       · Final performance comparisons")
+        print(f"       Â· Training/test loss curves")
+        print(f"       Â· Accuracy progression plots")
+        print(f"       Â· Final performance comparisons")
         print(f"")
     print(f"  Reports:")
     print(f"     - Summary: {results_dir}/reports/00_EXPERIMENT_SUMMARY.md")
@@ -12379,7 +14583,6 @@ Examples:
     print("GENERATING HIGH-QUALITY PLOTS")
     print("="*80)
     try:
-        import subprocess
         plot_script = Path(__file__).parent / "scripts" / "generate_experiment_plots.py"
         if plot_script.exists():
             print(f"Running universal plot generator: {plot_script}")

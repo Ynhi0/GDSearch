@@ -1,4 +1,4 @@
-"""
+﻿"""
 Scientific Integrity Fixes for GDSearch Optimizer Comparison
 
 This module addresses critical methodological flaws identified in thesis review:
@@ -67,7 +67,7 @@ def run_stochastic_2d_experiments(
     from src.core.training_utils import set_seed
 
     logging.info("\n" + "="*80)
-    logging.info("🔬 STOCHASTIC 2D OPTIMIZATION EXPERIMENTS (Proper SGD)")
+    logging.info("[STOCHASTIC 2D] STOCHASTIC 2D OPTIMIZATION EXPERIMENTS (Proper SGD)")
     logging.info("="*80)
     logging.info("   Gradient Noise: %s (std=%s)", noise_type, noise_std)
     logging.info("   Note: Without noise, this is Gradient Descent (GD), NOT SGD!")
@@ -102,14 +102,31 @@ def run_stochastic_2d_experiments(
     # Optimizer configurations (load from config with fallback)
     optimizers = []
     try:
-        sgd_cfg = load_optimizer_config('benchmark_hyperparameters', '2d_optimization', 'SGD')
-        sgdm_cfg = load_optimizer_config('benchmark_hyperparameters', '2d_optimization', 'SGDMomentum')
-        adam_cfg = load_optimizer_config('benchmark_hyperparameters', '2d_optimization', 'Adam')
-        rmsprop_cfg = load_optimizer_config('benchmark_hyperparameters', '2d_optimization', 'RMSProp')
+        def _load_cfg(*candidate_names: str) -> Dict[str, Any]:
+            last_error = None
+            for candidate in candidate_names:
+                try:
+                    return load_optimizer_config('benchmark_hyperparameters', '2d_optimization', candidate)
+                except (ConfigurationError, FileNotFoundError) as e:
+                    last_error = e
+            raise last_error if last_error is not None else ConfigurationError("No optimizer names provided")
+
+        def _normalize_kwargs(opt_name: str, cfg: Dict[str, Any]) -> Dict[str, Any]:
+            normalized = dict(cfg)
+            if opt_name == 'SGD_Momentum' and 'momentum' in normalized and 'beta' not in normalized:
+                normalized['beta'] = normalized.pop('momentum')
+            if opt_name in ('Adam', 'RMSProp') and 'eps' in normalized and 'epsilon' not in normalized:
+                normalized['epsilon'] = normalized.pop('eps')
+            return normalized
+
+        sgd_cfg = _normalize_kwargs('SGD', _load_cfg('SGD'))
+        sgdm_cfg = _normalize_kwargs('SGD_Momentum', _load_cfg('SGDMomentum', 'SGD_Momentum'))
+        adam_cfg = _normalize_kwargs('Adam', _load_cfg('Adam'))
+        rmsprop_cfg = _normalize_kwargs('RMSProp', _load_cfg('RMSProp'))
         # SAM config (if available, otherwise use default)
         try:
-            sam_cfg = load_optimizer_config('benchmark_hyperparameters', '2d_optimization', 'SAM')
-            sam_opt = SAM(**sam_cfg)
+            sam_cfg = _load_cfg('SAM', 'SAM_SGD')
+            sam_opt = SAM(base_optimizer='SGD', **sam_cfg)
         except (ConfigurationError, FileNotFoundError):
             sam_opt = SAM(lr=0.01, rho=0.05, base_optimizer='SGD')
 
@@ -126,7 +143,7 @@ def run_stochastic_2d_experiments(
         optimizers = [
             ("SGD", SGD(lr=0.01)),
             ("SGD_Momentum", SGDMomentum(lr=0.05, beta=0.9)),
-            ("Adam", Adam(lr=0.1)),
+            ("Adam", Adam(lr=0.01)),
             ("RMSProp", RMSProp(lr=0.01)),
             ("SAM", SAM(lr=0.01, rho=0.05, base_optimizer='SGD')),
         ]
@@ -149,15 +166,20 @@ def run_stochastic_2d_experiments(
                 optimizer.reset()
 
                 for iteration in range(max_iter):
-                    # Compute loss
-                    loss = func.compute(x, y)
-                    
-                    # Compute STOCHASTIC gradient (this is the key fix!)
-                    grad_x, grad_y = func.gradient(x, y, noise_std=noise_std, noise_type=noise_type)
-                    
+                    # Guard against numerical overflows from extreme divergence.
+                    try:
+                        loss = func.compute(x, y)
+                        # Compute STOCHASTIC gradient (this is the key fix!)
+                        grad_x, grad_y = func.gradient(x, y, noise_std=noise_std, noise_type=noise_type)
+                    except (OverflowError, FloatingPointError, ValueError) as e:
+                        logging.debug("Numeric failure for %s/%s seed %s at iter %s: %s", func_name, opt_name, seed, iteration, e)
+                        break
+
                     # Compute gradient norm for convergence analysis (proposal requirement)
                     grad_norm = np.hypot(grad_x, grad_y)
-                    
+                    if not np.isfinite(loss) or not np.isfinite(grad_norm):
+                        break
+
                     # Store iteration data including grad_norm (required by proposal)
                     history.append({'iteration': iteration, 'x': x, 'y': y, 'loss': loss, 'grad_norm': grad_norm})
 
@@ -170,7 +192,7 @@ def run_stochastic_2d_experiments(
                             # Normalize gradient direction
                             grad_dir_x = grad_x / grad_norm
                             grad_dir_y = grad_y / grad_norm
-                            # Adversarial step: θ + ρ * (g / ||g||)
+                            # Adversarial step: theta + rho * (g / ||g||)
                             # SAM guaranteed to have .rho attribute
                             if hasattr(optimizer, 'rho'):
                                 rho_value = optimizer.rho
@@ -190,6 +212,10 @@ def run_stochastic_2d_experiments(
                     else:
                         # Standard optimizer step
                         x, y = optimizer.step((x, y), (grad_x, grad_y))
+
+                    # Divergence guardrail to avoid numeric blow-ups.
+                    if (not np.isfinite(x)) or (not np.isfinite(y)) or abs(x) > 1e12 or abs(y) > 1e12:
+                        break
 
                     # Convergence check
                     if loss < 1e-8:
@@ -217,7 +243,7 @@ def run_stochastic_2d_experiments(
     df = pd.DataFrame(results)
     output_path = safe_to_csv(df, f"{results_dir}/stochastic_2d_results.csv", index=False)
 
-    print(f"\n💾 Results saved to {output_path}")
+    print(f"\nResults saved to {output_path}")
 
     # Generate summary statistics
     print("\n" + "="*80)
@@ -250,7 +276,7 @@ def compare_deterministic_vs_stochastic(
         Dictionary with 'deterministic' and 'stochastic' DataFrames
     """
     print("\n" + "="*80)
-    print("🔬 CRITICAL EXPERIMENT: Gradient Descent (GD) vs. SGD")
+    print("[CRITICAL] Gradient Descent (GD) vs. SGD")
     print("="*80)
     print("   This demonstrates why gradient noise matters!")
     print("="*80)
@@ -321,11 +347,12 @@ if __name__ == "__main__":
     results = compare_deterministic_vs_stochastic()
 
     print("\n" + "="*80)
-    print("✅ SCIENTIFIC INTEGRITY RESTORED")
+    print("[OK] SCIENTIFIC INTEGRITY RESTORED")
     print("="*80)
     print("   Key Fixes Applied:")
-    print("   1. ✅ Gradient noise injection (multiplicative)")
-    print("   2. ✅ Multi-function test suite (Rosenbrock, Ackley, Saddle, Ill-Conditioned)")
-    print("   3. ✅ Realistic condition numbers (kappa=1000-10000)")
-    print("   4. ✅ Proper GD vs. SGD comparison")
+    print("   1. [OK] Gradient noise injection (multiplicative)")
+    print("   2. [OK] Multi-function test suite (Rosenbrock, Ackley, Saddle, Ill-Conditioned)")
+    print("   3. [OK] Realistic condition numbers (kappa=1000-10000)")
+    print("   4. [OK] Proper GD vs. SGD comparison")
     print("="*80)
+

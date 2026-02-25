@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 Advanced Training Features Ablation Study
 
@@ -273,7 +273,8 @@ def run_ablation_study(
     results_dir: str = "results/advanced_training_ablation",
     seeds: List[int] = [1, 2, 3, 4, 5],
     epochs: int = 10,
-    quick: bool = False
+    quick: bool = False,
+    resume: bool = False
 ):
     """
     Run comprehensive ablation study for advanced training features.
@@ -291,16 +292,46 @@ def run_ablation_study(
     Statistical validity:
     - Multiple seeds for each configuration
     - Controlled experiments (one variable at a time)
-    - Report mean ± std for all metrics
+    - Report mean Â± std for all metrics
     """
     print("="*80)
-    print("🔬 ADVANCED TRAINING FEATURES ABLATION STUDY")
+    print("ðŸ”¬ ADVANCED TRAINING FEATURES ABLATION STUDY")
     print("="*80)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
     print(f"Seeds: {seeds}")
     print(f"Epochs: {epochs}")
+
+    results_path = Path(results_dir)
+    results_path.mkdir(parents=True, exist_ok=True)
+
+    def _load_cached_seed_result(config: Dict, seed: int) -> Optional[Dict]:
+        config_name = config.get('name', 'unknown').replace('+', '_')
+        cache_file = results_path / f"AdvAblation_{config_name}_seed{seed}.csv"
+        if not cache_file.exists():
+            return None
+        try:
+            hist_df = pd.read_csv(cache_file)
+            if hist_df.empty or 'test_acc' not in hist_df.columns:
+                return None
+            final_row = hist_df.iloc[-1]
+            ema_col = 'ema_test_acc' if 'ema_test_acc' in hist_df.columns else 'test_acc'
+            return {
+                'config': config,
+                'final_test_acc': float(final_row.get('test_acc', np.nan)),
+                'final_ema_acc': float(final_row.get(ema_col, np.nan)),
+                'best_test_acc': float(hist_df['test_acc'].max()),
+                'best_ema_acc': float(hist_df[ema_col].max()),
+                # Historical per-seed runtime is unavailable in cached CSV.
+                'training_time': np.nan,
+                'memory_used': np.nan,
+                'history': [],
+                'seed': seed,
+            }
+        except Exception as e:
+            logging.debug("Could not load cached advanced ablation seed file %s: %s", cache_file, e, exc_info=True)
+            return None
 
     # Setup data loaders
     transform_train = transforms.Compose([
@@ -397,43 +428,60 @@ def run_ablation_study(
         config_results = []
 
         for seed in seeds:
-            print(f"  Running seed {seed}...")
-            result = run_single_experiment(
-                config, train_dataset, test_dataset, device, epochs, seed,
-                results_dir=results_dir
-            )
+            result = _load_cached_seed_result(config, seed) if resume else None
+            if result is not None:
+                print(f"  Reusing seed {seed} from cached CSV")
+            else:
+                print(f"  Running seed {seed}...")
+                result = run_single_experiment(
+                    config, train_dataset, test_dataset, device, epochs, seed,
+                    results_dir=results_dir
+                )
             config_results.append(result)
 
             print(f"    Final Test Acc: {result['final_test_acc']:.2f}%")
             print(f"    Final EMA Acc: {result['final_ema_acc']:.2f}%")
-            print(f"    Training Time: {result['training_time']:.2f}s")
+            training_time = result.get('training_time', np.nan)
+            if np.isfinite(training_time):
+                print(f"    Training Time: {training_time:.2f}s")
+            else:
+                print("    Training Time: N/A (loaded from cache)")
 
-        # Aggregate results across seeds
-        test_accs = [r['final_test_acc'] for r in config_results]
-        ema_accs = [r['final_ema_acc'] for r in config_results]
-        times = [r['training_time'] for r in config_results]
+        # Aggregate results across seeds (nan-safe for resumed cached rows).
+        test_accs = np.asarray([r.get('final_test_acc', np.nan) for r in config_results], dtype=float)
+        ema_accs = np.asarray([r.get('final_ema_acc', np.nan) for r in config_results], dtype=float)
+        times = np.asarray([r.get('training_time', np.nan) for r in config_results], dtype=float)
+        mean_test_acc = float(np.nanmean(test_accs)) if np.any(np.isfinite(test_accs)) else np.nan
+        std_test_acc = float(np.nanstd(test_accs)) if np.any(np.isfinite(test_accs)) else np.nan
+        mean_ema_acc = float(np.nanmean(ema_accs)) if np.any(np.isfinite(ema_accs)) else np.nan
+        std_ema_acc = float(np.nanstd(ema_accs)) if np.any(np.isfinite(ema_accs)) else np.nan
+        mean_time = float(np.nanmean(times)) if np.any(np.isfinite(times)) else np.nan
+        std_time = float(np.nanstd(times)) if np.any(np.isfinite(times)) else np.nan
 
         all_results.append({
             'configuration': config['name'],
             'use_amp': config['use_amp'],
             'use_label_smoothing': config['use_label_smoothing'],
             'use_ema': config['use_ema'],
-            'mean_test_acc': np.mean(test_accs),
-            'std_test_acc': np.std(test_accs),
-            'test_accuracy': np.mean(test_accs),  # Add for plotting compatibility
-            'mean_ema_acc': np.mean(ema_accs),
-            'std_ema_acc': np.std(ema_accs),
-            'mean_training_time': np.mean(times),
-            'std_training_time': np.std(times),
-            'training_time': np.mean(times),  # Add for plotting compatibility
+            'mean_test_acc': mean_test_acc,
+            'std_test_acc': std_test_acc,
+            'test_accuracy': mean_test_acc,  # Add for plotting compatibility
+            'mean_ema_acc': mean_ema_acc,
+            'std_ema_acc': std_ema_acc,
+            'mean_training_time': mean_time,
+            'std_training_time': std_time,
+            'training_time': mean_time,  # Add for plotting compatibility
             'n_seeds': len(seeds),
             'seeds': seeds
         })
 
         print(f"\n  Summary (n={len(seeds)}):")
-        print(f"    Test Acc: {np.mean(test_accs):.2f} ± {np.std(test_accs):.2f}%")
-        print(f"    EMA Acc: {np.mean(ema_accs):.2f} ± {np.std(ema_accs):.2f}%")
-        print(f"    Time: {np.mean(times):.2f} ± {np.std(times):.2f}s")
+        print(f"    Test Acc: {mean_test_acc:.2f} +/- {std_test_acc:.2f}%")
+        print(f"    EMA Acc: {mean_ema_acc:.2f} +/- {std_ema_acc:.2f}%")
+        if np.isfinite(mean_time):
+            print(f"    Time: {mean_time:.2f} +/- {std_time:.2f}s")
+        else:
+            print("    Time: N/A (all seeds loaded from cache)")
 
     # Save results
     results_path = Path(results_dir)
@@ -494,10 +542,32 @@ def create_visualizations(df: pd.DataFrame, results_dir: str):
     # 1. Bar plot: Final test accuracy comparison
     fig, ax = plt.subplots(figsize=(12, 6))
 
-    # Group by configuration and compute mean/std
-    grouped = df.groupby('configuration')['test_accuracy'].agg(['mean', 'std', 'count'])
+    # Build visualization table from either raw per-seed rows or pre-aggregated summary rows.
+    summary_mode = {'mean_test_acc', 'std_test_acc'}.issubset(df.columns)
     from typing import cast
-    grouped = cast(pd.DataFrame, grouped).sort_values(by=['mean'], ascending=False)
+    if summary_mode:
+        agg_map = {
+            'mean_test_acc': 'mean',
+            'std_test_acc': 'mean',
+        }
+        if 'n_seeds' in df.columns:
+            agg_map['n_seeds'] = 'max'
+        grouped = cast(pd.DataFrame, df.groupby('configuration', as_index=False).agg(agg_map))
+        grouped = grouped.rename(columns={
+            'mean_test_acc': 'mean',
+            'std_test_acc': 'std',
+            'n_seeds': 'count',
+        })
+        if 'count' not in grouped.columns:
+            grouped['count'] = 1
+        grouped = grouped.set_index('configuration')
+    else:
+        grouped = cast(pd.DataFrame, df.groupby('configuration')['test_accuracy'].agg(['mean', 'std', 'count']))
+
+    grouped['mean'] = pd.to_numeric(grouped['mean'], errors='coerce')
+    grouped['std'] = pd.to_numeric(grouped['std'], errors='coerce').fillna(0.0)
+    grouped['count'] = pd.to_numeric(grouped['count'], errors='coerce').fillna(1).astype(int)
+    grouped = cast(pd.DataFrame, grouped.sort_values(by=['mean'], ascending=False))
 
     x_pos = np.arange(len(grouped))
     bars = ax.bar(x_pos, grouped['mean'], yerr=grouped['std'],
@@ -519,7 +589,7 @@ def create_visualizations(df: pd.DataFrame, results_dir: str):
     ax.set_xticks(x_pos)
     ax.set_xticklabels(grouped.index, rotation=45, ha='right')
     ax.set_ylabel('Test Accuracy (%)', fontsize=12)
-    ax.set_title('Advanced Training Features: Ablation Study Results\n(Error bars show ±1 std dev)',
+    ax.set_title('Advanced Training Features: Ablation Study Results\n(Error bars show +/- 1 std dev)',
                  fontsize=14, fontweight='bold')
     ax.grid(axis='y', alpha=0.3)
 
@@ -539,7 +609,7 @@ def create_visualizations(df: pd.DataFrame, results_dir: str):
 
     # Create matrix of feature combinations and their effects
     configs = grouped.index.tolist()
-    baseline_acc = grouped.loc['Baseline', 'mean']
+    baseline_acc = grouped.loc['Baseline', 'mean'] if 'Baseline' in grouped.index else grouped['mean'].iloc[0]
 
     improvements = {config: grouped.loc[config, 'mean'] - baseline_acc
                    for config in configs if config != 'Baseline'}
@@ -590,28 +660,36 @@ def create_visualizations(df: pd.DataFrame, results_dir: str):
     plt.close()
     print("  Saved feature_heatmap.png/.pdf")
 
-    # 3. Box plot for variance analysis
+    # 3. Distribution view for variance analysis
     fig, ax = plt.subplots(figsize=(14, 6))
 
-    # Prepare data for box plot
-    from src.utils.type_guards import ensure_series
-    box_data = [ensure_series(df[df['configuration'] == config]['test_accuracy']).to_numpy()
-                for config in grouped.index]
-
-    bp = ax.boxplot(box_data, patch_artist=True, showmeans=True, meanline=True)
-
-    # Color boxes
-    for patch, color in zip(bp['boxes'], colors):
-        patch.set_facecolor(color)
-        patch.set_alpha(0.6)
+    if summary_mode:
+        # Summary CSV already stores mean/std, so use error bars instead of a pseudo-boxplot.
+        x_pos = np.arange(len(grouped))
+        bars = ax.bar(x_pos, grouped['mean'], yerr=grouped['std'],
+                      capsize=5, alpha=0.7, edgecolor='black')
+        for bar, color in zip(bars, colors):
+            bar.set_color(color)
+            bar.set_alpha(0.6)
+        ax.set_xticks(x_pos)
+        ax.set_xticklabels(grouped.index, rotation=45, ha='right')
+        ax.set_title('Accuracy Summary Across Seeds\n(Using reported mean +/- std)',
+                     fontsize=14, fontweight='bold')
+    else:
+        from src.utils.type_guards import ensure_series
+        box_data = [ensure_series(df[df['configuration'] == config]['test_accuracy']).to_numpy()
+                    for config in grouped.index]
+        bp = ax.boxplot(box_data, patch_artist=True, showmeans=True, meanline=True)
+        for patch, color in zip(bp['boxes'], colors):
+            patch.set_facecolor(color)
+            patch.set_alpha(0.6)
+        ax.set_xticks(np.arange(1, len(grouped.index) + 1))
+        ax.set_xticklabels(grouped.index, rotation=45, ha='right')
+        ax.set_title('Accuracy Distribution Across Seeds\n(Box = IQR, Orange line = Mean)',
+                     fontsize=14, fontweight='bold')
 
     ax.set_ylabel('Test Accuracy (%)', fontsize=12)
-    ax.set_title('Accuracy Distribution Across Seeds\n(Box = IQR, Orange line = Mean)',
-                fontsize=14, fontweight='bold')
     ax.grid(axis='y', alpha=0.3)
-    # Ensure x-axis labels match boxplot positions
-    ax.set_xticks(np.arange(1, len(grouped.index) + 1))
-    ax.set_xticklabels(grouped.index, rotation=45, ha='right')
     plt.tight_layout()
     plt.savefig(viz_dir / 'accuracy_distribution.png', dpi=300, bbox_inches='tight')
     plt.savefig(viz_dir / 'accuracy_distribution.pdf', bbox_inches='tight')
@@ -619,33 +697,60 @@ def create_visualizations(df: pd.DataFrame, results_dir: str):
     print("  Saved accuracy_distribution.png/.pdf")
 
     # 4. Training time comparison
-    if 'training_time' in df.columns:
+    if 'training_time' in df.columns or 'mean_training_time' in df.columns:
         fig, ax = plt.subplots(figsize=(12, 6))
 
-        time_grouped = df.groupby('configuration')['training_time'].agg(['mean', 'std'])
+        if summary_mode and 'mean_training_time' in df.columns:
+            time_agg = {'mean_training_time': 'mean'}
+            if 'std_training_time' in df.columns:
+                time_agg['std_training_time'] = 'mean'
+            time_grouped = cast(pd.DataFrame, df.groupby('configuration', as_index=False).agg(time_agg))
+            time_grouped = time_grouped.rename(columns={
+                'mean_training_time': 'mean',
+                'std_training_time': 'std',
+            }).set_index('configuration')
+            if 'std' not in time_grouped.columns:
+                time_grouped['std'] = 0.0
+        else:
+            time_grouped = cast(pd.DataFrame, df.groupby('configuration')['training_time'].agg(['mean', 'std']))
+
         time_grouped = time_grouped.loc[grouped.index]  # Same order as accuracy
+        time_grouped['mean'] = pd.to_numeric(time_grouped['mean'], errors='coerce')
+        time_grouped['std'] = pd.to_numeric(time_grouped['std'], errors='coerce').fillna(0.0)
 
-        x_pos = np.arange(len(time_grouped))
-        bars = ax.bar(x_pos, time_grouped['mean'], yerr=time_grouped['std'],
-                     capsize=5, alpha=0.7, edgecolor='black', color=colors)
+        finite_mask = np.isfinite(time_grouped['mean'].to_numpy())
+        if not finite_mask.any():
+            plt.close()
+            print("  Skipped training_time plot (all values are missing)")
+        else:
+            # Keep x-axis aligned and render missing values as 0 with N/A labels.
+            time_values = time_grouped['mean'].fillna(0.0)
+            std_values = time_grouped['std'].fillna(0.0)
 
-        ax.set_xticks(x_pos)
-        ax.set_xticklabels(time_grouped.index, rotation=45, ha='right')
-        ax.set_ylabel('Training Time (seconds)', fontsize=12)
-        ax.set_title('Training Time Comparison\n(Lower is better)',
-                    fontsize=14, fontweight='bold')
-        ax.grid(axis='y', alpha=0.3)
+            x_pos = np.arange(len(time_grouped))
+            bars = ax.bar(x_pos, time_values, yerr=std_values,
+                         capsize=5, alpha=0.7, edgecolor='black', color=colors)
 
-        # Add value labels
-        for i, mean_val in enumerate(time_grouped['mean']):
-            ax.text(i, mean_val, f'{mean_val:.1f}s',
-                   ha='center', va='bottom', fontsize=9)
+            ax.set_xticks(x_pos)
+            ax.set_xticklabels(time_grouped.index, rotation=45, ha='right')
+            ax.set_ylabel('Training Time (seconds)', fontsize=12)
+            ax.set_title('Training Time Comparison\n(Lower is better)',
+                        fontsize=14, fontweight='bold')
+            ax.grid(axis='y', alpha=0.3)
 
-        plt.tight_layout()
-        plt.savefig(viz_dir / 'training_time.png', dpi=300, bbox_inches='tight')
-        plt.savefig(viz_dir / 'training_time.pdf', bbox_inches='tight')
-        plt.close()
-        print("  ✓ Saved training_time.png/.pdf")
+            # Add value labels
+            for i, mean_val in enumerate(time_grouped['mean']):
+                if np.isfinite(mean_val):
+                    ax.text(i, mean_val, f'{mean_val:.1f}s',
+                           ha='center', va='bottom', fontsize=9)
+                else:
+                    ax.text(i, 0.0, 'N/A', ha='center', va='bottom', fontsize=9)
+
+            plt.tight_layout()
+            plt.savefig(viz_dir / 'training_time.png', dpi=300, bbox_inches='tight')
+            plt.savefig(viz_dir / 'training_time.pdf', bbox_inches='tight')
+            plt.close()
+            print("  Saved training_time.png/.pdf")
 
     # 5. Summary table visualization
     fig, ax = plt.subplots(figsize=(14, 8))
@@ -655,16 +760,17 @@ def create_visualizations(df: pd.DataFrame, results_dir: str):
     # Prepare summary table
     summary_data = []
     for config in grouped.index:
-        row_data = df[df['configuration'] == config]
+        std_val = grouped.loc[config, 'std']
+        samples = int(grouped.loc[config, 'count'])
         summary_data.append([
             config,
-            f"{grouped.loc[config, 'mean']:.2f} ± {grouped.loc[config, 'std']:.2f}",
+            f"{grouped.loc[config, 'mean']:.2f} +/- {std_val:.2f}",
             f"{(grouped.loc[config, 'mean'] - baseline_acc):+.2f}%",
-            f"{int(grouped.loc[config, 'count'])} seeds"
+            f"{samples} seeds"
         ])
 
     table = ax.table(cellText=summary_data,
-                    colLabels=['Configuration', 'Accuracy (mean±std)', 'vs Baseline', 'Samples'],
+                    colLabels=['Configuration', 'Accuracy (mean+/-std)', 'vs Baseline', 'Samples'],
                     cellLoc='left',
                     loc='center',
                     colWidths=[0.35, 0.25, 0.2, 0.2])
@@ -696,7 +802,7 @@ def create_visualizations(df: pd.DataFrame, results_dir: str):
     plt.savefig(viz_dir / 'summary_table.png', dpi=300, bbox_inches='tight')
     plt.savefig(viz_dir / 'summary_table.pdf', bbox_inches='tight')
     plt.close()
-    print("  ✓ Saved summary_table.png/.pdf")
+    print("  Saved summary_table.png/.pdf")
 
     print(f"\nAll visualizations saved to {viz_dir}/")
 
@@ -732,3 +838,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

@@ -17,7 +17,7 @@ Usage:
     # Dry run (show what would be done)
     python scripts/generate_analysis_artifacts.py --dry-run
 
-This ensures theory-practice validation uses MEASURED constants (L, σ²)
+This ensures theory-practice validation uses MEASURED constants (L, sigma^2)
 instead of hardcoded fallbacks.
 """
 
@@ -78,20 +78,20 @@ def run_hessian_analysis(experiment: str, checkpoint: Path, output_dir: Path, dr
         )
 
         if result.returncode == 0:
-            logging.info(f"    ✓ Hessian analysis completed")
+            logging.info("    [OK] Hessian analysis completed")
             return True
         else:
-            logging.warning(f"    ✗ Hessian analysis failed: {result.stderr[:200]}")
+            logging.warning(f"    [WARN] Hessian analysis failed: {result.stderr[:200]}")
             return False
 
     except FileNotFoundError:
-        logging.warning("    ✗ Python module execution failed (module may not have CLI)")
+        logging.warning("    [WARN] Python module execution failed (module may not have CLI)")
         return False
     except subprocess.TimeoutExpired:
-        logging.warning("    ✗ Hessian analysis timed out")
+        logging.warning("    [WARN] Hessian analysis timed out")
         return False
     except Exception as e:
-        logging.warning(f"    ✗ Hessian analysis error: {e}")
+        logging.warning(f"    [WARN] Hessian analysis error: {e}")
         return False
 
 
@@ -126,20 +126,20 @@ def run_gradient_noise_analysis(experiment: str, training_csv: Path, output_dir:
         )
 
         if result.returncode == 0:
-            logging.info(f"    ✓ Gradient noise analysis completed")
+            logging.info("    [OK] Gradient noise analysis completed")
             return True
         else:
-            logging.warning(f"    ✗ Gradient noise analysis failed: {result.stderr[:200]}")
+            logging.warning(f"    [WARN] Gradient noise analysis failed: {result.stderr[:200]}")
             return False
 
     except FileNotFoundError:
-        logging.warning("    ✗ Python module execution failed (module may not have CLI)")
+        logging.warning("    [WARN] Python module execution failed (module may not have CLI)")
         return False
     except subprocess.TimeoutExpired:
-        logging.warning("    ✗ Gradient noise analysis timed out")
+        logging.warning("    [WARN] Gradient noise analysis timed out")
         return False
     except Exception as e:
-        logging.warning(f"    ✗ Gradient noise analysis error: {e}")
+        logging.warning(f"    [WARN] Gradient noise analysis error: {e}")
         return False
 
 
@@ -315,19 +315,19 @@ def main():
     print()
 
     if args.dry_run:
-        print("✓ DRY RUN COMPLETE - No artifacts generated")
+        print("[OK] DRY RUN COMPLETE - No artifacts generated")
         print("  Remove --dry-run flag to execute")
     elif args.mock:
-        print("✓ MOCK ARTIFACTS CREATED")
+        print("[OK] MOCK ARTIFACTS CREATED")
         print("  Replace with real analysis when models are trained")
     elif stats['hessian_success'] > 0 or stats['noise_success'] > 0:
-        print("✓ ARTIFACTS GENERATED")
+        print("[OK] ARTIFACTS GENERATED")
         print("  Theory-practice validation will now use measured constants")
         print()
         print("Next step: Run theory-practice validation")
         print("  python -m src.experiments.theory_practice_validation")
     else:
-        print("⚠ NO ARTIFACTS GENERATED")
+        print("[WARN] NO ARTIFACTS GENERATED")
         print("  Possible causes:")
         print("  - Analysis modules don't have CLI interface")
         print("  - No trained models/checkpoints available")

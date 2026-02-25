@@ -18,6 +18,7 @@ import argparse
 
 from src.core.test_functions import Rosenbrock, IllConditionedQuadratic, SaddlePoint
 from src.core.optimizers import SGD, SGDMomentum, SGDNesterov, RMSProp, Adam, AdamW, AMSGrad
+from src.analysis.dynamics_metrics import compute_smoothness_index, compute_oscillation_magnitude
 
 
 def run_single_trial(
@@ -31,23 +32,19 @@ def run_single_trial(
     """
     Run one trial with a given initial point.
 
-    Added gradient clipping to prevent NaN explosion on
-    Rosenbrock and other ill-conditioned functions where gradients can
-    reach 1e9+ magnitude.
-
-    Returns:
-        Dictionary with final_loss, converged (bool), iterations_to_converge, grad_norm
+    Added gradient clipping to prevent NaN explosion.
+    Tracks and returns the optimization trajectory.
     """
     optimizer.reset()
     x, y = initial_point
+    trajectory = [(x, y)]
+    speeds = []
 
     for iteration in range(max_iterations):
         loss = test_function.compute(x, y)
         grad_x, grad_y = test_function.gradient(x, y)
-        # NUMERICAL STABILITY FIX: Use np.hypot to avoid overflow
         grad_norm = np.hypot(grad_x, grad_y)
 
-        # Convergence check
         if grad_norm < convergence_threshold:
             return {
                 'final_loss': loss,
@@ -55,29 +52,35 @@ def run_single_trial(
                 'iterations': iteration,
                 'grad_norm': grad_norm,
                 'final_x': x,
-                'final_y': y
+                'final_y': y,
+                'trajectory': np.array(trajectory),
+                'speeds': speeds
             }
 
-        # Gradient clipping to prevent exploding gradients
-        # Rosenbrock gradients can reach O(1e9) at x,y >> 1
         if grad_norm > grad_clip_value:
             clip_scale = grad_clip_value / grad_norm
             grad_x = grad_x * clip_scale
             grad_y = grad_y * clip_scale
 
-        # Wrap in try-except to catch NaN/Inf gracefully
         try:
-            x, y = optimizer.step((x, y), (grad_x, grad_y))
-            # Check for NaN/Inf
-            if not (np.isfinite(x) and np.isfinite(y)):
+            x_new, y_new = optimizer.step((x, y), (grad_x, grad_y))
+            if not (np.isfinite(x_new) and np.isfinite(y_new)):
                 return {
                     'final_loss': float('inf'),
                     'converged': False,
                     'iterations': iteration,
                     'grad_norm': float('inf'),
                     'final_x': float('nan'),
-                    'final_y': float('nan')
+                    'final_y': float('nan'),
+                    'trajectory': np.array(trajectory),
+                    'speeds': speeds
                 }
+            
+            speed = np.hypot(x_new - x, y_new - y)
+            speeds.append(speed)
+            x, y = x_new, y_new
+            trajectory.append((x, y))
+
         except (ValueError, OverflowError) as e:
             return {
                 'final_loss': float('inf'),
@@ -86,13 +89,13 @@ def run_single_trial(
                 'grad_norm': grad_norm,
                 'final_x': float('nan'),
                 'final_y': float('nan'),
-                'error': str(e)
+                'error': str(e),
+                'trajectory': np.array(trajectory),
+                'speeds': speeds
             }
 
-    # Did not converge within max_iterations
     final_loss = test_function.compute(x, y)
     final_grad_x, final_grad_y = test_function.gradient(x, y)
-    # NUMERICAL STABILITY FIX: Use np.hypot to avoid overflow
     final_grad_norm = np.hypot(final_grad_x, final_grad_y)
 
     return {
@@ -101,7 +104,9 @@ def run_single_trial(
         'iterations': max_iterations,
         'grad_norm': final_grad_norm,
         'final_x': x,
-        'final_y': y
+        'final_y': y,
+        'trajectory': np.array(trajectory),
+        'speeds': speeds
     }
 
 
@@ -136,6 +141,106 @@ def generate_initial_points(
         points.append((x, y))
 
     return points
+
+
+def plot_robustness_trajectories(
+    test_function,
+    detailed_rows: List[Dict],
+    func_type: str,
+    plots_dir: str
+):
+    df = pd.DataFrame(detailed_rows)
+    optimizers = df['optimizer'].unique()
+    
+    fig, axes = plt.subplots(int(np.ceil(len(optimizers)/3)), 3, figsize=(18, 6 * int(np.ceil(len(optimizers)/3))))
+    if len(optimizers) > 1:
+        axes = axes.flatten()
+    else:
+        axes = [axes]
+    
+    all_x, all_y = [], []
+    for row in detailed_rows:
+        traj = row.get('trajectory', [])
+        if len(traj) > 0:
+            all_x.extend(traj[:, 0])
+            all_y.extend(traj[:, 1])
+    
+    if not all_x:
+        return
+        
+    x_min, x_max = min(all_x), max(all_x)
+    y_min, y_max = min(all_y), max(all_y)
+    
+    x_padding = (x_max - x_min) * 0.1
+    y_padding = (y_max - y_min) * 0.1
+    # Handle zero padding if flat trajectory
+    if x_padding == 0: x_padding = 1.0
+    if y_padding == 0: y_padding = 1.0
+    
+    x_range = np.linspace(x_min - x_padding, x_max + x_padding, 100)
+    y_range = np.linspace(y_min - y_padding, y_max + y_padding, 100)
+    X, Y = np.meshgrid(x_range, y_range)
+    Z = np.array([[test_function.compute(x, y) for x in x_range] for y in y_range])
+    
+    for idx, opt in enumerate(optimizers):
+        ax = axes[idx]
+        opt_df = df[df['optimizer'] == opt]
+        
+        ax.contour(X, Y, Z, levels=20, cmap='viridis', alpha=0.4)
+        
+        for _, row in opt_df.iterrows():
+            traj = row.get('trajectory', [])
+            if len(traj) > 0:
+                color = 'r' if row['converged'] else 'gray'
+                ax.plot(traj[:, 0], traj[:, 1], color=color, alpha=0.5, linewidth=1)
+                ax.plot(traj[0, 0], traj[0, 1], 'go', markersize=3)
+                
+        ax.set_title(f'{opt}', fontsize=12, fontweight='bold')
+        ax.set_xlabel('x')
+        ax.set_ylabel('y')
+        ax.grid(True, alpha=0.3)
+        
+    for idx in range(len(optimizers), len(axes)):
+        axes[idx].axis('off')
+        
+    plt.tight_layout()
+    plot_path = os.path.join(plots_dir, f'robustness_trajectories_{func_type}.png')
+    plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+    plt.close()
+
+
+def plot_dynamics_metrics(df_agg: pd.DataFrame, func_type: str, plots_dir: str):
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    metrics = [
+        ('success_rate', 'Success Rate (Converged / Total)', False),
+        ('mean_smoothness', 'Smoothness Index', False),
+        ('mean_oscillation', 'Oscillation Metric', False)
+    ]
+    
+    optimizers = df_agg['optimizer'].astype(str).tolist()
+    
+    for ax, (metric, title, use_log) in zip(axes, metrics):
+        if metric not in df_agg.columns:
+            continue
+        values = df_agg[metric].fillna(0).to_numpy(dtype=float)
+        bars = ax.bar(range(len(optimizers)), values, color='steelblue', alpha=0.8)
+        ax.set_xticks(range(len(optimizers)))
+        ax.set_xticklabels(optimizers, rotation=45, ha='right')
+        ax.set_ylabel(title, fontsize=10)
+        ax.set_title(title, fontsize=12, fontweight='bold')
+        if use_log:
+            ax.set_yscale('log')
+        ax.grid(axis='y', alpha=0.3)
+        
+        for i, val in enumerate(values):
+            ax.text(i, val + 0.02 * (max(values) if max(values) > 0 else 1.0), 
+                    f'{val:.2f}' if metric != 'success_rate' else f'{val:.0%}', 
+                    ha='center', va='bottom', fontsize=10, fontweight='bold')
+            
+    plt.tight_layout()
+    plot_path = os.path.join(plots_dir, f'robustness_dynamics_{func_type}.png')
+    plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+    plt.close()
 
 
 def run_robustness_experiment(
@@ -185,21 +290,18 @@ def run_robustness_experiment(
         opt_type = opt_cfg['type']
         opt_params = opt_cfg.get('params', {})
 
-        # Import constant at function level to avoid circular dependency
-        from src.utils.constants import OptimizerNames
-        
         # Instantiate optimizer
-        if opt_type == OptimizerNames.SGD:
+        if opt_type == 'SGD':
             optimizer = SGD(**opt_params)
-        elif opt_type == OptimizerNames.SGD_MOMENTUM:
+        elif opt_type == 'SGDMomentum':
             optimizer = SGDMomentum(**opt_params)
         elif opt_type == 'SGDNesterov':
             optimizer = SGDNesterov(**opt_params)
-        elif opt_type == OptimizerNames.RMSPROP:
+        elif opt_type == 'RMSProp':
             optimizer = RMSProp(**opt_params)
-        elif opt_type == OptimizerNames.ADAM:
+        elif opt_type == 'Adam':
             optimizer = Adam(**opt_params)
-        elif opt_type == OptimizerNames.ADAMW:
+        elif opt_type == 'AdamW':
             optimizer = AdamW(**opt_params)
         elif opt_type == 'AMSGrad':
             optimizer = AMSGrad(**opt_params)
@@ -213,6 +315,17 @@ def run_robustness_experiment(
             trial_result = run_single_trial(
                 optimizer, test_function, init_pt, max_iterations, convergence_threshold
             )
+            
+            traj = trial_result.get('trajectory', np.array([]))
+            speeds = trial_result.get('speeds', [])
+            mean_speed = np.mean(speeds) if len(speeds) > 0 else 0.0
+            
+            smoothness = compute_smoothness_index(traj) if len(traj) > 2 else 0.0
+            if len(traj) > 2:
+                osc_array = compute_oscillation_magnitude(traj)
+                oscillation = float(np.mean(osc_array)) if len(osc_array) > 0 else 0.0
+            else:
+                oscillation = 0.0
 
             detailed_rows.append({
                 'optimizer': opt_name,
@@ -225,14 +338,19 @@ def run_robustness_experiment(
                 'iterations': trial_result['iterations'],
                 'grad_norm': trial_result['grad_norm'],
                 'final_x': trial_result['final_x'],
-                'final_y': trial_result['final_y']
+                'final_y': trial_result['final_y'],
+                'mean_speed': mean_speed,
+                'smoothness': smoothness,
+                'oscillation': oscillation,
+                'trajectory': traj
             })
 
     df_detailed = pd.DataFrame(detailed_rows)
 
-    # Save detailed results
+    # Save detailed results, excluding trajectories to save space
     detail_path = os.path.join(results_dir, f'initial_condition_robustness_detailed_{func_type}.csv')
-    df_detailed.to_csv(detail_path, index=False)
+    df_detailed_no_traj = df_detailed.drop(columns=['trajectory']) if 'trajectory' in df_detailed.columns else df_detailed
+    df_detailed_no_traj.to_csv(detail_path, index=False)
     print(f"\nDetailed results saved to: {detail_path}")
 
     # Aggregate by optimizer
@@ -245,6 +363,10 @@ def run_robustness_experiment(
         std_loss = opt_df['final_loss'].std()
         min_loss = opt_df['final_loss'].min()
         max_loss = opt_df['final_loss'].max()
+        
+        mean_speed = opt_df['mean_speed'].mean() if 'mean_speed' in opt_df else 0.0
+        mean_smoothness = opt_df['smoothness'].mean() if 'smoothness' in opt_df else 0.0
+        mean_oscillation = opt_df['oscillation'].mean() if 'oscillation' in opt_df else 0.0
 
         converged_df = opt_df[opt_df['converged']]
         if len(converged_df) > 0:
@@ -263,7 +385,10 @@ def run_robustness_experiment(
             'min_final_loss': min_loss,
             'max_final_loss': max_loss,
             'mean_iterations_to_converge': mean_iters,
-            'std_iterations_to_converge': std_iters
+            'std_iterations_to_converge': std_iters,
+            'mean_speed': mean_speed,
+            'mean_smoothness': mean_smoothness,
+            'mean_oscillation': mean_oscillation
         })
 
     from typing import cast
@@ -274,31 +399,10 @@ def run_robustness_experiment(
     df_agg.to_csv(agg_path, index=False)
     print(f"Aggregated summary saved to: {agg_path}")
 
-    # Plot success rate comparison
-    fig, ax = plt.subplots(figsize=(10, 6))
-
-    optimizers = df_agg['optimizer'].astype(str).tolist()
-    success_rates = df_agg['success_rate'].to_numpy(dtype=float)
-
-    bars = ax.bar(range(len(optimizers)), success_rates, color='steelblue', alpha=0.8)
-    ax.set_xticks(range(len(optimizers)))
-    ax.set_xticklabels(optimizers, rotation=45, ha='right')
-    ax.set_ylabel('Success Rate (Converged / Total Trials)', fontsize=12)
-    ax.set_title(f'Initial Condition Robustness: {func_type}\n'
-                 f'({len(initial_points)} initial points, convergence threshold={convergence_threshold})',
-                 fontsize=14, fontweight='bold')
-    ax.set_ylim((0.0, 1.0))
-    ax.grid(axis='y', alpha=0.3)
-
-    # Annotate bars
-    for i, (opt, sr) in enumerate(zip(optimizers, success_rates)):
-        ax.text(i, sr + 0.02, f'{sr:.2%}', ha='center', va='bottom', fontsize=10, fontweight='bold')
-
-    plt.tight_layout()
-    plot_path = os.path.join(plots_dir, f'initial_condition_robustness_{func_type}.png')
-    plt.savefig(plot_path, dpi=300, bbox_inches='tight')
-    print(f"Plot saved to: {plot_path}")
-    plt.close()
+    # Plot dynamics and success rates
+    plot_robustness_trajectories(test_function, detailed_rows, func_type, plots_dir)
+    plot_dynamics_metrics(df_agg, func_type, plots_dir)
+    print(f"Plots saved to: {plots_dir}")
 
     # Print summary
     print(f"\n{'='*70}")

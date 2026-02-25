@@ -330,7 +330,7 @@ def run_single_experiment(
 def run_initialization_ablation(
     results_dir: str = "results/initialization_ablation",
     seeds: List[int] | None = None,
-    epochs: int = 10,
+    epochs: int = 20,
     quick: bool = False
 ) -> pd.DataFrame:
     """
@@ -350,7 +350,7 @@ def run_initialization_ablation(
     print("="*80)
 
     if seeds is None:
-        seeds = [1, 2, 3, 4, 5]
+        seeds = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
@@ -512,9 +512,9 @@ def main():
     parser = argparse.ArgumentParser(description='Optimizer-Initialization Ablation Study')
     parser.add_argument('--results-dir', type=str, default='results/initialization_ablation',
                         help='Directory to save results')
-    parser.add_argument('--seeds', type=str, default='1,2,3,4,5',
+    parser.add_argument('--seeds', type=str, default='1,2,3,4,5,6,7,8,9,10',
                         help='Comma-separated list of random seeds')
-    parser.add_argument('--epochs', type=int, default=10,
+    parser.add_argument('--epochs', type=int, default=20,
                         help='Number of training epochs')
     parser.add_argument('--quick', action='store_true',
                         help='Quick test run with fewer configurations')

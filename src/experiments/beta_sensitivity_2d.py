@@ -49,7 +49,7 @@ from src.core.test_function_factory import get_test_function
 from src.core.optimizers import SGD, SGDMomentum, SGDNesterov, Adam, AdamW, RMSProp
 from src.analysis.dynamics_metrics import (
     compute_instantaneous_speed, compute_smoothness_index,
-    compute_oscillation_metric
+    compute_oscillation_magnitude
 )
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -106,17 +106,30 @@ def run_single_trial(
     grad_norms = []
     
     for _ in range(max_iters):
-        # Compute gradient
-        grad = test_function.gradient(*params)
-        grad_norms.append(np.linalg.norm(grad))
-        
-        # Update parameters
-        params = optimizer.step(params, grad)
-        trajectory.append(params)
-        losses.append(test_function.compute(*params))
-        
-        # Early stopping if converged
-        if grad_norms[-1] < 1e-6:
+        try:
+            # Compute gradient
+            grad = test_function.gradient(*params)
+            
+            # Check for NaN/Inf
+            if not np.all(np.isfinite(grad)):
+                break
+                
+            grad_norms.append(np.linalg.norm(grad))
+            
+            # Update parameters
+            params = optimizer.step(params, grad)
+            
+            # Check for NaN/Inf params
+            if not np.all(np.isfinite(params)):
+                break
+                
+            trajectory.append(params)
+            losses.append(test_function.compute(*params))
+            
+            # Early stopping if converged
+            if grad_norms[-1] < 1e-6:
+                break
+        except (OverflowError, ValueError):
             break
     
     return {
@@ -140,17 +153,21 @@ def compute_dynamics_metrics(result: Dict) -> Dict:
         speeds.append(speed)
     
     # Smoothness (how consistent are the steps?)
-    smoothness = compute_smoothness_index(losses) if len(losses) > 2 else 0.0
+    smoothness = compute_smoothness_index(trajectory) if len(trajectory) > 2 else 0.0
     
     # Oscillation (directional changes)
-    oscillation = compute_oscillation_metric(trajectory) if len(trajectory) > 2 else 0.0
+    if len(trajectory) > 2:
+        osc_array = compute_oscillation_magnitude(trajectory)
+        oscillation = float(np.mean(osc_array)) if len(osc_array) > 0 else 0.0
+    else:
+        oscillation = 0.0
     
     return {
         'mean_speed': np.mean(speeds) if speeds else 0.0,
         'std_speed': np.std(speeds) if speeds else 0.0,
         'smoothness': smoothness,
         'oscillation': oscillation,
-        'final_grad_norm': result['grad_norms'][-1] if result['grad_norms'] else np.inf
+        'final_grad_norm': result['grad_norms'][-1] if len(result['grad_norms']) > 0 else np.inf
     }
 
 
@@ -408,7 +425,7 @@ def main():
         logger.info("\n=== Summary Statistics ===")
         logger.info(f"\n{df.to_string()}")
     
-    logger.info(f"\n✅ Analysis complete! Results saved to {output_dir}")
+    logger.info(f"\n[OK] Analysis complete! Results saved to {output_dir}")
 
 
 if __name__ == '__main__':

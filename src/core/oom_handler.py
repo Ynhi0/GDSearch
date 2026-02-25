@@ -211,6 +211,8 @@ def oom_safe_train_step(
                     outputs = model(current_inputs)
                     loss = criterion(outputs, current_targets)
                     loss.backward()
+                    if robust_grad_handler is not None:
+                        robust_grad_handler(model, epoch=epoch)
                     return loss
 
                 # Use the closure in optimizer.step
@@ -249,6 +251,8 @@ def oom_safe_train_step(
                         outputs = model(current_inputs)
                         loss = criterion(outputs, current_targets)
                         loss.backward()
+                        if robust_grad_handler is not None:
+                            robust_grad_handler(model, epoch=epoch)
                         return loss
                     loss = optimizer.step(_closure_for_step)
                     if isinstance(loss, torch.Tensor):
@@ -287,6 +291,8 @@ def oom_safe_train_step(
                             outputs = model(current_inputs)
                             loss = criterion(outputs, current_targets)
                             loss.backward()
+                            if robust_grad_handler is not None:
+                                robust_grad_handler(model, epoch=epoch)
                             return loss
                         loss = optimizer.step(_closure_for_step)
                         if isinstance(loss, torch.Tensor):
@@ -373,6 +379,8 @@ def oom_safe_train_step(
                                 outputs = model(current_inputs_small)
                                 loss = criterion(outputs, current_targets_small)
                                 loss.backward()
+                                if robust_grad_handler is not None:
+                                    robust_grad_handler(model, epoch=epoch)
                                 return loss
                             loss_small = optimizer.step(_closure_small)
                             if isinstance(loss_small, torch.Tensor):

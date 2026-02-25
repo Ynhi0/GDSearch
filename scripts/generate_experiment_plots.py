@@ -246,7 +246,7 @@ def plot_training_curves(csv_files: List[str], output_dir: Path, title: str = "T
     plt.tight_layout()
     output_file = output_dir / f"{title.lower().replace(' ', '_')}.png"
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
-    print(f"✅ Saved: {output_file}")
+    print(f"[OK] Saved: {output_file}")
     plt.close()
 
 
@@ -257,21 +257,21 @@ def generate_all_plots(results_dir: str = 'results'):
     results_path = Path(results_dir)
 
     if not results_path.exists():
-        print(f"❌ Results directory not found: {results_dir}")
+        print(f"[ERROR] Results directory not found: {results_dir}")
         return
 
-    print(f"🎨 Generating visualizations from: {results_dir}")
+    print(f"[PLOTS] Generating visualizations from: {results_dir}")
     print("="*80)
 
     # Find all CSV files
     try:
         all_csvs = glob.glob(str(results_path / "**/*.csv"), recursive=True)
     except Exception as e:
-        print(f"⚠️  Error finding CSV files: {e}")
+        print(f"[WARN] Error finding CSV files: {e}")
         all_csvs = []
 
     if not all_csvs:
-        print("⚠️  No CSV files found")
+        print("[WARN] No CSV files found")
         return
 
     print(f"Found {len(all_csvs)} CSV files")
@@ -304,15 +304,15 @@ def generate_all_plots(results_dir: str = 'results'):
     plots_created = 0
     for exp_type, csv_files in experiments.items():
         if csv_files:
-            print(f"\n📊 {exp_type}: {len(csv_files)} files")
+            print(f"\n[GROUP] {exp_type}: {len(csv_files)} files")
             try:
                 plot_training_curves(csv_files, viz_dir, title=f"{exp_type} Training Results")
                 plots_created += 1
             except Exception as e:
-                print(f"   ⚠️  Error: {e}")
+                print(f"   [WARN] Error: {e}")
 
     print("\n" + "="*80)
-    print(f"✅ Created {plots_created} visualization sets in: {viz_dir}")
+    print(f"[OK] Created {plots_created} visualization sets in: {viz_dir}")
     print(f"   All plots are high-quality (300 DPI)")
 
 

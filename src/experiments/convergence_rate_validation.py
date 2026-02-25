@@ -86,16 +86,24 @@ def validate_convergence_rate(
         trajectory.append(params.copy())
         losses.append(func(*params))
 
-    # Fit convergence rate
+    # Align arrays for robust downstream DataFrame/plot creation.
     iterations = np.arange(1, len(grad_norms) + 1)
     grad_norms_arr = np.array(grad_norms)
+    losses_arr = np.array(losses)
+    if losses_arr.size == grad_norms_arr.size + 1:
+        losses_arr = losses_arr[:-1]
+    if losses_arr.size != grad_norms_arr.size:
+        min_len = int(min(losses_arr.size, grad_norms_arr.size))
+        losses_arr = losses_arr[:min_len]
+        grad_norms_arr = grad_norms_arr[:min_len]
+        iterations = np.arange(1, min_len + 1)
 
     fit_results = fit_convergence_rate(iterations, grad_norms_arr)
 
     return {
         'optimizer': optimizer_name,
         'trajectory': np.array(trajectory),
-        'losses': np.array(losses),
+        'losses': losses_arr,
         'grad_norms': grad_norms_arr,
         'iterations': iterations,
         'fit_results': fit_results,
@@ -126,7 +134,7 @@ def run_convergence_rate_comparison(
         ('SGD_Momentum_0.5', SGDMomentum, {'lr': 0.01, 'beta': 0.5}),
         ('SGD_Momentum_0.9', SGDMomentum, {'lr': 0.01, 'beta': 0.9}),
         ('Adam', Adam, {'lr': 0.01, 'beta1': 0.9, 'beta2': 0.999}),
-        ('RMSProp', RMSProp, {'lr': 0.01, 'beta': 0.9})
+        ('RMSProp', RMSProp, {'lr': 0.01, 'decay_rate': 0.9})
     ]
 
     all_results = []
@@ -168,7 +176,7 @@ def run_convergence_rate_comparison(
         df = pd.DataFrame({
             'iteration': result['iterations'],
             'grad_norm': result['grad_norms'],
-            'loss': result['losses'][:-1]  # Losses are 1 longer
+            'loss': result['losses']
         })
         df.to_csv(Path(output_dir) / f'{opt_name}_trajectory.csv', index=False)
 
@@ -195,7 +203,7 @@ def run_convergence_rate_comparison(
     # Plot 2: Loss vs iteration (log scale)
     ax2 = axes[1]
     for result in all_results:
-        ax2.semilogy(result['iterations'], result['losses'][:-1],
+        ax2.semilogy(result['iterations'], result['losses'],
                     label=result['optimizer'], alpha=0.7, linewidth=2)
 
     ax2.set_xlabel('Iteration k', fontsize=12)

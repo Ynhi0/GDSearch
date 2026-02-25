@@ -1,0 +1,34 @@
+INFO:__main__:=== Beta Sensitivity Analysis ===
+INFO:__main__:Optimizer: Momentum
+INFO:__main__:Function: rosenbrock
+INFO:__main__:Learning rate: 0.01
+INFO:__main__:Max iterations: 300
+INFO:__main__:Initial point: (-1.5, 2.5)
+INFO:__main__:Running Momentum beta sweep: \u03b2 \u2208 [0.5, 0.7, 0.9, 0.95, 0.99]
+Beta sweep:   0%|          | 0/5 [00:00<?, ?it/s]C:\Users\MPhuc\AppData\Roaming\Python\Python313\site-packages\numpy\linalg\_linalg.py:2767: RuntimeWarning: overflow encountered in dot
+  sqnorm = x.dot(x)
+C:\Users\MPhuc\AppData\Roaming\Python\Python313\site-packages\numpy\linalg\_linalg.py:2803: RuntimeWarning: overflow encountered in multiply
+  s = (x.conj() * x).real
+Beta sweep:   0%|          | 0/5 [00:00<?, ?it/s]
+Traceback (most recent call last):
+  File "F:\GDSearch\src\experiments\beta_sensitivity_2d.py", line 432, in <module>
+    main()
+    ~~~~^^
+  File "F:\GDSearch\src\experiments\beta_sensitivity_2d.py", line 404, in main
+    df, trajectories = run_beta_sweep_momentum(
+                       ~~~~~~~~~~~~~~~~~~~~~~~^
+        test_function, beta_values, lr, initial_point, max_iters, output_dir
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "F:\GDSearch\src\experiments\beta_sensitivity_2d.py", line 191, in run_beta_sweep_momentum
+    dynamics = compute_dynamics_metrics(trial_result)
+  File "F:\GDSearch\src\experiments\beta_sensitivity_2d.py", line 156, in compute_dynamics_metrics
+    smoothness = compute_smoothness_index(losses) if len(losses) > 2 else 0.0
+                 ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "F:\GDSearch\src\analysis\dynamics_metrics.py", line 69, in compute_smoothness_index
+    norms = np.linalg.norm(directions, axis=1, keepdims=True)
+  File "C:\Users\MPhuc\AppData\Roaming\Python\Python313\site-packages\numpy\linalg\_linalg.py", line 2804, in norm
+    return sqrt(add.reduce(s, axis=axis, keepdims=keepdims))
+                ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+numpy.exceptions.AxisError: axis 1 is out of bounds for array of dimension 1

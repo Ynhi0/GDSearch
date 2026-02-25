@@ -1,0 +1,305 @@
+﻿python : 
+INFO:root:Successfully 
+imported core modules 
+from F:\GDSearch\src
+At line:1 char:1
++ python 
+run_all_kaggle.py 
+--experiments 
+beta_sensitivity 
+--quick > out ...
++ ~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
+~~
+    + CategoryInfo     
+         : NotSpecifi  
+  ed: (INFO:root:Suc   
+ ce...F:\GDSearch\s    
+rc:String) [], Rem    
+oteException
+    + FullyQualifiedEr 
+   rorId : NativeComm  
+  andError
+ 
+INFO:root:Using 
+canonical ResNet18, 
+BasicBlock, SimpleMLP, 
+SAM from src/core/
+INFO:root:Advanced 
+training utilities 
+loaded (AMP, Label 
+Smoothing, EMA)
+INFO:root:Training 
+enhancements loaded 
+(LR Finder, 
+Memory-Aware Sizing, 
+Time Budget, Hessian)
+INFO:root:Reproducibili
+ty mode configured: 
+seed=42, 
+deterministic=False, 
+benchmark=False
+WARNING:root:\u26a0\ufe
+0f REPRODUCIBILITY 
+WARNING: 
+Non-deterministic 
+configuration detected:
+  - cudnn.deterministic
+=False: GPU operations 
+may be 
+non-deterministic
+  - CUBLAS_WORKSPACE_CO
+NFIG not set: Some 
+operations may be 
+non-deterministic
+  - Deterministic 
+algorithms disabled: 
+Results may not be 
+reproducible
+
+For reproducible 
+results, call set_repro
+ducibility_mode(seed, 
+deterministic=True, 
+benchmark=False)
+INFO:root:Experiment 
+reproducibility 
+initialized with 
+seed=42
+WARNING:root:\u26a0\ufe
+0f REPRODUCIBILITY 
+WARNING: 
+Non-deterministic 
+configuration detected:
+  - cudnn.deterministic
+=False: GPU operations 
+may be 
+non-deterministic
+  - CUBLAS_WORKSPACE_CO
+NFIG not set: Some 
+operations may be 
+non-deterministic
+  - Deterministic 
+algorithms disabled: 
+Results may not be 
+reproducible
+
+For reproducible 
+results, call set_repro
+ducibility_mode(seed, 
+deterministic=True, 
+benchmark=False)
+INFO:root:Global seed 
+set to 42 for 
+reproducibility
+ERROR:root:Error in 
+Beta Sensitivity 2D 
+Visualization: 
+'charmap' codec can't 
+encode character 
+'\U0001f52c' in 
+position 0: character 
+maps to <undefined>
+Using resume behavior: restart_if_no_checkpoint
+
+======================================================================
+[PRE-RUN VALIDATION] Integrity & Configuration Checks
+======================================================================
+   Deferring optional dependency checks until experiment selection...
+   [OK] Results directory is writable: results
+[PRE-RUN VALIDATION] Complete
+======================================================================
+
+
+[*] Validating Optional Dependencies for Selected Experiments:
+   All required dependencies for selected experiments are available
+
+[*] Optional Module Status:
+    Statistical Analysis: Available
+    Interactive Plots: Available
+    Loss Landscape: Available
+    Convergence Analysis: Available
+    Training Enhancements: Available
+================================================================================
+GDSEARCH KAGGLE BENCHMARK SUITE
+================================================================================
+Configuration:
+  Seeds: [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
+  Quick mode: True
+  Ultra-quick mode: False
+  Skip tuning: False
+  Resume mode: False
+  Deterministic: False
+  Parallel execution: disabled (sequential)
+  Kaggle T4 optimizations: False
+  Auto-LR (LR Finder): disabled
+  Adaptive Batch Sizing: disabled
+  Experiments: beta_sensitivity
+  Results dir: results
+  MLflow: enabled
+  Profiling: disabled
+================================================================================
+
+
+[SEQUENTIAL MODE] Running experiments one by one...
+
+
+================================================================================
+
+FAILED: Beta Sensitivity 2D Visualization - 'charmap' codec can't encode character '\U0001f52c' in position 0: character maps to <undefined>
+
+--- TRACEBACK (debug) ---
+   Continuing with remaining experiments...
+
+================================================================================
+RUNNING STATISTICAL ANALYSIS...
+================================================================================
+
+================================================================================
+STATISTICAL ANALYSIS & COMPARISONS
+================================================================================
+
+================================================================================
+CONVERGENCE ANALYSIS
+================================================================================
+
+   Analyzed 36 experiment runs
+   Results saved to results\analysis\convergence_rates.csv
+
+   Convergence Summary:
+optimizer  convergence_rate converged_epoch  final_loss
+    AdamW               NaN            None    0.164046
+    AdamW               NaN            None    0.164940
+    AdamW               NaN            None    0.163695
+    AdamW               NaN            None    0.189597
+    AdamW               NaN            None    0.184657
+    AdamW               NaN            None    0.181688
+    AdamW               NaN            None    0.200799
+    AdamW               NaN            None    0.195655
+     Adam               NaN            None    0.165943
+     Adam               NaN            None    0.173718
+
+================================================================================
+GENERATING INTERACTIVE VISUALIZATIONS
+================================================================================
+   Interactive visualizations complete
+Statistical analysis complete
+
+================================================================================
+[*] RUNNING INTEGRATED ANALYSIS PIPELINE
+================================================================================
+
+[THEORY] Theory-Practice Validation: SKIPPED (use --with-theory-analysis to enable)
+
+[0] Cross-Experiment Aggregation...
+
+CROSS-EXPERIMENT RESULT AGGREGATION
+--------------------------------------------------
+   No data to aggregate
+   [OK] Cross-experiment aggregation complete
+
+[1] Convergence Analysis...
+
+================================================================================
+CONVERGENCE ANALYSIS
+================================================================================
+
+   Analyzed 36 experiment runs
+   Results saved to results\analysis\convergence_rates.csv
+
+   Convergence Summary:
+optimizer  convergence_rate converged_epoch  final_loss
+    AdamW               NaN            None    0.164046
+    AdamW               NaN            None    0.164940
+    AdamW               NaN            None    0.163695
+    AdamW               NaN            None    0.189597
+    AdamW               NaN            None    0.184657
+    AdamW               NaN            None    0.181688
+    AdamW               NaN            None    0.200799
+    AdamW               NaN            None    0.195655
+     Adam               NaN            None    0.165943
+     Adam               NaN            None    0.173718
+   [OK] Convergence analysis complete
+
+[2] Interactive Visualizations...
+
+================================================================================
+GENERATING INTERACTIVE VISUALIZATIONS
+================================================================================
+   Interactive visualizations complete
+   [OK] Interactive plots generated
+   Creating comprehensive summary report...
+   Summary report saved to results\reports\experiment_summary_report.md
+   [OK] Summary report generated
+
+================================================================================
+GENERATING SCIENTIFIC ANALYSIS ARTIFACTS
+================================================================================
+Running analysis script: F:\GDSearch\scripts\generate_analysis_artifacts.py
+Could not generate analysis artifacts: cannot access local variable 'subprocess' where it is not associated with a value (non-fatal)
+================================================================================
+
+================================================================================
+BENCHMARK SUITE COMPLETED WITH ERRORS
+================================================================================
+Results saved to: results
+
+Successful experiments: 1
+   - aggregation: 0 result rows
+
+Failed experiments: 1
+   - Beta Sensitivity 2D Visualization: 'charmap' codec can't encode character '\U0001f52c' in position 0: character maps to <undefined>...
+
+   Tip: Failed experiments can often be fixed by:
+      - Checking network connectivity
+      - Logging into HuggingFace (huggingface-cli login)
+      - Running with --resume to retry failed experiments
+
+================================================================================
+INTEGRATED FEATURES STATUS
+================================================================================
+  Convergence Analysis: ENABLED
+  Interactive Plots: ENABLED
+  Loss Landscapes: ENABLED
+  Statistical Analysis: ENABLED
+  MLflow Tracking: ENABLED
+  Theory-Practice Validation: DISABLED (use --with-theory-analysis)
+================================================================================
+
+================================================================================
+ QUICK ACCESS GUIDE
+================================================================================
+  Main directory: results/
+
+   Analysis Results:
+     - Basic stats: results/analysis/00_basic_statistics.csv
+     - Cross-experiment: results/analysis/cross_experiment_aggregation.csv
+     - Optimizer rankings: results/analysis/optimizer_rankings.csv
+     - Convergence: results/analysis/01_convergence_rates.csv
+     - Statistical: results/analysis/02_statistical_comparison.csv
+     - Cross-exp stats: results/analysis/cross_experiment_statistics.csv
+
+  Visualizations:
+     - Interactive (per-experiment): results/visualizations/interactive/*_interactive_comparison.html
+     - Static plots (per-experiment): results/visualizations/static/*/
+       ╖ Training/test loss curves
+       ╖ Accuracy progression plots
+       ╖ Final performance comparisons
+
+  Reports:
+     - Summary: results/reports/00_EXPERIMENT_SUMMARY.md
+     - Structure: results/README.md
+
+  Experiment Data:
+     - Location: results/experiments/*/
+     - Format: {DATASET}_{MODEL}_{OPTIMIZER}_seed{N}.csv
+================================================================================
+
+================================================================================
+GENERATING HIGH-QUALITY PLOTS
+================================================================================
+Running universal plot generator: F:\GDSearch\scripts\generate_experiment_plots.py
+High-quality plots generated successfully
+   Plots saved to: results/visualizations/
+================================================================================

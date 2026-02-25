@@ -462,7 +462,7 @@ def ablation_weight_decay(
     return df
 
 
-def ablation_sam_effect(output_dir='results/ablation_studies', epochs=10, num_seeds=3):
+def ablation_sam_effect(output_dir='results/ablation_studies', epochs=20, num_seeds=10):
     """
     Ablation Study 4: Sharpness-Aware Minimization (SAM)
 
@@ -542,8 +542,11 @@ def ablation_sam_effect(output_dir='results/ablation_studies', epochs=10, num_se
                             return loss
 
                         loss = optimizer.step(closure)
+                        
+                        # Handle loss being a float (from SAMWrapper) or a Tensor
+                        loss_val = loss.item() if hasattr(loss, 'item') else float(loss)
                         # BUG FIX: Weight loss by batch size for correct averaging
-                        epoch_loss += loss.item() * batch_size
+                        epoch_loss += loss_val * batch_size
                     else:
                         optimizer.zero_grad()
                         outputs = model(inputs)
@@ -589,6 +592,22 @@ def ablation_sam_effect(output_dir='results/ablation_studies', epochs=10, num_se
 
     df = pd.DataFrame(results)
     df.to_csv(output_dir / 'ablation_sam.csv', index=False)
+
+    # Generate visualizations
+    try:
+        viz_df = df.copy()
+        viz_df['configuration'] = viz_df['optimizer']
+        generate_all_ablation_plots(
+            df=viz_df,
+            results_dir=str(Path(output_dir) / 'sam'),
+            study_name='sam_effect',
+            group_col='configuration',
+            value_col='final_test_accuracy',
+            baseline_name='SGD',
+            features=['SAM']
+        )
+    except Exception as e:
+        logging.warning("Visualization generation failed: %s", e)
 
     # Import constant at function level to avoid circular dependency
     from src.utils.constants import OptimizerNames

@@ -1,0 +1,25 @@
+INFO:__main__:=== Beta Sensitivity Analysis ===
+INFO:__main__:Optimizer: Adam
+INFO:__main__:Function: saddle_point
+INFO:__main__:Learning rate: 0.2
+INFO:__main__:Max iterations: 10
+INFO:__main__:Initial point: (1.0, 1.0)
+INFO:__main__:Running Adam beta sweep: \u03b21 \u2208 [0.8], \u03b22 \u2208 [0.9]
+Adam \u03b21\u03b22 sweep:   0%|          | 0/1 [00:00<?, ?it/s]Adam \u03b21\u03b22 sweep:   0%|          | 0/1 [00:00<?, ?it/s]
+Traceback (most recent call last):
+  File "F:\GDSearch\src\experiments\beta_sensitivity_2d.py", line 432, in <module>
+    main()
+    ~~~~^^
+  File "F:\GDSearch\src\experiments\beta_sensitivity_2d.py", line 418, in main
+    df, trajectories = run_beta_sweep_adam(
+                       ~~~~~~~~~~~~~~~~~~~^
+        test_function, beta1_values, beta2_values, lr, initial_point, max_iters, output_dir
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "F:\GDSearch\src\experiments\beta_sensitivity_2d.py", line 238, in run_beta_sweep_adam
+    dynamics = compute_dynamics_metrics(trial_result)
+  File "F:\GDSearch\src\experiments\beta_sensitivity_2d.py", line 170, in compute_dynamics_metrics
+    'final_grad_norm': result['grad_norms'][-1] if result['grad_norms'] else np.inf
+                                                   ~~~~~~^^^^^^^^^^^^^^
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
