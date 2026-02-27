@@ -1,2 +1,2 @@
-iteration,loss,grad_norm
-0,0.0,0.0
+iteration,loss,grad_norm,x,y
+0,0.0,0.0,1.0,1.0

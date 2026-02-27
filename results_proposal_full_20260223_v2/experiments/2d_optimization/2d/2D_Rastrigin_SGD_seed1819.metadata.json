@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-02-26T03:04:21.986762",
+  "timestamp": "2026-02-26T21:24:35.164771",
   "dataset": "2D",
   "model": "Rastrigin",
   "optimizer": "SGD",
@@ -12,7 +12,16 @@
     "optimizer": "SGD",
     "max_iter": 1000,
     "initial_x": 2.8948171536461826,
-    "initial_y": -4.5797784560242345
+    "initial_y": -4.5797784560242345,
+    "final_x": 2.9848554134368896,
+    "final_y": -4.974690914154053,
+    "converged": false,
+    "converged_strict": false,
+    "converged_practical": false,
+    "converged_iteration_strict": null,
+    "converged_iteration_practical": null,
+    "run_status": "max_iters_or_stalled",
+    "error": ""
   },
   "model_path": null,
   "system": {
@@ -26,12 +35,12 @@
     "cuda_version": "12.4"
   },
   "provenance": {
-    "timestamp": "2026-02-26T03:04:21.988225",
+    "timestamp": "2026-02-26T21:24:35.165672",
     "python_version": "3.13.7 (tags/v3.13.7:bcee1c3, Aug 14 2025, 14:15:11) [MSC v.1944 64 bit (AMD64)]",
     "pytorch_version": "2.6.0+cu124",
-    "command_line": "run_all_kaggle.py --experiment-mode full --experiments 2d,robustness,sam,ablation,beta_sensitivity,hyperparam_sensitivity,convergence_validation,2d_visualization,saddle_escape,stochastic_2d_integrity,adam_adamw_comparison,hyperparameter_heatmaps --seeds 42,123,456,789,1011,1213,1415,1617,1819,2021 --results-dir results_proposal_full_20260223_v2 --skip-tuning --robust-gradients --generate-deliverables",
+    "command_line": "run_all_kaggle.py --experiment-mode full --experiments 2d --seeds 42,789,1819 --results-dir results_proposal_full_20260223_v2 --robust-gradients",
     "working_dir": "F:\\GDSearch",
-    "git_commit": "d6630fd8de45030119f292096c0d5e9873354920",
+    "git_commit": "f5b0ca661943f37de6179d7a5876ab439efa20bc",
     "git_dirty": true,
     "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
     "gpu_count": 1,
@@ -41,5 +50,5 @@
   },
   "completed": true,
   "tainted": false,
-  "run_signature": "4e0376013d3e16399c3cbb0b55b79eb22a2aab45f5f82dd02dbceb62be34fb9c"
+  "run_signature": "8889feee97bea2201d718c534ad01e215b6ce13493c0351169a9cc7557a62329"
 }

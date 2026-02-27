@@ -1,0 +1,10 @@
+BASELINE COMPARISON
+================================================================================
+
+Custom vs PyTorch built-in optimizers:
+- SGD: Verified equivalent
+- SGD+Momentum: Verified equivalent
+- Adam: Verified equivalent
+- AdamW: Verified equivalent
+
+See src/analysis/baseline_comparison.py for implementation.

@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-02-26T03:10:03.364193",
+  "timestamp": "2026-02-26T21:53:39.125803",
   "dataset": "Robustness",
   "model": "Rosenbrock",
   "optimizer": "Adam_start4",
@@ -12,7 +12,12 @@
     "start_point": [
       2.0,
       -1.0
-    ]
+    ],
+    "final_x": 0.9941033124923706,
+    "final_y": 0.9806904196739197,
+    "run_status": "converged",
+    "error": "",
+    "converged_iteration": 2841
   },
   "model_path": null,
   "system": {
@@ -26,12 +31,12 @@
     "cuda_version": "12.4"
   },
   "provenance": {
-    "timestamp": "2026-02-26T03:10:03.365084",
+    "timestamp": "2026-02-26T21:53:39.127952",
     "python_version": "3.13.7 (tags/v3.13.7:bcee1c3, Aug 14 2025, 14:15:11) [MSC v.1944 64 bit (AMD64)]",
     "pytorch_version": "2.6.0+cu124",
-    "command_line": "run_all_kaggle.py --experiment-mode full --experiments 2d,robustness,sam,ablation,beta_sensitivity,hyperparam_sensitivity,convergence_validation,2d_visualization,saddle_escape,stochastic_2d_integrity,adam_adamw_comparison,hyperparameter_heatmaps --seeds 42,123,456,789,1011,1213,1415,1617,1819,2021 --results-dir results_proposal_full_20260223_v2 --skip-tuning --robust-gradients --generate-deliverables",
+    "command_line": "run_all_kaggle.py --experiment-mode full --experiments robustness --seeds 42,123,456,789,1011,1213,1415,1617,1819,2021 --results-dir results_proposal_full_20260223_v2 --robust-gradients",
     "working_dir": "F:\\GDSearch",
-    "git_commit": "d6630fd8de45030119f292096c0d5e9873354920",
+    "git_commit": "f5b0ca661943f37de6179d7a5876ab439efa20bc",
     "git_dirty": true,
     "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
     "gpu_count": 1,
@@ -41,5 +46,5 @@
   },
   "completed": true,
   "tainted": false,
-  "run_signature": "8e8d84c65cc129237ae12e6f5ef1cde56433c9aad8659dc4660cc50f6ec93898"
+  "run_signature": "aa9003f17d94d2de6a3578e91f3dea97091c32710184ebe83b52e12c735a85fb"
 }

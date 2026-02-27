@@ -87,47 +87,47 @@ class FinalDeliverablesGenerator:
 
         # 1. Loss Landscape Visualizations
         if HAS_ALL_MODULES:
-            print("\n1️⃣  Generating Loss Landscape Visualizations...")
+            print("\n[1] Generating Loss Landscape Visualizations...")
             landscapes = self.generate_loss_landscapes()
             deliverables.extend(landscapes)
 
         # 2. Interactive Plots
         if HAS_ALL_MODULES:
-            print("\n2️⃣  Generating Interactive Plots...")
+            print("\n[2] Generating Interactive Plots...")
             interactive = self.generate_interactive_plots()
             deliverables.extend(interactive)
 
         # 3. Convergence Analysis
         if HAS_ALL_MODULES:
-            print("\n3️⃣  Running Convergence Analysis...")
+            print("\n[3] Running Convergence Analysis...")
             convergence = self.generate_convergence_analysis()
             deliverables.extend(convergence)
 
         # 4. Ablation Studies
         if HAS_ALL_MODULES:
-            print("\n4️⃣  Running Ablation Studies...")
+            print("\n[4] Running Ablation Studies...")
             ablation = self.generate_ablation_studies()
             deliverables.extend(ablation)
 
         # 5. Sensitivity Analysis
         if HAS_ALL_MODULES:
-            print("\n5️⃣  Running Sensitivity Analysis...")
+            print("\n[5] Running Sensitivity Analysis...")
             sensitivity = self.generate_sensitivity_analysis()
             deliverables.extend(sensitivity)
 
         # 6. Baseline Comparisons
         if HAS_ALL_MODULES:
-            print("\n6️⃣  Running Baseline Comparisons...")
+            print("\n[6] Running Baseline Comparisons...")
             baseline = self.generate_baseline_comparisons()
             deliverables.extend(baseline)
 
         # 7. Statistical Reports
-        print("\n7️⃣  Generating Statistical Reports...")
+        print("\n[7] Generating Statistical Reports...")
         stats = self.generate_statistical_reports()
         deliverables.extend(stats)
 
         # 8. Summary Report
-        print("\n8️⃣  Creating Summary Report...")
+        print("\n[8] Creating Summary Report...")
         summary = self.create_summary_report(deliverables)
 
         print("\n" + "="*80)
@@ -158,9 +158,11 @@ class FinalDeliverablesGenerator:
             from src.core.test_functions import Rosenbrock, Rastrigin
             from src.visualization.loss_landscape import plot_loss_landscape
 
+            rosenbrock_fn = Rosenbrock()
+            rastrigin_fn = Rastrigin(dim=2)
             functions = [
-                ('Rosenbrock', Rosenbrock()),
-                ('Rastrigin', Rastrigin(dim=2))
+                ('Rosenbrock', lambda z, f=rosenbrock_fn: f.compute(float(z[0]), float(z[1]))),
+                ('Rastrigin', lambda z, f=rastrigin_fn: f.compute(np.asarray(z, dtype=float)))
             ]
 
             for func_name, func in functions:
@@ -285,16 +287,34 @@ class FinalDeliverablesGenerator:
                         parts = filename.split('_')
                         opt_name = parts[3] if len(parts) > 3 else 'Unknown'
 
-                    # Extract training data
-                    train_df = ensure_dataframe(df[df['phase'] == 'train'])
+                    # Extract training-like rows.
+                    # Many synthetic/summary CSVs do not have a `phase` column.
+                    if 'phase' in df.columns:
+                        train_df = ensure_dataframe(df[df['phase'] == 'train'])
+                    else:
+                        train_df = ensure_dataframe(df)
                     if train_df.empty:
                         continue
 
+                    loss_col = None
+                    for candidate in ['train_loss', 'loss', 'objective_value', 'final_loss']:
+                        if candidate in train_df.columns:
+                            loss_col = candidate
+                            break
+                    if loss_col is None:
+                        continue
+
+                    grad_col = None
+                    for candidate in ['grad_norm', 'gradient_norm', 'gradient_magnitude']:
+                        if candidate in train_df.columns:
+                            grad_col = candidate
+                            break
+
                     # Build data structure
                     results_dict[opt_name] = {
-                        'loss_history': arr_to_numpy_float(train_df['train_loss']) if 'train_loss' in train_df.columns else np.array([]),
-                        'grad_norm_history': arr_to_numpy_float(train_df['grad_norm']) if 'grad_norm' in train_df.columns else np.array([]),
-                        'final_loss': float(arr_to_numpy_float(train_df['train_loss'])[-1]) if 'train_loss' in train_df.columns and not train_df.empty else 0.0,
+                        'loss_history': arr_to_numpy_float(train_df[loss_col]),
+                        'grad_norm_history': arr_to_numpy_float(train_df[grad_col]) if grad_col is not None else np.array([]),
+                        'final_loss': float(arr_to_numpy_float(train_df[loss_col])[-1]) if not train_df.empty else 0.0,
                         'iterations': int(len(train_df))
                     }
                 except Exception as e:
@@ -572,7 +592,7 @@ class FinalDeliverablesGenerator:
         """Create master summary report."""
         output_path = self.output_dir / "DELIVERABLES_SUMMARY.md"
 
-        with open(output_path, 'w') as f:
+        with open(output_path, 'w', encoding='utf-8') as f:
             f.write("# Final Research Deliverables Summary\n\n")
             f.write(f"Generated: {pd.Timestamp.now()}\n\n")
             f.write("## Overview\n\n")
@@ -581,11 +601,11 @@ class FinalDeliverablesGenerator:
             f.write("## Directory Structure\n\n")
             f.write("```\n")
             f.write(f"{self.output_dir}/\n")
-            f.write("├── visualizations/     # Loss landscapes and static plots\n")
-            f.write("├── interactive_plots/  # Interactive HTML plots\n")
-            f.write("├── analysis/           # Convergence, ablation, sensitivity\n")
-            f.write("├── reports/            # Statistical and summary reports\n")
-            f.write("└── DELIVERABLES_SUMMARY.md  # This file\n")
+            f.write("|-- visualizations/     # Loss landscapes and static plots\n")
+            f.write("|-- interactive_plots/  # Interactive HTML plots\n")
+            f.write("|-- analysis/           # Convergence, ablation, sensitivity\n")
+            f.write("|-- reports/            # Statistical and summary reports\n")
+            f.write("`-- DELIVERABLES_SUMMARY.md  # This file\n")
             f.write("```\n\n")
 
             f.write("## Generated Files\n\n")
@@ -605,7 +625,7 @@ class FinalDeliverablesGenerator:
             f.write("3. Use statistical reports for claims\n")
             f.write("4. Share interactive plots for presentations\n")
 
-        print(f"   ✓ Generated: {output_path.name}")
+        print(f"   [OK] Generated: {output_path.name}")
         return str(output_path)
 
 

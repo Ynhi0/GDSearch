@@ -27,6 +27,19 @@ except ImportError:
     from src.core.optimizers import SGD, SGDMomentum, Adam, SGDNesterov
 
 
+def _sanitize_metric(value: float, max_abs: float = 1e12) -> float:
+    """Convert non-finite/exploded values to NaN for robust reporting."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return float('nan')
+    if not np.isfinite(v):
+        return float('nan')
+    if abs(v) > max_abs:
+        return float('nan')
+    return v
+
+
 def compute_trajectory_smoothness(trajectory: np.ndarray) -> float:
     """
     Compute trajectory smoothness as inverse of curvature.
@@ -80,7 +93,17 @@ def compute_oscillation_index(trajectory: np.ndarray) -> float:
     return float(oscillation_index)
 
 
-def run_optimizer_trajectory(optimizer, func, grad_func, x0, max_iters=1000, tol=1e-6):
+def run_optimizer_trajectory(
+    optimizer,
+    func,
+    grad_func,
+    x0,
+    max_iters=1000,
+    tol=1e-6,
+    grad_clip: Optional[float] = None,
+    max_param_abs: float = 1e4,
+    loss_cap: float = 1e12
+):
     """
     Run optimizer and collect trajectory data.
 
@@ -89,36 +112,71 @@ def run_optimizer_trajectory(optimizer, func, grad_func, x0, max_iters=1000, tol
         losses: List of function values
         grad_norms: List of gradient norms
     """
-    trajectory = [x0]
-    losses = [func(*x0)]
+    trajectory = [np.asarray(x0, dtype=float).copy()]
+    losses = [float(func(*x0))]
     grad_norms = []
+    status = 'max_iters'
 
     params = np.array(x0, dtype=float)
 
     for _ in range(max_iters):
-        grad = grad_func(*params)
-        grad_norm = np.linalg.norm(grad)
+        grad = np.asarray(grad_func(*params), dtype=float)
+        if not np.all(np.isfinite(grad)):
+            status = 'non_finite_gradient'
+            break
+
+        grad_norm = float(np.linalg.norm(grad))
+        if grad_clip is not None and grad_norm > grad_clip:
+            grad = grad * (grad_clip / (grad_norm + 1e-12))
+            grad_norm = float(np.linalg.norm(grad))
         grad_norms.append(grad_norm)
 
         if grad_norm < tol:
+            status = 'converged'
             break
 
-        params = optimizer.step(params, grad)
-        trajectory.append(params.copy())
-        losses.append(func(*params))
+        try:
+            next_params = np.asarray(optimizer.step(params, grad), dtype=float)
+        except (OverflowError, ValueError, TypeError):
+            status = 'numeric_exception'
+            break
+        if next_params.shape != (2,):
+            status = 'invalid_param_shape'
+            break
+        if not np.all(np.isfinite(next_params)):
+            status = 'non_finite_params'
+            break
+        if np.any(np.abs(next_params) > max_param_abs):
+            status = 'params_out_of_bounds'
+            break
 
-    return np.array(trajectory), np.array(losses), np.array(grad_norms)
+        next_loss = float(func(*next_params))
+        if not np.isfinite(next_loss):
+            status = 'non_finite_loss'
+            break
+        if abs(next_loss) > loss_cap:
+            status = 'loss_exploded'
+            break
+
+        params = next_params
+        trajectory.append(params.copy())
+        losses.append(next_loss)
+
+    return np.array(trajectory), np.array(losses), np.array(grad_norms), status
 
 
 def momentum_beta_sweep(
     test_function='rosenbrock',
     beta_values=np.linspace(0.0, 0.99, 11),
-    lr=0.01,
+    lr: Optional[float] = None,
     x0=np.array([-1.5, 2.0]),
     max_iters=1000,
     output_dir='results/hyperparameter_sensitivity',
     use_coupled_lr=False,
-    noise_std: float = 0.1  # GAP FIX: Add noise for realistic momentum analysis
+    noise_std: float = 0.02,  # Smaller noise to avoid numerical blow-up on Rosenbrock
+    grad_clip: float = 1000.0,
+    max_param_abs: float = 50.0,
+    loss_cap: float = 1e8
 ):
     """
     Systematic sweep of momentum β parameter.
@@ -147,11 +205,15 @@ def momentum_beta_sweep(
     """
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
-    # Select test function
+    # Select test function and stable default learning rate
     if test_function == 'rosenbrock':
         test_fn = Rosenbrock()
+        if lr is None:
+            lr = 0.001
     else:
         test_fn = Ackley2D()
+        if lr is None:
+            lr = 0.01
 
     func = test_fn.compute
     # GAP FIX: Pass noise_std to gradient for realistic sensitivity analysis
@@ -164,32 +226,43 @@ def momentum_beta_sweep(
         effective_lr = lr * (1.0 - beta) if use_coupled_lr else lr
         optimizer = SGDMomentum(lr=effective_lr, beta=beta)
 
-        trajectory, losses, grad_norms = run_optimizer_trajectory(
-            optimizer, func, grad_func, x0, max_iters
+        trajectory, losses, grad_norms, status = run_optimizer_trajectory(
+            optimizer, func, grad_func, x0, max_iters,
+            grad_clip=grad_clip,
+            max_param_abs=max_param_abs,
+            loss_cap=loss_cap
         )
 
         # Compute dynamics metrics
-        smoothness = compute_trajectory_smoothness(trajectory)
-        oscillation = compute_oscillation_index(trajectory)
-        final_loss = losses[-1]
+        smoothness = compute_trajectory_smoothness(trajectory) if len(trajectory) > 2 and np.all(np.isfinite(trajectory)) else np.nan
+        oscillation = compute_oscillation_index(trajectory) if len(trajectory) > 2 and np.all(np.isfinite(trajectory)) else np.nan
+        final_loss = _sanitize_metric(losses[-1], max_abs=loss_cap)
         convergence_iters = len(losses)
 
         # Compute mean update magnitude
         if len(trajectory) > 1:
             updates = np.diff(trajectory, axis=0)
-            mean_update_mag = np.mean([np.linalg.norm(u) for u in updates])
+            update_norms = np.linalg.norm(updates, axis=1)
+            finite_norms = update_norms[np.isfinite(update_norms)]
+            mean_update_mag = _sanitize_metric(np.mean(finite_norms)) if len(finite_norms) > 0 else np.nan
         else:
-            mean_update_mag = 0.0
+            mean_update_mag = np.nan
 
         results.append({
             'beta': beta,
             'effective_lr': effective_lr,
             'final_loss': final_loss,
             'convergence_iters': convergence_iters,
-            'smoothness': smoothness,
-            'oscillation_index': oscillation,
+            'smoothness': _sanitize_metric(smoothness),
+            'oscillation_index': _sanitize_metric(oscillation),
             'mean_update_magnitude': mean_update_mag,
-            'final_grad_norm': grad_norms[-1] if len(grad_norms) > 0 else np.nan
+            'final_grad_norm': _sanitize_metric(grad_norms[-1]) if len(grad_norms) > 0 else np.nan,
+            'converged': status == 'converged',
+            'diverged': status in {
+                'non_finite_gradient', 'non_finite_params', 'params_out_of_bounds',
+                'non_finite_loss', 'loss_exploded', 'numeric_exception', 'invalid_param_shape'
+            },
+            'status': status,
         })
 
         logging.info(f"β={beta:.2f}, effective_lr={effective_lr:.6f}: loss={final_loss:.6f}, iters={convergence_iters}, "
@@ -202,41 +275,60 @@ def momentum_beta_sweep(
     # Visualization
     fig, axes = plt.subplots(2, 3, figsize=(15, 10))
 
-    axes[0, 0].plot(df['beta'], df['final_loss'], 'o-')
+    finite = np.isfinite(pd.to_numeric(df['final_loss'], errors='coerce'))
+    if finite.any():
+        axes[0, 0].plot(df.loc[finite, 'beta'], pd.to_numeric(df.loc[finite, 'final_loss']), 'o-')
+        axes[0, 0].set_yscale('log')
+    else:
+        axes[0, 0].text(0.5, 0.5, 'No finite data', ha='center', va='center', transform=axes[0, 0].transAxes)
     axes[0, 0].set_xlabel('Momentum β')
     axes[0, 0].set_ylabel('Final Loss')
     axes[0, 0].set_title('Convergence Quality vs β')
     axes[0, 0].grid(True, alpha=0.3)
 
-    axes[0, 1].plot(df['beta'], df['convergence_iters'], 'o-', color='orange')
+    finite = np.isfinite(pd.to_numeric(df['convergence_iters'], errors='coerce'))
+    if finite.any():
+        axes[0, 1].plot(df.loc[finite, 'beta'], pd.to_numeric(df.loc[finite, 'convergence_iters']), 'o-', color='orange')
     axes[0, 1].set_xlabel('Momentum β')
     axes[0, 1].set_ylabel('Iterations to Converge')
     axes[0, 1].set_title('Convergence Speed vs β')
     axes[0, 1].grid(True, alpha=0.3)
 
-    axes[0, 2].plot(df['beta'], df['smoothness'], 'o-', color='green')
+    finite = np.isfinite(pd.to_numeric(df['smoothness'], errors='coerce'))
+    if finite.any():
+        axes[0, 2].plot(df.loc[finite, 'beta'], pd.to_numeric(df.loc[finite, 'smoothness']), 'o-', color='green')
     axes[0, 2].set_xlabel('Momentum β')
     axes[0, 2].set_ylabel('Trajectory Smoothness')
     axes[0, 2].set_title('Dynamics: Smoothness vs β')
     axes[0, 2].grid(True, alpha=0.3)
 
-    axes[1, 0].plot(df['beta'], df['oscillation_index'], 'o-', color='red')
+    finite = np.isfinite(pd.to_numeric(df['oscillation_index'], errors='coerce'))
+    if finite.any():
+        axes[1, 0].plot(df.loc[finite, 'beta'], pd.to_numeric(df.loc[finite, 'oscillation_index']), 'o-', color='red')
     axes[1, 0].set_xlabel('Momentum β')
     axes[1, 0].set_ylabel('Oscillation Index')
     axes[1, 0].set_title('Dynamics: Oscillation vs β')
     axes[1, 0].grid(True, alpha=0.3)
 
-    axes[1, 1].plot(df['beta'], df['mean_update_magnitude'], 'o-', color='purple')
+    finite = np.isfinite(pd.to_numeric(df['mean_update_magnitude'], errors='coerce'))
+    if finite.any():
+        axes[1, 1].plot(df.loc[finite, 'beta'], pd.to_numeric(df.loc[finite, 'mean_update_magnitude']), 'o-', color='purple')
+    else:
+        axes[1, 1].text(0.5, 0.5, 'No finite data', ha='center', va='center', transform=axes[1, 1].transAxes)
     axes[1, 1].set_xlabel('Momentum β')
     axes[1, 1].set_ylabel('Mean Update Magnitude')
     axes[1, 1].set_title('Dynamics: Update Size vs β')
     axes[1, 1].grid(True, alpha=0.3)
 
-    axes[1, 2].plot(df['beta'], df['final_grad_norm'], 'o-', color='brown')
+    finite = np.isfinite(pd.to_numeric(df['final_grad_norm'], errors='coerce')) & (pd.to_numeric(df['final_grad_norm'], errors='coerce') > 0)
+    if finite.any():
+        axes[1, 2].plot(df.loc[finite, 'beta'], pd.to_numeric(df.loc[finite, 'final_grad_norm']), 'o-', color='brown')
+        axes[1, 2].set_yscale('log')
+    else:
+        axes[1, 2].text(0.5, 0.5, 'No finite data', ha='center', va='center', transform=axes[1, 2].transAxes)
     axes[1, 2].set_xlabel('Momentum β')
     axes[1, 2].set_ylabel('Final Gradient Norm')
     axes[1, 2].set_title('Convergence: Final Grad Norm vs β')
-    axes[1, 2].set_yscale('log')
     axes[1, 2].grid(True, alpha=0.3)
 
     plt.tight_layout()
@@ -250,10 +342,13 @@ def adam_beta_sweep(
     test_function='rosenbrock',
     beta1_values=np.linspace(0.5, 0.99, 8),
     beta2_values=np.linspace(0.9, 0.9999, 8),
-    lr=0.01,
+    lr: Optional[float] = None,
     x0=np.array([-1.5, 2.0]),
     max_iters=1000,
-    output_dir='results/hyperparameter_sensitivity'
+    output_dir='results/hyperparameter_sensitivity',
+    grad_clip: float = 1000.0,
+    max_param_abs: float = 50.0,
+    loss_cap: float = 1e8
 ):
     """
     Systematic 2D sweep of Adam β1, β2 parameters.
@@ -263,11 +358,15 @@ def adam_beta_sweep(
     """
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
-    # Select test function
+    # Select test function and stable default learning rate
     if test_function == 'rosenbrock':
         test_fn = Rosenbrock()
+        if lr is None:
+            lr = 0.01
     else:
         test_fn = Ackley2D()
+        if lr is None:
+            lr = 0.01
 
     func = test_fn.compute
     grad_func = lambda x, y: np.array(test_fn.gradient(x, y))
@@ -278,32 +377,43 @@ def adam_beta_sweep(
         for beta2 in beta2_values:
             optimizer = Adam(lr=lr, beta1=beta1, beta2=beta2)
 
-            trajectory, losses, grad_norms = run_optimizer_trajectory(
-                optimizer, func, grad_func, x0, max_iters
+            trajectory, losses, grad_norms, status = run_optimizer_trajectory(
+                optimizer, func, grad_func, x0, max_iters,
+                grad_clip=grad_clip,
+                max_param_abs=max_param_abs,
+                loss_cap=loss_cap
             )
 
             # Compute dynamics metrics
-            smoothness = compute_trajectory_smoothness(trajectory)
-            oscillation = compute_oscillation_index(trajectory)
-            final_loss = losses[-1]
+            smoothness = compute_trajectory_smoothness(trajectory) if len(trajectory) > 2 and np.all(np.isfinite(trajectory)) else np.nan
+            oscillation = compute_oscillation_index(trajectory) if len(trajectory) > 2 and np.all(np.isfinite(trajectory)) else np.nan
+            final_loss = _sanitize_metric(losses[-1], max_abs=loss_cap)
             convergence_iters = len(losses)
 
             # Compute mean update magnitude
             if len(trajectory) > 1:
                 updates = np.diff(trajectory, axis=0)
-                mean_update_mag = np.mean([np.linalg.norm(u) for u in updates])
+                update_norms = np.linalg.norm(updates, axis=1)
+                finite_norms = update_norms[np.isfinite(update_norms)]
+                mean_update_mag = _sanitize_metric(np.mean(finite_norms)) if len(finite_norms) > 0 else np.nan
             else:
-                mean_update_mag = 0.0
+                mean_update_mag = np.nan
 
             results.append({
                 'beta1': beta1,
                 'beta2': beta2,
                 'final_loss': final_loss,
                 'convergence_iters': convergence_iters,
-                'smoothness': smoothness,
-                'oscillation_index': oscillation,
+                'smoothness': _sanitize_metric(smoothness),
+                'oscillation_index': _sanitize_metric(oscillation),
                 'mean_update_magnitude': mean_update_mag,
-                'final_grad_norm': grad_norms[-1] if len(grad_norms) > 0 else np.nan
+                'final_grad_norm': _sanitize_metric(grad_norms[-1]) if len(grad_norms) > 0 else np.nan,
+                'converged': status == 'converged',
+                'diverged': status in {
+                    'non_finite_gradient', 'non_finite_params', 'params_out_of_bounds',
+                    'non_finite_loss', 'loss_exploded', 'numeric_exception', 'invalid_param_shape'
+                },
+                'status': status,
             })
 
     # Save results

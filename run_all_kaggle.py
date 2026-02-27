@@ -508,12 +508,16 @@ def check_gradient_health_quick(model, epoch=None, threshold=1e3, context=""):
 
         # Use efficient PyTorch built-in for gradient norm
         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), float('inf'))
+        if torch.is_tensor(grad_norm):
+            grad_norm_value = float(grad_norm.detach().cpu().item())
+        else:
+            grad_norm_value = float(grad_norm)
 
-        if grad_norm > threshold:
+        if grad_norm_value > float(threshold):
             epoch_str = f" at epoch {epoch}" if epoch is not None else ""
-            logging.warning("Large gradient norm%s: %.2e (%s)", epoch_str, grad_norm, context)
+            logging.warning("Large gradient norm%s: %.2e (%s)", epoch_str, grad_norm_value, context)
 
-        return grad_norm if not has_bad_grad else float('inf')
+        return grad_norm_value if not has_bad_grad else float('inf')
     except (RuntimeError, ValueError, AttributeError) as e:
         logging.debug("Gradient check failed (%s): %s", context, e)
         return 0.0
@@ -2187,7 +2191,7 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
 
                             # Check gradient health before optimizer step
                             grad_norm = check_gradient_health_quick(model, epoch=epoch, context=f"MNIST-{opt_name}")
-                            if not torch.isfinite(torch.tensor(grad_norm)):
+                            if not np.isfinite(float(grad_norm)):
                                 logging.warning(f"Skipping update due to bad gradients ({opt_name})")
                                 continue
 
@@ -4633,6 +4637,49 @@ def _infer_epochs_completed_from_artifacts(csv_path: Path, meta_path: Path) -> i
     return epochs_done
 
 
+def _collect_checkpoint_candidates(
+    checkpoint_manager,
+    preferred_filename: Optional[str],
+    glob_patterns: List[str]
+) -> List[str]:
+    """Return checkpoint filenames ordered by priority (preferred first, then newest matches)."""
+    candidates: List[str] = []
+    seen = set()
+
+    if preferred_filename:
+        preferred = str(preferred_filename)
+        candidates.append(preferred)
+        seen.add(preferred)
+
+    if checkpoint_manager is None:
+        return candidates
+
+    base_dir = Path(getattr(checkpoint_manager, 'base_dir', ''))
+    if not str(base_dir) or not base_dir.exists():
+        return candidates
+
+    matched_files: List[Path] = []
+    for pattern in glob_patterns:
+        try:
+            matched_files.extend(base_dir.glob(pattern))
+        except Exception:
+            logging.debug("Invalid checkpoint glob pattern: %s", pattern, exc_info=True)
+
+    matched_files = sorted(
+        [p for p in matched_files if p.is_file()],
+        key=lambda p: p.stat().st_mtime,
+        reverse=True
+    )
+
+    for path in matched_files:
+        name = path.name
+        if name not in seen:
+            candidates.append(name)
+            seen.add(name)
+
+    return candidates
+
+
 def _is_nlp_seed_complete(
     results_dir: Union[str, Path],
     model_name: str,
@@ -4660,29 +4707,41 @@ def _is_nlp_seed_complete(
             logging.debug("Could not read completion flag from %s", meta_path, exc_info=True)
 
     # Also consider checkpoint epoch progress for resume decisions (important when CSV sidecars lag behind).
-    if checkpoint_manager is not None and checkpoint_filename:
-        try:
-            checkpoint = checkpoint_manager.load_checkpoint(checkpoint_filename, file_stem)
-            if isinstance(checkpoint, dict) and len(checkpoint) > 0:
-                checkpoint_seen = True
-                ckpt_epoch = int(checkpoint.get('epoch', 0) or 0)
-                ckpt_meta = checkpoint.get('metadata', {}) if isinstance(checkpoint.get('metadata', {}), dict) else {}
-                ckpt_total = int(ckpt_meta.get('total_epochs_trained', 0) or 0)
-                hist = checkpoint.get('history', [])
-                hist_epoch = 0
-                if isinstance(hist, list) and len(hist) > 0:
-                    try:
-                        hist_epoch = max(
-                            int(item.get('epoch', 0) or 0)
-                            for item in hist
-                            if isinstance(item, dict)
-                        )
-                    except Exception:
-                        hist_epoch = 0
-                epochs_done = max(epochs_done, ckpt_epoch, ckpt_total, hist_epoch)
-                completed_flag = bool(completed_flag or ckpt_meta.get('completed', False))
-        except Exception:
-            logging.debug("Could not parse checkpoint progress from %s", checkpoint_filename, exc_info=True)
+    checkpoint_patterns = [
+        f"IMDB_{model_name}_{optimizer_name}_lr*_seed{seed}.pt",
+        f"IMDB_{model_name}_{optimizer_name}_seed{seed}.pt",
+        f"NLP_SIMPLE_IMDB_*_{optimizer_name}_seed{seed}.pt",
+    ]
+    checkpoint_candidates = _collect_checkpoint_candidates(
+        checkpoint_manager=checkpoint_manager,
+        preferred_filename=checkpoint_filename,
+        glob_patterns=checkpoint_patterns
+    )
+
+    if checkpoint_manager is not None and checkpoint_candidates:
+        for ckpt_name in checkpoint_candidates:
+            try:
+                checkpoint = checkpoint_manager.load_checkpoint(ckpt_name, file_stem)
+                if isinstance(checkpoint, dict) and len(checkpoint) > 0:
+                    checkpoint_seen = True
+                    ckpt_epoch = int(checkpoint.get('epoch', 0) or 0)
+                    ckpt_meta = checkpoint.get('metadata', {}) if isinstance(checkpoint.get('metadata', {}), dict) else {}
+                    ckpt_total = int(ckpt_meta.get('total_epochs_trained', 0) or 0)
+                    hist = checkpoint.get('history', [])
+                    hist_epoch = 0
+                    if isinstance(hist, list) and len(hist) > 0:
+                        try:
+                            hist_epoch = max(
+                                int(item.get('epoch', 0) or 0)
+                                for item in hist
+                                if isinstance(item, dict)
+                            )
+                        except Exception:
+                            hist_epoch = 0
+                    epochs_done = max(epochs_done, ckpt_epoch, ckpt_total, hist_epoch)
+                    completed_flag = bool(completed_flag or ckpt_meta.get('completed', False))
+            except Exception:
+                logging.debug("Could not parse checkpoint progress from %s", ckpt_name, exc_info=True)
 
     # Consider run complete only if it reached the requested epoch budget.
     is_complete = bool(epochs_done >= int(target_epochs) and (completed_flag or csv_path.exists() or checkpoint_seen))
@@ -5067,54 +5126,87 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
 
             # Resume logic with compatibility validation
             ckpt_file = f"IMDB_{model_name.replace('/', '_')}_{opt_name}_lr{lr}_seed{seed}.pt"
+            active_ckpt_file = ckpt_file
             start_epoch = 1
             history = []
             checkpoint = None  # Initialize to prevent NameError if checkpoint_manager is None
 
             if checkpoint_manager and resume:
-                checkpoint = checkpoint_manager.load_checkpoint(ckpt_file, f"IMDB_{model_name.replace('/', '_')}_{opt_name}_lr{lr}_seed{seed}")
-                if checkpoint:
-                    # Validate optimizer compatibility before loading
-                    if checkpoint_manager.validate_optimizer_compatibility(checkpoint, opt_name):
-                        model.load_state_dict(checkpoint['model'], strict=False)
-                        try:
-                            optimizer.load_state_dict(checkpoint['optimizer'])
-                            saved_opt = checkpoint.get('opt_name', 'unknown')
-                            logging.info(f"Loaded checkpoint with compatible optimizer: {saved_opt} -> {opt_name}")
+                ckpt_candidates = _collect_checkpoint_candidates(
+                    checkpoint_manager=checkpoint_manager,
+                    preferred_filename=ckpt_file,
+                    glob_patterns=[
+                        f"IMDB_{model_name.replace('/', '_')}_{opt_name}_lr*_seed{seed}.pt",
+                        f"IMDB_{model_name.replace('/', '_')}_{opt_name}_seed{seed}.pt"
+                    ]
+                )
+                for candidate_file in ckpt_candidates:
+                    checkpoint = checkpoint_manager.load_checkpoint(
+                        candidate_file,
+                        f"IMDB_{model_name.replace('/', '_')}_{opt_name}_seed{seed}"
+                    )
+                    if not checkpoint:
+                        continue
 
-                            # Restore early stopping state from checkpoint metadata
-                            # Without this, resumed runs lose their early stopping progress
-                            if 'metadata' in checkpoint:
-                                metadata = checkpoint['metadata']
-                                best_val_acc = metadata.get('best_val_acc', best_val_acc)
-                                patience_counter = metadata.get('patience_counter', patience_counter)
-                                logging.info(f"[RESTORED] Early stopping state: best_val_acc={best_val_acc:.2f}%, patience_counter={patience_counter}/{patience}")
-                        except Exception as e:
-                            logging.warning(f"Could not load optimizer state: {e}")
-                        start_epoch = int(checkpoint.get('epoch', 0)) + 1
-                        history = checkpoint.get('history', [])
+                    if not checkpoint_manager.validate_optimizer_compatibility(checkpoint, opt_name):
+                        logging.warning("Incompatible optimizer in checkpoint %s, skipping", candidate_file)
+                        continue
 
-                        # Restore scheduler state for this specific checkpoint.
-                        if checkpoint.get('scheduler') is not None:
+                    active_ckpt_file = candidate_file
+                    model.load_state_dict(checkpoint['model'], strict=False)
+                    try:
+                        optimizer.load_state_dict(checkpoint['optimizer'])
+                        saved_opt = checkpoint.get('opt_name', 'unknown')
+                        logging.info("Loaded checkpoint with compatible optimizer: %s -> %s", saved_opt, opt_name)
+
+                        checkpoint_lr = checkpoint.get('lr', None)
+                        if checkpoint_lr is not None:
                             try:
-                                scheduler.load_state_dict(checkpoint['scheduler'])
-                                logging.info("Restored scheduler state from checkpoint (last_epoch=%s)", scheduler.last_epoch)
-                            except Exception as e:
-                                logging.warning("Could not restore scheduler state: %s. Using fresh scheduler.", e)
+                                checkpoint_lr = float(checkpoint_lr)
+                                if np.isfinite(checkpoint_lr) and abs(checkpoint_lr - float(lr)) > 1e-12:
+                                    logging.info(
+                                        "Resume NLP seed %s %s: using checkpoint lr %.2e (configured %.2e)",
+                                        seed, opt_name, checkpoint_lr, lr
+                                    )
+                                    lr = checkpoint_lr
+                            except Exception:
+                                logging.debug("Could not parse checkpoint lr from %s", candidate_file, exc_info=True)
 
-                        # Scheduler will be created later, skip restore here
-                        # AMP scaler and EMA not used in IMDB baseline
+                        if 'metadata' in checkpoint:
+                            metadata = checkpoint['metadata']
+                            best_val_acc = metadata.get('best_val_acc', best_val_acc)
+                            patience_counter = metadata.get('patience_counter', patience_counter)
+                            logging.info(
+                                "[RESTORED] Early stopping state: best_val_acc=%.2f%%, patience_counter=%s/%s",
+                                best_val_acc, patience_counter, patience
+                            )
+                    except Exception as e:
+                        logging.warning(f"Could not load optimizer state: {e}")
 
-                        # Restore RNG states for reproducibility
-                        checkpoint_manager.restore_rng_states(checkpoint)
+                    start_epoch = int(checkpoint.get('epoch', 0)) + 1
+                    history = checkpoint.get('history', [])
 
-                        if resume and checkpoint.get('metadata', {}).get('completed', False) and int(checkpoint.get('epoch', 0)) >= int(epochs):
-                            logging.info("Checkpoint already marked complete at epoch %s (target=%s); skipping", checkpoint.get('epoch', 0), epochs)
-                            continue
+                    if checkpoint.get('scheduler') is not None:
+                        try:
+                            scheduler.load_state_dict(checkpoint['scheduler'])
+                            logging.info("Restored scheduler state from checkpoint (last_epoch=%s)", scheduler.last_epoch)
+                        except Exception as e:
+                            logging.warning("Could not restore scheduler state: %s. Using fresh scheduler.", e)
 
-                        logging.info(f"Resuming from epoch {start_epoch}")
+                    checkpoint_manager.restore_rng_states(checkpoint)
+
+                    if resume and checkpoint.get('metadata', {}).get('completed', False) and int(checkpoint.get('epoch', 0)) >= int(epochs):
+                        logging.info(
+                            "Checkpoint %s already complete at epoch %s (target=%s); skipping",
+                            candidate_file, checkpoint.get('epoch', 0), epochs
+                        )
+                        start_epoch = epochs + 1
                     else:
-                        logging.warning(f"Incompatible optimizer in checkpoint, starting fresh")
+                        logging.info("Resuming from epoch %s using checkpoint %s", start_epoch, candidate_file)
+                    break
+
+                if start_epoch > epochs:
+                    continue
 
             # Training loop with OOM recovery
             start_time = time.time()
@@ -5252,7 +5344,11 @@ def _run_nlp_experiment_huggingface(results_dir="results_nlp", seeds=None, quick
                             }
                         }
                         try:
-                            saved = checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"IMDB_{model_name.replace('/', '_')}_{opt_name}_lr{lr}_seed{seed}")
+                            saved = checkpoint_manager.save_checkpoint(
+                                checkpoint_data,
+                                active_ckpt_file,
+                                f"IMDB_{model_name.replace('/', '_')}_{opt_name}_lr{lr}_seed{seed}"
+                            )
                             if not saved:
                                 run_tainted = True
                                 logging.warning("INTEGRITY: Checkpoint save returned False for %s seed %s; results may be incomplete or non-reproducible.", opt_name, seed)
@@ -5687,24 +5783,50 @@ def run_nlp_experiment_simple(
                 optimizer = opt_fn(model.parameters())
                 criterion = nn.CrossEntropyLoss()
                 ckpt_file = f"NLP_SIMPLE_IMDB_{model_name}_{opt_name}_seed{seed}.pt"
+                active_ckpt_file = ckpt_file
                 start_epoch = 1
                 history = []
 
                 if checkpoint_manager and resume:
-                    checkpoint = checkpoint_manager.load_checkpoint(ckpt_file, f"NLP_SIMPLE_IMDB_{model_name}_{opt_name}_seed{seed}")
-                    if checkpoint and checkpoint_manager.validate_optimizer_compatibility(checkpoint, opt_name):
+                    ckpt_candidates = _collect_checkpoint_candidates(
+                        checkpoint_manager=checkpoint_manager,
+                        preferred_filename=ckpt_file,
+                        glob_patterns=[f"NLP_SIMPLE_IMDB_{model_name}_{opt_name}_seed{seed}.pt"]
+                    )
+                    for candidate_file in ckpt_candidates:
+                        checkpoint = checkpoint_manager.load_checkpoint(
+                            candidate_file,
+                            f"NLP_SIMPLE_IMDB_{model_name}_{opt_name}_seed{seed}"
+                        )
+                        if not checkpoint:
+                            continue
+                        if not checkpoint_manager.validate_optimizer_compatibility(checkpoint, opt_name):
+                            continue
                         try:
+                            active_ckpt_file = candidate_file
                             model.load_state_dict(checkpoint['model'], strict=False)
                             optimizer.load_state_dict(checkpoint['optimizer'])
                             history = checkpoint.get('history', []) or []
                             start_epoch = int(checkpoint.get('epoch', 0)) + 1
                             checkpoint_manager.restore_rng_states(checkpoint)
-                            logging.info("Simple NLP resume: %s %s seed=%s from epoch %s", model_name, opt_name, seed, start_epoch)
+                            logging.info(
+                                "Simple NLP resume: %s %s seed=%s from epoch %s via %s",
+                                model_name, opt_name, seed, start_epoch, candidate_file
+                            )
                             if checkpoint.get('metadata', {}).get('completed', False) and int(checkpoint.get('epoch', 0)) >= int(epochs):
-                                print(f"   Skipping {model_name} + {opt_name} (seed {seed}) - checkpoint already complete ({checkpoint.get('epoch', 0)}/{epochs})")
-                                continue
+                                print(
+                                    f"   Skipping {model_name} + {opt_name} (seed {seed}) - "
+                                    f"checkpoint already complete ({checkpoint.get('epoch', 0)}/{epochs})"
+                                )
+                                start_epoch = epochs + 1
+                            break
                         except Exception as e:
-                            logging.warning("Simple NLP checkpoint restore failed for %s %s seed %s: %s", model_name, opt_name, seed, e)
+                            logging.warning(
+                                "Simple NLP checkpoint restore failed for %s %s seed %s from %s: %s",
+                                model_name, opt_name, seed, candidate_file, e
+                            )
+                    if start_epoch > epochs:
+                        continue
 
                 train_loader = make_dataloader(train_dataset, batch_size=batch_size, shuffle=True, seed=seed)
                 val_loader = make_dataloader(val_dataset, batch_size=batch_size, shuffle=False, seed=seed)
@@ -5782,7 +5904,11 @@ def run_nlp_experiment_simple(
                                 'total_epochs_trained': int(epoch)
                             }
                         }
-                        checkpoint_manager.save_checkpoint(ckpt_data, ckpt_file, f"NLP_SIMPLE_IMDB_{model_name}_{opt_name}_seed{seed}")
+                        checkpoint_manager.save_checkpoint(
+                            ckpt_data,
+                            active_ckpt_file,
+                            f"NLP_SIMPLE_IMDB_{model_name}_{opt_name}_seed{seed}"
+                        )
 
                 # REPRODUCIBILITY: Final test evaluation AFTER training completes
                 # This ensures test set is only used once for unbiased generalization estimate
@@ -9212,6 +9338,11 @@ def aggregate_cross_experiment_results(results_dir: Path, experiment_results: Di
     aggregated = []
     optimizer_performance = {}  # optimizer -> list of (experiment, metric, value)
 
+    def _finite_float_array(values: Any) -> np.ndarray:
+        """Convert values to float array and keep only finite elements."""
+        arr = pd.to_numeric(pd.Series(values), errors='coerce').to_numpy(dtype=float)
+        return arr[np.isfinite(arr)]
+
     # Collect results from all experiments
     for exp_name, exp_df in experiment_results.items():
         if exp_df is None or not hasattr(exp_df, 'columns'):
@@ -9257,27 +9388,34 @@ def aggregate_cross_experiment_results(results_dir: Path, experiment_results: Di
                 entry = {
                     'experiment': exp_name,
                     'optimizer': opt,
-                    'n_runs': len(opt_data),
+                    'n_runs': int(opt_data['seed'].nunique()) if 'seed' in opt_data.columns else int(len(opt_data)),
+                    'n_rows': int(len(opt_data)),
                 }
 
                 if acc_col and acc_col in opt_data.columns:
                     # Get final accuracy (last row per run or max)
                     if 'seed' in opt_data.columns:
-                        final_accs = opt_data.groupby('seed')[acc_col].last().values
+                        final_accs_raw = opt_data.groupby('seed')[acc_col].last().values
                     else:
-                        final_accs = opt_data[acc_col].values
+                        final_accs_raw = opt_data[acc_col].values
 
-                    entry['mean_accuracy'] = np.mean(final_accs)
-                    entry['std_accuracy'] = np.std(final_accs) if len(final_accs) > 1 else 0.0
+                    final_accs = _finite_float_array(final_accs_raw)
+                    entry['accuracy_samples_total'] = int(len(final_accs_raw))
+                    entry['accuracy_samples_finite'] = int(len(final_accs))
+                    entry['mean_accuracy'] = float(np.mean(final_accs)) if len(final_accs) > 0 else np.nan
+                    entry['std_accuracy'] = float(np.std(final_accs)) if len(final_accs) > 1 else 0.0
 
                 if loss_col and loss_col in opt_data.columns:
                     if 'seed' in opt_data.columns:
-                        final_losses = opt_data.groupby('seed')[loss_col].last().values
+                        final_losses_raw = opt_data.groupby('seed')[loss_col].last().values
                     else:
-                        final_losses = opt_data[loss_col].values
+                        final_losses_raw = opt_data[loss_col].values
 
-                    entry['mean_loss'] = np.mean(final_losses)
-                    entry['std_loss'] = np.std(final_losses) if len(final_losses) > 1 else 0.0
+                    final_losses = _finite_float_array(final_losses_raw)
+                    entry['loss_samples_total'] = int(len(final_losses_raw))
+                    entry['loss_samples_finite'] = int(len(final_losses))
+                    entry['mean_loss'] = float(np.mean(final_losses)) if len(final_losses) > 0 else np.nan
+                    entry['std_loss'] = float(np.std(final_losses)) if len(final_losses) > 1 else 0.0
 
                 aggregated.append(entry)
 
@@ -9315,11 +9453,15 @@ def aggregate_cross_experiment_results(results_dir: Path, experiment_results: Di
         opt_values = pd.unique(agg_df['optimizer'].dropna()) if 'optimizer' in agg_df.columns else []
         for opt in opt_values:
             opt_data = agg_df[agg_df['optimizer'] == opt]
+            acc_vals = pd.to_numeric(opt_data.get('mean_accuracy', pd.Series(dtype=float)), errors='coerce').to_numpy(dtype=float)
+            acc_vals = acc_vals[np.isfinite(acc_vals)]
+            loss_vals = pd.to_numeric(opt_data.get('mean_loss', pd.Series(dtype=float)), errors='coerce').to_numpy(dtype=float)
+            loss_vals = loss_vals[np.isfinite(loss_vals)]
             rankings.append({
                 'optimizer': opt,
                 'experiments_count': len(opt_data),
-                'avg_accuracy': opt_data['mean_accuracy'].mean(),
-                'avg_loss': opt_data['mean_loss'].mean() if 'mean_loss' in opt_data.columns else np.nan,
+                'avg_accuracy': float(np.mean(acc_vals)) if acc_vals.size > 0 else np.nan,
+                'avg_loss': float(np.mean(loss_vals)) if loss_vals.size > 0 else np.nan,
             })
 
         ranking_df = pd.DataFrame(rankings)
@@ -9703,9 +9845,15 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, skip_t
         if 'iterations' in df_in.columns:
             iters = pd.to_numeric(df_in['iterations'], errors='coerce').fillna(0.0)
             valid_mask = valid_mask & (iters > 0)
+        if 'final_loss' in df_in.columns:
+            final_loss = pd.to_numeric(df_in['final_loss'], errors='coerce')
+            valid_mask = valid_mask & np.isfinite(final_loss)
         if 'error' in df_in.columns:
             err = df_in['error'].astype(str).str.strip()
             valid_mask = valid_mask & (err.eq('') | err.eq('nan'))
+        if 'run_status' in df_in.columns:
+            status = df_in['run_status'].astype(str).str.lower().str.strip()
+            valid_mask = valid_mask & (~status.str.startswith('error'))
         keys = set()
         for _, row in df_in.loc[valid_mask, ['function', 'optimizer', 'seed']].dropna().iterrows():
             try:
@@ -9730,10 +9878,41 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, skip_t
             iterations = 0
             initial_x = np.nan
             initial_y = np.nan
-            final_x = [float('nan'), float('nan')]
+            final_x = np.nan
+            final_y = np.nan
             path_length = np.nan
             mean_step_size = np.nan
             oscillation_rate = np.nan
+            run_status = ''
+            run_error = ''
+            converged_iter_strict = np.nan
+            converged_iter_practical = np.nan
+
+            metadata_path = csv_path.with_suffix('.metadata.json')
+            if metadata_path.exists():
+                try:
+                    meta = json.loads(metadata_path.read_text(encoding='utf-8'))
+                    params = meta.get('params', {}) if isinstance(meta, dict) else {}
+                    run_status = str(params.get('run_status', '')).strip()
+                    run_error = str(params.get('error', '')).strip()
+                    if run_status.lower() in {'nan', 'none'}:
+                        run_status = ''
+                    if run_error.lower() in {'nan', 'none'}:
+                        run_error = ''
+                    fx = params.get('final_x')
+                    fy = params.get('final_y')
+                    if fx is not None:
+                        try:
+                            final_x = float(fx)
+                        except Exception:
+                            pass
+                    if fy is not None:
+                        try:
+                            final_y = float(fy)
+                        except Exception:
+                            pass
+                except Exception:
+                    logging.debug("Failed to parse 2D metadata: %s", metadata_path, exc_info=True)
 
             try:
                 hist_df = pd.read_csv(csv_path)
@@ -9759,7 +9938,8 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, skip_t
                             y_vals = y_series[finite_mask].to_numpy(dtype=float)
                             initial_x = float(x_vals[0])
                             initial_y = float(y_vals[0])
-                            final_x = [float(x_vals[-1]), float(y_vals[-1])]
+                            final_x = float(x_vals[-1])
+                            final_y = float(y_vals[-1])
                             if len(x_vals) >= 2:
                                 traj = np.column_stack([x_vals, y_vals])
                                 steps = np.diff(traj, axis=0)
@@ -9782,11 +9962,34 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, skip_t
                                     )
                                     angles = np.arccos(cos_theta)
                                     oscillation_rate = float(np.mean(angles > (np.pi / 2)))
+                    if 'loss' in hist_df.columns:
+                        loss_all = pd.to_numeric(hist_df['loss'], errors='coerce').to_numpy(dtype=float)
+                        finite_loss = np.isfinite(loss_all)
+                        hit_strict = np.where(finite_loss & (loss_all < strict_convergence_threshold))[0]
+                        hit_practical = np.where(finite_loss & (loss_all < practical_convergence_threshold))[0]
+                        if hit_strict.size > 0:
+                            converged_iter_strict = int(hit_strict[0])
+                        if hit_practical.size > 0:
+                            converged_iter_practical = int(hit_practical[0])
             except Exception:
                 logging.debug("Failed to parse 2D artifact CSV: %s", csv_path, exc_info=True)
 
             converged_strict = bool(np.isfinite(final_loss) and final_loss < strict_convergence_threshold)
             converged_practical = bool(np.isfinite(final_loss) and final_loss < practical_convergence_threshold)
+            if not run_status:
+                if run_error:
+                    run_status = 'error_exception'
+                elif converged_strict:
+                    run_status = 'converged_strict'
+                elif converged_practical:
+                    run_status = 'converged_practical'
+                elif iterations > 0:
+                    run_status = 'max_iters_or_stalled'
+                else:
+                    run_status = 'artifact_only'
+            if not run_error and (not np.isfinite(final_loss)):
+                run_status = 'error_non_finite_loss'
+                run_error = 'non-finite final_loss in artifact'
 
             rows.append(normalize_metric_names({
                 'function': func_name,
@@ -9797,15 +10000,21 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, skip_t
                 'final_loss': final_loss,
                 'final_grad_norm': final_grad_norm,
                 'final_x': final_x,
+                'final_y': final_y,
+                'final_position': [float(final_x), float(final_y)],
                 'iterations': iterations,
                 'converged': converged_strict,
                 'converged_strict': converged_strict,
                 'converged_practical': converged_practical,
+                'converged_iteration_strict': converged_iter_strict,
+                'converged_iteration_practical': converged_iter_practical,
                 'path_length': path_length,
                 'mean_step_size': mean_step_size,
                 'oscillation_rate': oscillation_rate,
                 'strict_convergence_threshold': strict_convergence_threshold,
                 'practical_convergence_threshold': practical_convergence_threshold,
+                'run_status': run_status,
+                'error': run_error,
             }))
 
         return pd.DataFrame(rows)
@@ -10009,8 +10218,12 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, skip_t
 
                     max_iter = 200 if quick else 1000
                     ckpt_interval = max(1, max_iter // 10)
+                    run_error = None
 
                     # Main optimization loop (may resume from start_iter)
+                    i = start_iter - 1
+                    converged_iter_strict = None
+                    converged_iter_practical = None
                     for i in range(start_iter, max_iter):
                         optimizer.zero_grad()
                         _sanitize_2d_tensor_(x)
@@ -10027,6 +10240,7 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, skip_t
                                 seed,
                                 i,
                             )
+                            run_error = f"Non-finite loss at iteration {i}: {loss_value}"
                             break
 
                         # Manually set gradient using analytical gradient from function
@@ -10080,6 +10294,7 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, skip_t
                                     else:
                                         optimizer.step()
                                 else:
+                                    run_error = sam_msg
                                     raise
                         else:
                             optimizer.step()
@@ -10095,6 +10310,10 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, skip_t
                         else:
                             history_entry['x'] = float(x_np_after[0]); history_entry['y'] = 0.0
                         history.append(history_entry)
+                        if converged_iter_practical is None and float(loss_after) < practical_convergence_threshold:
+                            converged_iter_practical = int(i)
+                        if converged_iter_strict is None and float(loss_after) < strict_convergence_threshold:
+                            converged_iter_strict = int(i)
 
                         # Periodic checkpointing for long 2D runs
                         if checkpoint_manager and (i % ckpt_interval == 0 or i == max_iter - 1):
@@ -10156,6 +10375,19 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, skip_t
 
                     converged_strict = bool(final_loss < strict_convergence_threshold) if history else False
                     converged_practical = bool(final_loss < practical_convergence_threshold) if history else False
+                    if run_error:
+                        converged_strict = False
+                        converged_practical = False
+                    final_x = float(x.detach().cpu().numpy()[0]) if x.numel() >= 1 else np.nan
+                    final_y = float(x.detach().cpu().numpy()[1]) if x.numel() >= 2 else np.nan
+                    if run_error:
+                        run_status = 'error_non_finite_loss' if 'Non-finite' in str(run_error) else 'error_exception'
+                    elif converged_strict:
+                        run_status = 'converged_strict'
+                    elif converged_practical:
+                        run_status = 'converged_practical'
+                    else:
+                        run_status = 'max_iters_or_stalled'
                     results.append(normalize_metric_names({
                         'function': func_name,
                         'optimizer': opt_name,
@@ -10164,17 +10396,23 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, skip_t
                         'initial_y': float(run_start_point[1]),
                         'final_loss': final_loss,
                         'final_grad_norm': final_grad_norm,
-                        'final_x': x.detach().numpy().tolist(),
+                        'final_x': final_x,
+                        'final_y': final_y,
+                        'final_position': [float(final_x), float(final_y)],
                         'iterations': len(history),
                         # Keep legacy 'converged' as strict threshold for backward compatibility.
                         'converged': converged_strict,
                         'converged_strict': converged_strict,
                         'converged_practical': converged_practical,
+                        'converged_iteration_strict': converged_iter_strict if converged_iter_strict is not None else np.nan,
+                        'converged_iteration_practical': converged_iter_practical if converged_iter_practical is not None else np.nan,
                         'path_length': path_length,
                         'mean_step_size': mean_step_size,
                         'oscillation_rate': oscillation_rate,
                         'strict_convergence_threshold': strict_convergence_threshold,
                         'practical_convergence_threshold': practical_convergence_threshold,
+                        'run_status': run_status,
+                        'error': run_error if run_error else '',
                     }))
 
                     # Mark final checkpoint as completed
@@ -10191,7 +10429,11 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, skip_t
                                     'function': func_name,
                                     'seed': seed,
                                     'start_point': [float(run_start_point[0]), float(run_start_point[1])],
-                                    'completed': True,
+                                    'completed': bool(
+                                        (run_error is None)
+                                        and (len(history) > 0)
+                                        and np.isfinite(final_loss)
+                                    ),
                                 }
                             }
                             checkpoint_manager.save_checkpoint(final_ckpt, ckpt_file, f"2D_{func_name}_{opt_name}_seed{seed}")
@@ -10206,6 +10448,15 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, skip_t
                             'max_iter': max_iter,
                             'initial_x': float(run_start_point[0]),
                             'initial_y': float(run_start_point[1]),
+                            'final_x': final_x,
+                            'final_y': final_y,
+                            'converged': bool(converged_strict),
+                            'converged_strict': bool(converged_strict),
+                            'converged_practical': bool(converged_practical),
+                            'converged_iteration_strict': converged_iter_strict if converged_iter_strict is not None else None,
+                            'converged_iteration_practical': converged_iter_practical if converged_iter_practical is not None else None,
+                            'run_status': run_status,
+                            'error': run_error if run_error else '',
                         }
                         save_run_artifacts(results_dir, '2D', func_name, opt_name, seed, history, params, device=None, exp_tracker=None)
                     except Exception as e:
@@ -10239,16 +10490,21 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, skip_t
                         'initial_y': float(run_start_point[1]),
                         'final_loss': float('nan'),
                         'final_grad_norm': float('nan'),
-                        'final_x': [float('nan'), float('nan')],
+                        'final_x': float('nan'),
+                        'final_y': float('nan'),
+                        'final_position': [float('nan'), float('nan')],
                         'iterations': 0,
                         'converged': False,
                         'converged_strict': False,
                         'converged_practical': False,
+                        'converged_iteration_strict': np.nan,
+                        'converged_iteration_practical': np.nan,
                         'path_length': float('nan'),
                         'mean_step_size': float('nan'),
                         'oscillation_rate': float('nan'),
                         'strict_convergence_threshold': strict_convergence_threshold,
                         'practical_convergence_threshold': practical_convergence_threshold,
+                        'run_status': 'error_exception',
                         'error': str(trial_e),
                     }))
 
@@ -10287,8 +10543,11 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, skip_t
                 has_error = df['error'].notna() & (df['error'].astype(str).str.strip() != '')
             else:
                 has_error = pd.Series(False, index=df.index)
+            if 'run_status' in df.columns:
+                status = df['run_status'].astype(str).str.lower().str.strip()
+                has_error = has_error | status.str.startswith('error')
             df['_quality_score'] = (
-                final_loss_num.notna().astype(int) * 2
+                np.isfinite(final_loss_num).astype(int) * 2
                 + (iterations_num > 0).astype(int)
                 + (~has_error).astype(int)
             )
@@ -10414,8 +10673,21 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
         required = {'optimizer', 'seed', 'start_point'}
         if not required.issubset(df_in.columns):
             return set()
+        valid_mask = pd.Series(True, index=df_in.index)
+        if 'iterations' in df_in.columns:
+            iters = pd.to_numeric(df_in['iterations'], errors='coerce').fillna(0.0)
+            valid_mask = valid_mask & (iters > 0)
+        if 'final_loss' in df_in.columns:
+            final_loss = pd.to_numeric(df_in['final_loss'], errors='coerce')
+            valid_mask = valid_mask & np.isfinite(final_loss)
+        if 'error' in df_in.columns:
+            err = df_in['error'].astype(str).str.strip()
+            valid_mask = valid_mask & (err.eq('') | err.eq('nan'))
+        if 'run_status' in df_in.columns:
+            status = df_in['run_status'].astype(str).str.lower().str.strip()
+            valid_mask = valid_mask & (~status.str.startswith('error'))
         keys = set()
-        for _, row in df_in[['optimizer', 'seed', 'start_point']].dropna().iterrows():
+        for _, row in df_in.loc[valid_mask, ['optimizer', 'seed', 'start_point']].dropna().iterrows():
             try:
                 keys.add((str(row['optimizer']), int(row['seed']), int(row['start_point'])))
             except Exception:
@@ -10437,6 +10709,11 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
             iterations = 0
             final_loss = np.nan
             final_grad_norm = np.nan
+            final_x = np.nan
+            final_y = np.nan
+            run_status = ''
+            run_error = ''
+            converged_iteration = np.nan
 
             metadata_path = csv_path.with_suffix('.metadata.json')
             if metadata_path.exists():
@@ -10444,10 +10721,28 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
                     meta = json.loads(metadata_path.read_text(encoding='utf-8'))
                     params = meta.get('params', {}) if isinstance(meta, dict) else {}
                     converged = bool(params.get('converged', False))
+                    run_status = str(params.get('run_status', '')).strip()
+                    run_error = str(params.get('error', '')).strip()
+                    if run_status.lower() in {'nan', 'none'}:
+                        run_status = ''
+                    if run_error.lower() in {'nan', 'none'}:
+                        run_error = ''
                     sp = params.get('start_point')
                     if isinstance(sp, (list, tuple)) and len(sp) >= 2:
                         initial_x = float(sp[0])
                         initial_y = float(sp[1])
+                    px = params.get('final_x')
+                    py = params.get('final_y')
+                    if px is not None:
+                        try:
+                            final_x = float(px)
+                        except Exception:
+                            pass
+                    if py is not None:
+                        try:
+                            final_y = float(py)
+                        except Exception:
+                            pass
                     rows_original = meta.get('rows_original')
                     if rows_original is not None:
                         iterations = int(rows_original)
@@ -10464,6 +10759,25 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
                     grad_series = pd.to_numeric(hist_df['grad_norm'], errors='coerce').dropna()
                     if not grad_series.empty:
                         final_grad_norm = float(grad_series.iloc[-1])
+                if {'x', 'y'}.issubset(hist_df.columns):
+                    x_series = pd.to_numeric(hist_df['x'], errors='coerce')
+                    y_series = pd.to_numeric(hist_df['y'], errors='coerce')
+                    finite_mask = x_series.notna() & y_series.notna()
+                    if finite_mask.any():
+                        x_vals = x_series[finite_mask].to_numpy(dtype=float)
+                        y_vals = y_series[finite_mask].to_numpy(dtype=float)
+                        if not np.isfinite(initial_x):
+                            initial_x = float(x_vals[0])
+                        if not np.isfinite(initial_y):
+                            initial_y = float(y_vals[0])
+                        final_x = float(x_vals[-1])
+                        final_y = float(y_vals[-1])
+                if 'loss' in hist_df.columns:
+                    loss_all = pd.to_numeric(hist_df['loss'], errors='coerce').to_numpy(dtype=float)
+                    finite_loss = np.isfinite(loss_all)
+                    hit = np.where(finite_loss & (loss_all < 1e-4))[0]
+                    if hit.size > 0:
+                        converged_iteration = int(hit[0])
                 if iterations <= 0:
                     if 'iteration' in hist_df.columns:
                         iter_series = pd.to_numeric(hist_df['iteration'], errors='coerce').dropna()
@@ -10476,18 +10790,36 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
             except Exception:
                 logging.debug("Failed to parse robustness artifact CSV: %s", csv_path, exc_info=True)
 
+            if not run_status:
+                if run_error:
+                    run_status = 'error_exception'
+                elif np.isfinite(final_loss) and final_loss < 1e-4:
+                    run_status = 'converged'
+                elif iterations > 0:
+                    run_status = 'max_iters_or_stalled'
+                else:
+                    run_status = 'artifact_only'
+            if not run_error and (not np.isfinite(final_loss)):
+                run_status = 'error_non_finite_loss'
+                run_error = 'non-finite final_loss in artifact'
+            if (not converged) and np.isfinite(final_loss) and final_loss < 1e-4 and not run_error:
+                converged = True
+
             rows.append({
                 'optimizer': optimizer,
                 'seed': seed,
                 'start_point': start_idx,
                 'initial_x': initial_x,
                 'initial_y': initial_y,
-                'final_x': np.nan,
-                'final_y': np.nan,
+                'final_x': final_x,
+                'final_y': final_y,
                 'final_loss': final_loss,
                 'final_grad_norm': final_grad_norm,
                 'iterations': int(iterations),
                 'converged': bool(converged),
+                'converged_iteration': converged_iteration,
+                'run_status': run_status,
+                'error': run_error,
             })
         return pd.DataFrame(rows)
 
@@ -10613,14 +10945,36 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
                 max_iter = 2000 if quick else 20000
                 ckpt_interval = max(1, max_iter // 10)
                 converged = False
+                run_error = None
+                i = start_iter - 1
 
                 # Ensure `loss` always exists in case optimizer throws (so we can still save results)
                 loss = torch.tensor(float('nan'))
+                loss_value = float('nan')
+
+                def _sanitize_point_(x_tensor: torch.Tensor) -> None:
+                    with torch.no_grad():
+                        x_tensor.data = torch.nan_to_num(
+                            x_tensor.data,
+                            nan=0.0,
+                            posinf=100.0,
+                            neginf=-100.0,
+                        )
+                        x_tensor.data.clamp_(-100.0, 100.0)
 
                 for i in range(start_iter, max_iter):
                     try:
                         optimizer.zero_grad()
+                        _sanitize_point_(x)
                         loss = rosenbrock.torch_loss(x)
+                        loss_value = float(loss.detach().item())
+                        if not np.isfinite(loss_value):
+                            run_error = f"Non-finite loss at iteration {i}: {loss_value}"
+                            logging.warning(
+                                "Robustness run non-finite loss for %s seed %s start %s at iter %s: %s",
+                                opt_name, seed, start_point, i, loss_value
+                            )
+                            break
                         loss.backward()
 
                         # Apply robust gradient handling OR default clipping
@@ -10654,16 +11008,31 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
                             optimizer.step(closure)
                         else:
                             optimizer.step()
+                        _sanitize_point_(x)
+                        if not torch.isfinite(x).all():
+                            run_error = f"Non-finite parameters at iteration {i}"
+                            logging.warning(
+                                "Robustness run non-finite params for %s seed %s start %s at iter %s",
+                                opt_name, seed, start_point, i
+                            )
+                            break
 
                     except Exception as e:
                         # Robustness analysis should continue across optimizer failures
                         logging.warning("Robustness run failed for %s seed %s start %s at iter %s: %s", opt_name, seed, start_point, i, e, exc_info=True)
+                        run_error = str(e)
                         # Stop this start-point's optimization loop and proceed to save whatever we have
                         break
 
                     # record history entry for summary metrics and debugging
                     try:
-                        hist_entry = {'iteration': i, 'loss': float(loss), 'grad_norm': float(torch.norm(x.grad)) if x.grad is not None else None}
+                        hist_entry = {
+                            'iteration': i,
+                            'loss': float(loss_value),
+                            'grad_norm': float(torch.norm(x.grad)) if x.grad is not None else None,
+                            'x': float(x.detach().cpu().numpy()[0]),
+                            'y': float(x.detach().cpu().numpy()[1]),
+                        }
                     except Exception:
                         hist_entry = {'iteration': i, 'loss': None}
                     history.append(hist_entry)
@@ -10685,7 +11054,7 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
 
                     # Check convergence using last computed loss (relax threshold for hard Rosenbrock function)
                     try:
-                        loss_val = float(loss)
+                        loss_val = float(loss_value)
                         if loss_val < 1e-4:
                             converged = True
                             break
@@ -10693,22 +11062,52 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
                         # Non-numeric loss (nan/inf) -> cannot converge
                         pass
 
+                final_x = float(x.detach().cpu().numpy()[0]) if x.numel() >= 1 else np.nan
+                final_y = float(x.detach().cpu().numpy()[1]) if x.numel() >= 2 else np.nan
+                final_loss_value = float('nan')
+                if history:
+                    try:
+                        final_loss_value = float(history[-1].get('loss', np.nan))
+                    except Exception:
+                        final_loss_value = np.nan
+                elif np.isfinite(loss_value):
+                    final_loss_value = float(loss_value)
+                if not np.isfinite(final_loss_value):
+                    converged = False
+                if run_error:
+                    converged = False
+                converged_iteration = np.nan
+                if history:
+                    loss_hist = pd.to_numeric(pd.DataFrame(history)['loss'], errors='coerce').to_numpy(dtype=float)
+                    hit = np.where(np.isfinite(loss_hist) & (loss_hist < 1e-4))[0]
+                    if hit.size > 0:
+                        converged_iteration = int(hit[0])
+                if run_error:
+                    run_status = 'error_exception'
+                elif converged:
+                    run_status = 'converged'
+                else:
+                    run_status = 'max_iters_or_stalled'
+
                 results.append({
                     'optimizer': opt_name,
                     'seed': seed,
                     'start_point': idx,
                     'initial_x': start_point[0],
                     'initial_y': start_point[1],
-                    'final_x': float(x.detach().cpu().numpy()[0]),
-                    'final_y': float(x.detach().cpu().numpy()[1]),
-                    'final_loss': loss.item(),
+                    'final_x': final_x,
+                    'final_y': final_y,
+                    'final_loss': final_loss_value,
                     'final_grad_norm': (
                         float(history[-1].get('grad_norm'))
                         if history and history[-1].get('grad_norm') is not None
                         else np.nan
                     ),
-                    'iterations': i + 1,
-                    'converged': converged
+                    'iterations': int(len(history)),
+                    'converged': bool(converged),
+                    'converged_iteration': converged_iteration,
+                    'run_status': run_status,
+                    'error': run_error if run_error else '',
                 })
 
                 # Mark final checkpoint as completed
@@ -10720,7 +11119,17 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
                             'iteration': i,
                             'x': x.detach().cpu().numpy().tolist(),
                             'history': history,
-                            'metadata': {'experiment': 'Robustness', 'function': 'Rosenbrock', 'seed': seed, 'start_point': start_point, 'completed': True}
+                            'metadata': {
+                                'experiment': 'Robustness',
+                                'function': 'Rosenbrock',
+                                'seed': seed,
+                                'start_point': start_point,
+                                'completed': bool(
+                                    (run_error is None)
+                                    and (len(history) > 0)
+                                    and np.isfinite(final_loss_value)
+                                ),
+                            }
                         }
                         checkpoint_manager.save_checkpoint(final_ckpt, ckpt_file, f"Robustness_Rosenbrock_{opt_name}_seed{seed}_start{idx}")
                     except Exception as e:
@@ -10728,11 +11137,32 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
 
                 # Save per-run artifact for robustness run
                 try:
-                    save_run_artifacts(results_dir, 'Robustness', 'Rosenbrock', f"{opt_name}_start{idx}", seed, history, {'converged': converged, 'start_point': start_point}, device=None, exp_tracker=None)
+                    save_run_artifacts(
+                        results_dir,
+                        'Robustness',
+                        'Rosenbrock',
+                        f"{opt_name}_start{idx}",
+                        seed,
+                        history,
+                        {
+                            'converged': bool(converged),
+                            'start_point': start_point,
+                            'final_x': final_x,
+                            'final_y': final_y,
+                            'run_status': run_status,
+                            'error': run_error if run_error else '',
+                            'converged_iteration': converged_iteration,
+                        },
+                        device=None,
+                        exp_tracker=None,
+                    )
                 except Exception as e:
                     logging.debug("Failed to save robustness artifact for start %s seed %s: %s", start_point, seed, e, exc_info=True)
 
-                print(f"  Start {start_point}: Loss={loss.item():.6f}, Iters={i+1}, Converged={converged}")
+                print(
+                    f"  Start {start_point}: Loss={final_loss_value:.6f}, "
+                    f"Iters={len(history)}, Converged={converged}, Status={run_status}"
+                )
 
     # Save results (merge with existing summary and artifact-derived rows to preserve resumability)
     os.makedirs(results_dir, exist_ok=True)
@@ -10745,15 +11175,51 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
             logging.debug("Could not read existing robustness summary for merge", exc_info=True)
     artifact_df = _build_robustness_df_from_artifacts()
 
-    frames = [df_part for df_part in (existing_df, artifact_df, new_df) if df_part is not None and not df_part.empty]
+    frames = []
+    if not existing_df.empty:
+        existing_df = existing_df.copy()
+        existing_df['_source'] = 'existing'
+        frames.append(existing_df)
+    if not artifact_df.empty:
+        artifact_df = artifact_df.copy()
+        artifact_df['_source'] = 'artifact'
+        frames.append(artifact_df)
+    if not new_df.empty:
+        new_df = new_df.copy()
+        new_df['_source'] = 'new'
+        frames.append(new_df)
+
     if frames:
         df = pd.concat(frames, ignore_index=True, sort=False)
         dedupe_cols = [c for c in ['optimizer', 'seed', 'start_point'] if c in df.columns]
         if dedupe_cols:
-            df = df.drop_duplicates(subset=dedupe_cols, keep='last')
+            final_loss_num = pd.to_numeric(df.get('final_loss', np.nan), errors='coerce')
+            iterations_num = pd.to_numeric(df.get('iterations', 0), errors='coerce').fillna(0)
+            if 'error' in df.columns:
+                has_error = df['error'].notna() & (df['error'].astype(str).str.strip() != '')
+            else:
+                has_error = pd.Series(False, index=df.index)
+            if 'run_status' in df.columns:
+                status = df['run_status'].astype(str).str.lower().str.strip()
+                has_error = has_error | status.str.startswith('error')
+            df['_quality_score'] = (
+                np.isfinite(final_loss_num).astype(int) * 2
+                + (iterations_num > 0).astype(int)
+                + (~has_error).astype(int)
+            )
+            source_rank = {'new': 2, 'artifact': 1, 'existing': 0}
+            df['_source_rank'] = df['_source'].map(source_rank).fillna(0).astype(int)
+            df = df.sort_values(
+                dedupe_cols + ['_quality_score', '_source_rank'],
+                ascending=[True] * len(dedupe_cols) + [False, False],
+            )
+            df = df.drop_duplicates(subset=dedupe_cols, keep='first')
         sort_cols = [c for c in ['seed', 'optimizer', 'start_point'] if c in df.columns]
         if sort_cols:
             df = df.sort_values(sort_cols).reset_index(drop=True)
+        for temp_col in ['_source', '_quality_score', '_source_rank']:
+            if temp_col in df.columns:
+                df = df.drop(columns=[temp_col])
     else:
         df = pd.DataFrame()
 
@@ -13473,7 +13939,7 @@ Examples:
             experiment_function_map = {
                 'mnist': run_mnist_experiment,
                 'cifar10': run_cifar10_experiment,
-                'nlp': run_nlp_experiment if HAS_HF else None,
+                'nlp': run_nlp_experiment,
                 'medical': run_medical_experiment,
                 '2d': run_2d_experiments,
                 'robustness': run_robustness_analysis,
@@ -13643,19 +14109,16 @@ Examples:
             if not check_time_budget('NLP'):
                 return experiment_results
             with error_context("NLP Experiment", continue_on_error=True):
-                if not HAS_HF:
-                    print("Hugging Face transformers not available - skipping NLP")
-                    experiment_results['nlp'] = None
-                else:
-                    experiment_results['nlp'] = run_nlp_experiment(
-                        results_dir=str(experiments_dir / "nlp"),
-                        seeds=seeds,
-                        quick=args.quick,
-                        resume=args.resume,
-                        profiler=profiler,
-                        tracker=tracker,
-                        checkpoint_manager=checkpoint_manager
-                    )
+                experiment_results['nlp'] = run_nlp_experiment(
+                    results_dir=str(experiments_dir / "nlp"),
+                    seeds=seeds,
+                    quick=args.quick,
+                    resume=args.resume,
+                    resume_behavior=args.resume_behavior,
+                    profiler=profiler,
+                    tracker=tracker,
+                    checkpoint_manager=checkpoint_manager
+                )
 
         if 'medical' in selected_experiments:
             if not check_time_budget('Medical'):
@@ -13874,8 +14337,15 @@ Examples:
                 try:
                     demo_script = Path(__file__).parent / "run_beta_2d_demos.py"
                     if demo_script.exists():
+                        beta_out_dir = experiments_dir / "beta_sensitivity_2d"
                         # Pass encoding='utf-8' to prevent Windows cp1252 encoding crashes from emojis in child script
-                        result = subprocess.run([sys.executable, str(demo_script)], check=True, capture_output=True, text=True, encoding='utf-8')
+                        result = subprocess.run(
+                            [sys.executable, str(demo_script), "--output-dir", str(beta_out_dir)],
+                            check=True,
+                            capture_output=True,
+                            text=True,
+                            encoding='utf-8'
+                        )
                         print(result.stdout)
                         if result.stderr:
                             print(result.stderr)

@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-02-24T14:27:01.730845",
+  "timestamp": "2026-02-27T01:26:13.965672",
   "dataset": "Robustness",
   "model": "Rosenbrock",
   "optimizer": "Adam_start3",
@@ -12,7 +12,12 @@
     "start_point": [
       -0.5,
       -0.5
-    ]
+    ],
+    "final_x": 0.998576283454895,
+    "final_y": 0.9846612215042114,
+    "run_status": "converged",
+    "error": "",
+    "converged_iteration": 448
   },
   "model_path": null,
   "system": {
@@ -26,12 +31,12 @@
     "cuda_version": "12.4"
   },
   "provenance": {
-    "timestamp": "2026-02-24T14:27:01.732146",
+    "timestamp": "2026-02-27T01:26:13.966487",
     "python_version": "3.13.7 (tags/v3.13.7:bcee1c3, Aug 14 2025, 14:15:11) [MSC v.1944 64 bit (AMD64)]",
     "pytorch_version": "2.6.0+cu124",
-    "command_line": "run_all_kaggle.py --experiment-mode full --experiments robustness --results-dir results_proposal_full_20260223_v2 --seeds 42,123,456,789,1011,1213,1415,1617,1819,2021 --resume --robust-gradients",
+    "command_line": "run_all_kaggle.py --experiment-mode full --experiments robustness --seeds 42,123,456,789,1011,1213,1415,1617,1819,2021 --results-dir results_proposal_full_20260223_v2 --robust-gradients",
     "working_dir": "F:\\GDSearch",
-    "git_commit": "9b39ba81d7d01d50c2dd77630a8c2b5555f6e93b",
+    "git_commit": "f5b0ca661943f37de6179d7a5876ab439efa20bc",
     "git_dirty": true,
     "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
     "gpu_count": 1,
@@ -41,5 +46,5 @@
   },
   "completed": true,
   "tainted": false,
-  "run_signature": "bbd7d42dcbcefe6ae3c68fed52c6137ce3a2da451685f912e457ae3928d5f228"
+  "run_signature": "ea7ea1a4e3569873cd87dd2e73a1aadbfaf0679ff8411f15311e0c48249d4d18"
 }
