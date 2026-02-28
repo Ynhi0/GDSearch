@@ -1,2 +1,2 @@
-path,ok,rows,cols,na_cells,inf_cells,issue
-analysis/png_qc_flagged_latest.csv,True,0,7,0,0,empty
+path,ok,rows,cols,na_cells,inf_cells,issue,optimizer
+analysis/png_qc_flagged_latest.csv,True,0,7,0,0,empty,Unknown

@@ -146,6 +146,11 @@ def train_and_evaluate_with_clipping(
         train_acc, train_avg_loss = evaluate(model, train_loader, nn.CrossEntropyLoss(), device)
         test_acc, test_avg_loss = evaluate(model, test_loader, nn.CrossEntropyLoss(), device)
         
+        print(f"  Epoch {epoch+1}/{epochs} | "
+              f"Train Loss: {train_avg_loss:.4f}, Acc: {train_acc:.2f}% | "
+              f"Test Loss: {test_avg_loss:.4f}, Acc: {test_acc:.2f}%", flush=True)
+
+        
         history.append({
             'epoch': epoch + 1,
             'train_acc': train_acc,

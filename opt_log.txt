@@ -1,0 +1,232 @@
+﻿python : INFO:root:Successfully imported core modules from F:\GDSearch\src
+At line:1 char:239
++ ... ng $e ==="; python -u run_all_kaggle.py --experiment-mode full --expe ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (INFO:root:Succe...F:\GDSearch\src:String) [], Remote 
+   Exception
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+INFO:root:Using canonical ResNet18, BasicBlock, SimpleMLP, SAM from src/core/
+INFO:root:Advanced training utilities loaded (AMP, Label Smoothing, EMA)
+INFO:root:Training enhancements loaded (LR Finder, Memory-Aware Sizing, Time Budget, Hessian)
+INFO:root:Reproducibility mode configured: seed=42, deterministic=False, benchmark=False
+WARNING:root:ΓÜá∩╕Å REPRODUCIBILITY WARNING: Non-deterministic configuration detected:
+  - cudnn.deterministic=False: GPU operations may be non-deterministic
+  - CUBLAS_WORKSPACE_CONFIG not set: Some operations may be non-deterministic
+  - Deterministic algorithms disabled: Results may not be reproducible
+
+For reproducible results, call set_reproducibility_mode(seed, deterministic=True, benchmark=False)
+INFO:root:Experiment reproducibility initialized with seed=42
+WARNING:root:ΓÜá∩╕Å REPRODUCIBILITY WARNING: Non-deterministic configuration detected:
+  - cudnn.deterministic=False: GPU operations may be non-deterministic
+  - CUBLAS_WORKSPACE_CONFIG not set: Some operations may be non-deterministic
+  - Deterministic algorithms disabled: Results may not be reproducible
+
+For reproducible results, call set_reproducibility_mode(seed, deterministic=True, benchmark=False)
+Experiment mode set from CLI: 'full' -> quick=False, ultra_quick=False
+Using resume behavior: skip_if_results_exist
+
+======================================================================
+[PRE-RUN VALIDATION] Integrity & Configuration Checks
+======================================================================
+   Deferring optional dependency checks until experiment selection...
+   [OK] Results directory is writable: results_proposal_full_20260223_v2
+[PRE-RUN VALIDATION] Complete
+======================================================================
+
+INFO:root:Global seed set to 42 for reproducibility
+
+[*] Validating Optional Dependencies for Selected Experiments:
+   All required dependencies for selected experiments are available
+
+[*] Optional Module Status:
+    Statistical Analysis: Available
+    Interactive Plots: Available
+    Loss Landscape: Available
+    Convergence Analysis: Available
+    Training Enhancements: Available
+
+[*] Robust Gradient Handling Enabled:
+   [OK] Full robust gradient suite active (AGC + trimmed-mean + monitoring)
+   [OK] Adaptive Gradient Clipping (AGC): per-layer scaling
+   [OK] Heavy-tail gradient monitoring active
+   Scientific Justification: Heavy-tailed gradients violate SGD theory
+   assumptions. Robust methods improve stability without suppressing signals.
+================================================================================
+GDSEARCH KAGGLE BENCHMARK SUITE
+================================================================================
+Configuration:
+  Seeds: [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
+  Quick mode: False
+  Ultra-quick mode: False
+  Skip tuning: False
+  Resume mode: True
+  Deterministic: False
+  Parallel execution: disabled (sequential)
+  Kaggle T4 optimizations: False
+  Auto-LR (LR Finder): disabled
+  Adaptive Batch Sizing: disabled
+  Experiments: optimizer_comparison
+  Results dir: results_proposal_full_20260223_v2
+  MLflow: disabled
+  Profiling: disabled
+
+[SYNC] Resume mode enabled - will skip completed experiments
+================================================================================
+
+
+[SEQUENTIAL MODE] Running experiments one by one...
+
+
+================================================================================
+OPTIMIZER COMPARISON MATRIX
+================================================================================
+MNIST results not found - run MNIST experiments first
+
+================================================================================
+RUNNING STATISTICAL ANALYSIS...
+================================================================================
+
+================================================================================
+STATISTICAL ANALYSIS & COMPARISONS
+================================================================================
+
+================================================================================
+CONVERGENCE ANALYSIS
+================================================================================
+
+   Analyzed 1216 experiment runs
+   Results saved to results_proposal_full_20260223_v2\analysis\convergence_rates.csv
+
+   Convergence Summary:
+optimizer  convergence_rate  converged_epoch   final_loss
+     Adam          0.064989              505 9.838263e-07
+     Adam          0.005678              532 1.906452e-03
+     Adam          0.003253              424 2.855450e-02
+     Adam          0.004200              758 2.250235e-03
+     Adam          0.009749              537 1.507249e-02
+     Adam          0.002597              313 6.691181e-03
+     Adam          0.008751              652 1.579962e-02
+     Adam          0.007398               14 1.006154e-02
+     Adam          0.009163               16 8.790304e-03
+     Adam          0.182756              380 1.387287e-07
+
+================================================================================
+GENERATING INTERACTIVE VISUALIZATIONS
+================================================================================
+WARNING:root:CSV 'results_proposal_full_20260223_v2\analysis\png_qc_flagged_latest.csv' yielded 
+zero rows after full read.
+   Interactive visualizations complete
+Statistical analysis complete
+
+================================================================================
+[*] RUNNING INTEGRATED ANALYSIS PIPELINE
+================================================================================
+
+[THEORY] Theory-Practice Validation: SKIPPED (use --with-theory-analysis to enable)
+
+[0] Cross-Experiment Aggregation...
+
+CROSS-EXPERIMENT RESULT AGGREGATION
+--------------------------------------------------
+   No data to aggregate
+   [OK] Cross-experiment aggregation complete
+
+[1] Convergence Analysis...
+
+================================================================================
+CONVERGENCE ANALYSIS
+================================================================================
+
+   Analyzed 1216 experiment runs
+   Results saved to results_proposal_full_20260223_v2\analysis\convergence_rates.csv
+
+   Convergence Summary:
+optimizer  convergence_rate  converged_epoch   final_loss
+     Adam          0.064989              505 9.838263e-07
+     Adam          0.005678              532 1.906452e-03
+     Adam          0.003253              424 2.855450e-02
+     Adam          0.004200              758 2.250235e-03
+     Adam          0.009749              537 1.507249e-02
+     Adam          0.002597              313 6.691181e-03
+     Adam          0.008751              652 1.579962e-02
+     Adam          0.007398               14 1.006154e-02
+     Adam          0.009163               16 8.790304e-03
+     Adam          0.182756              380 1.387287e-07
+   [OK] Convergence analysis complete
+
+[2] Interactive Visualizations...
+
+================================================================================
+GENERATING INTERACTIVE VISUALIZATIONS
+================================================================================
+WARNING:root:CSV 'results_proposal_full_20260223_v2\analysis\png_qc_flagged_latest.csv' yielded 
+zero rows after full read.
+   Interactive visualizations complete
+   [OK] Interactive plots generated
+   Creating comprehensive summary report...
+   Summary report saved to results_proposal_full_20260223_v2\reports\experiment_summary_report.md
+   [OK] Summary report generated
+
+================================================================================
+GENERATING SCIENTIFIC ANALYSIS ARTIFACTS
+================================================================================
+Running analysis script: F:\GDSearch\scripts\generate_analysis_artifacts.py
+Analysis artifacts generated successfully
+================================================================================
+
+================================================================================
+BENCHMARK SUITE COMPLETED SUCCESSFULLY
+================================================================================
+Results saved to: results_proposal_full_20260223_v2
+
+Successful experiments: 1
+   - aggregation: 0 result rows
+
+================================================================================
+INTEGRATED FEATURES STATUS
+================================================================================
+  Convergence Analysis: ENABLED
+  Interactive Plots: ENABLED
+  Loss Landscapes: ENABLED
+  Statistical Analysis: ENABLED
+  MLflow Tracking: DISABLED
+  Theory-Practice Validation: DISABLED (use --with-theory-analysis)
+================================================================================
+
+================================================================================
+ QUICK ACCESS GUIDE
+================================================================================
+  Main directory: results_proposal_full_20260223_v2/
+
+   Analysis Results:
+     - Basic stats: results_proposal_full_20260223_v2/analysis/00_basic_statistics.csv
+     - Cross-experiment: results_proposal_full_20260223_v2/analysis/cross_experiment_aggregation.csv
+     - Optimizer rankings: results_proposal_full_20260223_v2/analysis/optimizer_rankings.csv
+     - Convergence: results_proposal_full_20260223_v2/analysis/01_convergence_rates.csv
+     - Statistical: results_proposal_full_20260223_v2/analysis/02_statistical_comparison.csv
+     - Cross-exp stats: results_proposal_full_20260223_v2/analysis/cross_experiment_statistics.csv
+
+  Visualizations:
+     - Interactive (per-experiment): results_proposal_full_20260223_v2/visualizations/interactive/*_interactive_comparison.html
+     - Static plots (per-experiment): results_proposal_full_20260223_v2/visualizations/static/*/
+       ├é┬╖ Training/test loss curves
+       ├é┬╖ Accuracy progression plots
+       ├é┬╖ Final performance comparisons
+
+  Reports:
+     - Summary: results_proposal_full_20260223_v2/reports/00_EXPERIMENT_SUMMARY.md
+     - Structure: results_proposal_full_20260223_v2/README.md
+
+  Experiment Data:
+     - Location: results_proposal_full_20260223_v2/experiments/*/
+     - Format: {DATASET}_{MODEL}_{OPTIMIZER}_seed{N}.csv
+================================================================================
+
+================================================================================
+GENERATING HIGH-QUALITY PLOTS
+================================================================================
+Running universal plot generator: F:\GDSearch\scripts\generate_experiment_plots.py
+High-quality plots generated successfully
+   Plots saved to: results_proposal_full_20260223_v2/visualizations/
+================================================================================

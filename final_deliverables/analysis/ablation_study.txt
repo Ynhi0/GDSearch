@@ -1,0 +1,10 @@
+ABLATION STUDY
+================================================================================
+
+Component isolation analysis:
+- Momentum effect
+- Adaptive learning rates
+- Second-moment estimation
+- Weight decay
+
+See src/analysis/ablation_study.py for implementation.

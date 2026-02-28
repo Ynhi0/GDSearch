@@ -91,12 +91,18 @@ def make_dataloader(
             import logging
             logging.info(f"Full-Batch GD mode enabled: batch_size={batch_size} (entire dataset), shuffle=False")
 
-    # Force num_workers=0 on Windows to prevent hanging/crashes
+    # Force num_workers=0 and pin_memory=False on Windows to prevent hanging/crashes.
+    # On Windows (multiprocessing uses 'spawn'), both DataLoader worker processes and
+    # the pin-memory thread can deadlock when output is redirected to a file.
     import platform
     import logging
-    if platform.system() == 'Windows' and num_workers > 0:
-        logging.debug(f"Windows detected: forcing num_workers=0 (was {num_workers}) for stability")
-        num_workers = 0
+    if platform.system() == 'Windows':
+        if num_workers > 0:
+            logging.debug(f"Windows detected: forcing num_workers=0 (was {num_workers}) for stability")
+            num_workers = 0
+        if pin_memory:
+            logging.debug("Windows detected: forcing pin_memory=False for stability")
+            pin_memory = False
         # persistent_workers requires num_workers > 0, so disable it
         persistent_workers = False
 

@@ -1,0 +1,5 @@
+## Other Training Results - Tabular Summary
+
+| Optimizer/Config | Final Loss | Loss Std | Final Test Acc (%) | Acc Std (%) | Speed (iters/sec) |
+|------------------|------------|----------|--------------------|-------------|-------------------|
+| summary_quantitative | 0.0616 | N/A | 98.0100 | 0.0000 | N/A |

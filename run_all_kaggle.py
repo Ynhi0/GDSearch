@@ -1714,11 +1714,17 @@ def make_dataloader(dataset, batch_size=64, shuffle: Union[bool, int] = False, s
     
     # Coerce shuffle to bool to silence static typing when callers pass ints (e.g., 0/1 from CLI)
     shuffle = bool(shuffle)
-    # Force num_workers=0 on Windows to prevent hanging/crashes
+    # Force num_workers=0 and pin_memory=False on Windows to prevent hanging/crashes.
+    # On Windows (multiprocessing uses 'spawn'), both worker processes and the pin-memory
+    # pinner thread can deadlock, especially when stdout/stderr are redirected to a file.
     import platform
-    if platform.system() == 'Windows' and num_workers > 0:
-        logging.debug(f"Windows detected: forcing num_workers=0 (was {num_workers}) for stability")
-        num_workers = 0
+    if platform.system() == 'Windows':
+        if num_workers > 0:
+            logging.debug(f"Windows detected: forcing num_workers=0 (was {num_workers}) for stability")
+            num_workers = 0
+        if pin_memory:
+            logging.debug("Windows detected: forcing pin_memory=False for stability")
+            pin_memory = False
         # persistent_workers requires num_workers > 0, so disable it
         persistent_workers = False
 

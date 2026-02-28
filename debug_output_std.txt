@@ -1,0 +1,129 @@
+[DEBUG] plot_training_curves('Other Training Results'): optimizers=['summary_quantitative']
+[DEBUG] plot_training_curves('Adam Adamw Comparison Training Results'): optimizers=['adam_l2_vs_adamw_comparison']
+[DEBUG] plot_training_curves('Analysis Training Results'): optimizers=['convergence_rates', 'cross_experiment_aggregation']
+[DEBUG] plot_training_curves('2D Optimization Training Results'): optimizers=['Ablation_2D_Rosenbrock_Adam', 'Ablation_2D_Rosenbrock_Adam_NoBeta2', 'Ablation_2D_Rosenbrock_SAM_SGD', 'Ablation_2D_Rosenbrock_SGD', 'Ablation_2D_Rosenbrock_SGD_Momentum', 'Rastrigin_Adam', 'Rastrigin_SAM_SGD', 'Rastrigin_SGD', 'Rosenbrock_Adam', 'Rosenbrock_SAM_SGD', 'Rosenbrock_SGD', 'adam_beta_sweep', 'gd_vs_sgd_comparison', 'momentum_beta_sweep', 'optimization_results', 'optimization_training_results_summary', 'stochastic_2d_results']
+[DEBUG] plot_training_curves('Ablation Training Results'): optimizers=['ablation_results']
+[DEBUG] plot_training_curves('Advanced Ablation Training Results'): optimizers=[]
+Traceback (most recent call last):
+  File "F:\GDSearch\scripts\generate_experiment_plots.py", line 546, in generate_all_plots
+    plot_training_curves(csv_files, viz_dir, title=f"{exp_type} Training Results")
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "F:\GDSearch\scripts\generate_experiment_plots.py", line 189, in plot_training_curves
+    ax.set_xlabel(x_label_for_plot, fontsize=14, fontweight='bold')
+                  ^^^^^^^^^^^^^^^^
+UnboundLocalError: cannot access local variable 'x_label_for_plot' where it is not associated with a value
+[DEBUG] plot_training_curves('Convergence Validation Training Results'): optimizers=['Adam_trajectory', 'RMSProp_trajectory', 'SGD_Momentum_0.5_trajectory', 'SGD_Momentum_0.9_trajectory', 'SGD_trajectory']
+[DEBUG] plot_training_curves('Hyperparameter Heatmaps Training Results'): optimizers=[]
+Traceback (most recent call last):
+  File "F:\GDSearch\scripts\generate_experiment_plots.py", line 546, in generate_all_plots
+    plot_training_curves(csv_files, viz_dir, title=f"{exp_type} Training Results")
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "F:\GDSearch\scripts\generate_experiment_plots.py", line 189, in plot_training_curves
+    ax.set_xlabel(x_label_for_plot, fontsize=14, fontweight='bold')
+                  ^^^^^^^^^^^^^^^^
+UnboundLocalError: cannot access local variable 'x_label_for_plot' where it is not associated with a value
+[DEBUG] plot_training_curves('Hyperparam Sensitivity Training Results'): optimizers=['adam_beta_sweep_rosenbrock', 'hyperparam_sensitivity_results', 'momentum_beta_sweep_ackley', 'momentum_beta_sweep_rosenbrock']
+[DEBUG] plot_training_curves('Init Ablation Training Results'): optimizers=['InitAblation_kaiming_normal_Adam', 'InitAblation_kaiming_normal_AdamW', 'InitAblation_kaiming_normal_SGD', 'InitAblation_kaiming_normal_SGD_Momentum', 'InitAblation_kaiming_uniform_Adam', 'InitAblation_kaiming_uniform_AdamW', 'InitAblation_kaiming_uniform_SGD', 'InitAblation_kaiming_uniform_SGD_Momentum', 'InitAblation_normal_small_Adam', 'InitAblation_normal_small_AdamW', 'InitAblation_normal_small_SGD', 'InitAblation_normal_small_SGD_Momentum', 'InitAblation_uniform_small_Adam', 'InitAblation_uniform_small_AdamW', 'InitAblation_uniform_small_SGD', 'InitAblation_uniform_small_SGD_Momentum', 'InitAblation_xavier_normal_Adam', 'InitAblation_xavier_normal_AdamW', 'InitAblation_xavier_normal_SGD', 'InitAblation_xavier_normal_SGD_Momentum', 'InitAblation_xavier_uniform_Adam', 'InitAblation_xavier_uniform_AdamW', 'InitAblation_xavier_uniform_SGD', 'InitAblation_xavier_uniform_SGD_Momentum']
+[DEBUG] plot_training_curves('Lr Ablation Training Results'): optimizers=['SGD_Momentum_lr1.0e-02', 'SGD_Momentum_lr1.0e-03', 'SGD_Momentum_lr1.0e-04', 'SGD_Momentum_lr3.0e-02', 'SGD_Momentum_lr3.0e-03', 'SGD_Momentum_lr3.0e-04', 'SGD_lr1.0e-02', 'SGD_lr1.0e-03', 'SGD_lr1.0e-04', 'SGD_lr3.0e-02', 'SGD_lr3.0e-03', 'SGD_lr3.0e-04']
+[DEBUG] plot_training_curves('Missing Ablations Training Results'): optimizers=['gradient_clipping_ablation']
+[DEBUG] plot_training_curves('MNIST Training Results'): optimizers=['SchedulerAblation_MNIST_SGD', 'SimpleMLP_GradientClip_0.5', 'SimpleMLP_GradientClip_1.0', 'SimpleMLP_GradientClip_10.0', 'SimpleMLP_GradientClip_5.0', 'SimpleMLP_GradientClip_None', 'SimpleMLP_SAM_rho_0.01', 'SimpleMLP_SAM_rho_0.02', 'SimpleMLP_SAM_rho_0.05', 'SimpleMLP_SAM_rho_0.1', 'SimpleMLP_SAM_rho_0.2', 'training_results_summary']
+[DEBUG] plot_training_curves('Robustness Training Results'): optimizers=['Robustness_Rosenbrock_Adam_start0', 'Robustness_Rosenbrock_Adam_start1', 'Robustness_Rosenbrock_Adam_start2', 'Robustness_Rosenbrock_Adam_start3', 'Robustness_Rosenbrock_Adam_start4', 'Robustness_Rosenbrock_Adam_start5', 'Robustness_Rosenbrock_Adam_start6', 'Robustness_Rosenbrock_Adam_start7', 'Robustness_Rosenbrock_Adam_start8', 'Robustness_Rosenbrock_Adam_start9', 'Robustness_Rosenbrock_SAM_Adam_start0', 'Robustness_Rosenbrock_SAM_Adam_start1', 'Robustness_Rosenbrock_SAM_Adam_start2', 'Robustness_Rosenbrock_SAM_Adam_start3', 'Robustness_Rosenbrock_SAM_Adam_start4', 'Robustness_Rosenbrock_SAM_Adam_start5', 'Robustness_Rosenbrock_SAM_Adam_start6', 'Robustness_Rosenbrock_SAM_Adam_start7', 'Robustness_Rosenbrock_SAM_Adam_start8', 'Robustness_Rosenbrock_SAM_Adam_start9', 'Robustness_Rosenbrock_SAM_SGD_start0', 'Robustness_Rosenbrock_SAM_SGD_start1', 'Robustness_Rosenbrock_SAM_SGD_start2', 'Robustness_Rosenbrock_SAM_SGD_start3', 'Robustness_Rosenbrock_SAM_SGD_start4', 'Robustness_Rosenbrock_SAM_SGD_start5', 'Robustness_Rosenbrock_SAM_SGD_start6', 'Robustness_Rosenbrock_SAM_SGD_start7', 'Robustness_Rosenbrock_SAM_SGD_start8', 'Robustness_Rosenbrock_SAM_SGD_start9', 'Robustness_Rosenbrock_SGD_Momentum_start0', 'Robustness_Rosenbrock_SGD_Momentum_start1', 'Robustness_Rosenbrock_SGD_Momentum_start2', 'Robustness_Rosenbrock_SGD_Momentum_start3', 'Robustness_Rosenbrock_SGD_Momentum_start4', 'Robustness_Rosenbrock_SGD_Momentum_start5', 'Robustness_Rosenbrock_SGD_Momentum_start6', 'Robustness_Rosenbrock_SGD_Momentum_start7', 'Robustness_Rosenbrock_SGD_Momentum_start8', 'Robustness_Rosenbrock_SGD_Momentum_start9', 'Robustness_Rosenbrock_SGD_start0', 'Robustness_Rosenbrock_SGD_start1', 'Robustness_Rosenbrock_SGD_start2', 'Robustness_Rosenbrock_SGD_start3', 'Robustness_Rosenbrock_SGD_start4', 'Robustness_Rosenbrock_SGD_start5', 'Robustness_Rosenbrock_SGD_start6', 'Robustness_Rosenbrock_SGD_start7', 'Robustness_Rosenbrock_SGD_start8', 'Robustness_Rosenbrock_SGD_start9', 'robustness_results']
+[DEBUG] plot_training_curves('Saddle Escape Training Results'): optimizers=['Adam_trajectory', 'SGD_Momentum_trajectory', 'SGD_trajectory', 'saddle_escape_summary']
+[DEBUG] plot_training_curves('Sam Sensitivity Training Results'): optimizers=['sam_sensitivity_results']
+[DEBUG] plot_training_curves('Wd Ablation Training Results'): optimizers=['SGD_Momentum_wd0.0e+00', 'SGD_Momentum_wd1.0e-03', 'SGD_Momentum_wd1.0e-04', 'SGD_Momentum_wd1.0e-05', 'SGD_Momentum_wd1.0e-06', 'SGD_wd0.0e+00', 'SGD_wd1.0e-02', 'SGD_wd1.0e-03', 'SGD_wd1.0e-04', 'SGD_wd1.0e-05', 'SGD_wd1.0e-06']
+[DEBUG] plot_training_curves('Visualizations Training Results'): optimizers=['ablation_training_results_summary', 'adam_adamw_comparison_training_results_summary', 'convergence_validation_training_results_summary', 'hyperparam_sensitivity_training_results_summary', 'init_ablation_training_results_summary', 'lr_ablation_training_results_summary', 'missing_ablations_training_results_summary', 'other_training_results_summary', 'robustness_training_results_summary', 'saddle_escape_training_results_summary', 'sam_sensitivity_training_results_summary', 'training_results_summary', 'visualizations_training_results_summary', 'wd_ablation_training_results_summary']
+[PLOTS] Generating visualizations from: results_proposal_full_20260223_v2
+================================================================================
+Found 10 baseline CSV files for cross-referencing
+   [DEBUG] Group Other is not a valid injection target
+   [DEBUG] Group Adam Adamw Comparison is not a valid injection target
+   [DEBUG] Group Analysis is not a valid injection target
+   [DEBUG] Group 2D Optimization is not a valid injection target
+   [DEBUG] Injecting 10 baselines into Ablation
+   [DEBUG] Group Advanced Ablation is not a valid injection target
+   [DEBUG] Group Convergence Validation is not a valid injection target
+   [DEBUG] Group Hyperparameter Heatmaps is not a valid injection target
+   [DEBUG] Injecting 10 baselines into Hyperparam Sensitivity
+   [DEBUG] Injecting 10 baselines into Init Ablation
+   [DEBUG] Injecting 10 baselines into Lr Ablation
+   [DEBUG] Injecting 10 baselines into Missing Ablations
+   [DEBUG] Injecting 10 baselines into MNIST
+   [DEBUG] Group Robustness is not a valid injection target
+   [DEBUG] Group Saddle Escape is not a valid injection target
+   [DEBUG] Injecting 10 baselines into Sam Sensitivity
+   [DEBUG] Injecting 10 baselines into Wd Ablation
+   [DEBUG] Group Visualizations is not a valid injection target
+
+[GROUP] Other: 1 files
+[OK] Saved: results_proposal_full_20260223_v2\visualizations\other_training_results.png
+[OK] Saved table: results_proposal_full_20260223_v2\visualizations\other_training_results_summary.md
+
+[GROUP] Adam Adamw Comparison: 4 files
+[OK] Saved: results_proposal_full_20260223_v2\visualizations\adam_adamw_comparison_training_results.png
+[OK] Saved table: results_proposal_full_20260223_v2\visualizations\adam_adamw_comparison_training_results_summary.md
+
+[GROUP] Analysis: 25 files
+[OK] Saved: results_proposal_full_20260223_v2\visualizations\analysis_training_results.png
+[OK] Saved table: results_proposal_full_20260223_v2\visualizations\analysis_training_results_summary.md
+
+[GROUP] 2D Optimization: 119 files
+[OK] Saved: results_proposal_full_20260223_v2\visualizations\2d_optimization_training_results.png
+[OK] Saved table: results_proposal_full_20260223_v2\visualizations\2d_optimization_training_results_summary.md
+
+[GROUP] Ablation: 11 files
+[OK] Saved: results_proposal_full_20260223_v2\visualizations\ablation_training_results.png
+[OK] Saved table: results_proposal_full_20260223_v2\visualizations\ablation_training_results_summary.md
+
+[GROUP] Advanced Ablation: 81 files
+   [WARN] Error in Advanced Ablation: cannot access local variable 'x_label_for_plot' where it is not associated with a value
+
+[GROUP] Convergence Validation: 6 files
+[OK] Saved: results_proposal_full_20260223_v2\visualizations\convergence_validation_training_results.png
+[OK] Saved table: results_proposal_full_20260223_v2\visualizations\convergence_validation_training_results_summary.md
+
+[GROUP] Hyperparameter Heatmaps: 4 files
+   [WARN] Error in Hyperparameter Heatmaps: cannot access local variable 'x_label_for_plot' where it is not associated with a value
+
+[GROUP] Hyperparam Sensitivity: 14 files
+[OK] Saved: results_proposal_full_20260223_v2\visualizations\hyperparam_sensitivity_training_results.png
+[OK] Saved table: results_proposal_full_20260223_v2\visualizations\hyperparam_sensitivity_training_results_summary.md
+
+[GROUP] Init Ablation: 251 files
+[OK] Saved: results_proposal_full_20260223_v2\visualizations\init_ablation_training_results.png
+[OK] Saved table: results_proposal_full_20260223_v2\visualizations\init_ablation_training_results_summary.md
+
+[GROUP] Lr Ablation: 130 files
+[OK] Saved: results_proposal_full_20260223_v2\visualizations\lr_ablation_training_results.png
+[OK] Saved table: results_proposal_full_20260223_v2\visualizations\lr_ablation_training_results_summary.md
+
+[GROUP] Missing Ablations: 11 files
+[OK] Saved: results_proposal_full_20260223_v2\visualizations\missing_ablations_training_results.png
+[OK] Saved table: results_proposal_full_20260223_v2\visualizations\missing_ablations_training_results_summary.md
+
+[GROUP] MNIST: 112 files
+[OK] Saved: results_proposal_full_20260223_v2\visualizations\mnist_training_results.png
+[OK] Saved table: results_proposal_full_20260223_v2\visualizations\mnist_training_results_summary.md
+
+[GROUP] Robustness: 501 files
+[OK] Saved: results_proposal_full_20260223_v2\visualizations\robustness_training_results.png
+[OK] Saved table: results_proposal_full_20260223_v2\visualizations\robustness_training_results_summary.md
+
+[GROUP] Saddle Escape: 4 files
+[OK] Saved: results_proposal_full_20260223_v2\visualizations\saddle_escape_training_results.png
+[OK] Saved table: results_proposal_full_20260223_v2\visualizations\saddle_escape_training_results_summary.md
+
+[GROUP] Sam Sensitivity: 11 files
+[OK] Saved: results_proposal_full_20260223_v2\visualizations\sam_sensitivity_training_results.png
+[OK] Saved table: results_proposal_full_20260223_v2\visualizations\sam_sensitivity_training_results_summary.md
+
+[GROUP] Wd Ablation: 117 files
+[OK] Saved: results_proposal_full_20260223_v2\visualizations\wd_ablation_training_results.png
+[OK] Saved table: results_proposal_full_20260223_v2\visualizations\wd_ablation_training_results_summary.md
+
+[GROUP] Visualizations: 15 files
+[OK] Saved: results_proposal_full_20260223_v2\visualizations\visualizations_training_results.png
+[OK] Saved table: results_proposal_full_20260223_v2\visualizations\visualizations_training_results_summary.md
+
+================================================================================
+[OK] Created 16 visualization sets in: results_proposal_full_20260223_v2\visualizations
+   All plots are high-quality (300 DPI)

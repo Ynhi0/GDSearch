@@ -1,2 +1,2 @@
-iteration,loss,grad_norm,x,y
-0,0.0,0.0,1.0,1.0
+iteration,loss,grad_norm,x,y,optimizer,elapsed_seconds,test_acc
+0,0.0,0.0,1.0,1.0,SAM_Adam_start7,0.0,0.01

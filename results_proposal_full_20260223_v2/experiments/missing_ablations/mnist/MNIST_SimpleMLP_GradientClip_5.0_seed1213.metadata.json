@@ -1,0 +1,44 @@
+{
+  "timestamp": "2026-02-28T01:32:04.253229",
+  "dataset": "MNIST",
+  "model": "SimpleMLP",
+  "optimizer": "GradientClip_5.0",
+  "seed": 1213,
+  "rows": 15,
+  "rows_original": 15,
+  "history_thinning_stride": 1,
+  "params": {
+    "gradient_clip": 5.0,
+    "epochs": 15,
+    "seed": 1213
+  },
+  "model_path": null,
+  "system": {
+    "python_version": "3.12.0 (tags/v3.12.0:0fb18b0, Oct  2 2023, 13:03:39) [MSC v.1935 64 bit (AMD64)]",
+    "torch_version": "2.5.1+cu121",
+    "cuda_available": true,
+    "cpu_count": 16,
+    "total_memory_gb": 15.730949401855469,
+    "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
+    "gpu_memory_gb": 3.99951171875,
+    "cuda_version": "12.1"
+  },
+  "provenance": {
+    "timestamp": "2026-02-28T01:32:04.254973",
+    "python_version": "3.12.0 (tags/v3.12.0:0fb18b0, Oct  2 2023, 13:03:39) [MSC v.1935 64 bit (AMD64)]",
+    "pytorch_version": "2.5.1+cu121",
+    "command_line": "run_all_kaggle.py --experiment-mode full --experiments missing_ablations --seeds 42,123,456,789,1011,1213,1415,1617,1819,2021 --results-dir results_proposal_full_20260223_v2 --robust-gradients --resume --no-mlflow",
+    "working_dir": "F:\\GDSearch",
+    "git_commit": "d7356e1e01d4437f75cc1dce928dbb3fa86a10d1",
+    "git_dirty": true,
+    "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
+    "gpu_count": 1,
+    "gpu_memory_gb": 3.99951171875,
+    "cuda_version": "12.1",
+    "nvidia_driver": "581.80"
+  },
+  "completed": true,
+  "tainted": false,
+  "run_signature": "ea4c8cd57be3b866c441878b1adfce0db6e99f7c6b5c8be5958fc3d4ef804e5d",
+  "device": "cuda"
+}
