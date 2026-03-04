@@ -1,0 +1,2 @@
+status,reason,required_input_dirs
+skipped,mnist_cifar_results_missing,"results_proposal_full_20260223_v2\experiments\mnist,results_proposal_full_20260223_v2\experiments\cifar10"

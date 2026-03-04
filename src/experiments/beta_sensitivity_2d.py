@@ -1,35 +1,30 @@
 #!/usr/bin/env python3
 """
-Beta Parameter Sensitivity Analysis on 2D Test Functions
+Beta parameter sensitivity analysis on 2D test functions.
 
 Complementary to beta_sensitivity_training.py (which runs on neural networks),
-this script analyzes β, β1, β2 impact on 2D test function optimization.
-
-Research Proposal Alignment:
-"khảo sát hệ thống và trực quan hóa ảnh hưởng của các siêu tham số đặc trưng
-(β, β1, β2) lên các khía cạnh động học như quỹ đạo, tốc độ tức thời và độ ổn định"
+this script analyzes beta, beta1, beta2 impact on 2D optimization dynamics.
 
 Purpose:
 - Generate clear 2D trajectory visualizations for thesis figures
-- Analyze β impact on Momentum optimizer dynamics
-- Analyze β1, β2 impact on Adam optimizer dynamics
-- Compare convergence speed, smoothness, and stability across β values
+- Analyze beta impact on Momentum optimizer dynamics
+- Analyze beta1, beta2 impact on Adam optimizer dynamics
+- Compare convergence speed, smoothness, and stability across beta values
 
 Output:
 - Trajectory plots (contour + optimizer path)
-- Convergence rate comparisons
+- Convergence-rate comparisons
 - Dynamics metrics (smoothness, oscillation, instantaneous speed)
 
 Usage:
     # Momentum beta sweep on Rosenbrock
-    python src/experiments/beta_sensitivity_2d.py --optimizer Momentum \\
+    python src/experiments/beta_sensitivity_2d.py --optimizer Momentum \
         --function rosenbrock --beta-values 0.5,0.7,0.9,0.95,0.99
-    
-    # Adam beta1/beta2 sweep on Saddle Point
-    python src/experiments/beta_sensitivity_2d.py --optimizer Adam \\
-        --function saddle_point --beta1-values 0.8,0.9,0.95 \\
-        --beta2-values 0.9,0.99,0.999
 
+    # Adam beta1/beta2 sweep on Saddle Point
+    python src/experiments/beta_sensitivity_2d.py --optimizer Adam \
+        --function saddle_point --beta1-values 0.8,0.9,0.95 \
+        --beta2-values 0.9,0.99,0.999
 """
 
 import sys
@@ -286,8 +281,8 @@ def run_beta_sweep_momentum(
     max_param_abs: float = 1e4,
     loss_cap: float = 1e12,
 ) -> pd.DataFrame:
-    """Run Momentum optimizer with different β values."""
-    logger.info(f"Running Momentum beta sweep: β ∈ {beta_values}")
+    """Run Momentum optimizer with different beta values."""
+    logger.info(f"Running Momentum beta sweep: beta in {beta_values}")
     
     results = []
     all_trajectories = {}
@@ -344,14 +339,14 @@ def run_beta_sweep_adam(
     max_param_abs: float = 1e4,
     loss_cap: float = 1e12,
 ) -> pd.DataFrame:
-    """Run Adam optimizer with different β1, β2 combinations."""
-    logger.info(f"Running Adam beta sweep: β1 ∈ {beta1_values}, β2 ∈ {beta2_values}")
+    """Run Adam optimizer with different beta1, beta2 combinations."""
+    logger.info(f"Running Adam beta sweep: beta1 in {beta1_values}, beta2 in {beta2_values}")
     
     results = []
     all_trajectories = {}
     
     total = len(beta1_values) * len(beta2_values)
-    with tqdm(total=total, desc="Adam β1×β2 sweep") as pbar:
+    with tqdm(total=total, desc="Adam beta1xbeta2 sweep") as pbar:
         for beta1 in beta1_values:
             for beta2 in beta2_values:
                 optimizer = Adam(lr=lr, beta1=beta1, beta2=beta2)
@@ -401,7 +396,7 @@ def plot_momentum_trajectories(
     beta_values: List[float],
     output_dir: Path
 ):
-    """Plot 2D trajectories for different β values (Momentum)."""
+    """Plot 2D trajectories for different beta values (Momentum)."""
     fig, axes = plt.subplots(2, 3, figsize=(18, 12))
     axes = axes.flatten()
     
@@ -428,7 +423,7 @@ def plot_momentum_trajectories(
         status = str(trajectories[beta].get('status', 'unknown'))
 
         if len(visible_traj) >= 2:
-            ax.plot(visible_traj[:, 0], visible_traj[:, 1], 'r.-', linewidth=2, markersize=4, label=f'β={beta}')
+            ax.plot(visible_traj[:, 0], visible_traj[:, 1], 'r.-', linewidth=2, markersize=4, label=f'beta={beta}')
             ax.plot(visible_traj[0, 0], visible_traj[0, 1], 'go', markersize=10, label='Start')
             ax.plot(visible_traj[-1, 0], visible_traj[-1, 1], 'r*', markersize=15, label='End')
         elif len(traj) > 0 and np.all(np.isfinite(traj[0])):
@@ -442,7 +437,7 @@ def plot_momentum_trajectories(
                 bbox=dict(facecolor='white', alpha=0.7, edgecolor='none')
             )
         
-        ax.set_title(f'Momentum β={beta}', fontsize=14, fontweight='bold')
+        ax.set_title(f'Momentum beta={beta}', fontsize=14, fontweight='bold')
         ax.set_xlabel('x')
         ax.set_ylabel('y')
         ax.set_xlim(xlim)
@@ -461,7 +456,7 @@ def plot_momentum_trajectories(
 
 
 def plot_momentum_metrics(df: pd.DataFrame, output_dir: Path):
-    """Plot dynamics metrics vs β for Momentum."""
+    """Plot dynamics metrics vs beta for Momentum."""
     fig, axes = plt.subplots(2, 3, figsize=(18, 10))
     
     metrics = [
@@ -490,9 +485,9 @@ def plot_momentum_metrics(df: pd.DataFrame, output_dir: Path):
             ax.text(0.98, 0.02, f'invalid={invalid_count}', transform=ax.transAxes,
                     ha='right', va='bottom', fontsize=9, color='darkred')
 
-        ax.set_xlabel('β (Momentum Coefficient)', fontsize=12)
+        ax.set_xlabel('beta (Momentum Coefficient)', fontsize=12)
         ax.set_ylabel(title, fontsize=12)
-        ax.set_title(f'{title} vs β', fontsize=14, fontweight='bold')
+        ax.set_title(f'{title} vs beta', fontsize=14, fontweight='bold')
         ax.grid(True, alpha=0.3)
         if metric in ['final_loss', 'final_grad_norm'] and finite_mask.any():
             ax.set_yscale('log')
@@ -504,7 +499,7 @@ def plot_momentum_metrics(df: pd.DataFrame, output_dir: Path):
 
 
 def plot_adam_heatmaps(df: pd.DataFrame, output_dir: Path):
-    """Plot heatmaps showing β1 vs β2 impact on various metrics."""
+    """Plot heatmaps showing beta1 vs beta2 impact on various metrics."""
     metrics = ['final_loss', 'iterations', 'smoothness', 'oscillation']
     titles = ['Final Loss', 'Iterations', 'Smoothness', 'Oscillation']
     
@@ -517,9 +512,9 @@ def plot_adam_heatmaps(df: pd.DataFrame, output_dir: Path):
         
         sns.heatmap(heatmap_data, annot=True, fmt='.3f', cmap='RdYlGn_r' if metric in ['final_loss', 'oscillation'] else 'RdYlGn',
                     ax=ax, cbar_kws={'label': title})
-        ax.set_title(f'{title} (β1 vs β2)', fontsize=14, fontweight='bold')
-        ax.set_xlabel('β1 (First Moment Decay)', fontsize=12)
-        ax.set_ylabel('β2 (Second Moment Decay)', fontsize=12)
+        ax.set_title(f'{title} (beta1 vs beta2)', fontsize=14, fontweight='bold')
+        ax.set_xlabel('beta1 (First Moment Decay)', fontsize=12)
+        ax.set_ylabel('beta2 (Second Moment Decay)', fontsize=12)
     
     plt.tight_layout()
     plt.savefig(output_dir / 'adam_heatmaps.png', dpi=150, bbox_inches='tight')
@@ -618,3 +613,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

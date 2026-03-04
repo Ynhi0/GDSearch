@@ -54,6 +54,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from src.utils.plot_helpers import arr_to_numpy_float
+from src.utils.constants import MNIST_MEAN, MNIST_STD
 from typing import Dict, List, Optional, Tuple, Any, TYPE_CHECKING
 from src.core.dataloader_utils import make_dataloader
 import os
@@ -299,7 +300,10 @@ def train_with_beta(
     final_test_acc = 100. * test_correct / test_total
     logger.info(f"Final Test Performance: Loss={test_loss:.4f}, Acc={final_test_acc:.2f}%")
 
-    # Add final test metrics to history
+    # Add final test metrics to history and keep legacy keys populated.
+    # Some downstream consumers index history['test_*'] and would fail on empty lists.
+    history['test_loss'].append(test_loss)
+    history['test_acc'].append(final_test_acc)
     history['final_test_loss'] = test_loss
     history['final_test_acc'] = final_test_acc
 
@@ -343,9 +347,9 @@ def train_with_beta(
         'beta': beta,
         'optimizer': optimizer_name,
         'final_train_acc': history['train_acc'][-1],
-        'final_test_acc': history['test_acc'][-1],
+        'final_test_acc': final_test_acc,
         'final_train_loss': history['train_loss'][-1],
-        'final_test_loss': history['test_loss'][-1],
+        'final_test_loss': test_loss,
         'history': history,
         'dynamics_metrics': dynamics_metrics,
         'param_snapshots': param_snapshots
@@ -920,13 +924,14 @@ def create_beta2_sensitivity_plots(df: pd.DataFrame, output_dir: str):
 def create_beta_grid_plots(df: pd.DataFrame, output_dir: str):
     """Create 2D heatmap visualizations for (β1, β2) grid search"""
 
-    # Aggregate across seeds
-    agg_df = df.groupby(['Beta1', 'Beta2']).agg({
-        'Final_Test_Acc': 'mean',
-        'Final_Train_Loss': 'mean',
-        'mean_speed': 'mean' if 'mean_speed' in df.columns else lambda x: 0,
-        'oscillation_index': 'mean' if 'oscillation_index' in df.columns else lambda x: 0
-    }).reset_index()
+    # Aggregate across seeds using only available columns.
+    # In ultra-quick runs (very few epochs), some dynamics columns are absent.
+    agg_metrics = ['Final_Test_Acc', 'Final_Train_Loss']
+    if 'mean_speed' in df.columns:
+        agg_metrics.append('mean_speed')
+    if 'oscillation_index' in df.columns:
+        agg_metrics.append('oscillation_index')
+    agg_df = df.groupby(['Beta1', 'Beta2'])[agg_metrics].mean().reset_index()
 
     fig, axes = plt.subplots(2, 2, figsize=(14, 12))
     fig.suptitle('Adam (β1, β2) Grid Search on MNIST Training',
@@ -1049,10 +1054,16 @@ def create_beta_sensitivity_plots(df: pd.DataFrame, output_dir: str, optimizer: 
     # 6. Summary Heatmap
     ax = axes[1, 2]
     if len(df[beta_col].unique()) > 1:
-        # Aggregate across seeds
-        agg_df = df.groupby(beta_col)[['Final_Test_Acc', 'mean_speed', 'oscillation_index']].mean()
-        # Normalize for heatmap
-        agg_norm = (agg_df - agg_df.min()) / (agg_df.max() - agg_df.min())
+        # Aggregate across seeds with schema-safe metric selection.
+        heatmap_metrics = ['Final_Test_Acc']
+        if 'mean_speed' in df.columns:
+            heatmap_metrics.append('mean_speed')
+        if 'oscillation_index' in df.columns:
+            heatmap_metrics.append('oscillation_index')
+        agg_df = df.groupby(beta_col)[heatmap_metrics].mean()
+        # Normalize for heatmap and avoid divide-by-zero on constant columns.
+        denom = (agg_df.max() - agg_df.min()).replace(0.0, 1.0)
+        agg_norm = (agg_df - agg_df.min()) / denom
         sns.heatmap(agg_norm.T, annot=True, fmt='.3f', cmap='RdYlGn', ax=ax, cbar_kws={'label': 'Normalized Value'})
         ax.set_xlabel(f'{beta_col}', fontsize=12)
         ax.set_title('Normalized Metrics Heatmap', fontweight='bold')
@@ -1117,13 +1128,19 @@ def main():
     print("SUMMARY STATISTICS")
     print("=" * 80)
     if args.optimizer == 'adam_grid':
-        print(df.groupby(['Beta1', 'Beta2'])[
-            ['Final_Test_Acc', 'Final_Train_Loss', 'mean_speed', 'oscillation_index']
-        ].mean())
+        summary_cols = ['Final_Test_Acc', 'Final_Train_Loss']
+        if 'mean_speed' in df.columns:
+            summary_cols.append('mean_speed')
+        if 'oscillation_index' in df.columns:
+            summary_cols.append('oscillation_index')
+        print(df.groupby(['Beta1', 'Beta2'])[summary_cols].mean())
     else:
-        print(df.groupby(beta_col)[
-            ['Final_Test_Acc', 'Final_Train_Loss', 'mean_speed', 'oscillation_index']
-        ].mean())
+        summary_cols = ['Final_Test_Acc', 'Final_Train_Loss']
+        if 'mean_speed' in df.columns:
+            summary_cols.append('mean_speed')
+        if 'oscillation_index' in df.columns:
+            summary_cols.append('oscillation_index')
+        print(df.groupby(beta_col)[summary_cols].mean())
 
 
 if __name__ == '__main__':

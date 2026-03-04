@@ -17,7 +17,6 @@
 | InitAblation_uniform_small_SGD_Momentum | 0.1757 | 0.0038 | 95.2490 | 0.4638 | N/A |
 | InitAblation_uniform_small_Adam | 0.1969 | 0.0100 | 94.5120 | 0.4383 | N/A |
 | InitAblation_uniform_small_AdamW | 0.1945 | 0.0069 | 94.5070 | 0.4928 | N/A |
-| Baseline | 0.2125 | 0.0095 | 94.3240 | 0.2730 | N/A |
 | InitAblation_kaiming_uniform_SGD | 0.4978 | 0.0300 | 86.5710 | 1.8702 | N/A |
 | InitAblation_normal_small_AdamW | 0.4769 | 0.1430 | 85.8940 | 6.1565 | N/A |
 | InitAblation_normal_small_Adam | 0.4763 | 0.1393 | 85.5530 | 5.7402 | N/A |

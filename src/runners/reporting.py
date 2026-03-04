@@ -1,4 +1,4 @@
-"""
+﻿"""
 Reporting Module for GDSearch.
 
 Handles result aggregation, report generation, and visualization.
@@ -45,20 +45,20 @@ def generate_experiment_summary(results_dir: Path, experiment_results: Dict[str,
         f.write("\n## Results Directory Structure\n\n")
         f.write("```\n")
         f.write(f"{results_dir.name}/\n")
-        f.write("├── experiments/           # Experiment-specific results\n")
-        f.write("│   ├── mnist/            # MNIST classification results\n")
-        f.write("│   ├── cifar10/          # CIFAR-10 image classification\n")
-        f.write("│   ├── nlp/              # NLP sentiment analysis\n")
-        f.write("│   └── medical/          # Medical image segmentation\n")
-        f.write("├── visualizations/       # Interactive HTML plots\n")
-        f.write("│   └── *.html            # Open in browser for interactive charts\n")
-        f.write("├── analysis/             # Statistical & convergence analysis\n")
-        f.write("│   ├── convergence_rates.csv\n")
-        f.write("│   ├── cross_experiment_statistics.csv\n")
-        f.write("│   └── aggregated_optimizer_performance.csv\n")
-        f.write("├── reports/              # Summary reports\n")
-        f.write("│   └── experiment_summary_report.md  # This file\n")
-        f.write("└── checkpoints/          # Model checkpoints (if enabled)\n")
+        f.write("|-- experiments/           # Experiment-specific results\n")
+        f.write("|   |-- mnist/             # MNIST classification results\n")
+        f.write("|   |-- cifar10/           # CIFAR-10 image classification\n")
+        f.write("|   |-- nlp/               # NLP sentiment analysis\n")
+        f.write("|   `-- medical/           # Medical image segmentation\n")
+        f.write("|-- visualizations/        # Interactive HTML plots\n")
+        f.write("|   `-- *.html             # Open in browser for interactive charts\n")
+        f.write("|-- analysis/              # Statistical & convergence analysis\n")
+        f.write("|   |-- convergence_rates.csv\n")
+        f.write("|   |-- cross_experiment_statistics.csv\n")
+        f.write("|   `-- aggregated_optimizer_performance.csv\n")
+        f.write("|-- reports/               # Summary reports\n")
+        f.write("|   `-- experiment_summary_report.md  # This file\n")
+        f.write("`-- checkpoints/           # Model checkpoints (if enabled)\n")
         f.write("```\n\n")
         
         # Statistical summary
@@ -122,7 +122,7 @@ def generate_experiment_summary(results_dir: Path, experiment_results: Dict[str,
                     
                     f.write(f"| {comp} | {p_val} | {p_adj}{sig} | {d} | {ci_low} | {ci_high} | {interp} |\n")
                 
-                f.write("\n*Asterisk (*) indicates statistical significance after FDR correction (α=0.05)\n\n")
+                f.write("\n*Asterisk (*) indicates statistical significance after FDR correction (Î±=0.05)\n\n")
             except Exception as e:
                 f.write(f"Could not load statistics: {e}\n\n")
         

@@ -6,9 +6,29 @@ import sys
 from pathlib import Path
 
 
+def _cleanup_demo_outputs(output_root: Path) -> None:
+    """
+    Remove previous demo artifacts so regenerated plots/CSVs are always fresh.
+    """
+    targets = [
+        output_root / "rosenbrock" / "momentum",
+        output_root / "saddle_point" / "adam",
+    ]
+    for d in targets:
+        if not d.exists():
+            continue
+        for p in d.glob("*"):
+            if p.is_file() and p.suffix.lower() in {".png", ".csv", ".npy"}:
+                try:
+                    p.unlink()
+                except Exception:
+                    pass
+
+
 def run_beta_sensitivity_2d_demos(output_root: Path) -> int:
     """Run momentum/adam beta-sensitivity demos for 2D functions."""
     output_root = Path(output_root)
+    _cleanup_demo_outputs(output_root)
 
     print("=" * 80)
     print("BETA SENSITIVITY 2D VISUALIZATIONS")

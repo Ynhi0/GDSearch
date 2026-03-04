@@ -41,7 +41,7 @@ def run_optimizer_2d(
     max_iters: int = 500,
     tol: float = 1e-6,
     grad_clip: float | None = None,
-    max_param_abs: float = 1e6
+    max_param_abs: float = 1e4
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Run optimizer on 2D function and collect trajectory.
@@ -77,6 +77,45 @@ def run_optimizer_2d(
         losses.append(float(func(float(params[0]), float(params[1]))))
 
     return np.asarray(trajectory, dtype=float), np.asarray(losses, dtype=float)
+
+
+def _trim_trajectory_for_plot(
+    trajectory: np.ndarray,
+    xlim: Tuple[float, float],
+    ylim: Tuple[float, float],
+    margin_ratio: float = 0.2,
+    max_jump_ratio: float = 0.35,
+) -> np.ndarray:
+    """
+    Keep only the stable, in-bounds prefix of a trajectory.
+
+    This prevents misleading straight-line artifacts when a run takes one
+    numerically large jump before divergence handling stops it.
+    """
+    traj = np.asarray(trajectory, dtype=float)
+    if traj.ndim != 2 or traj.shape[1] != 2 or len(traj) == 0:
+        return np.empty((0, 2), dtype=float)
+
+    x_span = max(1e-8, float(xlim[1] - xlim[0]))
+    y_span = max(1e-8, float(ylim[1] - ylim[0]))
+    x_margin = x_span * margin_ratio
+    y_margin = y_span * margin_ratio
+    x_min, x_max = xlim[0] - x_margin, xlim[1] + x_margin
+    y_min, y_max = ylim[0] - y_margin, ylim[1] + y_margin
+    max_jump = max(1e-8, np.hypot(x_span, y_span) * max_jump_ratio)
+
+    out: List[np.ndarray] = [traj[0]]
+    for pt in traj[1:]:
+        prev = out[-1]
+        if not np.all(np.isfinite(pt)):
+            break
+        if not (x_min <= pt[0] <= x_max and y_min <= pt[1] <= y_max):
+            break
+        if float(np.linalg.norm(pt - prev)) > max_jump:
+            break
+        out.append(pt)
+
+    return np.asarray(out, dtype=float)
 
 
 from collections.abc import Sequence
@@ -143,27 +182,32 @@ def plot_contour_with_trajectories(
         )
 
         color = colors[idx % len(colors)]
+        visible_traj = _trim_trajectory_for_plot(trajectory, xlim, ylim)
 
-        # Plot trajectory line
-        ax.plot(trajectory[:, 0], trajectory[:, 1],
-               color=color, linewidth=2, alpha=0.7, label=opt_name)
+        if len(visible_traj) >= 2:
+            # Plot stable trajectory line
+            ax.plot(visible_traj[:, 0], visible_traj[:, 1],
+                   color=color, linewidth=2, alpha=0.7, label=opt_name)
+        elif len(visible_traj) == 1:
+            ax.plot([], [], color=color, linewidth=2, alpha=0.7, label=opt_name)
 
         # Plot start point
         ax.plot(x0[0], x0[1], 'o', color=color, markersize=10,
                markeredgecolor='black', markeredgewidth=1.5)
 
         # Plot end point
-        ax.plot(trajectory[-1, 0], trajectory[-1, 1], '*',
+        end_pt = visible_traj[-1] if len(visible_traj) > 0 else np.asarray(x0, dtype=float)
+        ax.plot(end_pt[0], end_pt[1], '*',
                color=color, markersize=15, markeredgecolor='black', markeredgewidth=1.5)
 
         # Add arrow annotations to show direction every N steps
-        arrow_interval = max(1, len(trajectory) // 10)
+        arrow_interval = max(1, len(visible_traj) // 10)
         head_width = 0.015 * (ylim[1] - ylim[0])
         head_length = 0.02 * (xlim[1] - xlim[0])
-        for i in range(arrow_interval, len(trajectory), arrow_interval):
-            dx = trajectory[i, 0] - trajectory[i-1, 0]
-            dy = trajectory[i, 1] - trajectory[i-1, 1]
-            ax.arrow(trajectory[i-1, 0], trajectory[i-1, 1], dx, dy,
+        for i in range(arrow_interval, len(visible_traj), arrow_interval):
+            dx = visible_traj[i, 0] - visible_traj[i-1, 0]
+            dy = visible_traj[i, 1] - visible_traj[i-1, 1]
+            ax.arrow(visible_traj[i-1, 0], visible_traj[i-1, 1], dx, dy,
                     head_width=head_width, head_length=head_length, fc=color, ec=color, alpha=0.5)
 
     ax.set_xlim(xlim)

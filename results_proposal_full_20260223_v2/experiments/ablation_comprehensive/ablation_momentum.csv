@@ -1,0 +1,11 @@
+seed,optimizer,momentum,final_train_loss,final_test_accuracy,convergence_epoch,diverged,divergence_reason
+42,SGD,0.0,1.4499779815038045,50.45,10,False,None
+42,SGD_Momentum,0.9,0.3769694549719493,89.5,10,False,None
+43,SGD,0.0,1.3600633682250975,54.31,10,False,None
+43,SGD_Momentum,0.9,0.3267926104704539,91.58,10,False,None
+44,SGD,0.0,1.349804425239563,53.15,10,False,None
+44,SGD_Momentum,0.9,0.42465883547465005,86.92,10,False,None
+45,SGD,0.0,1.3812323086420695,51.73,10,False,None
+45,SGD_Momentum,0.9,0.3426947372277578,91.02,10,False,None
+46,SGD,0.0,1.327897330156962,54.81,10,False,None
+46,SGD_Momentum,0.9,0.36397783495585123,88.21,10,False,None

@@ -1,0 +1,2 @@
+status,reason,required_input_dir
+skipped,mnist_results_missing,results_proposal_full_20260223_v2\experiments\mnist

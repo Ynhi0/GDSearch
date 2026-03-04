@@ -38,7 +38,8 @@ def run_stochastic_2d_experiments(
     noise_std: float = 0.1,
     noise_type: str = 'multiplicative',
     max_iter: int = 5000,
-    resume: bool = False
+    resume: bool = False,
+    divergence_threshold: float = 1e6,
 ) -> pd.DataFrame:
     """
     Run 2D optimization experiments with PROPER stochastic gradient noise.
@@ -164,6 +165,8 @@ def run_stochastic_2d_experiments(
 
                 # Reset optimizer state
                 optimizer.reset()
+                run_status = "max_iters_or_stalled"
+                converged_iteration = -1
 
                 for iteration in range(max_iter):
                     # Guard against numerical overflows from extreme divergence.
@@ -173,11 +176,23 @@ def run_stochastic_2d_experiments(
                         grad_x, grad_y = func.gradient(x, y, noise_std=noise_std, noise_type=noise_type)
                     except (OverflowError, FloatingPointError, ValueError) as e:
                         logging.debug("Numeric failure for %s/%s seed %s at iter %s: %s", func_name, opt_name, seed, iteration, e)
+                        run_status = "error_numeric_exception"
                         break
 
                     # Compute gradient norm for convergence analysis (proposal requirement)
                     grad_norm = np.hypot(grad_x, grad_y)
                     if not np.isfinite(loss) or not np.isfinite(grad_norm):
+                        run_status = "error_non_finite_loss"
+                        break
+                    if (
+                        abs(x) > divergence_threshold
+                        or abs(y) > divergence_threshold
+                        or abs(loss) > divergence_threshold
+                        or abs(grad_norm) > divergence_threshold
+                    ):
+                        run_status = "error_diverged"
+                        # Keep result files numerically stable for downstream plotting/audits.
+                        x, y = np.nan, np.nan
                         break
 
                     # Store iteration data including grad_norm (required by proposal)
@@ -214,15 +229,28 @@ def run_stochastic_2d_experiments(
                         x, y = optimizer.step((x, y), (grad_x, grad_y))
 
                     # Divergence guardrail to avoid numeric blow-ups.
-                    if (not np.isfinite(x)) or (not np.isfinite(y)) or abs(x) > 1e12 or abs(y) > 1e12:
+                    if (not np.isfinite(x)) or (not np.isfinite(y)):
+                        run_status = "error_non_finite_params"
+                        break
+                    if abs(x) > divergence_threshold or abs(y) > divergence_threshold:
+                        run_status = "error_diverged"
+                        # Keep CSV numerically stable for downstream plotting/audits.
+                        x, y = np.nan, np.nan
                         break
 
                     # Convergence check
                     if loss < 1e-8:
+                        run_status = "converged_strict"
+                        converged_iteration = iteration
                         break
 
-                final_loss = history[-1]['loss'] if history else float('nan')
-                converged = final_loss < 1e-6
+                final_loss = history[-1]['loss'] if history else float('inf')
+                if run_status.startswith("error_"):
+                    final_loss = np.nan
+                converged = bool(np.isfinite(final_loss) and final_loss < 1e-6)
+                if converged and run_status.startswith("max_iters"):
+                    run_status = "converged_practical"
+                    converged_iteration = len(history) - 1
 
                 results.append({
                     'function': func_name,
@@ -234,7 +262,10 @@ def run_stochastic_2d_experiments(
                     'final_x': x,
                     'final_y': y,
                     'iterations': len(history),
-                    'converged': converged
+                    'converged': converged,
+                    'run_status': run_status,
+                    'converged_epoch': converged_iteration,
+                    'converged_iteration': converged_iteration,
                 })
 
                 print(f"  {opt_name:15s} (seed {seed}): Loss={final_loss:.6e}, Iters={len(history):4d}, Converged={converged}")
@@ -263,7 +294,9 @@ def run_stochastic_2d_experiments(
 
 def compare_deterministic_vs_stochastic(
     results_dir: str = "results/gd_vs_sgd_comparison",
-    seeds: Optional[List[int]] = None
+    seeds: Optional[List[int]] = None,
+    max_iter: int = 5000,
+    divergence_threshold: float = 1e6,
 ) -> Dict[str, pd.DataFrame]:
     """
     Compare deterministic GD (noise_std=0) vs. stochastic SGD (noise_std>0).
@@ -291,8 +324,9 @@ def compare_deterministic_vs_stochastic(
         results_dir=f"{results_dir}/deterministic",
         seeds=seeds,
         noise_std=0.0,  # No noise = not stochastic!
-        max_iter=5000,
-        resume=False
+        max_iter=max_iter,
+        resume=False,
+        divergence_threshold=divergence_threshold,
     )
 
     # Run stochastic (REAL SGD)
@@ -303,14 +337,22 @@ def compare_deterministic_vs_stochastic(
         seeds=seeds,
         noise_std=0.1,
         noise_type='multiplicative',
-        max_iter=5000,
-        resume=False
+        max_iter=max_iter,
+        resume=False,
+        divergence_threshold=divergence_threshold,
     )
 
     # Compare
     print("\n" + "="*80)
     print("COMPARISON: Deterministic GD vs. Stochastic SGD")
     print("="*80)
+
+    def _finite_mean(series: pd.Series) -> float:
+        arr = pd.to_numeric(series, errors='coerce').to_numpy(dtype=float)
+        arr = arr[np.isfinite(arr)]
+        if arr.size == 0:
+            return np.nan
+        return float(np.mean(arr))
 
     comparison = []
     for func in df_deterministic['function'].unique():
@@ -323,15 +365,17 @@ def compare_deterministic_vs_stochastic(
                 'optimizer': opt,
                 'GD_converged_rate': det_subset['converged'].mean(),
                 'SGD_converged_rate': stoch_subset['converged'].mean(),
-                'GD_avg_iters': det_subset['iterations'].mean(),
-                'SGD_avg_iters': stoch_subset['iterations'].mean(),
-                'GD_final_loss': det_subset['final_loss'].mean(),
-                'SGD_final_loss': stoch_subset['final_loss'].mean(),
+                'GD_avg_iters': _finite_mean(det_subset['iterations']),
+                'SGD_avg_iters': _finite_mean(stoch_subset['iterations']),
+                'GD_final_loss': _finite_mean(det_subset['final_loss']),
+                'SGD_final_loss': _finite_mean(stoch_subset['final_loss']),
+                'GD_valid_runs': int(pd.to_numeric(det_subset['final_loss'], errors='coerce').notna().sum()),
+                'SGD_valid_runs': int(pd.to_numeric(stoch_subset['final_loss'], errors='coerce').notna().sum()),
             })
 
     df_comparison = pd.DataFrame(comparison)
     Path(results_dir).mkdir(parents=True, exist_ok=True)
-    df_comparison.to_csv(f"{results_dir}/gd_vs_sgd_comparison.csv", index=False)
+    safe_to_csv(df_comparison, f"{results_dir}/gd_vs_sgd_comparison.csv", index=False)
 
     print(df_comparison)
 

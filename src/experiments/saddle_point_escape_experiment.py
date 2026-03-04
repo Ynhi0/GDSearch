@@ -27,7 +27,8 @@ def run_saddle_point_escape_experiment(
     max_iters: int = 1000,
     eigenvalue_check_interval: int = 10,
     output_dir: str = 'results/saddle_point_escape',
-    noise_std: float = 0.01  # GAP FIX: Add noise for true SGD simulation
+    noise_std: float = 0.01,  # GAP FIX: Add noise for true SGD simulation
+    divergence_threshold: float = 1e4,
 ) -> Dict:
     """
     Run saddle point escape experiment with Hessian eigenvalue tracking.
@@ -103,6 +104,7 @@ def run_saddle_point_escape_experiment(
 
         escaped_saddle = False
         escape_iteration = None
+        run_status = "max_iters_or_stalled"
         last_lambda_min = np.nan
         last_lambda_max = np.nan
 
@@ -112,6 +114,18 @@ def run_saddle_point_escape_experiment(
             # Without noise, deterministic GD cannot escape saddle points where ∇f=0
             grad_x, grad_y = test_fn.gradient(x, y, noise_std=noise_std)
             grad_norm = np.linalg.norm([grad_x, grad_y])
+            if (not np.isfinite(loss)) or (not np.isfinite(grad_norm)):
+                run_status = "error_non_finite_loss"
+                break
+            if (
+                abs(x) > divergence_threshold
+                or abs(y) > divergence_threshold
+                or abs(loss) > divergence_threshold
+                or abs(grad_norm) > divergence_threshold
+            ):
+                run_status = "error_diverged"
+                x, y = np.nan, np.nan
+                break
 
             history['iteration'].append(i)
             history['x'].append(x)
@@ -135,6 +149,7 @@ def run_saddle_point_escape_experiment(
                     if not escaped_saddle and distance_from_saddle > 0.5 and abs(loss) > 0.1:
                         escaped_saddle = True
                         escape_iteration = i
+                        run_status = "escaped_saddle"
                         print(f"  {opt_name}: Escaped saddle at iteration {i}")
 
                 except Exception as e:
@@ -148,18 +163,31 @@ def run_saddle_point_escape_experiment(
 
             # Divergence check
             if not np.isfinite(x) or not np.isfinite(y):
+                run_status = "error_non_finite_params"
                 print(f"  {opt_name}: Diverged at iteration {i}")
+                break
+            if abs(x) > divergence_threshold or abs(y) > divergence_threshold:
+                run_status = "error_diverged"
+                x, y = np.nan, np.nan
+                print(f"  {opt_name}: Diverged past threshold at iteration {i}")
                 break
 
         # Store results
         df = pd.DataFrame(history)
         df.to_csv(Path(output_dir) / f'{opt_name.replace("+", "_")}_trajectory.csv', index=False)
 
+        final_loss = history['loss'][-1] if history else np.nan
+        if run_status.startswith("error_"):
+            final_loss = np.nan
+        if run_status.startswith("max_iters"):
+            run_status = "max_iters_or_stalled"
+
         all_results[opt_name] = {
             'escaped': escaped_saddle,
             'escape_iteration': escape_iteration if escaped_saddle else max_iters,
             'final_position': (x, y),
-            'final_loss': history['loss'][-1] if history['loss'] else np.nan,
+            'final_loss': final_loss,
+            'run_status': run_status,
             'history': history
         }
 
@@ -287,7 +315,8 @@ def run_saddle_point_escape_experiment(
             'escape_iteration': result['escape_iteration'],
             'final_x': result['final_position'][0],
             'final_y': result['final_position'][1],
-            'final_loss': result['final_loss']
+            'final_loss': result['final_loss'],
+            'run_status': result.get('run_status', 'unknown'),
         }
         for opt_name, result in all_results.items()
     ])

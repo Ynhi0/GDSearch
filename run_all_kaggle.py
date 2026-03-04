@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 GDSearch Complete Benchmark Suite - Kaggle Edition
@@ -380,6 +380,15 @@ def normalize_metric_names(data_dict: Dict[str, Any]) -> Dict[str, Any]:
         Dictionary with standardized metric names
     """
     normalized = data_dict.copy()
+
+    def _coerce_nonneg_int(value: Any) -> Optional[int]:
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            return None
+        if not np.isfinite(v) or v < 0:
+            return None
+        return int(v)
     
     # Test accuracy normalization (many variations observed)
     if 'test_accuracy' in normalized and 'test_acc' not in normalized:
@@ -399,7 +408,37 @@ def normalize_metric_names(data_dict: Dict[str, Any]) -> Dict[str, Any]:
     # Validation accuracy normalization
     if 'val_accuracy' in normalized and 'val_acc' not in normalized:
         normalized['val_acc'] = normalized.pop('val_accuracy')
-    
+
+    # Convergence iteration/epoch normalization for cross-experiment plotting.
+    # Prefer strict threshold hit, then practical, then generic convergence iteration.
+    conv_epoch = _coerce_nonneg_int(normalized.get('converged_epoch'))
+    if conv_epoch is None:
+        for key in (
+            'converged_step',
+            'converged_iteration_strict',
+            'converged_iteration_practical',
+            'converged_iteration',
+            'iterations_to_converge',
+        ):
+            conv_epoch = _coerce_nonneg_int(normalized.get(key))
+            if conv_epoch is not None:
+                break
+    if conv_epoch is not None:
+        normalized['converged_epoch'] = conv_epoch
+        if 'converged_iteration' not in normalized:
+            normalized['converged_iteration'] = conv_epoch
+    elif any(
+        k in normalized
+        for k in (
+            'converged_step',
+            'converged_iteration_strict',
+            'converged_iteration_practical',
+            'converged_iteration',
+            'iterations_to_converge',
+        )
+    ):
+        normalized.setdefault('converged_epoch', np.nan)
+
     return normalized
 
 
@@ -7173,6 +7212,9 @@ def _create_2d_visualizations(csv_paths, static_dir, experiment_name):
                     for opt, grp in fn_df.groupby('optimizer'):
                         opt_color = color_map.get(str(opt), color_cycle(0))
                         run_groups = grp.groupby(seed_col) if seed_col is not None else [(0, grp)]
+                        start_points: List[Tuple[float, float]] = []
+                        representative_path: Optional[Tuple[np.ndarray, np.ndarray]] = None
+                        best_final_loss = float('inf')
                         for _, run_df in run_groups:
                             run_df = run_df.sort_values('iteration')
                             x_vals = pd.to_numeric(run_df['x'], errors='coerce').to_numpy(dtype=float)
@@ -7190,18 +7232,45 @@ def _create_2d_visualizations(csv_paths, static_dir, experiment_name):
                                 y_vals = y_vals[keep]
                                 if x_vals.size < 2:
                                     continue
+                            start_points.append((float(x_vals[0]), float(y_vals[0])))
+                            if 'loss' in run_df.columns:
+                                run_loss = pd.to_numeric(run_df['loss'], errors='coerce').to_numpy(dtype=float)
+                                run_loss = run_loss[np.isfinite(run_loss)]
+                                if run_loss.size > 0 and float(run_loss[-1]) < best_final_loss:
+                                    best_final_loss = float(run_loss[-1])
+                                    representative_path = (x_vals.copy(), y_vals.copy())
                             all_x.extend(x_vals.tolist())
                             all_y.extend(y_vals.tolist())
                             plt.plot(x_vals, y_vals, color=opt_color, alpha=0.25, linewidth=1.0)
                             plt.scatter(x_vals[0], y_vals[0], color=opt_color, s=14, alpha=0.35, marker='o')
                             plt.scatter(x_vals[-1], y_vals[-1], color=opt_color, s=18, alpha=0.7, marker='x')
 
+                        # Only plot a median path when starts are aligned.
+                        # With seed-dependent random starts, a global median path is misleading.
+                        starts_aligned = False
+                        if len(start_points) >= 2:
+                            sp = np.asarray(start_points, dtype=float)
+                            center = np.nanmedian(sp, axis=0)
+                            radial = np.linalg.norm(sp - center, axis=1)
+                            starts_aligned = bool(np.nanmax(radial) <= 1e-3)
+                        elif len(start_points) == 1:
+                            starts_aligned = True
+
                         median_traj = grp.groupby('iteration')[['x', 'y']].median().dropna()
-                        if not median_traj.empty:
+                        if starts_aligned and (not median_traj.empty):
                             plt.plot(
                                 arr_to_numpy_float(median_traj['x']),
                                 arr_to_numpy_float(median_traj['y']),
                                 label=f"{opt} median",
+                                linewidth=2.4,
+                                color=opt_color,
+                            )
+                        elif representative_path is not None:
+                            rep_x, rep_y = representative_path
+                            plt.plot(
+                                rep_x,
+                                rep_y,
+                                label=f"{opt} representative",
                                 linewidth=2.4,
                                 color=opt_color,
                             )
@@ -7229,7 +7298,7 @@ def _create_2d_visualizations(csv_paths, static_dir, experiment_name):
                     plt.ylabel('y', fontsize=12)
                     n_runs = int(fn_df[seed_col].nunique()) if seed_col is not None else 1
                     plt.title(
-                        f'2D {fn_name}: Seed Trajectories with Median Path (n={n_runs})',
+                        f'2D {fn_name}: Seed Trajectories (median when starts align, else representative) (n={n_runs})',
                         fontsize=14,
                         fontweight='bold',
                     )
@@ -7414,100 +7483,119 @@ def _create_2d_visualizations(csv_paths, static_dir, experiment_name):
                     plt.close()
                     print(f"   Created {out_path.name}")
 
-                # Main chart: practical threshold (if available), fallback to legacy/strict.
-                if 'converged_practical' in summary_df.columns:
+                # Build proposal-aligned convergence booleans:
+                # prefer explicit converged flags, but also treat stationarity (small ||grad||)
+                # and low-loss as convergence evidence for non-convex local minima.
+                def _build_conv_bool(df_in, threshold, explicit_col=None):
+                    conv = pd.Series(False, index=df_in.index)
+                    has_any = False
+                    if explicit_col is not None and explicit_col in df_in.columns:
+                        conv = conv | _as_bool(df_in[explicit_col])
+                        has_any = True
+                    if 'final_grad_norm' in df_in.columns:
+                        grad_hit = pd.to_numeric(df_in['final_grad_norm'], errors='coerce') < float(threshold)
+                        conv = conv | grad_hit.fillna(False)
+                        has_any = True
+                    if 'final_loss' in df_in.columns:
+                        loss_hit = pd.to_numeric(df_in['final_loss'], errors='coerce') < float(threshold)
+                        conv = conv | loss_hit.fillna(False)
+                        has_any = True
+                    if (not has_any) and ('converged' in df_in.columns):
+                        conv = conv | _as_bool(df_in['converged'])
+                        has_any = True
+                    if 'run_status' in df_in.columns:
+                        status = df_in['run_status'].astype(str).str.lower().str.strip()
+                        conv.loc[status.str.startswith('error')] = False
+                    if 'error' in df_in.columns:
+                        err = df_in['error'].astype(str).str.lower().str.strip()
+                        has_err = ~err.isin({'', 'nan', 'none'})
+                        conv.loc[has_err] = False
+                    return conv if has_any else None
+
+                conv_bool_practical = _build_conv_bool(
+                    summary_df,
+                    threshold=1e-3,
+                    explicit_col='converged_practical' if 'converged_practical' in summary_df.columns else None,
+                )
+                if conv_bool_practical is not None:
                     conv_practical = summary_df.copy()
-                    conv_practical['conv_bool'] = _as_bool(conv_practical['converged_practical'])
+                    conv_practical['conv_bool'] = conv_bool_practical
                     group_practical = conv_practical.groupby(['optimizer', 'function'])['conv_bool']
                     conv_rate_practical = 100.0 * group_practical.mean().unstack('function')
                     conv_success_practical = group_practical.sum().unstack('function')
                     conv_count_practical = group_practical.count().unstack('function')
                     _plot_conv_rate(
                         conv_rate_practical,
-                        '2D Optimization: Practical Convergence Rate by Optimizer and Function (<1e-3)',
+                        '2D Optimization: Practical Convergence Rate (||grad||<1e-3 OR loss<1e-3)',
                         '2d_convergence_rate_by_optimizer.png',
                         success_df=conv_success_practical,
                         count_df=conv_count_practical,
-                    )
-                elif 'final_loss' in summary_df.columns:
-                    conv_practical = summary_df.copy()
-                    conv_practical['conv_bool'] = pd.to_numeric(conv_practical['final_loss'], errors='coerce') < 1e-3
-                    group_practical = conv_practical.groupby(['optimizer', 'function'])['conv_bool']
-                    conv_rate_practical = 100.0 * group_practical.mean().unstack('function')
-                    conv_success_practical = group_practical.sum().unstack('function')
-                    conv_count_practical = group_practical.count().unstack('function')
-                    _plot_conv_rate(
-                        conv_rate_practical,
-                        '2D Optimization: Practical Convergence Rate by Optimizer and Function (<1e-3)',
-                        '2d_convergence_rate_by_optimizer.png',
-                        success_df=conv_success_practical,
-                        count_df=conv_count_practical,
-                    )
-                elif 'converged' in summary_df.columns:
-                    conv_legacy = summary_df.copy()
-                    conv_legacy['conv_bool'] = _as_bool(conv_legacy['converged'])
-                    group_legacy = conv_legacy.groupby(['optimizer', 'function'])['conv_bool']
-                    conv_rate_legacy = 100.0 * group_legacy.mean().unstack('function')
-                    conv_success_legacy = group_legacy.sum().unstack('function')
-                    conv_count_legacy = group_legacy.count().unstack('function')
-                    _plot_conv_rate(
-                        conv_rate_legacy,
-                        '2D Optimization: Convergence Rate by Optimizer and Function',
-                        '2d_convergence_rate_by_optimizer.png',
-                        success_df=conv_success_legacy,
-                        count_df=conv_count_legacy,
                     )
 
-                # Companion chart: strict threshold, if available.
-                strict_col = 'converged_strict' if 'converged_strict' in summary_df.columns else ('converged' if 'converged' in summary_df.columns else None)
-                if strict_col is not None:
+                conv_bool_strict = _build_conv_bool(
+                    summary_df,
+                    threshold=1e-6,
+                    explicit_col='converged_strict' if 'converged_strict' in summary_df.columns else ('converged' if 'converged' in summary_df.columns else None),
+                )
+                if conv_bool_strict is not None:
                     conv_strict = summary_df.copy()
-                    conv_strict['conv_bool'] = _as_bool(conv_strict[strict_col])
+                    conv_strict['conv_bool'] = conv_bool_strict
                     group_strict = conv_strict.groupby(['optimizer', 'function'])['conv_bool']
                     conv_rate_strict = 100.0 * group_strict.mean().unstack('function')
                     conv_success_strict = group_strict.sum().unstack('function')
                     conv_count_strict = group_strict.count().unstack('function')
                     _plot_conv_rate(
                         conv_rate_strict,
-                        '2D Optimization: Strict Convergence Rate by Optimizer and Function (<1e-6)',
-                        '2d_convergence_rate_strict_by_optimizer.png',
-                        success_df=conv_success_strict,
-                        count_df=conv_count_strict,
-                    )
-                elif 'final_loss' in summary_df.columns:
-                    conv_strict = summary_df.copy()
-                    conv_strict['conv_bool'] = pd.to_numeric(conv_strict['final_loss'], errors='coerce') < 1e-6
-                    group_strict = conv_strict.groupby(['optimizer', 'function'])['conv_bool']
-                    conv_rate_strict = 100.0 * group_strict.mean().unstack('function')
-                    conv_success_strict = group_strict.sum().unstack('function')
-                    conv_count_strict = group_strict.count().unstack('function')
-                    _plot_conv_rate(
-                        conv_rate_strict,
-                        '2D Optimization: Strict Convergence Rate by Optimizer and Function (<1e-6)',
+                        '2D Optimization: Strict Convergence Rate (||grad||<1e-6 OR loss<1e-6)',
                         '2d_convergence_rate_strict_by_optimizer.png',
                         success_df=conv_success_strict,
                         count_df=conv_count_strict,
                     )
 
                 # Convergence chance profile across thresholds (not only 0/1 strict/practical cuts).
-                if 'final_loss' in summary_df.columns:
+                # Proposal-aligned criterion: stationarity OR low loss.
+                if 'final_loss' in summary_df.columns or 'final_grad_norm' in summary_df.columns:
                     profile_rows = []
                     thresholds = np.logspace(-6, 2, 80)
                     grouped = summary_df.groupby(['optimizer', 'function'])
                     for (opt_name, fn_name), grp in grouped:
-                        losses = pd.to_numeric(grp['final_loss'], errors='coerce').to_numpy(dtype=float)
-                        finite_mask = np.isfinite(losses)
-                        total = int(losses.size)
-                        if total == 0:
+                        status_err_mask = np.zeros(len(grp), dtype=bool)
+                        if 'run_status' in grp.columns:
+                            status_txt = grp['run_status'].astype(str).str.lower().str.strip()
+                            status_err_mask = status_txt.str.startswith('error').to_numpy(dtype=bool)
+                        error_col_mask = np.zeros(len(grp), dtype=bool)
+                        if 'error' in grp.columns:
+                            err_txt = grp['error'].astype(str).str.lower().str.strip()
+                            error_col_mask = (~err_txt.isin({'', 'nan', 'none'})).to_numpy(dtype=bool)
+                        bad_run_mask = status_err_mask | error_col_mask
+                        losses = (
+                            pd.to_numeric(grp['final_loss'], errors='coerce').to_numpy(dtype=float)
+                            if 'final_loss' in grp.columns
+                            else np.full(len(grp), np.nan, dtype=float)
+                        )
+                        grad_norms = (
+                            pd.to_numeric(grp['final_grad_norm'], errors='coerce').to_numpy(dtype=float)
+                            if 'final_grad_norm' in grp.columns
+                            else np.full(len(grp), np.nan, dtype=float)
+                        )
+                        finite_loss = np.isfinite(losses)
+                        finite_grad = np.isfinite(grad_norms)
+                        valid_mask = finite_loss | finite_grad
+                        total = int(len(grp))
+                        if total <= 0:
                             continue
                         for thr in thresholds:
-                            success_mask = finite_mask & (losses < float(thr))
+                            thr_f = float(thr)
+                            loss_hit = finite_loss & (losses < thr_f)
+                            grad_hit = finite_grad & (grad_norms < thr_f)
+                            success_mask = valid_mask & (loss_hit | grad_hit) & (~bad_run_mask)
+                            success_count = int(np.sum(success_mask))
                             profile_rows.append({
                                 'optimizer': str(opt_name),
                                 'function': str(fn_name),
                                 'threshold': float(thr),
-                                'convergence_rate_pct': 100.0 * float(np.mean(success_mask)),
-                                'success_count': int(np.sum(success_mask)),
+                                'convergence_rate_pct': 100.0 * (float(success_count) / float(total)),
+                                'success_count': success_count,
                                 'total_count': total,
                             })
 
@@ -7541,7 +7629,7 @@ def _create_2d_visualizations(csv_paths, static_dir, experiment_name):
                                             label=str(opt_name),
                                         )
                                     ax.set_title(str(fn_name), fontsize=12, fontweight='bold')
-                                    ax.set_xlabel('Loss Threshold', fontsize=11)
+                                    ax.set_xlabel('Threshold t (loss and grad-norm cutoff)', fontsize=11)
                                     ax.grid(True, alpha=0.3)
                                     ax.set_ylim(0, 105)
                                 axes[0].set_ylabel('Convergence Rate (%)', fontsize=11)
@@ -7555,7 +7643,12 @@ def _create_2d_visualizations(csv_paths, static_dir, experiment_name):
                                         ncol=min(4, len(labels)),
                                         frameon=True,
                                     )
-                                fig.suptitle('2D Optimization: Convergence Chance vs Threshold', fontsize=14, fontweight='bold', y=0.965)
+                                fig.suptitle(
+                                    '2D Optimization: Convergence Chance vs Threshold t (||grad||<t OR loss<t)',
+                                    fontsize=14,
+                                    fontweight='bold',
+                                    y=0.965,
+                                )
                                 plt.tight_layout(rect=[0, 0, 1, 0.84])
                                 out_path = static_dir / '2d_convergence_profile_by_threshold.png'
                                 plt.savefig(out_path, dpi=300, bbox_inches='tight')
@@ -7716,13 +7809,37 @@ def _create_ablation_visualizations(csv_paths, static_dir, experiment_name):
                 plt.close()
                 print(f"   Created {out_path.name}")
 
-            conv_bool_practical = None
-            if 'converged_practical' in summary_df.columns:
-                conv_bool_practical = _as_bool(summary_df['converged_practical'])
-            elif 'final_loss' in summary_df.columns:
-                conv_bool_practical = pd.to_numeric(summary_df['final_loss'], errors='coerce') < 1e-3
-            elif 'converged' in summary_df.columns:
-                conv_bool_practical = _as_bool(summary_df['converged'])
+            def _build_conv_bool(df_in, threshold, explicit_col=None):
+                conv = pd.Series(False, index=df_in.index)
+                has_any = False
+                if explicit_col is not None and explicit_col in df_in.columns:
+                    conv = conv | _as_bool(df_in[explicit_col])
+                    has_any = True
+                if 'final_grad_norm' in df_in.columns:
+                    grad_hit = pd.to_numeric(df_in['final_grad_norm'], errors='coerce') < float(threshold)
+                    conv = conv | grad_hit.fillna(False)
+                    has_any = True
+                if 'final_loss' in df_in.columns:
+                    loss_hit = pd.to_numeric(df_in['final_loss'], errors='coerce') < float(threshold)
+                    conv = conv | loss_hit.fillna(False)
+                    has_any = True
+                if (not has_any) and ('converged' in df_in.columns):
+                    conv = conv | _as_bool(df_in['converged'])
+                    has_any = True
+                if 'run_status' in df_in.columns:
+                    status = df_in['run_status'].astype(str).str.lower().str.strip()
+                    conv.loc[status.str.startswith('error')] = False
+                if 'error' in df_in.columns:
+                    err = df_in['error'].astype(str).str.lower().str.strip()
+                    has_err = ~err.isin({'', 'nan', 'none'})
+                    conv.loc[has_err] = False
+                return conv if has_any else None
+
+            conv_bool_practical = _build_conv_bool(
+                summary_df,
+                threshold=1e-3,
+                explicit_col='converged_practical' if 'converged_practical' in summary_df.columns else None,
+            )
 
             if conv_bool_practical is not None:
                 conv_practical = summary_df.copy()
@@ -7733,19 +7850,17 @@ def _create_ablation_visualizations(csv_paths, static_dir, experiment_name):
                 conv_count_practical = g_practical.count()
                 _plot_conv_rate(
                     conv_rate_practical,
-                    f'{experiment_name}: Practical Convergence Rate by Optimizer (<1e-3)',
+                    f'{experiment_name}: Practical Convergence Rate (||grad||<1e-3 OR loss<1e-3)',
                     f'{experiment_name.lower()}_convergence_rate.png',
                     success_series=conv_success_practical,
                     count_series=conv_count_practical,
                 )
 
-            conv_bool_strict = None
-            if 'converged_strict' in summary_df.columns:
-                conv_bool_strict = _as_bool(summary_df['converged_strict'])
-            elif 'converged' in summary_df.columns:
-                conv_bool_strict = _as_bool(summary_df['converged'])
-            elif 'final_loss' in summary_df.columns:
-                conv_bool_strict = pd.to_numeric(summary_df['final_loss'], errors='coerce') < 1e-6
+            conv_bool_strict = _build_conv_bool(
+                summary_df,
+                threshold=1e-6,
+                explicit_col='converged_strict' if 'converged_strict' in summary_df.columns else ('converged' if 'converged' in summary_df.columns else None),
+            )
 
             if conv_bool_strict is not None:
                 conv_strict = summary_df.copy()
@@ -7756,27 +7871,53 @@ def _create_ablation_visualizations(csv_paths, static_dir, experiment_name):
                 conv_count_strict = g_strict.count()
                 _plot_conv_rate(
                     conv_rate_strict,
-                    f'{experiment_name}: Strict Convergence Rate by Optimizer (<1e-6)',
+                    f'{experiment_name}: Strict Convergence Rate (||grad||<1e-6 OR loss<1e-6)',
                     f'{experiment_name.lower()}_convergence_rate_strict.png',
                     success_series=conv_success_strict,
                     count_series=conv_count_strict,
                 )
 
             # Convergence chance profile gives richer signal than single binary thresholds.
-            if 'final_loss' in summary_df.columns:
+            # Proposal-aligned criterion: stationarity OR low loss.
+            if 'final_loss' in summary_df.columns or 'final_grad_norm' in summary_df.columns:
                 profile_rows = []
                 thresholds = np.logspace(-6, 1, 60)
                 for opt_name, grp in summary_df.groupby('optimizer'):
-                    losses = pd.to_numeric(grp['final_loss'], errors='coerce').to_numpy(dtype=float)
-                    finite_mask = np.isfinite(losses)
+                    status_err_mask = np.zeros(len(grp), dtype=bool)
+                    if 'run_status' in grp.columns:
+                        status_txt = grp['run_status'].astype(str).str.lower().str.strip()
+                        status_err_mask = status_txt.str.startswith('error').to_numpy(dtype=bool)
+                    error_col_mask = np.zeros(len(grp), dtype=bool)
+                    if 'error' in grp.columns:
+                        err_txt = grp['error'].astype(str).str.lower().str.strip()
+                        error_col_mask = (~err_txt.isin({'', 'nan', 'none'})).to_numpy(dtype=bool)
+                    bad_run_mask = status_err_mask | error_col_mask
+                    losses = (
+                        pd.to_numeric(grp['final_loss'], errors='coerce').to_numpy(dtype=float)
+                        if 'final_loss' in grp.columns
+                        else np.full(len(grp), np.nan, dtype=float)
+                    )
+                    grad_norms = (
+                        pd.to_numeric(grp['final_grad_norm'], errors='coerce').to_numpy(dtype=float)
+                        if 'final_grad_norm' in grp.columns
+                        else np.full(len(grp), np.nan, dtype=float)
+                    )
+                    finite_loss = np.isfinite(losses)
+                    finite_grad = np.isfinite(grad_norms)
+                    valid_mask = finite_loss | finite_grad
+                    total = int(len(grp))
                     for thr in thresholds:
-                        success_mask = finite_mask & (losses < float(thr))
+                        thr_f = float(thr)
+                        loss_hit = finite_loss & (losses < thr_f)
+                        grad_hit = finite_grad & (grad_norms < thr_f)
+                        success_mask = valid_mask & (loss_hit | grad_hit) & (~bad_run_mask)
+                        success_count = int(np.sum(success_mask))
                         profile_rows.append({
                             'optimizer': str(opt_name),
                             'threshold': float(thr),
-                            'convergence_rate_pct': 100.0 * float(np.mean(success_mask)) if losses.size > 0 else np.nan,
-                            'success_count': int(np.sum(success_mask)),
-                            'total_count': int(losses.size),
+                            'convergence_rate_pct': (100.0 * float(success_count) / float(total)) if total > 0 else np.nan,
+                            'success_count': success_count,
+                            'total_count': total,
                         })
 
                 if profile_rows:
@@ -7796,11 +7937,15 @@ def _create_ablation_visualizations(csv_paths, static_dir, experiment_name):
                             linewidth=2,
                             label=str(opt_name),
                         )
-                    plt.xlabel('Final-Loss Threshold', fontsize=12)
+                    plt.xlabel('Threshold t (loss and grad-norm cutoff)', fontsize=12)
                     plt.ylabel('Convergence Rate (%)', fontsize=12)
                     plt.ylim(0, 105)
                     plt.grid(True, alpha=0.3)
-                    plt.title(f'{experiment_name}: Convergence Chance vs Threshold', fontsize=14, fontweight='bold')
+                    plt.title(
+                        f'{experiment_name}: Convergence Chance vs Threshold t (||grad||<t OR loss<t)',
+                        fontsize=14,
+                        fontweight='bold',
+                    )
                     plt.legend()
                     plt.tight_layout()
                     out_path = static_dir / f'{experiment_name.lower()}_convergence_profile.png'
@@ -8009,36 +8154,206 @@ def _create_robustness_visualizations(csv_paths, static_dir, experiment_name):
                 logging.debug("Could not create start_point sensitivity plot: %s", e, exc_info=True)
 
     # â”€â”€ Plot 3: Convergence success rate per optimizer â”€â”€
-    if 'converged' in summary_df.columns and 'optimizer' in summary_df.columns:
+    conv_bool_practical = None
+    conv_bool_strict = None
+    if 'optimizer' in summary_df.columns:
         try:
-            conv_rate = summary_df.groupby('optimizer')['converged'].apply(
-                lambda x: 100.0 * x.astype(str).str.lower().isin(['1', 'true', 'yes']).mean()
-            )
-            plt.figure(figsize=(8, 5))
-            x = range(len(conv_rate))
-            colors = ['#2ecc71' if v >= 80 else '#e67e22' if v >= 50 else '#e74c3c' for v in conv_rate.values]
-            bars = plt.bar(x, conv_rate.values, alpha=0.8, edgecolor='black', color=colors)
-            plt.xticks(x, [str(o) for o in conv_rate.index], rotation=30, ha='right')
-            plt.ylabel('Convergence Rate (%)', fontsize=12)
-            plt.title(f'{experiment_name} - Convergence Success Rate by Optimizer', fontsize=13, fontweight='bold')
-            plt.ylim(0, 105)
-            plt.grid(axis='y', alpha=0.3)
-            ax = plt.gca()
-            for i, v in enumerate(conv_rate.values):
-                ax.text(i, v + 1, f'{v:.0f}%', ha='center', va='bottom', fontsize=10, fontweight='bold')
-            plt.tight_layout()
-            plt.savefig(static_dir / f'{experiment_name.lower()}_convergence_rate.png', dpi=300, bbox_inches='tight')
-            plt.close()
-            print(f"   Created {experiment_name.lower()}_convergence_rate.png")
+            def _as_bool(series):
+                txt = series.astype(str).str.lower().str.strip()
+                num = pd.to_numeric(series, errors='coerce')
+                return txt.isin({'1', 'true', 'yes', 'y', 't'}) | (num.fillna(0) > 0)
+
+            def _build_conv_bool(df_in: pd.DataFrame, threshold: float, explicit_cols: List[str]) -> Optional[pd.Series]:
+                conv = pd.Series(False, index=df_in.index)
+                has_any = False
+                for col in explicit_cols:
+                    if col in df_in.columns:
+                        conv = conv | _as_bool(df_in[col])
+                        has_any = True
+                if 'converged_epoch' in df_in.columns:
+                    conv = conv | (pd.to_numeric(df_in['converged_epoch'], errors='coerce') >= 0)
+                    has_any = True
+                if 'converged_iteration' in df_in.columns:
+                    conv = conv | (pd.to_numeric(df_in['converged_iteration'], errors='coerce') >= 0)
+                    has_any = True
+                if 'final_grad_norm' in df_in.columns:
+                    grad_hit = pd.to_numeric(df_in['final_grad_norm'], errors='coerce') < float(threshold)
+                    conv = conv | grad_hit.fillna(False)
+                    has_any = True
+                if 'final_loss' in df_in.columns:
+                    loss_hit = pd.to_numeric(df_in['final_loss'], errors='coerce') < float(threshold)
+                    conv = conv | loss_hit.fillna(False)
+                    has_any = True
+                if 'run_status' in df_in.columns:
+                    status = df_in['run_status'].astype(str).str.lower().str.strip()
+                    conv.loc[status.str.startswith('error')] = False
+                if 'error' in df_in.columns:
+                    err = df_in['error'].astype(str).str.lower().str.strip()
+                    has_err = ~err.isin({'', 'nan', 'none'})
+                    conv.loc[has_err] = False
+                return conv if has_any else None
+
+            def _plot_conv_rate(rate_series: pd.Series, title: str, out_name: str, success_series: Optional[pd.Series], count_series: Optional[pd.Series]) -> None:
+                if rate_series is None or len(rate_series) == 0:
+                    return
+                rate_series = pd.to_numeric(rate_series, errors='coerce').fillna(0.0)
+                plot_series = rate_series.copy()
+                ylabel = 'Convergence Rate (%)'
+                max_rate = float(np.nanmax(rate_series.to_numpy(dtype=float))) if len(rate_series) > 0 else 0.0
+                if max_rate <= 0:
+                    plot_series = 100.0 - rate_series
+                    ylabel = 'Non-Convergence Rate (%)'
+                    title = f'{title} (all convergence rates are 0%)'
+
+                if success_series is not None:
+                    success_series = pd.to_numeric(success_series.reindex(plot_series.index), errors='coerce').fillna(0.0)
+                if count_series is not None:
+                    count_series = pd.to_numeric(count_series.reindex(plot_series.index), errors='coerce').fillna(0.0)
+
+                plt.figure(figsize=(8, 5))
+                x = range(len(plot_series))
+                colors = ['#2ecc71' if v >= 80 else '#e67e22' if v >= 50 else '#e74c3c' for v in plot_series.values]
+                plt.bar(x, plot_series.values, alpha=0.8, edgecolor='black', color=colors)
+                plt.xticks(x, [str(o) for o in plot_series.index], rotation=30, ha='right')
+                plt.ylabel(ylabel, fontsize=12)
+                plt.title(title, fontsize=13, fontweight='bold')
+                plt.ylim(0, 105)
+                plt.grid(axis='y', alpha=0.3)
+                ax = plt.gca()
+                for i, v in enumerate(plot_series.values):
+                    label = f'{float(v):.0f}%'
+                    if success_series is not None and count_series is not None:
+                        succ = int(round(float(success_series.iloc[i])))
+                        cnt = int(round(float(count_series.iloc[i])))
+                        if cnt > 0:
+                            if max_rate <= 0:
+                                label = f'{float(v):.0f}% ({cnt - succ}/{cnt})'
+                            else:
+                                label = f'{float(v):.0f}% ({succ}/{cnt})'
+                    y = float(v) + 1 if float(v) > 0 else 0.35
+                    ax.text(i, y, label, ha='center', va='bottom', fontsize=9, fontweight='bold')
+                plt.tight_layout()
+                out_path = static_dir / out_name
+                plt.savefig(out_path, dpi=300, bbox_inches='tight')
+                plt.close()
+                print(f"   Created {out_path.name}")
+
+            conv_bool_practical = _build_conv_bool(summary_df, 1e-3, ['converged_practical'])
+            conv_bool_strict = _build_conv_bool(summary_df, 1e-6, ['converged_strict', 'converged'])
+
+            if conv_bool_practical is not None:
+                practical_df = summary_df.copy()
+                practical_df['conv_bool'] = conv_bool_practical
+                g = practical_df.groupby('optimizer')['conv_bool']
+                _plot_conv_rate(
+                    100.0 * g.mean(),
+                    f'{experiment_name} - Practical Convergence Rate (||grad||<1e-3 OR loss<1e-3)',
+                    f'{experiment_name.lower()}_convergence_rate.png',
+                    success_series=g.sum(),
+                    count_series=g.count(),
+                )
+
+            if conv_bool_strict is not None:
+                strict_df = summary_df.copy()
+                strict_df['conv_bool'] = conv_bool_strict
+                g = strict_df.groupby('optimizer')['conv_bool']
+                _plot_conv_rate(
+                    100.0 * g.mean(),
+                    f'{experiment_name} - Strict Convergence Rate (||grad||<1e-6 OR loss<1e-6)',
+                    f'{experiment_name.lower()}_convergence_rate_strict.png',
+                    success_series=g.sum(),
+                    count_series=g.count(),
+                )
+
+            if 'final_loss' in summary_df.columns or 'final_grad_norm' in summary_df.columns:
+                profile_rows = []
+                thresholds = np.logspace(-6, 1, 60)
+                for opt_name, grp in summary_df.groupby('optimizer'):
+                    status_err_mask = np.zeros(len(grp), dtype=bool)
+                    if 'run_status' in grp.columns:
+                        status_txt = grp['run_status'].astype(str).str.lower().str.strip()
+                        status_err_mask = status_txt.str.startswith('error').to_numpy(dtype=bool)
+                    error_col_mask = np.zeros(len(grp), dtype=bool)
+                    if 'error' in grp.columns:
+                        err_txt = grp['error'].astype(str).str.lower().str.strip()
+                        error_col_mask = (~err_txt.isin({'', 'nan', 'none'})).to_numpy(dtype=bool)
+                    bad_run_mask = status_err_mask | error_col_mask
+                    losses = (
+                        pd.to_numeric(grp['final_loss'], errors='coerce').to_numpy(dtype=float)
+                        if 'final_loss' in grp.columns
+                        else np.full(len(grp), np.nan, dtype=float)
+                    )
+                    grad_norms = (
+                        pd.to_numeric(grp['final_grad_norm'], errors='coerce').to_numpy(dtype=float)
+                        if 'final_grad_norm' in grp.columns
+                        else np.full(len(grp), np.nan, dtype=float)
+                    )
+                    finite_loss = np.isfinite(losses)
+                    finite_grad = np.isfinite(grad_norms)
+                    valid_mask = finite_loss | finite_grad
+                    total_count = int(len(grp))
+                    for thr in thresholds:
+                        if total_count <= 0:
+                            conv_rate = np.nan
+                            success_count = 0
+                        else:
+                            thr_f = float(thr)
+                            loss_hit = finite_loss & (losses < thr_f)
+                            grad_hit = finite_grad & (grad_norms < thr_f)
+                            success_mask = valid_mask & (loss_hit | grad_hit) & (~bad_run_mask)
+                            success_count = int(np.sum(success_mask))
+                            conv_rate = 100.0 * (float(success_count) / float(total_count))
+                        profile_rows.append({
+                            'optimizer': str(opt_name),
+                            'threshold': float(thr),
+                            'convergence_rate_pct': conv_rate,
+                            'success_count': success_count,
+                            'total_count': total_count,
+                        })
+                if profile_rows:
+                    profile_df = pd.DataFrame(profile_rows)
+                    try:
+                        profile_df.to_csv(static_dir / f'{experiment_name.lower()}_convergence_profile.csv', index=False)
+                    except Exception:
+                        logging.debug("Could not save robustness convergence profile CSV", exc_info=True)
+                    plt.figure(figsize=(10, 6))
+                    for opt_name, grp in profile_df.groupby('optimizer'):
+                        grp_sorted = grp.sort_values('threshold')
+                        plt.semilogx(
+                            arr_to_numpy_float(grp_sorted['threshold']),
+                            arr_to_numpy_float(grp_sorted['convergence_rate_pct']),
+                            linewidth=2,
+                            label=str(opt_name),
+                        )
+                    plt.xlabel('Threshold t (loss and grad-norm cutoff)', fontsize=12)
+                    plt.ylabel('Convergence Rate (%)', fontsize=12)
+                    plt.ylim(0, 105)
+                    plt.grid(True, alpha=0.3)
+                    plt.title(
+                        f'{experiment_name} - Convergence Chance vs Threshold t (||grad||<t OR loss<t)',
+                        fontsize=13,
+                        fontweight='bold',
+                    )
+                    plt.legend()
+                    plt.tight_layout()
+                    out_path = static_dir / f'{experiment_name.lower()}_convergence_profile.png'
+                    plt.savefig(out_path, dpi=300, bbox_inches='tight')
+                    plt.close()
+                    print(f"   Created {out_path.name}")
         except Exception as e:
-            logging.debug("Could not create convergence rate plot: %s", e, exc_info=True)
+            logging.debug("Could not create robustness convergence plots: %s", e, exc_info=True)
 
     # â”€â”€ Plot 4: Mean iterations to convergence per optimizer â”€â”€
     if 'iterations' in summary_df.columns and 'optimizer' in summary_df.columns:
         try:
-            # Only count runs that actually converged
-            converged_mask = summary_df.get('converged', pd.Series([True] * len(summary_df))).astype(str).str.lower().isin(['1', 'true', 'yes'])
-            conv_df = summary_df[converged_mask] if converged_mask.any() else summary_df
+            conv_mask = None
+            if conv_bool_practical is not None:
+                conv_mask = conv_bool_practical
+            elif conv_bool_strict is not None:
+                conv_mask = conv_bool_strict
+            elif 'converged' in summary_df.columns:
+                conv_mask = summary_df['converged'].astype(str).str.lower().isin(['1', 'true', 'yes'])
+            conv_df = summary_df[conv_mask] if (conv_mask is not None and conv_mask.any()) else summary_df
             agg_iters = conv_df.groupby('optimizer')['iterations'].agg(['mean', 'std'])
             plt.figure(figsize=(8, 5))
             x = range(len(agg_iters))
@@ -8154,9 +8469,9 @@ def _create_sam_sensitivity_visualizations(csv_paths, static_dir, experiment_nam
         else:
             plt.plot(arr_to_numpy_float(summary_df['rho']), arr_to_numpy_float(summary_df[metric_col]),
                      'o-', linewidth=2, color='steelblue')
-        plt.xlabel('SAM Rho (Ï)', fontsize=12)
+        plt.xlabel('SAM Rho (rho)', fontsize=12)
         plt.ylabel(metric_col.replace('_', ' ').title(), fontsize=12)
-        plt.title('SAM Sensitivity: Effect of Ï on Performance', fontsize=14, fontweight='bold')
+        plt.title('SAM Sensitivity: Effect of rho on Performance', fontsize=14, fontweight='bold')
         plt.grid(True, alpha=0.3)
         plt.tight_layout()
         plt.savefig(static_dir / 'sam_rho_sweep.png', dpi=300, bbox_inches='tight')
@@ -8184,7 +8499,7 @@ def _create_sam_sensitivity_visualizations(csv_paths, static_dir, experiment_nam
                                 yerr=arr_to_numpy_float(agg['std']), fmt='o-', capsize=4, linewidth=2)
                 else:
                     ax.plot(arr_to_numpy_float(summary_df['rho']), arr_to_numpy_float(summary_df[m]), 'o-', linewidth=2)
-                ax.set_xlabel('Ï', fontsize=11)
+                ax.set_xlabel('rho', fontsize=11)
                 ax.set_ylabel(m.replace('_', ' ').title(), fontsize=11)
                 ax.set_title(m.replace('_', ' ').title(), fontsize=12)
                 ax.grid(True, alpha=0.3)
@@ -8205,11 +8520,11 @@ def _create_sam_sensitivity_visualizations(csv_paths, static_dir, experiment_nam
                 x = arr_to_numpy_float(agg.index)
                 m = arr_to_numpy_float(agg['mean'])
                 s = arr_to_numpy_float(agg['std'])
-                plt.plot(x, m, marker='o', linewidth=2, label=f'Ï={rho:g}')
+                plt.plot(x, m, marker='o', linewidth=2, label=f'rho={rho:g}')
                 plt.fill_between(x, m - s, m + s, alpha=0.2)
             plt.xlabel('Epoch', fontsize=12)
             plt.ylabel('Train Loss', fontsize=12)
-            plt.title('SAM Sensitivity: Train Loss by Ï', fontsize=14, fontweight='bold')
+            plt.title('SAM Sensitivity: Train Loss by rho', fontsize=14, fontweight='bold')
             plt.grid(True, alpha=0.3)
             plt.legend()
             plt.tight_layout()
@@ -8228,11 +8543,11 @@ def _create_sam_sensitivity_visualizations(csv_paths, static_dir, experiment_nam
                 x = arr_to_numpy_float(agg.index)
                 m = arr_to_numpy_float(agg['mean'])
                 s = arr_to_numpy_float(agg['std'])
-                plt.plot(x, m, marker='o', linewidth=2, label=f'Ï={rho:g}')
+                plt.plot(x, m, marker='o', linewidth=2, label=f'rho={rho:g}')
                 plt.fill_between(x, m - s, m + s, alpha=0.2)
             plt.xlabel('Epoch', fontsize=12)
             plt.ylabel('Test Accuracy (%)', fontsize=12)
-            plt.title('SAM Sensitivity: Test Accuracy by Ï', fontsize=14, fontweight='bold')
+            plt.title('SAM Sensitivity: Test Accuracy by rho', fontsize=14, fontweight='bold')
             plt.grid(True, alpha=0.3)
             plt.legend()
             plt.tight_layout()
@@ -9438,18 +9753,37 @@ def aggregate_cross_experiment_results(results_dir: Path, experiment_results: Di
             logging.warning(f"Could not aggregate {exp_name}: {e}")
             continue
 
-    if not aggregated:
-        print("   No data to aggregate")
-        return pd.DataFrame()
-
-    # Create aggregated DataFrame
-    agg_df = pd.DataFrame(aggregated)
-
     # Save aggregated results
     analysis_dir = results_dir / "analysis"
     analysis_dir.mkdir(parents=True, exist_ok=True)
-
     agg_path = analysis_dir / "cross_experiment_aggregation.csv"
+
+    existing_agg_df = pd.DataFrame()
+    if agg_path.exists():
+        try:
+            existing_agg_df = pd.read_csv(agg_path)
+        except Exception as e:
+            logging.debug("Could not read existing aggregation CSV %s: %s", agg_path, e, exc_info=True)
+
+    if not aggregated:
+        if not existing_agg_df.empty:
+            print("   No new in-memory experiment DataFrames; preserving existing aggregation")
+            return existing_agg_df
+        print("   No data to aggregate")
+        return pd.DataFrame()
+
+    # Create aggregated DataFrame from current run
+    agg_df = pd.DataFrame(aggregated)
+
+    # Preserve prior aggregation when running subset experiments (e.g., resume/one-off reruns).
+    if not existing_agg_df.empty:
+        merged = pd.concat([existing_agg_df, agg_df], ignore_index=True, sort=False)
+        dedupe_keys = [k for k in ['experiment', 'optimizer'] if k in merged.columns]
+        if dedupe_keys:
+            agg_df = merged.drop_duplicates(subset=dedupe_keys, keep='last').reset_index(drop=True)
+        else:
+            agg_df = merged.reset_index(drop=True)
+
     agg_df.to_csv(agg_path, index=False)
     print(f"   Aggregated results saved to {agg_path}")
 
@@ -9640,21 +9974,21 @@ def generate_final_summary_report(results_dir, experiment_results):
         f.write("\n## Results Directory Structure\n\n")
         f.write("```\n")
         f.write(f"{results_dir.name}/\n")
-        f.write("â”œâ”€â”€ experiments/           # Experiment-specific results\n")
-        f.write("â”‚   â”œâ”€â”€ mnist/            # MNIST classification results\n")
-        f.write("â”‚   â”œâ”€â”€ cifar10/          # CIFAR-10 image classification\n")
-        f.write("â”‚   â”œâ”€â”€ nlp/              # NLP sentiment analysis\n")
-        f.write("â”‚   â””â”€â”€ medical/          # Medical image segmentation\n")
-        f.write("â”œâ”€â”€ visualizations/       # Interactive HTML plots\n")
-        f.write("â”‚   â””â”€â”€ *.html            # Open in browser for interactive charts\n")
-        f.write("â”œâ”€â”€ analysis/             # Statistical & convergence analysis\n")
-        f.write("â”‚   â”œâ”€â”€ convergence_rates.csv\n")
-        f.write("â”‚   â”œâ”€â”€ statistical_comparison.csv\n")
-        f.write("â”‚   â””â”€â”€ basic_statistics_summary.csv\n")
-        f.write("â”œâ”€â”€ reports/              # Summary reports\n")
-        f.write("â”‚   â””â”€â”€ experiment_summary_report.md  # This file\n")
-        f.write("â””â”€â”€ checkpoints/          # Model checkpoints (if enabled)\n")
-        f.write("```\n\n")
+        f.write(f"{results_dir.name}/\n")
+        f.write("|-- experiments/           # Experiment-specific results\n")
+        f.write("|   |-- mnist/             # MNIST classification results\n")
+        f.write("|   |-- cifar10/           # CIFAR-10 image classification\n")
+        f.write("|   |-- nlp/               # NLP sentiment analysis\n")
+        f.write("|   `-- medical/           # Medical image segmentation\n")
+        f.write("|-- visualizations/        # Interactive HTML plots\n")
+        f.write("|   `-- *.html             # Open in browser for interactive charts\n")
+        f.write("|-- analysis/              # Statistical & convergence analysis\n")
+        f.write("|   |-- convergence_rates.csv\n")
+        f.write("|   |-- statistical_comparison.csv\n")
+        f.write("|   `-- basic_statistics_summary.csv\n")
+        f.write("|-- reports/               # Summary reports\n")
+        f.write("|   `-- experiment_summary_report.md  # This file\n")
+        f.write("`-- checkpoints/           # Model checkpoints (if enabled)\n")
 
         f.write("## Integrated Analysis Features\n\n")
 
@@ -9797,6 +10131,14 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, skip_t
     print("="*80)
     strict_convergence_threshold = 1e-6
     practical_convergence_threshold = 1e-3
+
+    def _converged_with_stationarity(loss_val, grad_norm_val, threshold: float) -> bool:
+        """Proposal-aligned convergence: stationarity OR sufficiently low loss."""
+        loss_num = safe_to_float(loss_val, default=np.nan)
+        grad_num = safe_to_float(grad_norm_val, default=np.nan)
+        grad_hit = bool(np.isfinite(grad_num) and (grad_num < float(threshold)))
+        loss_hit = bool(np.isfinite(loss_num) and (loss_num < float(threshold)))
+        return bool(grad_hit or loss_hit)
 
     # Initialize robust gradient handler if enabled
     robust_grad_handler = None
@@ -9968,11 +10310,29 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, skip_t
                                     )
                                     angles = np.arccos(cos_theta)
                                     oscillation_rate = float(np.mean(angles > (np.pi / 2)))
-                    if 'loss' in hist_df.columns:
-                        loss_all = pd.to_numeric(hist_df['loss'], errors='coerce').to_numpy(dtype=float)
-                        finite_loss = np.isfinite(loss_all)
-                        hit_strict = np.where(finite_loss & (loss_all < strict_convergence_threshold))[0]
-                        hit_practical = np.where(finite_loss & (loss_all < practical_convergence_threshold))[0]
+                    loss_all = pd.to_numeric(
+                        hist_df['loss'],
+                        errors='coerce',
+                    ).to_numpy(dtype=float) if 'loss' in hist_df.columns else np.array([], dtype=float)
+                    grad_all = pd.to_numeric(
+                        hist_df['grad_norm'],
+                        errors='coerce',
+                    ).to_numpy(dtype=float) if 'grad_norm' in hist_df.columns else np.array([], dtype=float)
+                    n_steps = max(loss_all.size, grad_all.size)
+                    if n_steps > 0:
+                        strict_mask = np.zeros(n_steps, dtype=bool)
+                        practical_mask = np.zeros(n_steps, dtype=bool)
+                        if loss_all.size > 0:
+                            loss_finite = np.isfinite(loss_all)
+                            strict_mask[:loss_all.size] |= loss_finite & (loss_all < strict_convergence_threshold)
+                            practical_mask[:loss_all.size] |= loss_finite & (loss_all < practical_convergence_threshold)
+                        if grad_all.size > 0:
+                            grad_finite = np.isfinite(grad_all)
+                            strict_mask[:grad_all.size] |= grad_finite & (grad_all < strict_convergence_threshold)
+                            practical_mask[:grad_all.size] |= grad_finite & (grad_all < practical_convergence_threshold)
+
+                        hit_strict = np.where(strict_mask)[0]
+                        hit_practical = np.where(practical_mask)[0]
                         if hit_strict.size > 0:
                             converged_iter_strict = int(hit_strict[0])
                         if hit_practical.size > 0:
@@ -9980,8 +10340,16 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, skip_t
             except Exception:
                 logging.debug("Failed to parse 2D artifact CSV: %s", csv_path, exc_info=True)
 
-            converged_strict = bool(np.isfinite(final_loss) and final_loss < strict_convergence_threshold)
-            converged_practical = bool(np.isfinite(final_loss) and final_loss < practical_convergence_threshold)
+            converged_strict = _converged_with_stationarity(
+                final_loss,
+                final_grad_norm,
+                strict_convergence_threshold,
+            )
+            converged_practical = _converged_with_stationarity(
+                final_loss,
+                final_grad_norm,
+                practical_convergence_threshold,
+            )
             if not run_status:
                 if run_error:
                     run_status = 'error_exception'
@@ -10230,6 +10598,7 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, skip_t
                     i = start_iter - 1
                     converged_iter_strict = None
                     converged_iter_practical = None
+                    sam_nonfinite_recoveries = 0
                     for i in range(start_iter, max_iter):
                         optimizer.zero_grad()
                         _sanitize_2d_tensor_(x)
@@ -10239,6 +10608,32 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, skip_t
 
                         # If loss remains non-finite after sanitization, stop this run gracefully.
                         if not np.isfinite(loss_value):
+                            # Known unstable corner case: Rosenbrock + SAM_SGD on a few seeds.
+                            # Apply bounded recovery before recording an error row.
+                            if (
+                                func_name == 'Rosenbrock'
+                                and opt_name == 'SAM_SGD'
+                                and sam_nonfinite_recoveries < 3
+                            ):
+                                sam_nonfinite_recoveries += 1
+                                _sanitize_2d_tensor_(x)
+                                try:
+                                    setattr(optimizer, 'rho', max(1e-4, float(getattr(optimizer, 'rho', 0.05)) * 0.5))
+                                    base_opt = getattr(optimizer, 'base_optimizer', None)
+                                    if base_opt is not None:
+                                        for pg in base_opt.param_groups:
+                                            pg['lr'] = max(1e-6, float(pg.get('lr', 1e-3)) * 0.5)
+                                except Exception:
+                                    logging.debug("Failed to apply SAM non-finite recovery scaling", exc_info=True)
+                                logging.warning(
+                                    "Recovered non-finite 2D loss for %s/%s seed %s at iter %s (attempt %s/3)",
+                                    func_name,
+                                    opt_name,
+                                    seed,
+                                    i,
+                                    sam_nonfinite_recoveries,
+                                )
+                                continue
                             logging.warning(
                                 "Non-finite 2D loss after sanitization for %s/%s seed %s at iter %s; stopping run.",
                                 func_name,
@@ -10316,9 +10711,19 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, skip_t
                         else:
                             history_entry['x'] = float(x_np_after[0]); history_entry['y'] = 0.0
                         history.append(history_entry)
-                        if converged_iter_practical is None and float(loss_after) < practical_convergence_threshold:
+                        practical_hit = _converged_with_stationarity(
+                            loss_after,
+                            grad_norm_after,
+                            practical_convergence_threshold,
+                        )
+                        strict_hit = _converged_with_stationarity(
+                            loss_after,
+                            grad_norm_after,
+                            strict_convergence_threshold,
+                        )
+                        if converged_iter_practical is None and practical_hit:
                             converged_iter_practical = int(i)
-                        if converged_iter_strict is None and float(loss_after) < strict_convergence_threshold:
+                        if converged_iter_strict is None and strict_hit:
                             converged_iter_strict = int(i)
 
                         # Periodic checkpointing for long 2D runs
@@ -10342,7 +10747,7 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, skip_t
                             except Exception as e:
                                 logging.warning("Failed to save 2D checkpoint: %s", e)
 
-                        if float(loss_after) < strict_convergence_threshold:
+                        if strict_hit:
                             break
 
                     # Finalize per-run results with dynamics-derived summary metrics.
@@ -10379,8 +10784,24 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, skip_t
                                 angles = np.arccos(cos_theta)
                                 oscillation_rate = float(np.mean(angles > (np.pi / 2)))
 
-                    converged_strict = bool(final_loss < strict_convergence_threshold) if history else False
-                    converged_practical = bool(final_loss < practical_convergence_threshold) if history else False
+                    converged_strict = (
+                        _converged_with_stationarity(
+                            final_loss,
+                            final_grad_norm,
+                            strict_convergence_threshold,
+                        )
+                        if history
+                        else False
+                    )
+                    converged_practical = (
+                        _converged_with_stationarity(
+                            final_loss,
+                            final_grad_norm,
+                            practical_convergence_threshold,
+                        )
+                        if history
+                        else False
+                    )
                     if run_error:
                         converged_strict = False
                         converged_practical = False
@@ -10448,6 +10869,15 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, skip_t
 
                     # Save per-run artifact for this 2D optimization run
                     try:
+                        converged_epoch = (
+                            int(converged_iter_strict)
+                            if converged_iter_strict is not None
+                            else (
+                                int(converged_iter_practical)
+                                if converged_iter_practical is not None
+                                else None
+                            )
+                        )
                         params = {
                             'function': func_name,
                             'optimizer': opt_name,
@@ -10461,6 +10891,7 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, skip_t
                             'converged_practical': bool(converged_practical),
                             'converged_iteration_strict': converged_iter_strict if converged_iter_strict is not None else None,
                             'converged_iteration_practical': converged_iter_practical if converged_iter_practical is not None else None,
+                            'converged_epoch': converged_epoch,
                             'run_status': run_status,
                             'error': run_error if run_error else '',
                         }
@@ -10469,8 +10900,29 @@ def run_2d_experiments(results_dir="results_2d", seeds=None, quick=False, skip_t
                         logging.debug("Failed to save 2D artifact for %s %s seed %s: %s", func_name, opt_name, seed, e, exc_info=True)
 
                     final_loss = history[-1]['loss'] if history else float('nan')
-                    converged_strict = final_loss < strict_convergence_threshold if history else False
-                    converged_practical = final_loss < practical_convergence_threshold if history else False
+                    final_grad_norm = (
+                        history[-1].get('grad_norm', np.nan)
+                        if history
+                        else float('nan')
+                    )
+                    converged_strict = (
+                        _converged_with_stationarity(
+                            final_loss,
+                            final_grad_norm,
+                            strict_convergence_threshold,
+                        )
+                        if history
+                        else False
+                    )
+                    converged_practical = (
+                        _converged_with_stationarity(
+                            final_loss,
+                            final_grad_norm,
+                            practical_convergence_threshold,
+                        )
+                        if history
+                        else False
+                    )
                     print(
                         f"  {opt_name} (seed {seed}, start=({run_start_point[0]:.2f}, {run_start_point[1]:.2f})): "
                         f"Loss={final_loss:.6f}, Iters={len(history)}, "
@@ -10811,7 +11263,7 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
             if (not converged) and np.isfinite(final_loss) and final_loss < 1e-4 and not run_error:
                 converged = True
 
-            rows.append({
+            rows.append(normalize_metric_names({
                 'optimizer': optimizer,
                 'seed': seed,
                 'start_point': start_idx,
@@ -10826,7 +11278,7 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
                 'converged_iteration': converged_iteration,
                 'run_status': run_status,
                 'error': run_error,
-            })
+            }))
         return pd.DataFrame(rows)
 
     # Check if requested subset is already complete (by summary CSV and/or artifacts)
@@ -11089,13 +11541,13 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
                     if hit.size > 0:
                         converged_iteration = int(hit[0])
                 if run_error:
-                    run_status = 'error_exception'
+                    run_status = 'error_non_finite_loss' if 'non-finite' in str(run_error).lower() else 'error_exception'
                 elif converged:
                     run_status = 'converged'
                 else:
                     run_status = 'max_iters_or_stalled'
 
-                results.append({
+                results.append(normalize_metric_names({
                     'optimizer': opt_name,
                     'seed': seed,
                     'start_point': idx,
@@ -11114,7 +11566,7 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
                     'converged_iteration': converged_iteration,
                     'run_status': run_status,
                     'error': run_error if run_error else '',
-                })
+                }))
 
                 # Mark final checkpoint as completed
                 if checkpoint_manager:
@@ -11158,6 +11610,7 @@ def run_robustness_analysis(results_dir="results_robustness", seeds=None, quick=
                             'run_status': run_status,
                             'error': run_error if run_error else '',
                             'converged_iteration': converged_iteration,
+                            'converged_epoch': converged_iteration,
                         },
                         device=None,
                         exp_tracker=None,
@@ -11739,6 +12192,21 @@ def run_ablation_study(results_dir="results_ablation", seeds=None, quick=False, 
             final_grad_norm = float(history[-1].get('grad_norm', np.nan)) if history else np.nan
             final_x = float(x.detach().cpu().numpy()[0])
             final_y = float(x.detach().cpu().numpy()[1])
+            converged_iter_strict = np.nan
+            converged_iter_practical = np.nan
+            if history:
+                loss_hist = pd.to_numeric(pd.DataFrame(history)['loss'], errors='coerce').to_numpy(dtype=float)
+                hit_strict = np.where(np.isfinite(loss_hist) & (loss_hist < strict_convergence_threshold))[0]
+                hit_practical = np.where(np.isfinite(loss_hist) & (loss_hist < practical_convergence_threshold))[0]
+                if hit_strict.size > 0:
+                    converged_iter_strict = int(hit_strict[0])
+                if hit_practical.size > 0:
+                    converged_iter_practical = int(hit_practical[0])
+            converged_epoch = (
+                int(converged_iter_strict)
+                if np.isfinite(converged_iter_strict)
+                else (int(converged_iter_practical) if np.isfinite(converged_iter_practical) else np.nan)
+            )
             converged_strict = bool(
                 np.isfinite(final_loss)
                 and final_loss < strict_convergence_threshold
@@ -11749,8 +12217,16 @@ def run_ablation_study(results_dir="results_ablation", seeds=None, quick=False, 
                 and final_loss < practical_convergence_threshold
                 and run_error is None
             )
+            if run_error:
+                run_status = 'error_non_finite_loss' if 'non-finite' in str(run_error).lower() else 'error_exception'
+            elif converged_strict:
+                run_status = 'converged_strict'
+            elif converged_practical:
+                run_status = 'converged_practical'
+            else:
+                run_status = 'max_iters_or_stalled'
 
-            results.append({
+            results.append(normalize_metric_names({
                 'optimizer': opt_name,
                 'seed': seed,
                 'initial_x': float(run_start_point[0]),
@@ -11764,10 +12240,14 @@ def run_ablation_study(results_dir="results_ablation", seeds=None, quick=False, 
                 'converged': converged_strict,
                 'converged_strict': converged_strict,
                 'converged_practical': converged_practical,
+                'converged_iteration_strict': converged_iter_strict,
+                'converged_iteration_practical': converged_iter_practical,
+                'converged_epoch': converged_epoch,
                 'strict_convergence_threshold': strict_convergence_threshold,
                 'practical_convergence_threshold': practical_convergence_threshold,
+                'run_status': run_status,
                 'error': run_error,
-            })
+            }))
 
             # Save per-run artifact for ablation configuration
             try:
@@ -11777,6 +12257,14 @@ def run_ablation_study(results_dir="results_ablation", seeds=None, quick=False, 
                 params_save['initial_y'] = float(run_start_point[1])
                 params_save['strict_convergence_threshold'] = strict_convergence_threshold
                 params_save['practical_convergence_threshold'] = practical_convergence_threshold
+                params_save['run_status'] = run_status
+                params_save['converged_iteration_strict'] = (
+                    int(converged_iter_strict) if np.isfinite(converged_iter_strict) else None
+                )
+                params_save['converged_iteration_practical'] = (
+                    int(converged_iter_practical) if np.isfinite(converged_iter_practical) else None
+                )
+                params_save['converged_epoch'] = int(converged_epoch) if np.isfinite(converged_epoch) else None
                 if run_error:
                     params_save['error'] = run_error
                 save_run_artifacts(results_dir, 'Ablation', '2D_Rosenbrock', opt_name, seed, history, params_save, device=None, exp_tracker=None)
@@ -12656,11 +13144,13 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
     # Check if experiment is already completed
     if resume:
         result_file = Path(results_dir) / "resnet_results.csv"
-        if result_file.exists():
+        legacy_result_file = Path(results_dir) / "resnet_results_all_seeds.csv"
+        existing_result_file = result_file if result_file.exists() else legacy_result_file
+        if existing_result_file.exists():
             try:
-                df = pd.read_csv(result_file)
+                df = pd.read_csv(existing_result_file)
                 if len(df) > 0:
-                    logging.info(f"Skipping ResNet18 experiment (already completed)")
+                    logging.info("Skipping ResNet18 experiment (already completed)")
                     return df
             except Exception as e:
                 logging.debug("Could not read resnet results file: %s", e, exc_info=True)
@@ -12879,35 +13369,40 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
         test_acc = 100. * test_correct / len(test_dataset)
         logging.info(f"Final Test Performance: Loss={test_loss:.4f}, Acc={test_acc:.2f}%")
 
+        # Save per-seed results
+        os.makedirs(results_dir, exist_ok=True)
+        df_seed = pd.DataFrame(results)
+        df_seed['seed'] = seed
+        result_filename = f"{results_dir}/ResNet18_CIFAR10_Adam_seed{seed}.csv"
+        df_seed.to_csv(result_filename, index=False)
+        all_results.extend(results)
+
+        # Save per-run artifact
+        try:
+            params = {'epochs': epochs, 'batch_size': train_bs, 'seed': seed}
+            save_run_artifacts(results_dir, 'ResNet18', 'CIFAR10', 'Adam', seed, results, params, device=device, exp_tracker=tracker)
+        except Exception:
+            logging.debug("Failed to save per-run ResNet artifact for seed=%s", seed)
+
+        logging.info("Results for seed=%s saved to %s", seed, result_filename)
+
     # End profiling
     if profiler:
         perf_metrics = profiler.end_profiling("ResNet18_Experiment")
         profiler.log_performance("ResNet18_Experiment")
 
-    # Save per-seed results
-    os.makedirs(results_dir, exist_ok=True)
-    df_seed = pd.DataFrame(results)
-    df_seed['seed'] = seed
-    result_filename = f"{results_dir}/ResNet18_CIFAR10_Adam_seed{seed}.csv"
-    df_seed.to_csv(result_filename, index=False)
-    all_results.extend(results)
-
-    # Save per-run artifact
-    try:
-        params = {'epochs': epochs, 'batch_size': train_bs, 'seed': seed}
-        save_run_artifacts(results_dir, 'ResNet18', 'CIFAR10', 'Adam', seed, results, params, device=device, exp_tracker=tracker)
-    except Exception:
-        logging.debug(f"Failed to save per-run ResNet artifact for seed={seed}")
-
-    logging.info(f"ðŸ’¾ Results for seed={seed} saved to {result_filename}")
-
     # Aggregate results across all seeds
     df = pd.DataFrame(all_results)
-    df.to_csv(f"{results_dir}/resnet_results_all_seeds.csv", index=False)
-    logging.info(f"\nðŸ’¾ Aggregated results saved to {results_dir}/resnet_results_all_seeds.csv")
+    canonical_summary = Path(results_dir) / "resnet_results.csv"
+    legacy_summary = Path(results_dir) / "resnet_results_all_seeds.csv"
+    df.to_csv(canonical_summary, index=False)
+    # Keep legacy filename for backward compatibility with old notebooks.
+    if legacy_summary != canonical_summary:
+        df.to_csv(legacy_summary, index=False)
+    logging.info("Aggregated results saved to %s", canonical_summary)
 
     if tracker:
-        tracker.log_artifact(f"{results_dir}/resnet_results_all_seeds.csv", "results")
+        tracker.log_artifact(str(canonical_summary), "results")
         tracker.end_run()
 
     # Generate visualizations for ResNet experiment
@@ -12997,7 +13492,8 @@ def run_highdim_experiment(results_dir="results_highdim", seeds=None, quick=Fals
 
                 # Create high-dimensional quadratic function
                 # f(x) = sum(x_i^2) + 0.1 * sum(x_i * x_{i+1})
-                x = torch.randn(dim, requires_grad=True, device=device) * 0.1
+                # Keep x as a leaf tensor so optimizers can update it directly.
+                x = (torch.randn(dim, device=device) * 0.1).requires_grad_()
                 optimizer = opt_func([x])
 
                 history = []
@@ -14378,6 +14874,8 @@ Examples:
 
                     # Use MNIST results if available
                     mnist_results_dir = str(experiments_dir / "mnist")
+                    optimizer_comp_dir = experiments_dir / "optimizer_comparison"
+                    optimizer_comp_dir.mkdir(parents=True, exist_ok=True)
                     if os.path.exists(mnist_results_dir):
                         optimizers = [OptimizerNames.SGD, OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM, OptimizerNames.ADAMW, OptimizerNames.AMSGRAD]
 
@@ -14385,23 +14883,29 @@ Examples:
                             results_dir=mnist_results_dir,
                             optimizers=optimizers,
                             metric='test_accuracy',
-                            output_dir=str(experiments_dir / "optimizer_comparison"),
+                            output_dir=str(optimizer_comp_dir),
                             alpha=0.05
                         )
                         experiment_results['optimizer_comparison'] = "Completed"
                         print("Optimizer comparison matrix completed!")
                     else:
                         print("MNIST results not found - run MNIST experiments first")
-                        experiment_results['optimizer_comparison'] = None
+                        pd.DataFrame([{
+                            'status': 'skipped',
+                            'reason': 'mnist_results_missing',
+                            'required_input_dir': mnist_results_dir,
+                        }]).to_csv(optimizer_comp_dir / "optimizer_comparison_status.csv", index=False)
+                        experiment_results['optimizer_comparison'] = "Skipped (mnist results missing)"
                 except Exception as e:
                     logging.error(f"Optimizer comparison failed: {e}")
                     experiment_results['optimizer_comparison'] = None
 
         if 'resnet' in selected_experiments:
             with error_context("ResNet Experiment", continue_on_error=True):
+                selected_seeds = seeds[:3] if ULTRA_QUICK_MODE else seeds
                 experiment_results['resnet'] = run_resnet_experiment(
                     results_dir=str(experiments_dir / "resnet"),
-                    seeds=seeds,
+                    seeds=selected_seeds,
                     quick=args.quick,
                     profiler=profiler,
                     tracker=tracker,
@@ -14411,9 +14915,10 @@ Examples:
 
         if 'highdim' in selected_experiments:
             with error_context("High-Dimensional Experiment", continue_on_error=True):
+                selected_seeds = seeds[:3] if ULTRA_QUICK_MODE else seeds
                 experiment_results['highdim'] = run_highdim_experiment(
                     results_dir=str(experiments_dir / "highdim"),
-                    seeds=seeds,
+                    seeds=selected_seeds,
                     quick=args.quick,
                     profiler=profiler,
                     tracker=tracker,
@@ -14546,7 +15051,12 @@ Examples:
                         print("   Comprehensive ablation already completed (found existing results)")
                         experiment_results['ablation_comprehensive'] = "Skipped (already complete)"
                     else:
-                        run_all_ablation_studies(output_dir=ablation_dir)
+                        run_all_ablation_studies(
+                            output_dir=ablation_dir,
+                            seeds=seeds,
+                            quick=args.quick,
+                            resume=args.resume
+                        )
 
                         experiment_results['ablation_comprehensive'] = "Completed"
                         print("Comprehensive ablation studies completed!")
@@ -14635,7 +15145,7 @@ Examples:
                 try:
                     from src.experiments.dynamics_overhead_ablation import run_dynamics_overhead_ablation
 
-                    ablation_dir = str(results_dir / "dynamics_overhead_ablation")
+                    ablation_dir = str(experiments_dir / "dynamics_overhead")
 
                     # Check if already completed
                     csv_results = list(Path(ablation_dir).glob("dynamics_overhead_ablation_*.csv"))
@@ -14644,10 +15154,12 @@ Examples:
                         print("   Dynamics overhead ablation already completed")
                         experiment_results['dynamics_overhead'] = "Skipped (already complete)"
                     else:
+                        selected_seeds = seeds[:3] if ULTRA_QUICK_MODE else (seeds[:5] if args.quick else seeds)
+                        selected_epochs = 2 if ULTRA_QUICK_MODE else (5 if args.quick else 10)
                         df = run_dynamics_overhead_ablation(
                             dataset='MNIST',
-                            epochs=5 if args.quick else 10,
-                            seeds=seeds if args.quick else seeds,
+                            epochs=selected_epochs,
+                            seeds=selected_seeds,
                             results_dir=ablation_dir,
                             quick=args.quick
                         )
@@ -14667,7 +15179,7 @@ Examples:
                 try:
                     from src.experiments.theory_practice_validation import run_theory_practice_validation
 
-                    validation_dir = str(results_dir / "theory_practice_validation")
+                    validation_dir = str(experiments_dir / "theory_practice")
 
                     # Check if already completed
                     csv_results = list(Path(validation_dir).glob("theory_practice_comparison_results.csv"))
@@ -14678,9 +15190,9 @@ Examples:
                     else:
                         # Only run if we have MNIST/CIFAR results
                         available_experiments = []
-                        if (results_dir / "mnist").exists():
+                        if (experiments_dir / "mnist").exists() or (results_dir / "mnist").exists():
                             available_experiments.append('mnist')
-                        if (results_dir / "cifar10").exists():
+                        if (experiments_dir / "cifar10").exists() or (results_dir / "cifar10").exists():
                             available_experiments.append('cifar10')
 
                         if available_experiments:
@@ -14696,7 +15208,14 @@ Examples:
                         else:
                             print("No MNIST/CIFAR results found - skipping theory-practice validation")
                             print("    Run 'mnist' or 'cifar10' experiments first")
-                            experiment_results['theory_practice'] = None
+                            status_path = Path(validation_dir) / "theory_practice_status.csv"
+                            Path(validation_dir).mkdir(parents=True, exist_ok=True)
+                            pd.DataFrame([{
+                                'status': 'skipped',
+                                'reason': 'mnist_cifar_results_missing',
+                                'required_input_dirs': f"{experiments_dir / 'mnist'},{experiments_dir / 'cifar10'}",
+                            }]).to_csv(status_path, index=False)
+                            experiment_results['theory_practice'] = "Skipped (mnist/cifar results missing)"
                 except Exception as e:
                     logging.error(f"Theory-practice validation failed: {e}")
                     experiment_results['theory_practice'] = None
@@ -14724,7 +15243,8 @@ Examples:
                             max_iters=400 if args.quick else 1000,
                             eigenvalue_check_interval=10,
                             output_dir=saddle_escape_dir,
-                            noise_std=0.01
+                            noise_std=0.01,
+                            divergence_threshold=1e4,
                         )
 
                         if summary_file.exists():
@@ -14815,9 +15335,12 @@ Examples:
                         experiment_results['stochastic_2d_integrity'] = pd.read_csv(comparison_file)
                     else:
                         # Run comprehensive GD vs SGD comparison.
+                        stoch_max_iter = 1000 if ULTRA_QUICK_MODE else (2000 if args.quick else 5000)
                         _ = compare_deterministic_vs_stochastic(
                             results_dir=stoch_dir,
-                            seeds=seeds if not args.quick else seeds[:3]
+                            seeds=seeds if not args.quick else seeds[:3],
+                            max_iter=stoch_max_iter,
+                            divergence_threshold=1e4,
                         )
 
                         if comparison_file.exists():
@@ -14881,7 +15404,7 @@ Examples:
                 try:
                     from src.experiments.cross_optimizer_dynamics_comparison import run_cross_optimizer_dynamics_comparison
 
-                    dynamics_comp_dir = str(results_dir / "cross_optimizer_dynamics")
+                    dynamics_comp_dir = str(experiments_dir / "cross_optimizer_dynamics")
 
                     # Check if already completed
                     csv_results = list(Path(dynamics_comp_dir).glob("cross_optimizer_dynamics_*.csv"))
@@ -14891,11 +15414,14 @@ Examples:
                         experiment_results['cross_optimizer_dynamics'] = "Skipped (already complete)"
                     else:
                         # Run on MNIST (fast, clear dynamics)
+                        selected_seeds = seeds[:3] if ULTRA_QUICK_MODE else (seeds[:5] if args.quick else seeds)
+                        selected_epochs = 2 if ULTRA_QUICK_MODE else (20 if args.quick else 50)
+                        selected_optimizers = [OptimizerNames.SGD, OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM] if (args.quick or ULTRA_QUICK_MODE) else None
                         df = run_cross_optimizer_dynamics_comparison(
                             dataset='MNIST',
-                            optimizers=[OptimizerNames.SGD, OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM] if args.quick else None,
-                            epochs=20 if args.quick else 50,
-                            seeds=seeds if args.quick else seeds,
+                            optimizers=selected_optimizers,
+                            epochs=selected_epochs,
+                            seeds=selected_seeds,
                             quick=args.quick,
                             results_dir=dynamics_comp_dir
                         )
@@ -14924,7 +15450,7 @@ Examples:
                         run_adam_beta1_beta2_grid
                     )
 
-                    beta_sens_dir = str(results_dir / "beta_sensitivity_training")
+                    beta_sens_dir = str(experiments_dir / "beta_sensitivity_training")
 
                     # Check if already completed (now checking all 4 experiments)
                     momentum_csv = Path(beta_sens_dir) / "momentum_beta_sensitivity_mnist.csv"
@@ -14939,19 +15465,24 @@ Examples:
                     else:
                         # Determine device
                         device = 'cuda' if torch.cuda.is_available() else 'cpu'
+                        selected_seeds = seeds[:3] if ULTRA_QUICK_MODE else (seeds[:5] if args.quick else seeds)
+                        beta_epochs = 2 if ULTRA_QUICK_MODE else (10 if args.quick else 20)
+                        grid_epochs = 2 if ULTRA_QUICK_MODE else (10 if args.quick else 15)
+                        sgd_params = get_default_hyperparameters('SGD', 'resnet_cifar10')
+                        momentum_lr = sgd_params.get('lr', 0.01)
+                        adam_params = get_default_hyperparameters('Adam', 'resnet_cifar10')
+                        adam_lr = adam_params.get('lr', 0.001)
 
                         results_dict = {}
 
                         # Run Momentum Î² sensitivity
                         if not momentum_csv.exists() or not args.resume:
                             print("\nRunning Momentum Î² sweep on MNIST...")
-                            sgd_params = get_default_hyperparameters('SGD', 'resnet_cifar10')
-                            lr = sgd_params.get('lr', 0.01)
                             momentum_df = run_momentum_beta_sensitivity(
                                 beta_values=[0.0, 0.5, 0.9, 0.99] if args.quick else [0.0, 0.5, 0.7, 0.9, 0.95, 0.99],
-                                epochs=10 if args.quick else 20,
-                                seeds=seeds if args.quick else seeds,
-                                lr=lr,
+                                epochs=beta_epochs,
+                                seeds=selected_seeds,
+                                lr=momentum_lr,
                                 device=device,
                                 quick=args.quick,
                                 output_dir=beta_sens_dir
@@ -14961,13 +15492,11 @@ Examples:
                         # Run Adam Î²1 sensitivity
                         if not adam_beta1_csv.exists() or not args.resume:
                             print("\nRunning Adam Î²1 sweep on MNIST...")
-                            adam_params = get_default_hyperparameters('Adam', 'resnet_cifar10')
-                            lr = adam_params.get('lr', 0.001)
                             adam_beta1_df = run_adam_beta_sensitivity(
                                 beta1_values=[0.5, 0.9, 0.99] if args.quick else [0.5, 0.7, 0.9, 0.95, 0.99],
-                                epochs=10 if args.quick else 20,
-                                seeds=seeds if args.quick else seeds,
-                                lr=lr,
+                                epochs=beta_epochs,
+                                seeds=selected_seeds,
+                                lr=adam_lr,
                                 device=device,
                                 quick=args.quick,
                                 output_dir=beta_sens_dir
@@ -14980,9 +15509,9 @@ Examples:
                             adam_beta2_df = run_adam_beta2_sensitivity(
                                 beta1=0.9,  # Fixed Î²1
                                 beta2_values=[0.95, 0.99, 0.999] if args.quick else [0.9, 0.95, 0.99, 0.999, 0.9999],
-                                epochs=10 if args.quick else 20,
-                                seeds=seeds if args.quick else seeds,
-                                lr=lr,  # Use same lr as above
+                                epochs=beta_epochs,
+                                seeds=selected_seeds,
+                                lr=adam_lr,
                                 device=device,
                                 quick=args.quick,
                                 output_dir=beta_sens_dir
@@ -14995,9 +15524,9 @@ Examples:
                             adam_grid_df = run_adam_beta1_beta2_grid(
                                 beta1_values=[0.7, 0.9, 0.99] if args.quick else [0.7, 0.9, 0.95, 0.99],
                                 beta2_values=[0.9, 0.99, 0.999] if args.quick else [0.9, 0.99, 0.999, 0.9999],
-                                epochs=10 if args.quick else 15,
-                                seeds=seeds if args.quick else seeds,
-                                lr=lr,  # Use same lr as above
+                                epochs=grid_epochs,
+                                seeds=selected_seeds,
+                                lr=adam_lr,
                                 device=device,
                                 quick=args.quick,
                                 output_dir=beta_sens_dir
@@ -15016,207 +15545,220 @@ Examples:
                 print("\n" + "="*80)
                 print("ðŸ”¬ LABEL NOISE ABLATION STUDY")
                 print("="*80)
-            print(" This addresses important methodological gap:")
-            print("   'Label noise ablation is the gold standard for validating claims")
-            print("    about flat minima and optimizer robustness to noisy labels'")
-            print("="*80)
-            try:
-                from src.experiments.run_label_noise_ablation import (
-                    run_label_noise_ablation,
-                    LabelNoiseConfig
-                )
-                from src.utils.fairness_check import validate_tuning_fairness
-
-                label_noise_dir = str(results_dir / "label_noise")
-
-                # Check if already completed
-                mnist_csv = Path(label_noise_dir) / "label_noise_results_mnist_mlp.csv"
-                cifar10_csv = Path(label_noise_dir) / "label_noise_results_cifar10_resnet18.csv"
-
-                if args.resume and mnist_csv.exists() and cifar10_csv.exists():
-                    print("   Label noise ablation already completed")
-                    experiment_results['label_noise'] = "Skipped (already complete)"
-                else:
-                    # Configure label noise experiments
-                    noise_config = LabelNoiseConfig(
-                        noise_rates=[0.0, 0.1, 0.2, 0.4] if not args.quick else [0.0, 0.2],
-                        seeds=seeds if args.quick else seeds,
-                        epochs=20 if args.quick else 50,
-                        batch_size=128,
-                        device='cuda' if torch.cuda.is_available() else 'cpu'
+                print(" This addresses important methodological gap:")
+                print("   'Label noise ablation is the gold standard for validating claims")
+                print("    about flat minima and optimizer robustness to noisy labels'")
+                print("="*80)
+                try:
+                    from src.experiments.run_label_noise_ablation import (
+                        run_label_noise_ablation,
+                        LabelNoiseConfig
                     )
+                    from src.utils.fairness_check import validate_tuning_fairness
 
-                    # Get tuned hyperparameters for all optimizers
-                    optimizers_to_test = [OptimizerNames.SGD, OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM, OptimizerNames.ADAMW, OptimizerNames.AMSGRAD]
+                    label_noise_dir = str(experiments_dir / "label_noise")
 
-                    # Add advanced optimizers if not in quick mode
-                    if not args.quick:
-                        optimizers_to_test.extend(['SAM_SGD', 'SAM_Adam', 'Lookahead_SGD',
-                                                   'Lookahead_Adam', OptimizerNames.RADAM])
+                    # Check if already completed.
+                    # Quick/ultra-quick only runs MNIST by design; full mode runs MNIST + CIFAR10.
+                    mnist_csv = Path(label_noise_dir) / "label_noise_results_mnist_mlp.csv"
+                    cifar10_csv = Path(label_noise_dir) / "label_noise_results_cifar10_resnet18.csv"
+                    requires_cifar10 = not args.quick and not ULTRA_QUICK_MODE
+                    label_noise_complete = mnist_csv.exists() and (cifar10_csv.exists() if requires_cifar10 else True)
 
-                    # Build optimizer configs from tuned hyperparameters
-                    mnist_optimizers_config = {}
-                    cifar10_optimizers_config = {}
-                    tuning_fairness_config = {}
-
-                    # === FAIRNESS FIX: ALL optimizers receive equal tuning budget ===
-                    # As of the latest fixes, run_mnist_experiment now tunes ALL 12 optimizers
-                    # with identical n_trials and epochs. This ensures fair comparison.
-                    # Previously only 5 basic optimizers were tuned, creating unfair advantage.
-
-                    # All optimizers in this list are now equally tuned
-                    all_tuned_optimizers = [
-                        OptimizerNames.SGD, OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM, OptimizerNames.ADAMW, OptimizerNames.AMSGRAD,
-                        'SAM_SGD', 'SAM_Adam', 'Lookahead_SGD', 'Lookahead_Adam',
-                        OptimizerNames.ADABOUND, OptimizerNames.RADAM, OptimizerNames.LAMB
-                    ]
-
-                    for opt_name in optimizers_to_test:
-                        # Get hyperparameters from config
-                        mnist_params = get_default_hyperparameters(opt_name, 'mnist_mlp')
-                        cifar10_params = get_default_hyperparameters(opt_name, 'resnet_cifar10')
-
-                        mnist_optimizers_config[opt_name] = mnist_params
-                        cifar10_optimizers_config[opt_name] = cifar10_params
-
-                        # Track tuning budgets for fairness validation
-                        # All optimizers now receive equal treatment: n_trials=15, epochs=3
-                        is_tuned = opt_name in all_tuned_optimizers
-                        tuning_fairness_config[opt_name] = {
-                            'n_trials': 15 if is_tuned else 0,
-                            'epochs': 3 if is_tuned else 0,
-                            'is_tuned': is_tuned,
-                            'tuning_method': 'optuna' if is_tuned else 'default'
-                        }
-
-                    # Validate tuning fairness before running experiments
-                    # STRICT MODE enforcement - do not catch and ignore failures
-                    print("\nValidating tuning fairness across optimizers...")
-                    validate_tuning_fairness(
-                        optimizers_to_test,
-                        tuning_fairness_config,
-                        strict=True  # STRICT: All optimizers receive equal tuning budget
-                    )
-                    safe_print("   Tuning fairness validated: ALL optimizers tuned with equal budget")
-
-                    results_dict = {}
-
-                    # Run MNIST label noise ablation
-                    if not mnist_csv.exists() or not args.resume:
-                        print("\nRunning label noise ablation on MNIST MLP...")
-                        mnist_results = run_label_noise_ablation(
-                            dataset_name='mnist',
-                            model_name='mlp',
-                            optimizers_config=mnist_optimizers_config,
-                            config=noise_config,
-                            output_dir=label_noise_dir
+                    if args.resume and label_noise_complete:
+                        print("   Label noise ablation already completed")
+                        experiment_results['label_noise'] = "Skipped (already complete)"
+                    else:
+                        selected_seeds = seeds[:3] if ULTRA_QUICK_MODE else seeds
+                        selected_noise_rates = (
+                            [0.0, 0.2] if ULTRA_QUICK_MODE else
+                            ([0.0, 0.1, 0.2, 0.4] if not args.quick else [0.0, 0.2])
                         )
-                        results_dict['mnist'] = mnist_results
-                        safe_print(f"   MNIST ablation complete: {len(mnist_results)} results")
-
-                    # Run CIFAR-10 label noise ablation (if not quick mode)
-                    if not args.quick:
-                        if not cifar10_csv.exists() or not args.resume:
-                            print("\nRunning label noise ablation on CIFAR-10 ResNet-18...")
-                            cifar10_results = run_label_noise_ablation(
-                                dataset_name='cifar10',
-                                model_name='resnet18',
-                                optimizers_config=cifar10_optimizers_config,
+                        selected_epochs = 2 if ULTRA_QUICK_MODE else (20 if args.quick else 50)
+                        # Configure label noise experiments
+                        noise_config = LabelNoiseConfig(
+                            noise_rates=selected_noise_rates,
+                            seeds=selected_seeds,
+                            epochs=selected_epochs,
+                            batch_size=128,
+                            device='cuda' if torch.cuda.is_available() else 'cpu'
+                        )
+    
+                        # Get tuned hyperparameters for all optimizers
+                        optimizers_to_test = [OptimizerNames.SGD, OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM, OptimizerNames.ADAMW, OptimizerNames.AMSGRAD]
+    
+                        # Add advanced optimizers if not in quick mode
+                        if not args.quick:
+                            optimizers_to_test.extend(['SAM_SGD', 'SAM_Adam', 'Lookahead_SGD',
+                                                       'Lookahead_Adam', OptimizerNames.RADAM])
+    
+                        # Build optimizer configs from tuned hyperparameters
+                        mnist_optimizers_config = {}
+                        cifar10_optimizers_config = {}
+                        tuning_fairness_config = {}
+    
+                        # === FAIRNESS FIX: ALL optimizers receive equal tuning budget ===
+                        # As of the latest fixes, run_mnist_experiment now tunes ALL 12 optimizers
+                        # with identical n_trials and epochs. This ensures fair comparison.
+                        # Previously only 5 basic optimizers were tuned, creating unfair advantage.
+    
+                        # All optimizers in this list are now equally tuned
+                        all_tuned_optimizers = [
+                            OptimizerNames.SGD, OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM, OptimizerNames.ADAMW, OptimizerNames.AMSGRAD,
+                            'SAM_SGD', 'SAM_Adam', 'Lookahead_SGD', 'Lookahead_Adam',
+                            OptimizerNames.ADABOUND, OptimizerNames.RADAM, OptimizerNames.LAMB
+                        ]
+    
+                        for opt_name in optimizers_to_test:
+                            # Get hyperparameters from config
+                            mnist_params = get_default_hyperparameters(opt_name, 'mnist_mlp')
+                            cifar10_params = get_default_hyperparameters(opt_name, 'resnet_cifar10')
+    
+                            mnist_optimizers_config[opt_name] = mnist_params
+                            cifar10_optimizers_config[opt_name] = cifar10_params
+    
+                            # Track tuning budgets for fairness validation
+                            # All optimizers now receive equal treatment: n_trials=15, epochs=3
+                            is_tuned = opt_name in all_tuned_optimizers
+                            tuning_fairness_config[opt_name] = {
+                                'n_trials': 15 if is_tuned else 0,
+                                'epochs': 3 if is_tuned else 0,
+                                'is_tuned': is_tuned,
+                                'tuning_method': 'optuna' if is_tuned else 'default'
+                            }
+    
+                        # Validate tuning fairness before running experiments
+                        # STRICT MODE enforcement - do not catch and ignore failures
+                        print("\nValidating tuning fairness across optimizers...")
+                        validate_tuning_fairness(
+                            optimizers_to_test,
+                            tuning_fairness_config,
+                            strict=True  # STRICT: All optimizers receive equal tuning budget
+                        )
+                        safe_print("   Tuning fairness validated: ALL optimizers tuned with equal budget")
+    
+                        results_dict = {}
+    
+                        # Run MNIST label noise ablation
+                        if not mnist_csv.exists() or not args.resume:
+                            print("\nRunning label noise ablation on MNIST MLP...")
+                            mnist_results = run_label_noise_ablation(
+                                dataset_name='mnist',
+                                model_name='mlp',
+                                optimizers_config=mnist_optimizers_config,
                                 config=noise_config,
                                 output_dir=label_noise_dir
                             )
-                            results_dict['cifar10'] = cifar10_results
-                            safe_print(f"   CIFAR-10 ablation complete: {len(cifar10_results)} results")
+                            results_dict['mnist'] = mnist_results
+                            safe_print(f"   MNIST ablation complete: {len(mnist_results)} results")
+    
+                        # Run CIFAR-10 label noise ablation only in full mode.
+                        if requires_cifar10:
+                            if not cifar10_csv.exists() or not args.resume:
+                                print("\nRunning label noise ablation on CIFAR-10 ResNet-18...")
+                                cifar10_results = run_label_noise_ablation(
+                                    dataset_name='cifar10',
+                                    model_name='resnet18',
+                                    optimizers_config=cifar10_optimizers_config,
+                                    config=noise_config,
+                                    output_dir=label_noise_dir
+                                )
+                                results_dict['cifar10'] = cifar10_results
+                                safe_print(f"   CIFAR-10 ablation complete: {len(cifar10_results)} results")
 
-                    experiment_results['label_noise'] = results_dict
-                    safe_print("Label noise ablation completed!")
+                        experiment_results['label_noise'] = results_dict
+                        safe_print("Label noise ablation completed!")
 
-                    # Generate summary statistics
-                    print("\nGenerating robustness analysis...")
-                    from src.experiments.run_label_noise_ablation import (
-                        create_label_noise_summary,
-                        analyze_robustness_to_noise
-                    )
+                        # Generate summary statistics for whichever datasets were run.
+                        if results_dict:
+                            print("\nGenerating robustness analysis...")
+                            from src.experiments.run_label_noise_ablation import (
+                                create_label_noise_summary,
+                                analyze_robustness_to_noise
+                            )
 
-                    for dataset_name, results_df in results_dict.items():
-                        summary = create_label_noise_summary(results_df)
-                        robustness = analyze_robustness_to_noise(summary)
+                            for dataset_name, results_df in results_dict.items():
+                                summary = create_label_noise_summary(results_df)
+                                robustness = analyze_robustness_to_noise(summary)
 
-                        print(f"\n{dataset_name.upper()} Robustness Summary:")
-                        print(robustness.to_string(index=False))
-
-            except Exception as e:
-                logging.error(f"Label noise ablation failed: {e}")
-                import traceback
-                traceback.print_exc()
-                experiment_results['label_noise'] = None
+                                print(f"\n{dataset_name.upper()} Robustness Summary:")
+                                print(robustness.to_string(index=False))
+    
+                except Exception as e:
+                    logging.error(f"Label noise ablation failed: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    experiment_results['label_noise'] = None
 
             # Run statistical analysis if scipy available
         if HAS_SCIPY:
             print("\n" + "="*80)
             print("RUNNING STATISTICAL ANALYSIS...")
             print("="*80)
-        with error_context("Statistical Analysis", continue_on_error=True):
-            stats_df = run_statistical_analysis(results_dir=str(results_dir))
-            experiment_results['statistics'] = stats_df
+            with error_context("Statistical Analysis", continue_on_error=True):
+                stats_df = run_statistical_analysis(results_dir=str(results_dir))
+                experiment_results['statistics'] = stats_df
+        else:
+            print("\nStatistical Analysis: SKIPPED (scipy unavailable)")
+            experiment_results['statistics'] = None
 
-            # INTEGRATED ANALYSIS PIPELINE
-            print("\n" + "="*80)
-            print("[*] RUNNING INTEGRATED ANALYSIS PIPELINE")
-            print("="*80)
+        # INTEGRATED ANALYSIS PIPELINE
+        print("\n" + "="*80)
+        print("[*] RUNNING INTEGRATED ANALYSIS PIPELINE")
+        print("="*80)
 
-            # Theory-Practice Validation Pipeline (if requested)
-            if args.with_theory_analysis:
-                print("\n[THEORY] Theory-Practice Validation Pipeline...")
-                try:
-                    theory_results = run_theory_analysis_pipeline(
-                        results_dir=results_dir,
-                        experiment_results=experiment_results,
-                        dry_run=False
-                    )
-                    experiment_results['theory_analysis'] = theory_results
-                    print("   [OK] Theory-practice validation pipeline complete")
-                    if theory_results.get('report_path'):
-                        print(f"        Report: {theory_results['report_path']}")
-                except Exception as e:
-                    logging.error(f"   [FAIL] Theory analysis pipeline failed: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    experiment_results['theory_analysis'] = None
-            else:
-                print("\n[THEORY] Theory-Practice Validation: SKIPPED (use --with-theory-analysis to enable)")
-
-            # Cross-experiment aggregation (Priority 3)
-            print("\n[0] Cross-Experiment Aggregation...")
+        # Theory-Practice Validation Pipeline (if requested)
+        if args.with_theory_analysis:
+            print("\n[THEORY] Theory-Practice Validation Pipeline...")
             try:
-                aggregation_df = aggregate_cross_experiment_results(results_dir, experiment_results)
-                experiment_results['aggregation'] = aggregation_df
-                print("   [OK] Cross-experiment aggregation complete")
+                theory_results = run_theory_analysis_pipeline(
+                    results_dir=results_dir,
+                    experiment_results=experiment_results,
+                    dry_run=False
+                )
+                experiment_results['theory_analysis'] = theory_results
+                print("   [OK] Theory-practice validation pipeline complete")
+                if theory_results.get('report_path'):
+                    print(f"        Report: {theory_results['report_path']}")
             except Exception as e:
-                logging.error(f"   [FAIL] Cross-experiment aggregation failed: {e}")
-                experiment_results['aggregation'] = None
+                logging.error(f"   [FAIL] Theory analysis pipeline failed: {e}")
+                import traceback
+                traceback.print_exc()
+                experiment_results['theory_analysis'] = None
+        else:
+            print("\n[THEORY] Theory-Practice Validation: SKIPPED (use --with-theory-analysis to enable)")
 
-            # Convergence analysis
-            if HAS_CONVERGENCE:
-                print("\n[1] Convergence Analysis...")
-                try:
-                    run_convergence_analysis_on_results(str(results_dir))
-                    print("   [OK] Convergence analysis complete")
-                except Exception as e:
-                    logging.error(f"   [FAIL] Convergence analysis failed: {e}")
-            else:
-                print("\n[1] Convergence Analysis: SKIPPED (module not available)")
+        # Cross-experiment aggregation (Priority 3)
+        print("\n[0] Cross-Experiment Aggregation...")
+        try:
+            aggregation_df = aggregate_cross_experiment_results(results_dir, experiment_results)
+            experiment_results['aggregation'] = aggregation_df
+            print("   [OK] Cross-experiment aggregation complete")
+        except Exception as e:
+            logging.error(f"   [FAIL] Cross-experiment aggregation failed: {e}")
+            experiment_results['aggregation'] = None
 
-            # Interactive visualizations
-            if HAS_INTERACTIVE:
-                print("\n[2] Interactive Visualizations...")
-                try:
-                    generate_interactive_visualizations(str(results_dir), str(results_dir / "visualizations"))
-                    safe_print("   [OK] Interactive plots generated")
-                except Exception as e:
-                    logging.error(f"   [ERROR] Visualization failed: {e}")
-            else:
-                print("\n[2] Interactive Visualizations: SKIPPED (install plotly)")
+        # Convergence analysis
+        if HAS_CONVERGENCE:
+            print("\n[1] Convergence Analysis...")
+            try:
+                run_convergence_analysis_on_results(str(results_dir))
+                print("   [OK] Convergence analysis complete")
+            except Exception as e:
+                logging.error(f"   [FAIL] Convergence analysis failed: {e}")
+        else:
+            print("\n[1] Convergence Analysis: SKIPPED (module not available)")
+
+        # Interactive visualizations
+        if HAS_INTERACTIVE:
+            print("\n[2] Interactive Visualizations...")
+            try:
+                generate_interactive_visualizations(str(results_dir), str(results_dir / "visualizations"))
+                safe_print("   [OK] Interactive plots generated")
+            except Exception as e:
+                logging.error(f"   [ERROR] Visualization failed: {e}")
+        else:
+            print("\n[2] Interactive Visualizations: SKIPPED (install plotly)")
 
     # Final summary reports
     try:

@@ -1,6 +1,0 @@
-## Ablation Training Results - Tabular Summary
-
-| Optimizer/Config | Final Loss | Loss Std | Final Test Acc (%) | Acc Std (%) | Speed (iters/sec) |
-|------------------|------------|----------|--------------------|-------------|-------------------|
-| Baseline | 0.2125 | 0.0095 | 94.3240 | 0.2730 | N/A |
-| ablation_results | 5.9558 | N/A | N/A | N/A | N/A |

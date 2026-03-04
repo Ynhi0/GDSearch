@@ -2,5 +2,8 @@
 
 | Optimizer/Config | Final Loss | Loss Std | Final Test Acc (%) | Acc Std (%) | Speed (iters/sec) |
 |------------------|------------|----------|--------------------|-------------|-------------------|
-| gradient_clipping_ablation | 0.0129 | N/A | 98.0100 | 0.0000 | N/A |
-| Baseline | 0.2125 | 0.0095 | 94.3240 | 0.2730 | N/A |
+| SimpleMLP_GradientClip_10.0 | 0.0128 | 0.0003 | 98.1120 | 0.0685 | N/A |
+| SimpleMLP_GradientClip_None | 0.0128 | 0.0003 | 98.1120 | 0.0685 | N/A |
+| SimpleMLP_GradientClip_5.0 | 0.0128 | 0.0003 | 98.1120 | 0.0685 | N/A |
+| SimpleMLP_GradientClip_1.0 | 0.0129 | 0.0004 | 98.0910 | 0.0639 | N/A |
+| SimpleMLP_GradientClip_0.5 | 0.0218 | 0.0007 | 98.0350 | 0.0639 | N/A |

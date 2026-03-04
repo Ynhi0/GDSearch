@@ -79,6 +79,7 @@ def train_and_evaluate_model_with_loaders(model, optimizer, train_loader, test_l
         # Training
         model.train()
         epoch_loss = 0.0
+        epoch_samples = 0
         for inputs, targets in train_loader:
             inputs, targets = inputs.to(device), targets.to(device)
 
@@ -718,8 +719,15 @@ def ablation_lookahead_effect(output_dir='results/ablation_studies', epochs=10, 
     return df
 
 
-def run_all_ablation_studies(output_dir='results/ablation_studies'):
-    """Run all ablation studies and generate summary report."""
+def run_all_ablation_studies(output_dir='results/ablation_studies', seeds=None, quick=False, resume=True):
+    """Run all ablation studies and generate summary report.
+
+    Args:
+        output_dir: Base directory for outputs.
+        seeds: Optional explicit seed list. If None, each study uses its internal defaults.
+        quick: If True, use shorter epoch budgets for faster iteration.
+        resume: If True, reuse existing per-study CSVs and continue remaining studies.
+    """
 
     logging.basicConfig(level=logging.INFO, format='%(message)s')
 
@@ -728,20 +736,61 @@ def run_all_ablation_studies(output_dir='results/ablation_studies'):
     print("Systematically evaluating optimizer components")
     print("="*70 + "\n")
 
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    seed_list = list(seeds) if seeds is not None else None
+    num_seeds = len(seed_list) if seed_list is not None else 10
+    epochs_default = 10 if quick else 20
+    epochs_lookahead = 5 if quick else 10
+
+    def _load_or_run(csv_name, fn, *, kwargs=None):
+        kwargs = kwargs or {}
+        csv_path = out / csv_name
+        if resume and csv_path.exists():
+            try:
+                df_existing = pd.read_csv(csv_path)
+                if not df_existing.empty:
+                    logging.info("Resume: using existing %s", csv_path.name)
+                    return df_existing
+            except Exception as exc:
+                logging.warning("Could not read existing %s: %s; re-running", csv_path.name, exc)
+        return fn(**kwargs)
+
     # Study 1: Momentum
-    df_momentum = ablation_momentum_effect(output_dir=output_dir)
+    df_momentum = _load_or_run(
+        'ablation_momentum.csv',
+        ablation_momentum_effect,
+        kwargs={'seeds': seed_list, 'output_dir': output_dir, 'epochs': epochs_default},
+    )
 
     # Study 2: Adaptive LR
-    df_adaptive = ablation_adaptive_lr(output_dir=output_dir)
+    df_adaptive = _load_or_run(
+        'ablation_adaptive_lr.csv',
+        ablation_adaptive_lr,
+        kwargs={'seeds': seed_list, 'output_dir': output_dir, 'epochs': epochs_default},
+    )
 
     # Study 3: Weight Decay
-    df_wd = ablation_weight_decay(output_dir=output_dir)
+    df_wd = _load_or_run(
+        'ablation_weight_decay.csv',
+        ablation_weight_decay,
+        kwargs={'seeds': seed_list, 'output_dir': output_dir, 'epochs': epochs_default},
+    )
 
     # Study 4: SAM
-    df_sam = ablation_sam_effect(output_dir=output_dir)
+    df_sam = _load_or_run(
+        'ablation_sam.csv',
+        ablation_sam_effect,
+        kwargs={'output_dir': output_dir, 'epochs': epochs_default, 'num_seeds': num_seeds},
+    )
 
     # Study 5: Lookahead
-    df_lookahead = ablation_lookahead_effect(output_dir=output_dir)
+    df_lookahead = _load_or_run(
+        'ablation_lookahead.csv',
+        ablation_lookahead_effect,
+        kwargs={'output_dir': output_dir, 'epochs': epochs_lookahead, 'num_seeds': num_seeds},
+    )
 
     # Generate summary report
     summary = {
