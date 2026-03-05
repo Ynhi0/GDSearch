@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-02-27T23:27:14.938576",
+  "timestamp": "2026-03-05T14:53:20.199318",
   "dataset": "MNIST",
   "model": "SimpleMLP",
   "optimizer": "GradientClip_1.0",
@@ -14,27 +14,27 @@
   },
   "model_path": null,
   "system": {
-    "python_version": "3.12.0 (tags/v3.12.0:0fb18b0, Oct  2 2023, 13:03:39) [MSC v.1935 64 bit (AMD64)]",
-    "torch_version": "2.5.1+cu121",
+    "python_version": "3.13.7 (tags/v3.13.7:bcee1c3, Aug 14 2025, 14:15:11) [MSC v.1944 64 bit (AMD64)]",
+    "torch_version": "2.6.0+cu124",
     "cuda_available": true,
     "cpu_count": 16,
     "total_memory_gb": 15.730949401855469,
     "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
     "gpu_memory_gb": 3.99951171875,
-    "cuda_version": "12.1"
+    "cuda_version": "12.4"
   },
   "provenance": {
-    "timestamp": "2026-02-27T23:27:14.940590",
-    "python_version": "3.12.0 (tags/v3.12.0:0fb18b0, Oct  2 2023, 13:03:39) [MSC v.1935 64 bit (AMD64)]",
-    "pytorch_version": "2.5.1+cu121",
-    "command_line": "run_all_kaggle.py --experiment-mode full --experiments missing_ablations --seeds 42,123,456,789,1011,1213,1415,1617,1819,2021 --results-dir results_proposal_full_20260223_v2 --robust-gradients --resume --no-mlflow",
+    "timestamp": "2026-03-05T14:53:20.201974",
+    "python_version": "3.13.7 (tags/v3.13.7:bcee1c3, Aug 14 2025, 14:15:11) [MSC v.1944 64 bit (AMD64)]",
+    "pytorch_version": "2.6.0+cu124",
+    "command_line": "run_all_kaggle.py --results-dir results_proposal_full_20260223_v2 --experiment-mode full --experiments batch_ablation,lr_ablation,wd_ablation,scheduler_ablation,missing_ablations,optimizer_comparison,ablation_comprehensive,dynamics_overhead,theory_practice,cross_optimizer_dynamics,beta_sensitivity_training,label_noise,resnet,highdim --seeds 42,123,456,789,1011,1213,1415,1617,1819,2021 --robust-gradients --resume --resume-behavior restart_if_no_checkpoint",
     "working_dir": "F:\\GDSearch",
-    "git_commit": "d7356e1e01d4437f75cc1dce928dbb3fa86a10d1",
+    "git_commit": "a0f96786677294cfa4f1761f925427ab61202283",
     "git_dirty": true,
     "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
     "gpu_count": 1,
     "gpu_memory_gb": 3.99951171875,
-    "cuda_version": "12.1",
+    "cuda_version": "12.4",
     "nvidia_driver": "581.80"
   },
   "completed": true,

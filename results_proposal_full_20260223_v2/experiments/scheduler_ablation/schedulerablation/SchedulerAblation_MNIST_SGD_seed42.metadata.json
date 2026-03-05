@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-02-26T05:24:16.558277",
+  "timestamp": "2026-03-05T13:57:35.239964",
   "dataset": "SchedulerAblation",
   "model": "MNIST",
   "optimizer": "SGD",
@@ -22,12 +22,12 @@
     "cuda_version": "12.4"
   },
   "provenance": {
-    "timestamp": "2026-02-26T05:24:16.560773",
+    "timestamp": "2026-03-05T13:57:35.240980",
     "python_version": "3.13.7 (tags/v3.13.7:bcee1c3, Aug 14 2025, 14:15:11) [MSC v.1944 64 bit (AMD64)]",
     "pytorch_version": "2.6.0+cu124",
-    "command_line": "run_all_kaggle.py --experiments ablation,advanced_ablation,init_ablation,batch_ablation,lr_ablation,wd_ablation,scheduler_ablation,missing_ablations,optimizer_comparison,ablation_comprehensive --results-dir results_proposal_full_20260223_v2 --resume --robust-gradients",
+    "command_line": "run_all_kaggle.py --results-dir results_proposal_full_20260223_v2 --experiment-mode full --experiments batch_ablation,lr_ablation,wd_ablation,scheduler_ablation,missing_ablations,optimizer_comparison,ablation_comprehensive,dynamics_overhead,theory_practice,cross_optimizer_dynamics,beta_sensitivity_training,label_noise,resnet,highdim --seeds 42,123,456,789,1011,1213,1415,1617,1819,2021 --robust-gradients --resume --resume-behavior restart_if_no_checkpoint",
     "working_dir": "F:\\GDSearch",
-    "git_commit": "f5b0ca661943f37de6179d7a5876ab439efa20bc",
+    "git_commit": "a0f96786677294cfa4f1761f925427ab61202283",
     "git_dirty": true,
     "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
     "gpu_count": 1,
