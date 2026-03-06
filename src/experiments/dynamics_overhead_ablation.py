@@ -154,7 +154,7 @@ def run_dynamics_overhead_ablation(
     model_name: str = 'SimpleMLP',
     optimizer_name: str = 'Adam',
     epochs: int = 5,
-    seeds: List[int] = [42, 123, 456, 789, 1011],
+    seeds: Optional[List[int]] = None,
     results_dir: str = 'results/dynamics_overhead_ablation',
     quick: bool = False
 ) -> pd.DataFrame:
@@ -176,6 +176,10 @@ def run_dynamics_overhead_ablation(
     Returns:
         DataFrame with ablation results
     """
+    if seeds is None:
+        seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
+    seeds = list(seeds)
+
     print("\n" + "="*80)
     print("🔬 DYNAMICS TRACKING OVERHEAD ABLATION STUDY")
     print("="*80)
@@ -210,7 +214,6 @@ def run_dynamics_overhead_ablation(
     if quick:
         train_dataset = torch.utils.data.Subset(train_dataset, range(10000))
         test_dataset = torch.utils.data.Subset(test_dataset, range(2000))
-        seeds = seeds[:3]
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

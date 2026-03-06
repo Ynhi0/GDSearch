@@ -1,43 +1,27 @@
 # GDSearch Benchmark Suite - Comprehensive Experiment Report
 
-**Generated**: 2026-03-04 06:27:42
+**Generated**: 2026-03-06 16:06:03
 
 ---
 
 ## Experiments Completed
 
-- **2D_OPTIMIZATION**: 61 data points
-- **2D_VISUALIZATION**: 1 data points
-- **ABLATION**: 51 data points
-- **ABLATION_COMPREHENSIVE**: 1 data points
-- **ADAM_ADAMW_COMPARISON**: 2 data points
-- **ADVANCED_ABLATION**: 81 data points
-- **BATCH_ABLATION**: 21 data points
-- **BETA_SENSITIVITY_2D**: 2 data points
-- **BETA_SENSITIVITY_TRAINING**: 4 data points
-- **CONVERGENCE_VALIDATION**: 6 data points
-- **CROSS_OPTIMIZER_DYNAMICS**: 1 data points
-- **DYNAMICS_OVERHEAD**: 4 data points
-- **HIGHDIM**: 61 data points
-- **HYPERPARAM_SENSITIVITY**: 4 data points
-- **HYPERPARAMETER_HEATMAPS**: 2 data points
-- **INIT_ABLATION**: 241 data points
-- **LABEL_NOISE**: 1 data points
-- **LR_ABLATION**: 120 data points
-- **MISSING_ABLATIONS**: 51 data points
-- **OPTIMIZER_COMPARISON**: 1 data points
-- **RESNET**: 8 data points
-- **ROBUSTNESS**: 501 data points
-- **SADDLE_ESCAPE**: 4 data points
-- **SAM_SENSITIVITY**: 51 data points
-- **SCHEDULER_ABLATION**: 1 data points
-- **STOCHASTIC_2D_INTEGRITY**: 3 data points
-- **THEORY_PRACTICE**: 1 data points
-- **WD_ABLATION**: 107 data points
+- **BATCH_ABLATION**: 60 data points
+- **LR_ABLATION**: 12 data points
+- **WD_ABLATION**: 12 data points
+- **OPTIMIZER_COMPARISON**: 31 data points
+- **RESNET**: 6 data points
+- **HIGHDIM**: 60 data points
+- **DYNAMICS_OVERHEAD**: 26 data points
+- **THEORY_PRACTICE**: 37 data points
+- **CROSS_OPTIMIZER_DYNAMICS**: 26 data points
+- **BETA_SENSITIVITY_TRAINING**: 26 data points
+- **AGGREGATION**: 122 data points
 
 ## Results Directory Structure
 
 ```
+results_proposal_full_20260223_v2/
 results_proposal_full_20260223_v2/
 |-- experiments/           # Experiment-specific results
 |   |-- mnist/             # MNIST classification results
@@ -48,33 +32,86 @@ results_proposal_full_20260223_v2/
 |   `-- *.html             # Open in browser for interactive charts
 |-- analysis/              # Statistical & convergence analysis
 |   |-- convergence_rates.csv
-|   |-- cross_experiment_statistics.csv
-|   `-- aggregated_optimizer_performance.csv
+|   |-- statistical_comparison.csv
+|   `-- basic_statistics_summary.csv
 |-- reports/               # Summary reports
 |   `-- experiment_summary_report.md  # This file
 `-- checkpoints/           # Model checkpoints (if enabled)
+## Integrated Analysis Features
+
+### Convergence Analysis
+- **Purpose**: Empirical convergence rate detection
+- **Metrics**: Convergence rate, stagnation detection, epoch analysis
+- **Location**: `analysis/convergence_rates.csv`
+
+### Interactive Visualizations
+- **Purpose**: Multi-optimizer comparison with interactive charts
+- **Features**: Pan, zoom, hover tooltips, multi-metric subplots
+- **Location**: `visualizations/*.html`
+- **Usage**: Open HTML files in any web browser
+
+### Statistical Analysis
+- **Purpose**: Rigorous statistical comparisons
+- **Tests**: T-tests, Cohen's d effect sizes, confidence intervals
+- **Location**: `analysis/statistical_comparison.csv`
+
+## How to Use Results
+
+### View Interactive Plots
+```bash
+# Open visualizations in browser
+open results_proposal_full_20260223_v2/visualizations/*.html  # macOS
+xdg-open results_proposal_full_20260223_v2/visualizations/*.html  # Linux
 ```
 
-## Statistical Analysis Summary
+### Analyze Results Programmatically
+```python
+import pandas as pd
+from src.utils.csv_utils import safe_read_csv
 
-## Best Performing Optimizers
+# Load convergence analysis (skip if empty)
+conv = safe_read_csv('results_proposal_full_20260223_v2/analysis/convergence_rates.csv')
+if conv is None:
+    print('convergence CSV is empty or missing')
+else:
+    print(conv.groupby('optimizer')['convergence_rate'].mean())
 
-## Reproducibility Information
+# Load statistical comparison (skip if empty)
+stats = safe_read_csv('results_proposal_full_20260223_v2/analysis/statistical_comparison.csv')
+if stats is None:
+    print('statistical comparison CSV is empty or missing')
+else:
+    print(stats[stats['is_significant']])
 
-### Random Seeds
-All experiments use explicit random seeds for reproducibility.
+# Load experiment data (skip if empty)
+mnist = safe_read_csv('results_proposal_full_20260223_v2/experiments/mnist/MNIST_MLP_Adam_seed42.csv')
+if mnist is None:
+    print('MNIST experiment CSV is empty or missing')
+else:
+    print(mnist[['epoch', 'test_acc']].tail())
+```
 
-### Dependencies
-- PyTorch
-- NumPy
-- SciPy (for statistical tests)
-- Optional: MLflow (experiment tracking), medmnist/MONAI (medical experiments)
+## Key Findings
 
-### Data Splits
-- Train/Val/Test splits use deterministic seeds
-- No data leakage between splits
-- Test set used only for final evaluation
+1. **Convergence Analysis**: Review convergence rates to understand optimization dynamics
+2. **Statistical Tests**: Check p-values and effect sizes for rigorous comparisons
+3. **Interactive Plots**: Use visualizations for presentation and exploration
+4. **Per-Experiment Data**: Detailed CSV files for custom analysis
+
+## Next Steps
+
+1. Open `visualizations/*.html` for interactive exploration
+2. Review `analysis/convergence_rates.csv` for convergence insights
+3. Check `analysis/statistical_comparison.csv` for rigorous comparisons
+4. Use experiment CSVs for custom analysis and visualization
+
+## Citation
+
+If you use these results, please cite:
+```
+GDSearch: Gradient Descent Optimizer Comparison Platform
+Multi-seed reproducible experiments with statistical validity
+```
 
 ---
-
-*Report generated by GDSearch Benchmark Suite*
+*Report generated by GDSearch v1.0 on 2026-03-06 16:06:03*

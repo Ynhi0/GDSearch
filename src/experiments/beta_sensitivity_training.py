@@ -359,7 +359,7 @@ def train_with_beta(
 def run_momentum_beta_sensitivity(
     beta_values: Optional[List[float]] = None,
     epochs: int = 20,
-    seeds: List[int] = [42, 123, 456],
+    seeds: Optional[List[int]] = None,
     lr: float = 0.01,
     device: str = 'cpu',
     quick: bool = False,
@@ -396,6 +396,8 @@ def run_momentum_beta_sensitivity(
     """
     if beta_values is None:
         beta_values = [0.0, 0.5, 0.7, 0.9, 0.95, 0.99]
+    if seeds is None:
+        seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -467,7 +469,7 @@ def run_adam_beta_sensitivity(
     beta1_values: Optional[List[float]] = None,
     beta2: float = 0.999,
     epochs: int = 20,
-    seeds: List[int] = [42, 123, 456],
+    seeds: Optional[List[int]] = None,
     lr: float = 0.001,
     device: str = 'cpu',
     quick: bool = False,
@@ -480,6 +482,8 @@ def run_adam_beta_sensitivity(
     """
     if beta1_values is None:
         beta1_values = [0.5, 0.7, 0.9, 0.95, 0.99]
+    if seeds is None:
+        seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -548,7 +552,7 @@ def run_adam_beta2_sensitivity(
     beta1: float = 0.9,
     beta2_values: Optional[List[float]] = None,
     epochs: int = 20,
-    seeds: List[int] = [42, 123, 456],
+    seeds: Optional[List[int]] = None,
     lr: float = 0.001,
     device: str = 'cpu',
     quick: bool = False,
@@ -561,6 +565,8 @@ def run_adam_beta2_sensitivity(
     """
     if beta2_values is None:
         beta2_values = [0.9, 0.95, 0.99, 0.999, 0.9999]
+    if seeds is None:
+        seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -686,7 +692,7 @@ def run_adam_beta1_beta2_grid(
     beta1_values: Optional[List[float]] = None,
     beta2_values: Optional[List[float]] = None,
     epochs: int = 15,
-    seeds: List[int] = [42, 123],
+    seeds: Optional[List[int]] = None,
     lr: float = 0.001,
     device: str = 'cpu',
     quick: bool = False,
@@ -701,6 +707,8 @@ def run_adam_beta1_beta2_grid(
         beta1_values = [0.7, 0.9, 0.99]
     if beta2_values is None:
         beta2_values = [0.9, 0.99, 0.999]
+    if seeds is None:
+        seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
 
     os.makedirs(output_dir, exist_ok=True)
 

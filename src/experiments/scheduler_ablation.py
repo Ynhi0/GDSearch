@@ -83,7 +83,7 @@ def run_scheduler_ablation(
     schedulers: List[str] = ['None', 'LinearWarmup', 'StepLR_25', 'StepLR_33', 'StepLR_50',
                              'StepLR_75', 'ExponentialLR', 'CosineAnnealingLR', 'OneCycleLR'],
     optimizers: List[str] = ['SGD', 'Adam', 'AdamW'],
-    seeds: List[int] = [1, 2, 3, 4, 5],
+    seeds: Optional[List[int]] = None,
     results_dir: str = 'results/scheduler_ablation'
 ) -> Dict[str, pd.DataFrame]:
     """
@@ -104,6 +104,9 @@ def run_scheduler_ablation(
     Returns:
         Dictionary mapping config names to aggregated results
     """
+    if seeds is None:
+        seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
+
     os.makedirs(results_dir, exist_ok=True)
 
     print("="*80)
@@ -366,7 +369,7 @@ def main():
     # Test configurations
     schedulers = ['None', 'StepLR', 'ExponentialLR', 'CosineAnnealingLR']
     optimizers = ['SGD', 'Adam', 'AdamW']
-    seeds = [1, 2, 3, 4, 5]
+    seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
 
     # Run ablation study
     results = run_scheduler_ablation(

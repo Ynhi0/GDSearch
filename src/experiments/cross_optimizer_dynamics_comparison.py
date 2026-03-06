@@ -266,7 +266,7 @@ def run_cross_optimizer_dynamics_comparison(
             optimizers = [OptimizerNames.SGD, OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM, OptimizerNames.ADAMW, OptimizerNames.RMSPROP]
 
     if seeds is None:
-        seeds = [42] if quick else [42, 123, 456]
+        seeds = [42] if quick else [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
 
     if quick:
         epochs = min(epochs, 20)

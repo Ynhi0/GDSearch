@@ -1,6 +1,6 @@
 # Proposal Expectations Mapping
 
-- Generated: 2026-03-04T02:18:30+00:00
+- Generated: 2026-03-06T09:21:19+00:00
 - Results root: `results_proposal_full_20260223_v2`
 - Source docs:
   - `docs/CONVERGENCE_CRITERIA.md`

@@ -60,7 +60,7 @@ class LabelNoiseConfig:
         if self.noise_rates is None:
             self.noise_rates = [0.0, 0.1, 0.2, 0.4]
         if self.seeds is None:
-            self.seeds = [42, 123, 456, 789, 1011]
+            self.seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
 
 
 class NoisyLabelDataset(Dataset):

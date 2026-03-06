@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-03-05T13:57:35.239964",
+  "timestamp": "2026-03-06T17:35:41.748649",
   "dataset": "SchedulerAblation",
   "model": "MNIST",
   "optimizer": "SGD",
@@ -8,7 +8,7 @@
   "rows_original": 10,
   "history_thinning_stride": 1,
   "params": {
-    "scheduler": "StepLR"
+    "scheduler": "CosineAnnealingLR"
   },
   "model_path": null,
   "system": {
@@ -22,12 +22,12 @@
     "cuda_version": "12.4"
   },
   "provenance": {
-    "timestamp": "2026-03-05T13:57:35.240980",
+    "timestamp": "2026-03-06T17:35:41.751475",
     "python_version": "3.13.7 (tags/v3.13.7:bcee1c3, Aug 14 2025, 14:15:11) [MSC v.1944 64 bit (AMD64)]",
     "pytorch_version": "2.6.0+cu124",
-    "command_line": "run_all_kaggle.py --results-dir results_proposal_full_20260223_v2 --experiment-mode full --experiments batch_ablation,lr_ablation,wd_ablation,scheduler_ablation,missing_ablations,optimizer_comparison,ablation_comprehensive,dynamics_overhead,theory_practice,cross_optimizer_dynamics,beta_sensitivity_training,label_noise,resnet,highdim --seeds 42,123,456,789,1011,1213,1415,1617,1819,2021 --robust-gradients --resume --resume-behavior restart_if_no_checkpoint",
+    "command_line": "run_all_kaggle.py --experiment-mode full --experiments scheduler_ablation,dynamics_overhead --results-dir results_proposal_full_20260223_v2 --seeds 42,123,456,789,1011,1213,1415,1617,1819,2021 --robust-gradients --resume",
     "working_dir": "F:\\GDSearch",
-    "git_commit": "a0f96786677294cfa4f1761f925427ab61202283",
+    "git_commit": "cc0bb0ca07e5dae53ae3c0f6d30c833a790f7780",
     "git_dirty": true,
     "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
     "gpu_count": 1,
@@ -37,5 +37,5 @@
   },
   "completed": true,
   "tainted": false,
-  "run_signature": "d8c952a3a78508ebcfd4deeaefd0eb34ab938ce7bde3accf284bdacdac14519c"
+  "run_signature": "d851f1fbc1fb1704007c3a29543aa1475cc18ebcce6e927778fa72a3bc746874"
 }

@@ -1,0 +1,27 @@
+experiment,exists,csv_count,png_count,latest_file,latest_time,seed_cov_cols,seed_cov_fname,status_reason,health
+ablation,True,51,0,ablation_results.csv,2026-03-04 06:32:32,10,10,,seed10_present
+advanced_ablation,True,81,5,AdvAblation_LabelSmoothing_only_seed789.csv,2026-02-28 01:30:17,0,10,,seed10_present
+init_ablation,True,241,4,InitAblation_xavier_uniform_SGD_seed789.csv,2026-02-28 00:14:08,0,10,,seed10_present
+batch_ablation,True,21,0,MNIST_batch_ablation_seeds42_123_456_789_1011_1213_1415_1617_1819_2021.csv,2026-03-04 16:04:20,10,10,,seed10_present
+lr_ablation,True,120,0,SGD_Momentum_lr3.0e-02_seed2021.csv,2026-03-05 05:58:24,10,10,,seed10_present
+wd_ablation,True,120,0,SGD_Momentum_wd1.0e-02_seed2021.csv,2026-03-05 13:52:43,10,10,,seed10_present
+scheduler_ablation,True,1,0,SchedulerAblation_MNIST_SGD_seed42.metadata.json,2026-03-05 13:57:35,0,1,,partial_seed_coverage
+missing_ablations,True,51,0,gradient_clipping_ablation.csv,2026-03-05 19:47:36,10,10,,seed10_present
+optimizer_comparison,True,1,0,optimizer_comparison_status.csv,2026-03-05 19:47:36,0,0,mnist_results_missing,status_only_or_skipped
+resnet,True,8,0,resnet_results_all_seeds.csv,2026-03-04 01:33:52,3,3,,partial_seed_coverage
+highdim,True,61,0,highdim_results.csv,2026-03-03 20:58:21,10,10,,seed10_present
+hyperparam_sensitivity,True,4,3,momentum_beta_sweep_rosenbrock.csv,2026-03-04 06:32:33,0,0,,no_seed_detected
+convergence_validation,True,6,1,SGD_trajectory.csv,2026-02-28 00:32:13,0,0,,no_seed_detected
+ablation_comprehensive,True,4,16,summary_table.pdf,2026-03-06 07:58:13,10,0,,seed10_present
+2d_optimization,True,61,0,2d_optimization_results.csv,2026-03-04 06:37:49,10,10,,seed10_present
+dynamics_overhead,True,4,7,dynamics_overhead_ablation.png,2026-03-03 22:59:36,3,0,,partial_seed_coverage
+theory_practice,True,1,0,theory_practice_status.csv,2026-03-06 08:04:58,0,0,mnist_cifar_results_missing,status_only_or_skipped
+cross_optimizer_dynamics,True,1,2,dynamics_metrics_comparison_MNIST.png,2026-03-04 00:33:56,3,0,,partial_seed_coverage
+beta_sensitivity_training,True,4,4,momentum_beta_sensitivity_analysis.png,2026-03-04 05:55:56,3,0,,partial_seed_coverage
+label_noise,True,2,0,label_noise_results_cifar10_resnet18.csv,2026-03-06 16:04:37,1,0,,partial_seed_coverage
+saddle_escape,True,4,1,saddle_escape_summary.csv,2026-03-04 06:10:45,0,0,,no_seed_detected
+hyperparameter_heatmaps,True,2,2,momentum_beta_heatmap_data.csv,2026-03-03 12:07:22,0,0,,no_seed_detected
+stochastic_2d_integrity,True,3,0,stochastic_2d_results.csv,2026-03-04 06:32:53,10,0,,seed10_present
+adam_adamw_comparison,True,2,1,lr_schedule_demo_results.csv,2026-03-04 06:32:53,10,0,,seed10_present
+robustness,True,501,0,robustness_results.csv,2026-03-04 06:32:38,10,10,,seed10_present
+sam_sensitivity,True,51,0,MNIST_SimpleMLP_SAM_rho_0.2_seed789.csv,2026-02-28 00:14:25,10,10,,seed10_present

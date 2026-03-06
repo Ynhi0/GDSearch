@@ -2377,7 +2377,11 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
     return df
 
 
-def run_scheduler_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path] = 'results/scheduler_ablation', seeds: List[int] = None):
+def run_scheduler_ablation(
+    dataset_name: str = 'MNIST',
+    results_dir: Union[str, Path] = 'results/scheduler_ablation',
+    seeds: Optional[List[int]] = None
+):
     """
     Ablation Study B: Learning Rate Scheduler Impact
 
@@ -2387,10 +2391,10 @@ def run_scheduler_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, 
     Args:
         dataset_name: 'MNIST' or 'CIFAR10'
         results_dir: Output directory for ablation results (Path or str)
-        seeds: List of random seeds for reproducibility (default: [42])
+        seeds: List of random seeds for reproducibility (default: canonical 10-seed set)
     """
     if seeds is None:
-        seeds = [42]
+        seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
     print("\n" + "="*80)
     print("ABLATION STUDY B: LR Scheduler Impact (2Ã—2 Grid)")
     print("="*80)
@@ -2458,6 +2462,7 @@ def run_scheduler_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, 
 
         for opt_name, sched_name in pairs:
             print(f"\nTesting {opt_name} + {sched_name} (seed={seed})")
+            history: List[Dict[str, float]] = []
 
             # Create model
             model = SimpleMLP(input_dim=input_dim, hidden_dims=[128, 64], num_classes=num_classes)
@@ -2519,8 +2524,6 @@ def run_scheduler_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, 
                 print(f"  Epoch {epoch+1}/10: Loss={avg_loss:.4f}, Val Acc={val_accuracy:.2f}%, LR={current_lr:.6f}")
 
                 # Record history for artifact saving
-                if 'history' not in locals():
-                    history = []
                 history.append({
                     'epoch': epoch + 1,
                     'loss': avg_loss,
@@ -2552,7 +2555,7 @@ def run_scheduler_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, 
                 'optimizer': opt_name,
                 'scheduler': sched_name,
                 'seed': seed,
-                'final_loss': avg_loss,
+                'final_loss': final_test_loss,
                 'final_accuracy': final_test_accuracy
             })
 
@@ -2562,9 +2565,6 @@ def run_scheduler_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, 
                 save_run_artifacts(results_dir, 'SchedulerAblation', dataset_name, opt_name, seed, history, params)
             except Exception as e:
                 logging.debug(f"Failed to save scheduler ablation artifact: {e}")
-            finally:
-                if 'history' in locals():
-                    del history
 
     # Save to CSV (one file with all seeds)
     df = pd.DataFrame(scheduler_results)
@@ -13146,14 +13146,36 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
         result_file = Path(results_dir) / "resnet_results.csv"
         legacy_result_file = Path(results_dir) / "resnet_results_all_seeds.csv"
         existing_result_file = result_file if result_file.exists() else legacy_result_file
-        if existing_result_file.exists():
-            try:
-                df = pd.read_csv(existing_result_file)
-                if len(df) > 0:
-                    logging.info("Skipping ResNet18 experiment (already completed)")
-                    return df
-            except Exception as e:
-                logging.debug("Could not read resnet results file: %s", e, exc_info=True)
+        required_seed_set = {int(s) for s in seeds}
+        existing_seed_set: Set[int] = set()
+        for per_seed_csv in Path(results_dir).glob("ResNet18_CIFAR10_Adam_seed*.csv"):
+            m = re.search(r"seed(\d+)\.csv$", per_seed_csv.name)
+            if m:
+                existing_seed_set.add(int(m.group(1)))
+        if required_seed_set and required_seed_set.issubset(existing_seed_set):
+            if existing_result_file.exists():
+                try:
+                    df = pd.read_csv(existing_result_file)
+                except Exception:
+                    df = pd.DataFrame()
+            else:
+                seed_frames = []
+                for seed in sorted(required_seed_set):
+                    per_seed = Path(results_dir) / f"ResNet18_CIFAR10_Adam_seed{seed}.csv"
+                    if per_seed.exists():
+                        try:
+                            seed_frames.append(pd.read_csv(per_seed))
+                        except Exception:
+                            logging.debug("Could not read ResNet per-seed CSV: %s", per_seed, exc_info=True)
+                df = pd.concat(seed_frames, ignore_index=True) if seed_frames else pd.DataFrame()
+            logging.info("Skipping ResNet18 experiment (all requested seeds already completed)")
+            return df
+        if existing_seed_set:
+            logging.info(
+                "ResNet resume detected partial coverage (%d/%d seeds). Re-running requested seeds.",
+                len(existing_seed_set),
+                len(required_seed_set),
+            )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logging.info(f"Device: {device}")
@@ -13434,9 +13456,20 @@ def run_highdim_experiment(results_dir="results_highdim", seeds=None, quick=Fals
         if result_file.exists():
             try:
                 df = pd.read_csv(result_file)
-                if len(df) > 0:
-                    logging.info(f"Skipping HighDim experiment (already completed)")
+                seed_col = 'seed' if 'seed' in df.columns else ('Seed' if 'Seed' in df.columns else None)
+                required_seed_set = {int(s) for s in seeds}
+                existing_seed_set: Set[int] = set()
+                if seed_col is not None:
+                    existing_seed_set = set(pd.to_numeric(df[seed_col], errors='coerce').dropna().astype(int).tolist())
+                if required_seed_set and required_seed_set.issubset(existing_seed_set):
+                    logging.info("Skipping HighDim experiment (all requested seeds already completed)")
                     return df
+                if existing_seed_set:
+                    logging.info(
+                        "HighDim resume detected partial coverage (%d/%d seeds). Re-running requested seeds.",
+                        len(existing_seed_set),
+                        len(required_seed_set),
+                    )
             except Exception as e:
                 logging.debug("Could not read highdim results file: %s", e, exc_info=True)
 
@@ -14418,6 +14451,34 @@ Examples:
         remaining = time_budget.remaining_hours()
         print(f"   [TIME] Time remaining: {remaining:.1f}h")
         return True
+
+    def _normalize_seed_series(df: pd.DataFrame) -> pd.Series:
+        """Return numeric seed series from common column variants, or empty series."""
+        for c in ('seed', 'Seed', 'random_seed'):
+            if c in df.columns:
+                return pd.to_numeric(df[c], errors='coerce').dropna().astype(int)
+        return pd.Series(dtype='int64')
+
+    def _normalize_column(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
+        """Resolve a column name by exact match first, then case-insensitive match."""
+        for c in candidates:
+            if c in df.columns:
+                return c
+        lower_map = {str(c).lower(): c for c in df.columns}
+        for c in candidates:
+            resolved = lower_map.get(c.lower())
+            if resolved is not None:
+                return resolved
+        return None
+
+    def _read_csv_safe(path: Path) -> Optional[pd.DataFrame]:
+        if not path.exists():
+            return None
+        try:
+            return pd.read_csv(path)
+        except Exception:
+            logging.debug("Could not read CSV: %s", path, exc_info=True)
+            return None
     
     # ========================================================================
     # PARALLEL EXECUTION MODE: Build experiment queue and dispatch to workers
@@ -15147,15 +15208,37 @@ Examples:
 
                     ablation_dir = str(experiments_dir / "dynamics_overhead")
 
-                    # Check if already completed
-                    csv_results = list(Path(ablation_dir).glob("dynamics_overhead_ablation_*.csv"))
+                    selected_seeds = seeds[:3] if ULTRA_QUICK_MODE else (seeds[:5] if args.quick else seeds)
+                    selected_epochs = 2 if ULTRA_QUICK_MODE else (5 if args.quick else 10)
+                    expected_combo_count = len(selected_seeds) * 2  # baseline + with_tracking
+                    ablation_csv = Path(ablation_dir) / "dynamics_overhead_ablation_MNIST.csv"
+                    skip_dynamics_run = False
 
-                    if args.resume and len(csv_results) > 0:
-                        print("   Dynamics overhead ablation already completed")
-                        experiment_results['dynamics_overhead'] = "Skipped (already complete)"
-                    else:
-                        selected_seeds = seeds[:3] if ULTRA_QUICK_MODE else (seeds[:5] if args.quick else seeds)
-                        selected_epochs = 2 if ULTRA_QUICK_MODE else (5 if args.quick else 10)
+                    if args.resume and ablation_csv.exists():
+                        existing_df = _read_csv_safe(ablation_csv)
+                        existing_seeds: Set[int] = set()
+                        existing_combo_count = 0
+                        if existing_df is not None and not existing_df.empty:
+                            seed_series = _normalize_seed_series(existing_df)
+                            if not seed_series.empty:
+                                existing_seeds = set(seed_series.tolist())
+                            cond_col = _normalize_column(existing_df, ['condition'])
+                            seed_col = _normalize_column(existing_df, ['seed', 'Seed', 'random_seed'])
+                            if cond_col is not None and seed_col is not None:
+                                existing_combo_count = int(
+                                    existing_df[[seed_col, cond_col]].dropna().drop_duplicates().shape[0]
+                                )
+                        if set(selected_seeds).issubset(existing_seeds) and existing_combo_count >= expected_combo_count:
+                            print("   Dynamics overhead ablation already completed (full seed coverage)")
+                            experiment_results['dynamics_overhead'] = existing_df if existing_df is not None else "Skipped (already complete)"
+                            skip_dynamics_run = True
+                        else:
+                            print(
+                                f"   Resume found partial dynamics overhead results "
+                                f"(seeds={len(existing_seeds)}/{len(selected_seeds)}, combos={existing_combo_count}/{expected_combo_count}); rerunning"
+                            )
+
+                    if not skip_dynamics_run:
                         df = run_dynamics_overhead_ablation(
                             dataset='MNIST',
                             epochs=selected_epochs,
@@ -15406,17 +15489,44 @@ Examples:
 
                     dynamics_comp_dir = str(experiments_dir / "cross_optimizer_dynamics")
 
-                    # Check if already completed
-                    csv_results = list(Path(dynamics_comp_dir).glob("cross_optimizer_dynamics_*.csv"))
+                    selected_seeds = seeds[:3] if ULTRA_QUICK_MODE else (seeds[:5] if args.quick else seeds)
+                    selected_epochs = 2 if ULTRA_QUICK_MODE else (20 if args.quick else 50)
+                    selected_optimizers = [OptimizerNames.SGD, OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM] if (args.quick or ULTRA_QUICK_MODE) else None
+                    expected_optimizers = selected_optimizers or [
+                        OptimizerNames.SGD,
+                        OptimizerNames.SGD_MOMENTUM,
+                        OptimizerNames.ADAM,
+                        OptimizerNames.ADAMW,
+                        OptimizerNames.RMSPROP,
+                    ]
+                    expected_combo_count = len(selected_seeds) * len(expected_optimizers)
+                    dynamics_csv = Path(dynamics_comp_dir) / "cross_optimizer_dynamics_MNIST.csv"
+                    skip_cross_dynamics_run = False
 
-                    if args.resume and len(csv_results) > 0:
-                        print("   Cross-optimizer dynamics comparison already completed")
-                        experiment_results['cross_optimizer_dynamics'] = "Skipped (already complete)"
-                    else:
-                        # Run on MNIST (fast, clear dynamics)
-                        selected_seeds = seeds[:3] if ULTRA_QUICK_MODE else (seeds[:5] if args.quick else seeds)
-                        selected_epochs = 2 if ULTRA_QUICK_MODE else (20 if args.quick else 50)
-                        selected_optimizers = [OptimizerNames.SGD, OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM] if (args.quick or ULTRA_QUICK_MODE) else None
+                    if args.resume and dynamics_csv.exists():
+                        existing_df = _read_csv_safe(dynamics_csv)
+                        existing_seeds: Set[int] = set()
+                        existing_combo_count = 0
+                        if existing_df is not None and not existing_df.empty:
+                            seed_col = _normalize_column(existing_df, ['Seed', 'seed', 'random_seed'])
+                            opt_col = _normalize_column(existing_df, ['Optimizer', 'optimizer'])
+                            if seed_col is not None:
+                                existing_seeds = set(pd.to_numeric(existing_df[seed_col], errors='coerce').dropna().astype(int).tolist())
+                            if seed_col is not None and opt_col is not None:
+                                existing_combo_count = int(
+                                    existing_df[[seed_col, opt_col]].dropna().drop_duplicates().shape[0]
+                                )
+                        if set(selected_seeds).issubset(existing_seeds) and existing_combo_count >= expected_combo_count:
+                            print("   Cross-optimizer dynamics comparison already completed (full seed coverage)")
+                            experiment_results['cross_optimizer_dynamics'] = existing_df if existing_df is not None else "Skipped (already complete)"
+                            skip_cross_dynamics_run = True
+                        else:
+                            print(
+                                f"   Resume found partial cross-optimizer dynamics results "
+                                f"(seeds={len(existing_seeds)}/{len(selected_seeds)}, combos={existing_combo_count}/{expected_combo_count}); rerunning"
+                            )
+
+                    if not skip_cross_dynamics_run:
                         df = run_cross_optimizer_dynamics_comparison(
                             dataset='MNIST',
                             optimizers=selected_optimizers,
@@ -15452,20 +15562,66 @@ Examples:
 
                     beta_sens_dir = str(experiments_dir / "beta_sensitivity_training")
 
-                    # Check if already completed (now checking all 4 experiments)
+                    # Expected sweep settings (used for robust resume completeness checks).
+                    selected_seeds = seeds[:3] if ULTRA_QUICK_MODE else (seeds[:5] if args.quick else seeds)
+                    momentum_beta_values = [0.0, 0.5, 0.9, 0.99] if args.quick else [0.0, 0.5, 0.7, 0.9, 0.95, 0.99]
+                    adam_beta1_values = [0.5, 0.9, 0.99] if args.quick else [0.5, 0.7, 0.9, 0.95, 0.99]
+                    adam_beta2_values = [0.95, 0.99, 0.999] if args.quick else [0.9, 0.95, 0.99, 0.999, 0.9999]
+                    adam_grid_beta1_values = [0.7, 0.9, 0.99] if args.quick else [0.7, 0.9, 0.95, 0.99]
+                    adam_grid_beta2_values = [0.9, 0.99, 0.999] if args.quick else [0.9, 0.99, 0.999, 0.9999]
+
+                    # Check if already completed (with full seed/grid coverage).
                     momentum_csv = Path(beta_sens_dir) / "momentum_beta_sensitivity_mnist.csv"
                     adam_beta1_csv = Path(beta_sens_dir) / "adam_beta_sensitivity_mnist.csv"
                     adam_beta2_csv = Path(beta_sens_dir) / "adam_beta2_sensitivity_mnist.csv"
                     adam_grid_csv = Path(beta_sens_dir) / "adam_beta1_beta2_grid_mnist.csv"
 
-                    if args.resume and all([momentum_csv.exists(), adam_beta1_csv.exists(),
-                                           adam_beta2_csv.exists(), adam_grid_csv.exists()]):
-                        print("   Î² sensitivity training already completed (all 4 experiments)")
+                    def _beta_csv_complete(csv_path: Path, varying_cols: List[str], expected_combo_count: int) -> bool:
+                        df_local = _read_csv_safe(csv_path)
+                        if df_local is None or df_local.empty:
+                            return False
+                        seed_col = _normalize_column(df_local, ['Seed', 'seed', 'random_seed'])
+                        if seed_col is None:
+                            return False
+                        seed_vals = set(pd.to_numeric(df_local[seed_col], errors='coerce').dropna().astype(int).tolist())
+                        if not set(selected_seeds).issubset(seed_vals):
+                            return False
+                        cols = [seed_col]
+                        for c in varying_cols:
+                            resolved = _normalize_column(df_local, [c])
+                            if resolved is None:
+                                return False
+                            cols.append(resolved)
+                        combo_count = int(df_local[cols].dropna().drop_duplicates().shape[0])
+                        return combo_count >= expected_combo_count
+
+                    momentum_complete = _beta_csv_complete(
+                        momentum_csv,
+                        ['Beta'],
+                        len(selected_seeds) * len(momentum_beta_values),
+                    )
+                    adam_beta1_complete = _beta_csv_complete(
+                        adam_beta1_csv,
+                        ['Beta1'],
+                        len(selected_seeds) * len(adam_beta1_values),
+                    )
+                    adam_beta2_complete = _beta_csv_complete(
+                        adam_beta2_csv,
+                        ['Beta2'],
+                        len(selected_seeds) * len(adam_beta2_values),
+                    )
+                    adam_grid_complete = _beta_csv_complete(
+                        adam_grid_csv,
+                        ['Beta1', 'Beta2'],
+                        len(selected_seeds) * len(adam_grid_beta1_values) * len(adam_grid_beta2_values),
+                    )
+
+                    if args.resume and all([momentum_complete, adam_beta1_complete, adam_beta2_complete, adam_grid_complete]):
+                        print("   β sensitivity training already completed (full seed/grid coverage)")
                         experiment_results['beta_sensitivity_training'] = "Skipped (already complete)"
                     else:
                         # Determine device
                         device = 'cuda' if torch.cuda.is_available() else 'cpu'
-                        selected_seeds = seeds[:3] if ULTRA_QUICK_MODE else (seeds[:5] if args.quick else seeds)
                         beta_epochs = 2 if ULTRA_QUICK_MODE else (10 if args.quick else 20)
                         grid_epochs = 2 if ULTRA_QUICK_MODE else (10 if args.quick else 15)
                         sgd_params = get_default_hyperparameters('SGD', 'resnet_cifar10')
@@ -15476,10 +15632,10 @@ Examples:
                         results_dict = {}
 
                         # Run Momentum Î² sensitivity
-                        if not momentum_csv.exists() or not args.resume:
+                        if not args.resume or not momentum_complete:
                             print("\nRunning Momentum Î² sweep on MNIST...")
                             momentum_df = run_momentum_beta_sensitivity(
-                                beta_values=[0.0, 0.5, 0.9, 0.99] if args.quick else [0.0, 0.5, 0.7, 0.9, 0.95, 0.99],
+                                beta_values=momentum_beta_values,
                                 epochs=beta_epochs,
                                 seeds=selected_seeds,
                                 lr=momentum_lr,
@@ -15490,10 +15646,10 @@ Examples:
                             results_dict['momentum'] = momentum_df
 
                         # Run Adam Î²1 sensitivity
-                        if not adam_beta1_csv.exists() or not args.resume:
+                        if not args.resume or not adam_beta1_complete:
                             print("\nRunning Adam Î²1 sweep on MNIST...")
                             adam_beta1_df = run_adam_beta_sensitivity(
-                                beta1_values=[0.5, 0.9, 0.99] if args.quick else [0.5, 0.7, 0.9, 0.95, 0.99],
+                                beta1_values=adam_beta1_values,
                                 epochs=beta_epochs,
                                 seeds=selected_seeds,
                                 lr=adam_lr,
@@ -15504,11 +15660,11 @@ Examples:
                             results_dict['adam_beta1'] = adam_beta1_df
 
                         # Run Adam Î²2 sensitivity (NEW)
-                        if not adam_beta2_csv.exists() or not args.resume:
+                        if not args.resume or not adam_beta2_complete:
                             print("\nRunning Adam Î²2 sweep on MNIST...")
                             adam_beta2_df = run_adam_beta2_sensitivity(
                                 beta1=0.9,  # Fixed Î²1
-                                beta2_values=[0.95, 0.99, 0.999] if args.quick else [0.9, 0.95, 0.99, 0.999, 0.9999],
+                                beta2_values=adam_beta2_values,
                                 epochs=beta_epochs,
                                 seeds=selected_seeds,
                                 lr=adam_lr,
@@ -15519,11 +15675,11 @@ Examples:
                             results_dict['adam_beta2'] = adam_beta2_df
 
                         # Run Adam (Î²1, Î²2) grid search (NEW)
-                        if not adam_grid_csv.exists() or not args.resume:
+                        if not args.resume or not adam_grid_complete:
                             print("\nRunning Adam (Î²1, Î²2) grid search on MNIST...")
                             adam_grid_df = run_adam_beta1_beta2_grid(
-                                beta1_values=[0.7, 0.9, 0.99] if args.quick else [0.7, 0.9, 0.95, 0.99],
-                                beta2_values=[0.9, 0.99, 0.999] if args.quick else [0.9, 0.99, 0.999, 0.9999],
+                                beta1_values=adam_grid_beta1_values,
+                                beta2_values=adam_grid_beta2_values,
                                 epochs=grid_epochs,
                                 seeds=selected_seeds,
                                 lr=adam_lr,
@@ -15557,24 +15713,57 @@ Examples:
                     from src.utils.fairness_check import validate_tuning_fairness
 
                     label_noise_dir = str(experiments_dir / "label_noise")
+                    selected_seeds = seeds[:3] if ULTRA_QUICK_MODE else seeds
+                    selected_noise_rates = (
+                        [0.0, 0.2] if ULTRA_QUICK_MODE else
+                        ([0.0, 0.1, 0.2, 0.4] if not args.quick else [0.0, 0.2])
+                    )
+                    selected_epochs = 2 if ULTRA_QUICK_MODE else (20 if args.quick else 50)
 
                     # Check if already completed.
                     # Quick/ultra-quick only runs MNIST by design; full mode runs MNIST + CIFAR10.
                     mnist_csv = Path(label_noise_dir) / "label_noise_results_mnist_mlp.csv"
                     cifar10_csv = Path(label_noise_dir) / "label_noise_results_cifar10_resnet18.csv"
                     requires_cifar10 = not args.quick and not ULTRA_QUICK_MODE
-                    label_noise_complete = mnist_csv.exists() and (cifar10_csv.exists() if requires_cifar10 else True)
+                    optimizers_to_test = [OptimizerNames.SGD, OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM, OptimizerNames.ADAMW, OptimizerNames.AMSGRAD]
+
+                    # Add advanced optimizers if not in quick mode
+                    if not args.quick:
+                        optimizers_to_test.extend(['SAM_SGD', 'SAM_Adam', 'Lookahead_SGD',
+                                                   'Lookahead_Adam', OptimizerNames.RADAM])
+
+                    expected_combo_count = len(selected_seeds) * len(selected_noise_rates) * len(optimizers_to_test)
+
+                    def _label_noise_csv_complete(csv_path: Path) -> bool:
+                        df_local = _read_csv_safe(csv_path)
+                        if df_local is None or df_local.empty:
+                            return False
+                        seed_col = _normalize_column(df_local, ['seed', 'Seed', 'random_seed'])
+                        noise_col = _normalize_column(df_local, ['noise_rate', 'noise'])
+                        opt_col = _normalize_column(df_local, ['optimizer', 'Optimizer'])
+                        if seed_col is None or noise_col is None or opt_col is None:
+                            return False
+                        seed_vals = set(pd.to_numeric(df_local[seed_col], errors='coerce').dropna().astype(int).tolist())
+                        if not set(selected_seeds).issubset(seed_vals):
+                            return False
+                        combo_count = int(
+                            df_local[[seed_col, noise_col, opt_col]].dropna().drop_duplicates().shape[0]
+                        )
+                        return combo_count >= expected_combo_count
+
+                    mnist_complete = _label_noise_csv_complete(mnist_csv)
+                    cifar10_complete = _label_noise_csv_complete(cifar10_csv) if requires_cifar10 else True
+                    label_noise_complete = mnist_complete and cifar10_complete
 
                     if args.resume and label_noise_complete:
-                        print("   Label noise ablation already completed")
+                        print("   Label noise ablation already completed (full seed/noise/optimizer coverage)")
                         experiment_results['label_noise'] = "Skipped (already complete)"
                     else:
-                        selected_seeds = seeds[:3] if ULTRA_QUICK_MODE else seeds
-                        selected_noise_rates = (
-                            [0.0, 0.2] if ULTRA_QUICK_MODE else
-                            ([0.0, 0.1, 0.2, 0.4] if not args.quick else [0.0, 0.2])
-                        )
-                        selected_epochs = 2 if ULTRA_QUICK_MODE else (20 if args.quick else 50)
+                        if args.resume:
+                            print(
+                                "   Resume found partial label-noise results "
+                                f"(MNIST complete={mnist_complete}, CIFAR10 complete={cifar10_complete}); rerunning incomplete datasets"
+                            )
                         # Configure label noise experiments
                         noise_config = LabelNoiseConfig(
                             noise_rates=selected_noise_rates,
@@ -15583,15 +15772,7 @@ Examples:
                             batch_size=128,
                             device='cuda' if torch.cuda.is_available() else 'cpu'
                         )
-    
-                        # Get tuned hyperparameters for all optimizers
-                        optimizers_to_test = [OptimizerNames.SGD, OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM, OptimizerNames.ADAMW, OptimizerNames.AMSGRAD]
-    
-                        # Add advanced optimizers if not in quick mode
-                        if not args.quick:
-                            optimizers_to_test.extend(['SAM_SGD', 'SAM_Adam', 'Lookahead_SGD',
-                                                       'Lookahead_Adam', OptimizerNames.RADAM])
-    
+
                         # Build optimizer configs from tuned hyperparameters
                         mnist_optimizers_config = {}
                         cifar10_optimizers_config = {}
@@ -15640,7 +15821,7 @@ Examples:
                         results_dict = {}
     
                         # Run MNIST label noise ablation
-                        if not mnist_csv.exists() or not args.resume:
+                        if not args.resume or not mnist_complete:
                             print("\nRunning label noise ablation on MNIST MLP...")
                             mnist_results = run_label_noise_ablation(
                                 dataset_name='mnist',
@@ -15654,7 +15835,7 @@ Examples:
     
                         # Run CIFAR-10 label noise ablation only in full mode.
                         if requires_cifar10:
-                            if not cifar10_csv.exists() or not args.resume:
+                            if not args.resume or not cifar10_complete:
                                 print("\nRunning label noise ablation on CIFAR-10 ResNet-18...")
                                 cifar10_results = run_label_noise_ablation(
                                     dataset_name='cifar10',
