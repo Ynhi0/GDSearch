@@ -2,4 +2,4 @@
 
 | Optimizer/Config | Final Loss | Loss Std | Final Test Acc (%) | Acc Std (%) | Speed (iters/sec) |
 |------------------|------------|----------|--------------------|-------------|-------------------|
-| dynamics | 0.0810 | 0.0292 | N/A | N/A | N/A |
+| dynamics | 0.0224 | 0.0200 | N/A | N/A | N/A |

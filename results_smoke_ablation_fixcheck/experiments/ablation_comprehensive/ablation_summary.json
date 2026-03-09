@@ -1,0 +1,22 @@
+{
+  "momentum_effect": {
+    "improvement_pct": 36.71,
+    "conclusion": "Momentum significantly improves convergence"
+  },
+  "adaptive_lr_effect": {
+    "improvement_pct": 4.49666666666667,
+    "conclusion": "Adaptive LR provides faster convergence"
+  },
+  "weight_decay_effect": {
+    "improvement_pct": -0.01999999999999602,
+    "conclusion": "Weight decay provides regularization benefit"
+  },
+  "sam_effect": {
+    "improvement_pct": 0.0947,
+    "conclusion": "SAM finds flatter minima"
+  },
+  "lookahead_effect": {
+    "improvement_pct": -18.393333333333324,
+    "conclusion": "Lookahead provides stability"
+  }
+}

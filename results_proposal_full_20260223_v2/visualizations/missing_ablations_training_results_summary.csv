@@ -1,6 +1,6 @@
 Optimizer/Config,Final Loss,Loss Std,Final Test Acc (%),Acc Std (%),Speed (iters/sec)
-SimpleMLP_GradientClip_10.0,0.0128,0.0003,98.1120,0.0685,N/A
-SimpleMLP_GradientClip_None,0.0128,0.0003,98.1120,0.0685,N/A
-SimpleMLP_GradientClip_5.0,0.0128,0.0003,98.1120,0.0685,N/A
-SimpleMLP_GradientClip_1.0,0.0129,0.0004,98.0910,0.0639,N/A
-SimpleMLP_GradientClip_0.5,0.0218,0.0007,98.0350,0.0639,N/A
+SimpleMLP_GradientClip_10.0,0.0349,0.0338,96.4460,2.5197,N/A
+SimpleMLP_GradientClip_5.0,0.0349,0.0338,96.4460,2.5197,N/A
+SimpleMLP_GradientClip_None,0.0349,0.0338,96.4460,2.5197,N/A
+SimpleMLP_GradientClip_1.0,0.0351,0.0338,96.4400,2.4929,N/A
+SimpleMLP_GradientClip_0.5,0.0601,0.0585,96.0100,3.0740,N/A

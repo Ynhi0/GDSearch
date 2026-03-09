@@ -1,0 +1,7 @@
+Optimizer/Config,Final Loss,Loss Std,Final Test Acc (%),Acc Std (%),Speed (iters/sec)
+HighDim_Dim200_SAM_SGD,0.0000,0.0000,N/A,N/A,N/A
+HighDim_Dim100_SAM_SGD,0.0000,0.0000,N/A,N/A,N/A
+HighDim_Dim100_Adam,0.0000,0.0000,N/A,N/A,N/A
+HighDim_Dim200_Adam,0.0000,0.0000,N/A,N/A,N/A
+HighDim_Dim100_SGD,0.0000,0.0000,N/A,N/A,N/A
+HighDim_Dim200_SGD,0.0000,0.0000,N/A,N/A,N/A

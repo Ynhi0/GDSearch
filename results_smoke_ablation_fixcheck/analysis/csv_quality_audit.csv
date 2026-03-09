@@ -1,0 +1,6 @@
+path,experiment,rows,status,nan_cells,inf_cells,max_abs_numeric,has_axis,has_loss_like
+results_smoke_ablation_fixcheck\experiments\ablation_comprehensive\ablation_adaptive_lr.csv,ablation_comprehensive,6,has_nan,6,0,456.0,True,True
+results_smoke_ablation_fixcheck\experiments\ablation_comprehensive\ablation_lookahead.csv,ablation_comprehensive,6,ok,0,0,72.1,False,True
+results_smoke_ablation_fixcheck\experiments\ablation_comprehensive\ablation_momentum.csv,ablation_comprehensive,6,has_nan,6,0,456.0,True,True
+results_smoke_ablation_fixcheck\experiments\ablation_comprehensive\ablation_sam.csv,ablation_comprehensive,6,ok,0,0,44.0,False,True
+results_smoke_ablation_fixcheck\experiments\ablation_comprehensive\ablation_weight_decay.csv,ablation_comprehensive,6,has_nan,6,0,456.0,True,True

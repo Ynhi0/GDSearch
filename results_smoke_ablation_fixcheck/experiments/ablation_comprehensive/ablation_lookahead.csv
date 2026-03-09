@@ -1,0 +1,7 @@
+optimizer,seed,final_train_loss,final_test_accuracy
+SGD_Momentum,42,0.851487544631958,72.1
+Lookahead,42,1.4736043705622355,51.45
+SGD_Momentum,43,1.101681776301066,66.79
+Lookahead,43,1.4680306836446126,48.89
+SGD_Momentum,44,0.9671312163670858,71.87
+Lookahead,44,1.3467328133265177,55.24

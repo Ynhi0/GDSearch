@@ -1,44 +1,44 @@
 {
-  "timestamp": "2026-03-05T16:17:18.774730",
+  "timestamp": "2026-03-08T03:44:34.248275",
   "dataset": "MNIST",
   "model": "SimpleMLP",
   "optimizer": "GradientClip_10.0",
   "seed": 789,
-  "rows": 15,
-  "rows_original": 15,
+  "rows": 10,
+  "rows_original": 10,
   "history_thinning_stride": 1,
   "params": {
     "gradient_clip": 10.0,
-    "epochs": 15,
+    "epochs": 10,
     "seed": 789
   },
   "model_path": null,
   "system": {
-    "python_version": "3.13.7 (tags/v3.13.7:bcee1c3, Aug 14 2025, 14:15:11) [MSC v.1944 64 bit (AMD64)]",
-    "torch_version": "2.6.0+cu124",
+    "python_version": "3.12.0 (tags/v3.12.0:0fb18b0, Oct  2 2023, 13:03:39) [MSC v.1935 64 bit (AMD64)]",
+    "torch_version": "2.5.1+cu121",
     "cuda_available": true,
     "cpu_count": 16,
     "total_memory_gb": 15.730949401855469,
     "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
     "gpu_memory_gb": 3.99951171875,
-    "cuda_version": "12.4"
+    "cuda_version": "12.1"
   },
   "provenance": {
-    "timestamp": "2026-03-05T16:17:18.775796",
-    "python_version": "3.13.7 (tags/v3.13.7:bcee1c3, Aug 14 2025, 14:15:11) [MSC v.1944 64 bit (AMD64)]",
-    "pytorch_version": "2.6.0+cu124",
-    "command_line": "run_all_kaggle.py --results-dir results_proposal_full_20260223_v2 --experiment-mode full --experiments batch_ablation,lr_ablation,wd_ablation,scheduler_ablation,missing_ablations,optimizer_comparison,ablation_comprehensive,dynamics_overhead,theory_practice,cross_optimizer_dynamics,beta_sensitivity_training,label_noise,resnet,highdim --seeds 42,123,456,789,1011,1213,1415,1617,1819,2021 --robust-gradients --resume --resume-behavior restart_if_no_checkpoint",
+    "timestamp": "2026-03-08T03:44:34.250733",
+    "python_version": "3.12.0 (tags/v3.12.0:0fb18b0, Oct  2 2023, 13:03:39) [MSC v.1935 64 bit (AMD64)]",
+    "pytorch_version": "2.5.1+cu121",
+    "command_line": "run_all_kaggle.py --experiments medical,2d,robustness,sam,ablation,advanced_ablation,init_ablation,batch_ablation,lr_ablation,wd_ablation,scheduler_ablation,missing_ablations,optimizer_comparison,resnet,highdim,hyperparam_sensitivity,convergence_validation,ablation_comprehensive,2d_visualization,dynamics_overhead,theory_practice,cross_optimizer_dynamics,beta_sensitivity_training,label_noise,saddle_escape,hyperparameter_heatmaps,stochastic_2d_integrity,adam_adamw_comparison --seeds 42,123,456,789,1011,1213,1415,1617,1819,2021 --resume --resume-behavior skip_if_results_exist --robust-gradients --use-agc --use-trimmed-mean --use-robust-loss --gradient-clip-norm 1.0 --quick --no-mlflow --results-dir results_proposal_full_20260223_v2",
     "working_dir": "F:\\GDSearch",
-    "git_commit": "a0f96786677294cfa4f1761f925427ab61202283",
+    "git_commit": "a384f1a7f5079e27e5f53bf782449468ef25c31a",
     "git_dirty": true,
     "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
     "gpu_count": 1,
     "gpu_memory_gb": 3.99951171875,
-    "cuda_version": "12.4",
+    "cuda_version": "12.1",
     "nvidia_driver": "581.80"
   },
   "completed": true,
   "tainted": false,
-  "run_signature": "4f00024541534f38596baf2748215ff6ab63d6a0d7909db6671990807105513b",
+  "run_signature": "1b1ca3d6d09567a6bf06b45d7bbc3515ff6ebbb80d3ef47043f1f1ff3ee7b206",
   "device": "cuda"
 }

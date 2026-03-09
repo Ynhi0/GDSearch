@@ -1,0 +1,14 @@
+path,status,width,height,size_kb,gray_std,gray_range,flag_small,flag_blank_like,flag_aspect
+results_smoke_terminal_check\convergence_validation\convergence_rate_comparison.png,ok,2100,750,199.7,0.14093413128830096,1.0,False,False,False
+results_smoke_terminal_check\saddle_escape\saddle_point_escape_comparison.png,ok,4166,3565,560.58,0.1535570777595632,1.0,False,False,False
+results_smoke_terminal_check\visualizations\imdb_training_results.png,ok,7170,4719,435.02,0.05673307513418569,0.8509803861379623,False,False,False
+results_smoke_terminal_check\visualizations\static\2d_optimization\2d_convergence_profile_by_threshold.png,ok,2952,1575,171.71,0.1210714497562379,0.8509803861379623,False,False,False
+results_smoke_terminal_check\visualizations\static\2d_optimization\2d_convergence_rate_by_optimizer.png,ok,3181,1452,158.76,0.22199770803394725,1.0,False,False,False
+results_smoke_terminal_check\visualizations\static\2d_optimization\2d_convergence_rate_strict_by_optimizer.png,ok,3087,1452,151.05,0.12409967627649844,1.0,False,False,False
+results_smoke_terminal_check\visualizations\static\2d_optimization\2d_final_loss_by_optimizer.png,ok,2952,1752,129.46,0.2068979735233842,1.0,False,False,False
+results_smoke_terminal_check\visualizations\static\2d_optimization\2d_rastrigin_grad_norm_convergence.png,ok,2952,1752,456.17,0.11931717542579483,0.8509803861379623,False,False,False
+results_smoke_terminal_check\visualizations\static\2d_optimization\2d_rastrigin_loss_convergence.png,ok,2952,1752,135.52,0.13771526073600832,0.8509803861379623,False,False,False
+results_smoke_terminal_check\visualizations\static\2d_optimization\2d_rastrigin_trajectory_overlay.png,ok,2459,2052,146.49,0.09197452450846126,1.0,False,False,False
+results_smoke_terminal_check\visualizations\static\2d_optimization\2d_rosenbrock_grad_norm_convergence.png,ok,2952,1752,482.93,0.12502755636274296,0.8509803861379623,False,False,False
+results_smoke_terminal_check\visualizations\static\2d_optimization\2d_rosenbrock_loss_convergence.png,ok,2952,1752,420.07,0.11387908758710683,0.8509803861379623,False,False,False
+results_smoke_terminal_check\visualizations\static\2d_optimization\2d_rosenbrock_trajectory_overlay.png,ok,2512,2052,320.89,0.09896585065120186,1.0,False,False,False

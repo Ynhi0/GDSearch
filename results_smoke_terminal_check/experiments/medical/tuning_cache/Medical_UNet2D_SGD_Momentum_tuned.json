@@ -1,0 +1,16 @@
+{
+  "dataset": "Medical",
+  "model": "UNet2D",
+  "optimizer": "SGD_Momentum",
+  "best_params": {
+    "lr": 0.0013292918943162175,
+    "momentum": 0.9658500101408589
+  },
+  "timestamp": "2026-03-08T03:08:02.059539",
+  "metadata": {
+    "best_val_acc": 5368373.333333333,
+    "n_trials": 5,
+    "epochs": 1,
+    "seed": 42
+  }
+}

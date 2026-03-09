@@ -1,0 +1,7 @@
+seed,optimizer,weight_decay,final_train_loss,final_test_accuracy,convergence_epoch,diverged,divergence_reason
+42,Adam,0.0,0.1426103076716264,95.88,10,False,None
+42,AdamW,0.01,0.13952841301759084,95.8,10,False,None
+123,Adam,0.0,0.14685548270543416,96.02,10,False,None
+123,AdamW,0.01,0.1448064242442449,95.82,10,False,None
+456,Adam,0.0,0.14677756878932316,94.61,10,False,None
+456,AdamW,0.01,0.13884129035870235,94.83,10,False,None

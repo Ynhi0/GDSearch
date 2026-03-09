@@ -1,6 +1,0 @@
-Optimizer/Config,Final Loss,Loss Std,Final Test Acc (%),Acc Std (%),Speed (iters/sec)
-Adam_trajectory,0.0000,N/A,1.0000,0.0000,1000.0000
-RMSProp_trajectory,0.0013,N/A,1.0000,0.0000,1000.0000
-SGD_Momentum_0.5_trajectory,0.0000,N/A,1.0000,0.0000,1000.0000
-SGD_Momentum_0.9_trajectory,0.0000,N/A,1.0000,0.0000,1000.0000
-SGD_trajectory,0.0000,N/A,1.0000,0.0000,1000.0000

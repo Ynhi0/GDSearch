@@ -129,7 +129,7 @@ results_proposal_full_20260223_v2\experiments\lr_ablation\SGD_Momentum_lr3.0e-04
 results_proposal_full_20260223_v2\experiments\lr_ablation\SGD_Momentum_lr3.0e-04_seed42.csv,lr_ablation,4701,has_nan,37642,0,4690.0,True,True
 results_proposal_full_20260223_v2\experiments\lr_ablation\SGD_Momentum_lr3.0e-04_seed456.csv,lr_ablation,4701,has_nan,37642,0,4690.0,True,True
 results_proposal_full_20260223_v2\experiments\lr_ablation\SGD_Momentum_lr3.0e-04_seed789.csv,lr_ablation,4701,has_nan,37642,0,4690.0,True,True
-results_proposal_full_20260223_v2\experiments\missing_ablations\gradient_clipping_ablation.csv,missing_ablations,50,has_nan,10,0,2021.0,False,True
+results_proposal_full_20260223_v2\experiments\missing_ablations\gradient_clipping_ablation.csv,missing_ablations,15,has_nan,3,0,456.0,False,True
 results_proposal_full_20260223_v2\experiments\optimizer_comparison\optimizer_comparison_status.csv,optimizer_comparison,1,no_metric_cols,0,0,0.0,False,False
 results_proposal_full_20260223_v2\experiments\saddle_escape\saddle_escape_summary.csv,saddle_escape,3,has_nan,3,0,600.0,True,True
 results_proposal_full_20260223_v2\experiments\stochastic_2d_integrity\gd_vs_sgd_comparison.csv,stochastic_2d_integrity,35,has_nan,15,0,2000.0,True,True

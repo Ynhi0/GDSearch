@@ -603,8 +603,10 @@ def run_dropout_ablation(
 
 def create_ablation_plots(df: pd.DataFrame, title: str, output_dir: str, filename: str):
     """Create standardized ablation study plots"""
-    # Determine x-axis column (first column after 'Seed')
-    x_col = [c for c in df.columns if c != 'Seed'][0]
+    # Determine x-axis column.
+    # Prefer numeric Clip_Value for gradient clipping to avoid string values like 'None'.
+    candidate_cols = [c for c in df.columns if c != 'Seed']
+    x_col = 'Clip_Value' if 'Clip_Value' in candidate_cols else candidate_cols[0]
 
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
     fig.suptitle(f'{title} Ablation Study on MNIST', fontsize=16, fontweight='bold')

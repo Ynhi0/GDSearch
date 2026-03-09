@@ -1118,17 +1118,22 @@ class AdaBoundWrapper(Optimizer):
         # Flag for OOM handler - AdaBound does not require closure
         self.requires_closure = False
 
-        # Create separate optimizer for each parameter group
+        # Create separate optimizer map for each parameter group and parameter tensor.
+        # A single CustomAdaBound instance cannot be shared across differently shaped
+        # tensors because it stores shape-specific running moments.
         self.custom_opts = {}
         for group_id, group in enumerate(self.param_groups):
-            self.custom_opts[group_id] = CustomAdaBound(
-                lr=group['lr'],
-                beta1=group['beta1'],
-                beta2=group['beta2'],
-                final_lr=group['final_lr'],
-                epsilon=group['epsilon'],
-                gamma=group['gamma']
-            )
+            per_param_opts = {}
+            for p in group['params']:
+                per_param_opts[id(p)] = CustomAdaBound(
+                    lr=group['lr'],
+                    beta1=group['beta1'],
+                    beta2=group['beta2'],
+                    final_lr=group['final_lr'],
+                    epsilon=group['epsilon'],
+                    gamma=group['gamma']
+                )
+            self.custom_opts[group_id] = per_param_opts
 
     def step(self, closure=None) -> Optional[float]:  # type: ignore[override]
         loss = None
@@ -1136,11 +1141,24 @@ class AdaBoundWrapper(Optimizer):
             loss = closure()
 
         for group_id, group in enumerate(self.param_groups):
-            opt = self.custom_opts[group_id]
+            per_param_opts = self.custom_opts.setdefault(group_id, {})
 
             for p in group['params']:
                 if p.grad is None:
                     continue
+
+                param_id = id(p)
+                opt = per_param_opts.get(param_id)
+                if opt is None:
+                    opt = CustomAdaBound(
+                        lr=group['lr'],
+                        beta1=group['beta1'],
+                        beta2=group['beta2'],
+                        final_lr=group['final_lr'],
+                        epsilon=group['epsilon'],
+                        gamma=group['gamma']
+                    )
+                    per_param_opts[param_id] = opt
 
                 # Get gradient as numpy
                 grad = p.grad.data.cpu().numpy()

@@ -68,6 +68,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+def _ensure_dynamics_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Ensure optional dynamics columns exist for downstream schema stability."""
+    for col in ['mean_speed', 'oscillation_index', 'smoothness']:
+        if col not in df.columns:
+            df[col] = np.nan
+    return df
+
 # Import dynamics tracking with runtime-safe imports
 HAS_DYNAMICS: bool = False
 _TrainingDynamicsTracker: Optional[type] = None
@@ -252,8 +260,8 @@ def train_with_beta(
             train_correct += predicted.eq(target).sum().item()
 
         # BUG FIX: Divide by total samples, not number of batches
-        train_loss /= train_total
-        train_acc = 100. * train_correct / train_total
+        train_loss /= max(1, train_total)
+        train_acc = 100. * train_correct / max(1, train_total)
 
         # Compute param norm (tensor-safe)
         param_squares = [ (p.detach().norm() ** 2) for p in model.parameters() ]
@@ -343,12 +351,15 @@ def train_with_beta(
         dynamics_metrics['oscillation_index'] = np.std(oscillations)
         dynamics_metrics['final_loss_std'] = np.std(losses[-5:])  # Stability at end
 
+    final_train_acc = history['train_acc'][-1] if history['train_acc'] else np.nan
+    final_train_loss = history['train_loss'][-1] if history['train_loss'] else np.nan
+
     return {
         'beta': beta,
         'optimizer': optimizer_name,
-        'final_train_acc': history['train_acc'][-1],
+        'final_train_acc': final_train_acc,
         'final_test_acc': final_test_acc,
-        'final_train_loss': history['train_loss'][-1],
+        'final_train_loss': final_train_loss,
         'final_test_loss': test_loss,
         'history': history,
         'dynamics_metrics': dynamics_metrics,
@@ -453,6 +464,7 @@ def run_momentum_beta_sensitivity(
         rows.append(row)
 
     df = pd.DataFrame(rows)
+    df = _ensure_dynamics_columns(df)
 
     # Save results
     csv_path = os.path.join(output_dir, 'momentum_beta_sensitivity_mnist.csv')
@@ -536,6 +548,7 @@ def run_adam_beta_sensitivity(
         rows.append(row)
 
     df = pd.DataFrame(rows)
+    df = _ensure_dynamics_columns(df)
 
     # Save results
     csv_path = os.path.join(output_dir, 'adam_beta_sensitivity_mnist.csv')
@@ -676,6 +689,7 @@ def run_adam_beta2_sensitivity(
         rows.append(row)
 
     df = pd.DataFrame(rows)
+    df = _ensure_dynamics_columns(df)
 
     # Save results
     csv_path = os.path.join(output_dir, 'adam_beta2_sensitivity_mnist.csv')
@@ -825,6 +839,7 @@ def run_adam_beta1_beta2_grid(
         rows.append(row)
 
     df = pd.DataFrame(rows)
+    df = _ensure_dynamics_columns(df)
 
     # Save results
     csv_path = os.path.join(output_dir, 'adam_beta1_beta2_grid_mnist.csv')

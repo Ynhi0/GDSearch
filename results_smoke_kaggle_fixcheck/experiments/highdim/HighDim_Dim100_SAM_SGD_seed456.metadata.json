@@ -1,0 +1,44 @@
+{
+  "timestamp": "2026-03-09T09:44:28.542378",
+  "dataset": "HighDim",
+  "model": "Dim100",
+  "optimizer": "SAM_SGD",
+  "seed": 456,
+  "rows": 153,
+  "rows_original": 153,
+  "history_thinning_stride": 1,
+  "params": {
+    "dimension": 100,
+    "optimizer": "SAM_SGD",
+    "max_iter": 500
+  },
+  "model_path": null,
+  "system": {
+    "python_version": "3.13.7 (tags/v3.13.7:bcee1c3, Aug 14 2025, 14:15:11) [MSC v.1944 64 bit (AMD64)]",
+    "torch_version": "2.9.1+cu128",
+    "cuda_available": true,
+    "cpu_count": 16,
+    "total_memory_gb": 15.730949401855469,
+    "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
+    "gpu_memory_gb": 3.99951171875,
+    "cuda_version": "12.8"
+  },
+  "provenance": {
+    "timestamp": "2026-03-09T09:44:28.543720",
+    "python_version": "3.13.7 (tags/v3.13.7:bcee1c3, Aug 14 2025, 14:15:11) [MSC v.1944 64 bit (AMD64)]",
+    "pytorch_version": "2.9.1+cu128",
+    "command_line": "run_all_kaggle.py --experiments highdim,ablation_comprehensive,beta_sensitivity_training --seeds 42,123,456 --ultra-quick --no-mlflow --results-dir results_smoke_kaggle_fixcheck",
+    "working_dir": "F:\\GDSearch",
+    "git_commit": "a384f1a7f5079e27e5f53bf782449468ef25c31a",
+    "git_dirty": true,
+    "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
+    "gpu_count": 1,
+    "gpu_memory_gb": 3.99951171875,
+    "cuda_version": "12.8",
+    "nvidia_driver": "581.80"
+  },
+  "completed": true,
+  "tainted": false,
+  "run_signature": "096fe7ba34d33d17058c8261461bac790ef47ae7d0bea0ff103087929a8ccd1a",
+  "device": "cuda"
+}

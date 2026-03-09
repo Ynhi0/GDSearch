@@ -1,0 +1,7 @@
+seed,optimizer,adaptive_lr,final_train_loss,final_test_accuracy,convergence_epoch,diverged,divergence_reason
+42,SGD_Momentum,False,0.3148704276561737,91.21,10,False,None
+42,Adam,True,0.14173154114087422,95.73,10,False,None
+123,SGD_Momentum,False,0.3535740768750509,91.39,10,False,None
+123,Adam,True,0.1443582328716914,95.84,10,False,None
+456,SGD_Momentum,False,0.312321884393692,90.6,10,False,None
+456,Adam,True,0.1380064270099004,95.12,10,False,None

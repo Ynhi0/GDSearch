@@ -1,0 +1,19 @@
+{
+  "dataset": "Medical",
+  "model": "UNet2D",
+  "optimizer": "AdaBound",
+  "best_params": {
+    "lr": 0.0001329291894316216,
+    "beta1": 0.9450714306409915,
+    "beta2": 0.9731261947869594,
+    "final_lr": 0.30334265725654797,
+    "gamma": 0.0002051338263087451
+  },
+  "timestamp": "2026-03-08T08:17:38.533490",
+  "metadata": {
+    "best_val_acc": 5368373.333333333,
+    "n_trials": 5,
+    "epochs": 2,
+    "seed": 42
+  }
+}

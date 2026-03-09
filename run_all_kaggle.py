@@ -144,7 +144,7 @@ def safe_print(*args, **kwargs):
 
 
 # Import typing items at once for consistency
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
 from pathlib import Path
 
 # Use centralized helper to compute gradient norms for consistency
@@ -353,6 +353,33 @@ except ImportError:
 
 # Plot helpers
 from src.utils.plot_helpers import arr_to_numpy_float
+try:
+    from src.utils.num_utils import safe_to_float as _safe_to_float_base
+except Exception:
+    _safe_to_float_base = None
+
+
+def safe_to_float(x: Any, default: float = float("nan")) -> float:
+    """Project-wide float coercion helper with optional default fallback.
+
+    This wrapper keeps backward compatibility for call-sites that use
+    ``safe_to_float(value, default=...)`` while delegating conversion logic to
+    ``src.utils.num_utils.safe_to_float`` when available.
+    """
+    try:
+        if _safe_to_float_base is not None:
+            v = _safe_to_float_base(x)
+        else:
+            v = float(x)
+    except Exception:
+        return float(default)
+
+    try:
+        if np.isfinite(v):
+            return float(v)
+    except Exception:
+        pass
+    return float(default)
 
 
 # =============================================================================
@@ -2380,7 +2407,8 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
 def run_scheduler_ablation(
     dataset_name: str = 'MNIST',
     results_dir: Union[str, Path] = 'results/scheduler_ablation',
-    seeds: Optional[List[int]] = None
+    seeds: Optional[List[int]] = None,
+    resume: bool = False,
 ):
     """
     Ablation Study B: Learning Rate Scheduler Impact
@@ -2392,6 +2420,7 @@ def run_scheduler_ablation(
         dataset_name: 'MNIST' or 'CIFAR10'
         results_dir: Output directory for ablation results (Path or str)
         seeds: List of random seeds for reproducibility (default: canonical 10-seed set)
+        resume: If True, skip already-completed (optimizer, scheduler, seed) runs.
     """
     if seeds is None:
         seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
@@ -2413,8 +2442,117 @@ def run_scheduler_ablation(
         (OptimizerNames.ADAMW, 'StepLR')
     ]
 
+    csv_path = results_dir / f'{dataset_name}_scheduler_ablation_seeds{"_".join(map(str, seeds))}.csv'
+
+    def _canonical_record_df(df_in: pd.DataFrame) -> pd.DataFrame:
+        needed = ['dataset', 'optimizer', 'scheduler', 'seed', 'final_loss', 'final_accuracy']
+        if df_in is None or df_in.empty:
+            return pd.DataFrame(columns=needed)
+        df = df_in.copy()
+        for col in needed:
+            if col not in df.columns:
+                df[col] = np.nan if col in {'final_loss', 'final_accuracy'} else ''
+        df['dataset'] = df['dataset'].astype(str)
+        df['optimizer'] = df['optimizer'].astype(str)
+        df['scheduler'] = df['scheduler'].astype(str)
+        df['seed'] = pd.to_numeric(df['seed'], errors='coerce').astype('Int64')
+        df['final_loss'] = pd.to_numeric(df['final_loss'], errors='coerce')
+        df['final_accuracy'] = pd.to_numeric(df['final_accuracy'], errors='coerce')
+        return df[needed].dropna(subset=['seed'])
+
+    def _run_key(row_obj: pd.Series) -> Tuple[str, str, int]:
+        return (str(row_obj['optimizer']), str(row_obj['scheduler']), int(row_obj['seed']))
+
+    def _read_existing_records() -> Dict[Tuple[str, str, int], Dict[str, Any]]:
+        recs: Dict[Tuple[str, str, int], Dict[str, Any]] = {}
+
+        # 1) Load existing scheduler summary files first.
+        for summary_path in sorted(results_dir.glob(f"{dataset_name}_scheduler_ablation_seeds*.csv")):
+            try:
+                sdf = _canonical_record_df(pd.read_csv(summary_path))
+            except Exception:
+                logging.debug("Could not read scheduler summary CSV %s", summary_path, exc_info=True)
+                continue
+            for _, row in sdf.iterrows():
+                key = _run_key(row)
+                if not np.isfinite(float(row['final_loss'])) or not np.isfinite(float(row['final_accuracy'])):
+                    continue
+                recs[key] = {
+                    'dataset': dataset_name,
+                    'optimizer': str(row['optimizer']),
+                    'scheduler': str(row['scheduler']),
+                    'seed': int(row['seed']),
+                    'final_loss': float(row['final_loss']),
+                    'final_accuracy': float(row['final_accuracy']),
+                }
+
+        # 2) Recover from per-run artifacts if summaries are missing/partial.
+        art_dir = results_dir / 'schedulerablation'
+        artifact_pat = re.compile(
+            rf"^SchedulerAblation_{re.escape(dataset_name)}_(?P<optimizer>.+)_(?P<scheduler>CosineAnnealingLR|StepLR)_seed(?P<seed>\d+)\.csv$"
+        )
+        if art_dir.exists():
+            for art_csv in art_dir.glob(f"SchedulerAblation_{dataset_name}_*_seed*.csv"):
+                m = artifact_pat.match(art_csv.name)
+                if not m:
+                    continue
+                opt_name = str(m.group('optimizer'))
+                sched_name = str(m.group('scheduler'))
+                seed_val = int(m.group('seed'))
+                key = (opt_name, sched_name, seed_val)
+                if key in recs:
+                    continue
+                final_loss = np.nan
+                final_acc = np.nan
+                meta_path = art_csv.with_suffix('.metadata.json')
+                if meta_path.exists():
+                    try:
+                        meta = json.loads(meta_path.read_text(encoding='utf-8'))
+                        params = meta.get('params', {}) if isinstance(meta, dict) else {}
+                        final_loss = safe_to_float(
+                            params.get('final_test_loss', params.get('final_loss', np.nan)),
+                            default=np.nan,
+                        )
+                        final_acc = safe_to_float(
+                            params.get('final_test_accuracy', params.get('final_accuracy', np.nan)),
+                            default=np.nan,
+                        )
+                    except Exception:
+                        logging.debug("Could not parse scheduler metadata %s", meta_path, exc_info=True)
+                if (not np.isfinite(final_loss)) or (not np.isfinite(final_acc)):
+                    try:
+                        hist = pd.read_csv(art_csv)
+                        if 'loss' in hist.columns:
+                            final_loss = safe_to_float(pd.to_numeric(hist['loss'], errors='coerce').dropna().iloc[-1], default=np.nan)
+                        if 'val_acc' in hist.columns:
+                            final_acc = safe_to_float(pd.to_numeric(hist['val_acc'], errors='coerce').dropna().iloc[-1], default=np.nan)
+                    except Exception:
+                        logging.debug("Could not recover scheduler metrics from artifact %s", art_csv, exc_info=True)
+                if np.isfinite(final_loss) and np.isfinite(final_acc):
+                    recs[key] = {
+                        'dataset': dataset_name,
+                        'optimizer': opt_name,
+                        'scheduler': sched_name,
+                        'seed': seed_val,
+                        'final_loss': float(final_loss),
+                        'final_accuracy': float(final_acc),
+                    }
+        return recs
+
+    def _write_scheduler_summary(records: Dict[Tuple[str, str, int], Dict[str, Any]]) -> pd.DataFrame:
+        if records:
+            df_out = pd.DataFrame(list(records.values()))
+            df_out = df_out.sort_values(['optimizer', 'scheduler', 'seed']).reset_index(drop=True)
+        else:
+            df_out = pd.DataFrame(columns=['dataset', 'optimizer', 'scheduler', 'seed', 'final_loss', 'final_accuracy'])
+        df_out.to_csv(csv_path, index=False)
+        return df_out
+
+    # Resume-safe accumulator keyed by (optimizer, scheduler, seed)
+    existing_records = _read_existing_records()
+    scheduler_records: Dict[Tuple[str, str, int], Dict[str, Any]] = dict(existing_records)
+
     # Run scheduler ablation with multi-seed support
-    scheduler_results = []
     for seed in seeds:
         set_seed(seed)
         print(f"\n{'='*80}")
@@ -2462,6 +2600,10 @@ def run_scheduler_ablation(
 
         for opt_name, sched_name in pairs:
             print(f"\nTesting {opt_name} + {sched_name} (seed={seed})")
+            run_key = (str(opt_name), str(sched_name), int(seed))
+            if resume and run_key in scheduler_records:
+                print(f"  Skipping {opt_name} + {sched_name} (seed={seed}) [already completed]")
+                continue
             history: List[Dict[str, float]] = []
 
             # Create model
@@ -2470,10 +2612,22 @@ def run_scheduler_ablation(
 
             # Create optimizer
             if opt_name == OptimizerNames.SGD:
-                sgd_params = get_default_hyperparameters(OptimizerNames.SGD, 'resnet_cifar10')
+                sgd_params = get_default_hyperparameters(OptimizerNames.SGD, 'resnet_cifar10').copy()
+                # Strip Adam-specific leftovers if present in shared configs.
+                sgd_params.pop('beta1', None)
+                sgd_params.pop('beta2', None)
+                if 'epsilon' in sgd_params and 'eps' not in sgd_params:
+                    sgd_params['eps'] = sgd_params.pop('epsilon')
                 optimizer = torch.optim.SGD(model.parameters(), **sgd_params)
             elif opt_name == OptimizerNames.ADAMW:
-                adamw_params = get_default_hyperparameters(OptimizerNames.ADAMW, 'resnet_cifar10')
+                adamw_params = get_default_hyperparameters(OptimizerNames.ADAMW, 'resnet_cifar10').copy()
+                # Torch AdamW expects `betas=(beta1,beta2)`, not separate beta keys.
+                beta1 = adamw_params.pop('beta1', None)
+                beta2 = adamw_params.pop('beta2', None)
+                if beta1 is not None or beta2 is not None:
+                    adamw_params['betas'] = (beta1 if beta1 is not None else 0.9, beta2 if beta2 is not None else 0.999)
+                if 'epsilon' in adamw_params and 'eps' not in adamw_params:
+                    adamw_params['eps'] = adamw_params.pop('epsilon')
                 optimizer = torch.optim.AdamW(model.parameters(), **adamw_params)
             else:
                 raise ValueError(f"Unsupported optimizer: {opt_name}. Expected {OptimizerNames.SGD!r} or {OptimizerNames.ADAMW!r}.")
@@ -2550,26 +2704,34 @@ def run_scheduler_ablation(
             print(f"  Final Test: Loss={final_test_loss:.4f}, Acc={final_test_accuracy:.2f}%")
 
             # Save result with seed
-            scheduler_results.append({
+            scheduler_records[run_key] = {
                 'dataset': dataset_name,
                 'optimizer': opt_name,
                 'scheduler': sched_name,
                 'seed': seed,
                 'final_loss': final_test_loss,
                 'final_accuracy': final_test_accuracy
-            })
+            }
 
             # Save per-run artifact with full trajectory data
             try:
-                params = {'scheduler': sched_name}
-                save_run_artifacts(results_dir, 'SchedulerAblation', dataset_name, opt_name, seed, history, params)
+                params = {
+                    'scheduler': sched_name,
+                    'final_test_loss': final_test_loss,
+                    'final_test_accuracy': final_test_accuracy,
+                    'final_loss': final_test_loss,
+                    'final_accuracy': final_test_accuracy,
+                }
+                artifact_opt_name = f"{opt_name}_{sched_name}"
+                save_run_artifacts(results_dir, 'SchedulerAblation', dataset_name, artifact_opt_name, seed, history, params)
             except Exception as e:
                 logging.debug(f"Failed to save scheduler ablation artifact: {e}")
 
+            # Flush progress after each successful run to survive long-job interruption.
+            _write_scheduler_summary(scheduler_records)
+
     # Save to CSV (one file with all seeds)
-    df = pd.DataFrame(scheduler_results)
-    csv_path = os.path.join(results_dir, f'{dataset_name}_scheduler_ablation_seeds{"_".join(map(str, seeds))}.csv')
-    df.to_csv(csv_path, index=False)
+    df = _write_scheduler_summary(scheduler_records)
     print(f"\nScheduler ablation results saved to {csv_path}")
 
     # Try visualization (Kaggle-safe)
@@ -2577,8 +2739,14 @@ def run_scheduler_ablation(
         _, ax = plt.subplots(1, 1, figsize=(10, 6))
 
         x_labels = [f"{opt}\n{sched}" for opt, sched in pairs]
+        agg = (
+            df.groupby(['optimizer', 'scheduler'])['final_accuracy']
+            .agg(['mean', 'std', 'count'])
+            .reindex(pd.MultiIndex.from_tuples(pairs, names=['optimizer', 'scheduler']))
+            .fillna({'mean': np.nan, 'std': np.nan, 'count': 0})
+        )
         # Coerce to numpy float array for plotting and to satisfy static typing
-        accuracies = np.asarray(df['final_accuracy'].to_numpy(), dtype=float)
+        accuracies = np.asarray(agg['mean'].to_numpy(), dtype=float)
 
         bars = ax.bar(range(len(x_labels)), accuracies, color=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'])
         ax.set_xticks(range(len(x_labels)))
@@ -2588,12 +2756,18 @@ def run_scheduler_ablation(
         ax.grid(True, axis='y', alpha=0.3)
 
         # Add value labels on bars
-        for bar, acc in zip(bars, accuracies):
-            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5,
-                   f'{acc:.2f}%', ha='center', va='bottom', fontsize=9)
+        counts = np.asarray(agg['count'].to_numpy(), dtype=float)
+        for bar, acc, n in zip(bars, accuracies, counts):
+            if np.isfinite(acc):
+                label = f'{acc:.2f}%\n(n={int(n)})'
+                y = bar.get_height() + 0.5
+            else:
+                label = f'NA\n(n={int(n)})'
+                y = 0.5
+            ax.text(bar.get_x() + bar.get_width()/2, y, label, ha='center', va='bottom', fontsize=9)
 
         plt.tight_layout()
-        plot_path = os.path.join(results_dir, f'{dataset_name}_scheduler_ablation.png')
+        plot_path = str(results_dir / f'{dataset_name}_scheduler_ablation.png')
         try:
             plt.savefig(plot_path, dpi=150, bbox_inches='tight')
             print(f"Visualization saved to {plot_path}")
@@ -2765,6 +2939,52 @@ def dice_coefficient(pred, target, smooth=1e-6):
 # ==============================================================================
 # HYPERPARAMETER TUNING FUNCTIONS
 # ==============================================================================
+
+@contextmanager
+def _deterministic_warn_only_for_tuning(device) -> Iterator[None]:
+    """Temporarily relax strict deterministic mode to warn-only during tuning on CUDA.
+
+    Some CUDA kernels used by CrossEntropy/NLL (notably 2D variants) may not have
+    deterministic implementations in certain PyTorch/CUDA builds. When global
+    deterministic mode is enabled with strict errors, Optuna trials can fail
+    immediately. This context keeps determinism enabled but switches to warn-only
+    for the trial scope, then restores the previous strict setting.
+    """
+    try:
+        is_cuda = bool(getattr(device, 'type', '') == 'cuda')
+    except Exception:
+        is_cuda = False
+
+    if not is_cuda:
+        yield
+        return
+
+    are_det_enabled = getattr(torch, 'are_deterministic_algorithms_enabled', None)
+    is_warn_only_enabled = getattr(torch, 'is_deterministic_algorithms_warn_only_enabled', None)
+
+    det_enabled = bool(are_det_enabled()) if callable(are_det_enabled) else False
+    warn_only_enabled = bool(is_warn_only_enabled()) if callable(is_warn_only_enabled) else False
+
+    switched = False
+    if det_enabled and not warn_only_enabled:
+        try:
+            torch.use_deterministic_algorithms(True, warn_only=True)
+            switched = True
+            logging.warning(
+                "Deterministic mode is strict on CUDA; switching to warn_only=True "
+                "during hyperparameter tuning trial to tolerate unsupported kernels."
+            )
+        except Exception:
+            logging.debug("Could not switch deterministic mode to warn_only during tuning", exc_info=True)
+
+    try:
+        yield
+    finally:
+        if switched:
+            try:
+                torch.use_deterministic_algorithms(True, warn_only=False)
+            except Exception:
+                logging.debug("Could not restore strict deterministic mode after tuning trial", exc_info=True)
 
 def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader,
                         device, epochs=3, n_trials=10, seed=42, tuning_cache=None,
@@ -2952,45 +3172,50 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader
         # Use module-level SAMWrapper imported at top level
         requires_closure = isinstance(optimizer, SAMWrapper)
 
-        # Quick training
-        for epoch in range(epochs):
-            model.train()
-            for inputs, targets in train_loader:
-                inputs, targets = inputs.to(device), targets.to(device)
+        with _deterministic_warn_only_for_tuning(device):
+            # Quick training
+            for epoch in range(epochs):
+                model.train()
+                for inputs, targets in train_loader:
+                    inputs, targets = inputs.to(device), targets.to(device)
+                    if isinstance(criterion, nn.CrossEntropyLoss):
+                        if targets.ndim > 1:
+                            targets = targets.view(targets.size(0), -1)[:, 0]
+                        targets = targets.long()
 
-                if requires_closure:
-                    # SAMWrapper requires closure for adversarial gradient computation
-                    def closure(_inputs=inputs, _targets=targets):
+                    if requires_closure:
+                        # SAMWrapper requires closure for adversarial gradient computation
+                        def closure(_inputs=inputs, _targets=targets):
+                            optimizer.zero_grad()
+                            outputs = model(_inputs)
+                            loss = criterion(outputs, _targets)
+                            validate_loss(loss, context="Tuning objective SAM")
+                            loss.backward()
+                            return loss
+                        loss = optimizer.step(closure)
+                    else:
+                        # Standard optimizer path
                         optimizer.zero_grad()
-                        outputs = model(_inputs)
-                        loss = criterion(outputs, _targets)
-                        validate_loss(loss, context="Tuning objective SAM")
+                        outputs = model(inputs)
+                        loss = criterion(outputs, targets)
+                        validate_loss(loss, context="Tuning objective")
                         loss.backward()
-                        return loss
-                    loss = optimizer.step(closure)
-                else:
-                    # Standard optimizer path
-                    optimizer.zero_grad()
-                    outputs = model(inputs)
-                    loss = criterion(outputs, targets)
-                    validate_loss(loss, context="Tuning objective")
-                    loss.backward()
-                    optimizer.step()
+                        optimizer.step()
 
-                # Gradient health monitoring
-                try:
-                    grad_norm = 0.0
-                    for param in model.parameters():
-                        if param.grad is not None:
-                            if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
-                                logging.warning(f"NaN/Inf gradient detected in sanity check epoch {epoch}")
-                                break
-                            grad_norm += param.grad.data.norm(2).item() ** 2
-                    grad_norm = grad_norm ** 0.5
-                    if grad_norm > 1e3:
-                        logging.warning(f"Large gradient norm in sanity check: {grad_norm:.2e}")
-                except Exception as e:
-                    logging.debug(f"Gradient check failed: {e}")
+                    # Gradient health monitoring
+                    try:
+                        grad_norm = 0.0
+                        for param in model.parameters():
+                            if param.grad is not None:
+                                if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
+                                    logging.warning(f"NaN/Inf gradient detected in sanity check epoch {epoch}")
+                                    break
+                                grad_norm += param.grad.data.norm(2).item() ** 2
+                        grad_norm = grad_norm ** 0.5
+                        if grad_norm > 1e3:
+                            logging.warning(f"Large gradient norm in sanity check: {grad_norm:.2e}")
+                    except Exception as e:
+                        logging.debug(f"Gradient check failed: {e}")
 
         # Evaluate
         model.eval()
@@ -2999,6 +3224,10 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader
         with torch.no_grad():
             for inputs, targets in val_loader:
                 inputs, targets = inputs.to(device), targets.to(device)
+                if isinstance(criterion, nn.CrossEntropyLoss):
+                    if targets.ndim > 1:
+                        targets = targets.view(targets.size(0), -1)[:, 0]
+                    targets = targets.long()
                 outputs = model(inputs)
                 _, predicted = outputs.max(1)
                 correct += predicted.eq(targets).sum().item()
@@ -3019,7 +3248,26 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader
         pruner=optuna.pruners.MedianPruner()
     )
 
-    study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
+    try:
+        study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
+    except Exception as tuning_err:
+        logging.warning(
+            "Tuning failed for %s on %s/%s; falling back to defaults. Error: %s",
+            optimizer_name,
+            dataset_name,
+            model_name,
+            tuning_err,
+        )
+        return get_default_hyperparameters(optimizer_name)
+
+    if len(study.trials) == 0 or study.best_trial is None:
+        logging.warning(
+            "No successful tuning trial for %s on %s/%s; falling back to defaults.",
+            optimizer_name,
+            dataset_name,
+            model_name,
+        )
+        return get_default_hyperparameters(optimizer_name)
 
     best_params = study.best_params
     best_value = study.best_value
@@ -6110,6 +6358,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
     # Import new optimizers
     from src.core.pytorch_optimizers import AdaBoundWrapper, RAdamWrapper, LAMBWrapper
     from src.core.medical_data_utils import get_medical_datasets
+    from src.core.models import SimpleCNN
 
     # Configuration
     train_bs, test_bs = get_batch_size('medical', default_train=4, default_test=4)
@@ -6149,6 +6398,34 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
             raise ValueError("STRICT MODE: Synthetic medical data is not allowed when --require-medmnist is set")
         logging.warning("  Using synthetic data - NOT RECOMMENDED for research")
 
+    def _infer_task_mode(train_ds_local, stage: str) -> str:
+        """Infer whether targets are segmentation masks or classification labels."""
+        try:
+            sample = train_ds_local[0]
+            sample_target = sample[1] if isinstance(sample, (tuple, list)) and len(sample) > 1 else None
+            target_tensor = sample_target if torch.is_tensor(sample_target) else torch.as_tensor(sample_target)
+            if target_tensor.ndim >= 2:
+                logging.info("Medical dataset at %s stage detected SEGMENTATION targets (shape=%s)", stage, tuple(target_tensor.shape))
+                return 'segmentation'
+            logging.info("Medical dataset at %s stage detected CLASSIFICATION targets (shape=%s)", stage, tuple(target_tensor.shape))
+            return 'classification'
+        except Exception as sample_err:
+            logging.warning("Could not inspect %s medical dataset target shape: %s; defaulting to segmentation", stage, sample_err)
+            return 'segmentation'
+
+    def _infer_num_classes(train_ds_local) -> int:
+        """Infer class count for classification datasets."""
+        for attr in ('labels', 'targets'):
+            values = getattr(train_ds_local, attr, None)
+            if values is not None:
+                try:
+                    arr = np.asarray(values)
+                    if arr.size > 0:
+                        return int(np.max(arr)) + 1
+                except Exception:
+                    pass
+        return 10
+
 
     # Default LRs for each optimizer
     default_lrs = {
@@ -6182,6 +6459,8 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
             medmnist_name=medmnist_name,
             kaggle_path=kaggle_path
         )
+        medical_task_mode = _infer_task_mode(tune_train_ds, stage='tuning')
+        num_classes = _infer_num_classes(tune_train_ds) if medical_task_mode == 'classification' else 1
 
         # Create validation split for tuning
         val_split = 0.15
@@ -6217,11 +6496,17 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
         logging.info(f"Tuning {len(default_lrs)} optimizers with n_trials={n_trials}, epochs={tune_epochs}")
 
         for opt_name in default_lrs.keys():
+            if medical_task_mode == 'classification':
+                model_factory = lambda ch=n_channels, nc=num_classes: SimpleCNN(num_classes=nc, in_channels=ch)
+                tuning_model_name = "MedicalSimpleCNN"
+            else:
+                model_factory = lambda ch=n_channels: UNet2D(in_channels=ch, out_channels=1, features=[32, 64, 128])
+                tuning_model_name = "UNet2D"
             tuned_params[opt_name] = quick_tune_optimizer(
-                opt_name, lambda ch=n_channels: UNet2D(in_channels=ch, out_channels=1, features=[32, 64, 128]),
+                opt_name, model_factory,
                 tune_train_loader, tune_val_loader,
                 device, epochs=tune_epochs, n_trials=n_trials, seed=tune_seed,
-                tuning_cache=tuning_cache, dataset_name="Medical", model_name="UNet2D"
+                tuning_cache=tuning_cache, dataset_name="Medical", model_name=tuning_model_name
             )
 
         logging.info("\nMedical tuning complete!\n")
@@ -6239,11 +6524,6 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
         print("-" * 50)
 
         for seed in seeds:
-            # Check if this specific experiment is already completed
-            if resume and is_experiment_completed(results_dir, 'Medical', 'UNet2D', opt_name, seed):
-                logging.info(f"Skipping {opt_name} seed {seed} (already completed)")
-                continue
-
             set_seed(seed)
 
             # Load medical datasets (real or synthetic)
@@ -6257,6 +6537,14 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                 medmnist_name=medmnist_name,
                 kaggle_path=kaggle_path
             )
+            medical_task_mode = _infer_task_mode(train_ds, stage=f'train_seed_{seed}')
+            num_classes = _infer_num_classes(train_ds) if medical_task_mode == 'classification' else 1
+            current_model_name = 'MedicalSimpleCNN' if medical_task_mode == 'classification' else 'UNet2D'
+
+            # Check if this specific experiment is already completed
+            if resume and is_experiment_completed(results_dir, 'Medical', current_model_name, opt_name, seed):
+                logging.info(f"Skipping {opt_name} seed {seed} (already completed)")
+                continue
 
             # Create train/validation split
             val_split = 0.10
@@ -6294,7 +6582,14 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
             except Exception as e:
                 logging.warning(f"Could not detect channels from data: {e}. Using n_channels={n_channels}")
 
-            model = UNet2D(in_channels=n_channels, out_channels=1, features=[32, 64, 128])
+            if medical_task_mode == 'classification':
+                model = SimpleCNN(num_classes=num_classes, in_channels=n_channels)
+                metric_label = 'Accuracy'
+                model_name_for_artifacts = current_model_name
+            else:
+                model = UNet2D(in_channels=n_channels, out_channels=1, features=[32, 64, 128])
+                metric_label = 'Dice'
+                model_name_for_artifacts = current_model_name
             model = safe_device_transfer(model, device, operation=f"Medical {opt_name} seed {seed}")
 
             # Setup optimizer with all variants
@@ -6314,7 +6609,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
             if optimizer is None:
                 raise ValueError(f"Unsupported optimizer: {opt_name}")
             # Loss function
-            criterion = nn.BCEWithLogitsLoss()
+            criterion = nn.CrossEntropyLoss() if medical_task_mode == 'classification' else nn.BCEWithLogitsLoss()
 
             # Create learning rate scheduler
             from src.core.lr_schedulers import CosineAnnealingLR
@@ -6353,13 +6648,13 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                 logging.info(f"Medical: Robust gradient handling enabled for {opt_name}")
 
             # Resume logic with compatibility validation
-            ckpt_file = f"Medical_UNet2D_{opt_name}_lr{lr}_seed{seed}.pt"
+            ckpt_file = f"Medical_{current_model_name}_{opt_name}_lr{lr}_seed{seed}.pt"
             start_epoch = 1
             history = []
             checkpoint = None  # Initialize to prevent NameError if checkpoint_manager is None
 
             if checkpoint_manager:
-                checkpoint = checkpoint_manager.load_checkpoint(ckpt_file, f"Medical_UNet2D_{opt_name}_lr{lr}_seed{seed}")
+                checkpoint = checkpoint_manager.load_checkpoint(ckpt_file, f"Medical_{current_model_name}_{opt_name}_lr{lr}_seed{seed}")
                 if checkpoint:
                     # Validate optimizer compatibility
                     if checkpoint_manager.validate_optimizer_compatibility(checkpoint, opt_name):
@@ -6403,13 +6698,19 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
 
                 for images, masks in tqdm(train_loader, desc=f"Epoch {epoch}/{epochs}"):
                     images = images.to(device)
-                    masks = masks.to(device)
+                    if medical_task_mode == 'classification':
+                        cls_targets = masks.to(device)
+                        if cls_targets.ndim > 1:
+                            cls_targets = cls_targets.view(cls_targets.size(0), -1)[:, 0]
+                        cls_targets = cls_targets.long()
+                    else:
+                        masks = masks.to(device)
 
                     if isinstance(optimizer, SAMWrapper):
                         def closure():
                             optimizer.zero_grad()  # type: ignore[union-attr]
                             outputs = model(images)
-                            loss = criterion(outputs, masks)
+                            loss = criterion(outputs, cls_targets if medical_task_mode == 'classification' else masks)
                             validate_loss(loss, step=epoch, context=f"Medical {opt_name} SAM")
                             loss.backward()
                             return loss
@@ -6419,7 +6720,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                         outputs = model(images)  # Recompute after SAM step
                     else:
                         outputs = model(images)
-                        loss = criterion(outputs, masks)
+                        loss = criterion(outputs, cls_targets if medical_task_mode == 'classification' else masks)
                         validate_loss(loss, step=epoch, context=f"Medical {opt_name}")
                         optimizer.zero_grad()
                         loss.backward()
@@ -6440,7 +6741,12 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                     from src.utils.num_utils import safe_to_float
                     loss_value = safe_to_float(loss)
                     train_loss += loss_value * images.size(0)
-                    train_dice += dice_coefficient(torch.sigmoid(outputs), masks).item() * images.size(0)
+                    if medical_task_mode == 'classification':
+                        preds = outputs.argmax(dim=1)
+                        train_metric = (preds == cls_targets).float().mean().item()
+                    else:
+                        train_metric = dice_coefficient(torch.sigmoid(outputs), masks).item()
+                    train_dice += train_metric * images.size(0)
                     train_total += images.size(0)
 
                 train_loss /= max(1, train_total)
@@ -6455,13 +6761,24 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                 with torch.no_grad():
                     for images, masks in val_loader:
                         images = images.to(device)
-                        masks = masks.to(device)
+                        if medical_task_mode == 'classification':
+                            cls_targets = masks.to(device)
+                            if cls_targets.ndim > 1:
+                                cls_targets = cls_targets.view(cls_targets.size(0), -1)[:, 0]
+                            cls_targets = cls_targets.long()
+                        else:
+                            masks = masks.to(device)
 
                         outputs = model(images)
-                        loss = criterion(outputs, masks)
+                        loss = criterion(outputs, cls_targets if medical_task_mode == 'classification' else masks)
 
                         val_loss += float(loss.item()) * images.size(0)
-                        val_dice += dice_coefficient(torch.sigmoid(outputs), masks).item() * images.size(0)
+                        if medical_task_mode == 'classification':
+                            preds = outputs.argmax(dim=1)
+                            val_metric = (preds == cls_targets).float().mean().item()
+                        else:
+                            val_metric = dice_coefficient(torch.sigmoid(outputs), masks).item()
+                        val_dice += val_metric * images.size(0)
                         val_total += images.size(0)
 
                 val_loss /= max(1, val_total)
@@ -6502,9 +6819,9 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                         f'medical_{opt_name}_seed_{seed}_val_dice': val_dice
                     }, step=epoch)
 
-                print(f"Epoch {epoch}/{epochs}: Train Loss={train_loss:.4f}, "
-                      f"Train Dice={train_dice:.4f}, Val Loss={val_loss:.4f}, "
-                      f"Val Dice={val_dice:.4f}")
+                    print(f"Epoch {epoch}/{epochs}: Train Loss={train_loss:.4f}, "
+                        f"Train {metric_label}={train_dice:.4f}, Val Loss={val_loss:.4f}, "
+                        f"Val {metric_label}={val_dice:.4f}")
 
                 # Save checkpoint with complete training state
                 if checkpoint_manager:
@@ -6529,7 +6846,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                         }
                     }
                     try:
-                        saved = checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"Medical_UNet2D_{opt_name}_lr{lr}_seed{seed}")
+                        saved = checkpoint_manager.save_checkpoint(checkpoint_data, ckpt_file, f"Medical_{current_model_name}_{opt_name}_lr{lr}_seed{seed}")
                         if not saved:
                             run_tainted = True
                             logging.warning("INTEGRITY: Checkpoint save returned False for %s seed %s; results may be incomplete or non-reproducible.", opt_name, seed)
@@ -6558,18 +6875,29 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
             with torch.no_grad():
                 for images, masks in test_loader:
                     images = images.to(device)
-                    masks = masks.to(device)
+                    if medical_task_mode == 'classification':
+                        cls_targets = masks.to(device)
+                        if cls_targets.ndim > 1:
+                            cls_targets = cls_targets.view(cls_targets.size(0), -1)[:, 0]
+                        cls_targets = cls_targets.long()
+                    else:
+                        masks = masks.to(device)
 
                     outputs = model(images)
-                    loss = criterion(outputs, masks)
+                    loss = criterion(outputs, cls_targets if medical_task_mode == 'classification' else masks)
 
                     test_loss += float(loss.item()) * images.size(0)
-                    test_dice += dice_coefficient(torch.sigmoid(outputs), masks).item() * images.size(0)
+                    if medical_task_mode == 'classification':
+                        preds = outputs.argmax(dim=1)
+                        test_metric = (preds == cls_targets).float().mean().item()
+                    else:
+                        test_metric = dice_coefficient(torch.sigmoid(outputs), masks).item()
+                    test_dice += test_metric * images.size(0)
                     test_total += images.size(0)
 
             test_loss /= max(1, test_total)
             test_dice /= max(1, test_total)
-            logging.info(f"Final Test Performance: Loss={test_loss:.4f}, Dice={test_dice:.4f}")
+            logging.info(f"Final Test Performance: Loss={test_loss:.4f}, {metric_label}={test_dice:.4f}")
 
             training_time = time.time() - start_time
 
@@ -6593,6 +6921,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
             results.append(normalize_metric_names({
                 'optimizer': opt_name,
                 'seed': seed,
+                'task_mode': medical_task_mode,
                 'final_train_loss': train_loss,
                 'final_train_dice': train_dice,
                 'final_test_loss': test_loss,
@@ -6608,7 +6937,7 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
             # Save per-run artifacts for this optimizer/seed
             try:
                 params = {'lr': lr, 'epochs': epochs, 'batch_size': batch_size}
-                save_run_artifacts(results_dir, 'Medical', 'UNet2D', opt_name, seed, history, params, device=device, exp_tracker=tracker)
+                save_run_artifacts(results_dir, 'Medical', model_name_for_artifacts, opt_name, seed, history, params, device=device, exp_tracker=tracker)
             except Exception:
                 logging.debug("Failed to save per-run Medical artifact for %s seed %s", opt_name, seed)
 
@@ -6620,6 +6949,8 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
     for opt_name in set(r['optimizer'] for r in results) if results else []:
         results_path = Path(results_dir)
         seed_csvs = list(results_path.glob(f"Medical_UNet2D_{opt_name}_seed*.csv"))
+        if not seed_csvs:
+            seed_csvs = list(results_path.glob(f"Medical_MedicalSimpleCNN_{opt_name}_seed*.csv"))
 
         if len(seed_csvs) >= 2:  # Need at least 2 seeds for statistics
             try:
@@ -6631,13 +6962,14 @@ def run_medical_experiment(results_dir="results_medical", seeds=None, quick=Fals
                 )
                 
                 # Save aggregated summary
-                agg_filename = f"Medical_UNet2D_{opt_name}_aggregated.csv"
+                model_name_for_agg = 'MedicalSimpleCNN' if any('MedicalSimpleCNN' in p.name for p in seed_csvs) else 'UNet2D'
+                agg_filename = f"Medical_{model_name_for_agg}_{opt_name}_aggregated.csv"
                 agg_path = results_path / agg_filename
                 
                 # Create summary row
                 summary_df = pd.DataFrame([{
                     'dataset': 'Medical',
-                    'model': 'UNet2D',
+                    'model': model_name_for_agg,
                     'optimizer': opt_name,
                     'mean_test_dice': agg_results['mean'],
                     'std_test_dice': agg_results['std'],
@@ -13525,8 +13857,8 @@ def run_highdim_experiment(results_dir="results_highdim", seeds=None, quick=Fals
 
                 # Create high-dimensional quadratic function
                 # f(x) = sum(x_i^2) + 0.1 * sum(x_i * x_{i+1})
-                # Keep x as a leaf tensor so optimizers can update it directly.
-                x = (torch.randn(dim, device=device) * 0.1).requires_grad_()
+                # Keep x as a true leaf parameter so optimizers can update it directly.
+                x = nn.Parameter(torch.randn(dim, device=device) * 0.1)
                 optimizer = opt_func([x])
 
                 history = []
@@ -14691,6 +15023,7 @@ Examples:
                     results_dir=str(experiments_dir / "medical"),
                     seeds=seeds,
                     quick=args.quick,
+                    skip_tuning=args.skip_tuning,
                     resume=args.resume,
                     profiler=profiler,
                     tracker=tracker,
@@ -14843,7 +15176,8 @@ Examples:
                     experiment_results['scheduler_ablation'] = run_scheduler_ablation(
                         dataset_name=dataset_name,
                         results_dir=str(experiments_dir / "scheduler_ablation"),
-                        seeds=seeds
+                        seeds=seeds,
+                        resume=args.resume,
                     )
                 except Exception as e:
                     logging.error(f"Scheduler ablation failed: {e}")

@@ -62,6 +62,11 @@ def load_optimizer_results(
     optimizer_results = {}
     results_path = Path(results_dir)
 
+    metric_aliases = {
+        'test_accuracy': ['test_accuracy', 'test_acc', 'final_test_acc', 'final_test_accuracy', 'accuracy'],
+        'test_loss': ['test_loss', 'final_test_loss', 'loss'],
+    }
+
     for optimizer in optimizers:
         # Find all CSV files for this optimizer
         pattern = f"*{optimizer}*seed*.csv"
@@ -75,9 +80,16 @@ def load_optimizer_results(
         for file in files:
             try:
                 df = pd.read_csv(file)
-                eval_df = df[df['phase'] == 'eval']
-                if not eval_df.empty:
-                    series = eval_df[metric]
+                eval_df = df[df['phase'] == 'eval'] if 'phase' in df.columns else df
+
+                metric_candidates = metric_aliases.get(metric, [metric])
+                metric_col = next((c for c in metric_candidates if c in eval_df.columns), None)
+                if metric_col is None:
+                    logging.info("  Skipping %s: metric '%s' not found", file.name, metric)
+                    continue
+
+                series = eval_df[metric_col].dropna()
+                if not series.empty:
 
                     # GAP 33 FIX: Proper aggregation method
                     if aggregation == 'best':
@@ -99,7 +111,7 @@ def load_optimizer_results(
                         else:
                             final_value = series[-1]
 
-                    metrics.append(final_value)
+                    metrics.append(float(final_value))
             except Exception as e:
                 logging.info(f"  Error reading {file.name}: {e}")
 

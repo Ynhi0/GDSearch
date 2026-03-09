@@ -1,0 +1,4 @@
+experiment,optimizer,n_runs,n_rows,loss_samples_total,loss_samples_finite,mean_loss,std_loss
+highdim,SGD,3,6,3,3,9.776136190945788e-07,7.383533882835689e-09
+highdim,Adam,3,6,3,3,9.52126716432152e-07,4.663458201023428e-08
+highdim,SAM_SGD,3,6,3,3,5.188208405115802e-07,3.009766974685782e-07

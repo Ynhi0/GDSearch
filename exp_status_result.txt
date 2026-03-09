@@ -1,0 +1,30 @@
+OK 2d csv=2d_optimization_results.csv files=121
+OK robustness csv=robustness_results.csv files=1001
+OK sam csv=sam_sensitivity_results.csv files=101
+OK ablation csv=ablation_results.csv files=101
+NO_CSV advanced_ablation files=91
+NO_CSV init_ablation files=249
+NO_CSV batch_ablation files=41
+NO_CSV lr_ablation files=120
+NO_CSV wd_ablation files=120
+NO_CSV scheduler_ablation files=84
+NO_CSV missing_ablations files=101
+NO_CSV optimizer_comparison files=1
+OK resnet csv=resnet_results.csv files=12
+OK highdim csv=highdim_results.csv files=121
+OK hyperparam_sensitivity csv=hyperparam_sensitivity_results.csv files=7
+NO_CSV convergence_validation files=7
+NO_CSV ablation_comprehensive files=36
+NO_CSV 2d_visualization files=4
+NO_CSV dynamics_overhead files=32
+NO_CSV theory_practice files=1
+NO_CSV cross_optimizer_dynamics files=3
+NO_CSV beta_sensitivity_training files=8
+OK label_noise csv=label_noise_results_cifar10_resnet18.csv files=2
+NO_CSV saddle_escape files=5
+NO_CSV hyperparameter_heatmaps files=4
+NO_CSV stochastic_2d_integrity files=3
+NO_CSV adam_adamw_comparison files=3
+
+OK (8): ['2d', 'robustness', 'sam', 'ablation', 'resnet', 'highdim', 'hyperparam_sensitivity', 'label_noise']
+NEED_RUN (19): ['advanced_ablation', 'init_ablation', 'batch_ablation', 'lr_ablation', 'wd_ablation', 'scheduler_ablation', 'missing_ablations', 'optimizer_comparison', 'convergence_validation', 'ablation_comprehensive', '2d_visualization', 'dynamics_overhead', 'theory_practice', 'cross_optimizer_dynamics', 'beta_sensitivity_training', 'saddle_escape', 'hyperparameter_heatmaps', 'stochastic_2d_integrity', 'adam_adamw_comparison']

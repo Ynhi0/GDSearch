@@ -691,11 +691,11 @@ def ablation_lookahead_effect(output_dir='results/ablation_studies', epochs=10, 
             results.append({
                 'optimizer': opt_name,
                 'seed': seed,
-                'final_train_loss': metrics['train_loss'],
-                'final_test_accuracy': metrics['test_accuracy']
+                'final_train_loss': metrics['final_train_loss'],
+                'final_test_accuracy': metrics['final_test_accuracy']
             })
 
-            print(f"  Final: loss={metrics['train_loss']:.4f}, acc={metrics['test_accuracy']:.4f}")
+            print(f"  Final: loss={metrics['final_train_loss']:.4f}, acc={metrics['final_test_accuracy']:.4f}")
 
     df = pd.DataFrame(results)
     df.to_csv(output_dir / 'ablation_lookahead.csv', index=False)

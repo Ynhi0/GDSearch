@@ -1,0 +1,8 @@
+path,experiment,rows,status,nan_cells,inf_cells,max_abs_numeric,has_axis,has_loss_like
+results_smoke_kaggle_fixcheck\experiments\ablation_comprehensive\ablation_adaptive_lr.csv,ablation_comprehensive,6,has_nan,6,0,456.0,True,True
+results_smoke_kaggle_fixcheck\experiments\ablation_comprehensive\ablation_momentum.csv,ablation_comprehensive,6,has_nan,6,0,456.0,True,True
+results_smoke_kaggle_fixcheck\experiments\ablation_comprehensive\ablation_weight_decay.csv,ablation_comprehensive,6,has_nan,6,0,456.0,True,True
+results_smoke_kaggle_fixcheck\experiments\beta_sensitivity_training\adam_beta1_beta2_grid_mnist.csv,beta_sensitivity_training,27,has_nan,81,0,456.0,False,True
+results_smoke_kaggle_fixcheck\experiments\beta_sensitivity_training\adam_beta2_sensitivity_mnist.csv,beta_sensitivity_training,9,has_nan,27,0,456.0,False,True
+results_smoke_kaggle_fixcheck\experiments\beta_sensitivity_training\adam_beta_sensitivity_mnist.csv,beta_sensitivity_training,9,has_nan,27,0,456.0,False,True
+results_smoke_kaggle_fixcheck\experiments\beta_sensitivity_training\momentum_beta_sensitivity_mnist.csv,beta_sensitivity_training,12,has_nan,36,0,456.0,False,True

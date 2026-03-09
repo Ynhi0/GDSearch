@@ -1,0 +1,48 @@
+{
+  "timestamp": "2026-03-08T01:08:20.109224",
+  "dataset": "MNIST",
+  "model": "SimpleMLP",
+  "optimizer": "RAdam",
+  "seed": 42,
+  "rows": 2,
+  "rows_original": 2,
+  "history_thinning_stride": 1,
+  "params": {
+    "batch_size_train": 128,
+    "batch_size_test": 256,
+    "epochs": 2,
+    "optimizer_name": "RAdam",
+    "tainted": false,
+    "effective_batch_size": 128,
+    "original_batch_size": 128
+  },
+  "model_path": "results_proposal_full_20260223_v2\\experiments\\models\\MNIST_SimpleMLP_RAdam_seed42_final.pt",
+  "system": {
+    "python_version": "3.12.0 (tags/v3.12.0:0fb18b0, Oct  2 2023, 13:03:39) [MSC v.1935 64 bit (AMD64)]",
+    "torch_version": "2.5.1+cu121",
+    "cuda_available": true,
+    "cpu_count": 16,
+    "total_memory_gb": 15.730949401855469,
+    "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
+    "gpu_memory_gb": 3.99951171875,
+    "cuda_version": "12.1"
+  },
+  "provenance": {
+    "timestamp": "2026-03-08T01:08:20.110226",
+    "python_version": "3.12.0 (tags/v3.12.0:0fb18b0, Oct  2 2023, 13:03:39) [MSC v.1935 64 bit (AMD64)]",
+    "pytorch_version": "2.5.1+cu121",
+    "command_line": "run_all_kaggle.py --experiments mnist,medical,missing_ablations,optimizer_comparison,theory_practice --ultra-quick --quick --skip-tuning --seeds 42,123,456 --resume --no-mlflow --results-dir results_proposal_full_20260223_v2",
+    "working_dir": "F:\\GDSearch",
+    "git_commit": "a384f1a7f5079e27e5f53bf782449468ef25c31a",
+    "git_dirty": true,
+    "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
+    "gpu_count": 1,
+    "gpu_memory_gb": 3.99951171875,
+    "cuda_version": "12.1",
+    "nvidia_driver": "581.80"
+  },
+  "completed": true,
+  "tainted": false,
+  "run_signature": "74d819c4b0b1df25d4d63bc89e61290c902683989d6a39db112b73aa9ba83bc0",
+  "device": "cuda"
+}

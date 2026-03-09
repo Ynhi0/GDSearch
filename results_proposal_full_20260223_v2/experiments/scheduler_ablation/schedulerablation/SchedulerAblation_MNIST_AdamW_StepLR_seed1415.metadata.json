@@ -1,0 +1,45 @@
+{
+  "timestamp": "2026-03-07T00:19:02.322966",
+  "dataset": "SchedulerAblation",
+  "model": "MNIST",
+  "optimizer": "AdamW_StepLR",
+  "seed": 1415,
+  "rows": 10,
+  "rows_original": 10,
+  "history_thinning_stride": 1,
+  "params": {
+    "scheduler": "StepLR",
+    "final_test_loss": 0.07471525811415632,
+    "final_test_accuracy": 97.65,
+    "final_loss": 0.07471525811415632,
+    "final_accuracy": 97.65
+  },
+  "model_path": null,
+  "system": {
+    "python_version": "3.13.7 (tags/v3.13.7:bcee1c3, Aug 14 2025, 14:15:11) [MSC v.1944 64 bit (AMD64)]",
+    "torch_version": "2.6.0+cu124",
+    "cuda_available": true,
+    "cpu_count": 16,
+    "total_memory_gb": 15.730949401855469,
+    "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
+    "gpu_memory_gb": 3.99951171875,
+    "cuda_version": "12.4"
+  },
+  "provenance": {
+    "timestamp": "2026-03-07T00:19:02.325327",
+    "python_version": "3.13.7 (tags/v3.13.7:bcee1c3, Aug 14 2025, 14:15:11) [MSC v.1944 64 bit (AMD64)]",
+    "pytorch_version": "2.6.0+cu124",
+    "command_line": "run_all_kaggle.py --experiment-mode full --experiments scheduler_ablation --results-dir results_proposal_full_20260223_v2 --seeds 1213,1415,1617 --robust-gradients --resume",
+    "working_dir": "F:\\GDSearch",
+    "git_commit": "a384f1a7f5079e27e5f53bf782449468ef25c31a",
+    "git_dirty": true,
+    "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
+    "gpu_count": 1,
+    "gpu_memory_gb": 3.99951171875,
+    "cuda_version": "12.4",
+    "nvidia_driver": "581.80"
+  },
+  "completed": true,
+  "tainted": false,
+  "run_signature": "b1aea19146b6949b98f51cf51a0aeb6d33d160e0215c31703e396999d386f224"
+}
