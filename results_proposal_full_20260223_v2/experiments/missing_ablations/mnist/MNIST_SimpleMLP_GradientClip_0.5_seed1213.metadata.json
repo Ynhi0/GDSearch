@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-03-08T03:54:10.805693",
+  "timestamp": "2026-03-12T18:08:23.947437",
   "dataset": "MNIST",
   "model": "SimpleMLP",
   "optimizer": "GradientClip_0.5",
@@ -24,12 +24,12 @@
     "cuda_version": "12.1"
   },
   "provenance": {
-    "timestamp": "2026-03-08T03:54:10.807696",
+    "timestamp": "2026-03-12T18:08:23.948955",
     "python_version": "3.12.0 (tags/v3.12.0:0fb18b0, Oct  2 2023, 13:03:39) [MSC v.1935 64 bit (AMD64)]",
     "pytorch_version": "2.5.1+cu121",
     "command_line": "run_all_kaggle.py --experiments medical,2d,robustness,sam,ablation,advanced_ablation,init_ablation,batch_ablation,lr_ablation,wd_ablation,scheduler_ablation,missing_ablations,optimizer_comparison,resnet,highdim,hyperparam_sensitivity,convergence_validation,ablation_comprehensive,2d_visualization,dynamics_overhead,theory_practice,cross_optimizer_dynamics,beta_sensitivity_training,label_noise,saddle_escape,hyperparameter_heatmaps,stochastic_2d_integrity,adam_adamw_comparison --seeds 42,123,456,789,1011,1213,1415,1617,1819,2021 --resume --resume-behavior skip_if_results_exist --robust-gradients --use-agc --use-trimmed-mean --use-robust-loss --gradient-clip-norm 1.0 --quick --no-mlflow --results-dir results_proposal_full_20260223_v2",
     "working_dir": "F:\\GDSearch",
-    "git_commit": "a384f1a7f5079e27e5f53bf782449468ef25c31a",
+    "git_commit": "d46b561e93904db4461c6592de861f2ade056d44",
     "git_dirty": true,
     "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
     "gpu_count": 1,

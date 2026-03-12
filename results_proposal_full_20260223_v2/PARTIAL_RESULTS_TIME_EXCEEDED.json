@@ -1,0 +1,37 @@
+{
+  "status": "partial",
+  "reason": "time_budget_exceeded",
+  "elapsed_hours": 11.61093977034092,
+  "completed_experiments": [
+    "medical"
+  ],
+  "pending_experiments": [
+    "2d",
+    "robustness",
+    "sam",
+    "ablation",
+    "advanced_ablation",
+    "init_ablation",
+    "batch_ablation",
+    "lr_ablation",
+    "wd_ablation",
+    "scheduler_ablation",
+    "missing_ablations",
+    "optimizer_comparison",
+    "resnet",
+    "highdim",
+    "hyperparam_sensitivity",
+    "convergence_validation",
+    "ablation_comprehensive",
+    "2d_visualization",
+    "dynamics_overhead",
+    "theory_practice",
+    "cross_optimizer_dynamics",
+    "beta_sensitivity_training",
+    "label_noise",
+    "saddle_escape",
+    "hyperparameter_heatmaps",
+    "stochastic_2d_integrity",
+    "adam_adamw_comparison"
+  ]
+}

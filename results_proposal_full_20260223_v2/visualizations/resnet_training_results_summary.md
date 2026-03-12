@@ -1,0 +1,5 @@
+## Resnet Training Results - Tabular Summary
+
+| Optimizer/Config | Final Loss | Loss Std | Final Test Acc (%) | Acc Std (%) | Speed (iters/sec) |
+|------------------|------------|----------|--------------------|-------------|-------------------|
+| ResNet18_CIFAR10_Adam | 0.2099 | 0.0024 | N/A | N/A | N/A |

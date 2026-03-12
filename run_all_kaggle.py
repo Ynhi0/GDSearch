@@ -8919,6 +8919,13 @@ def create_experiment_visualizations(experiment_name, results_dir, csv_files):
 
     csv_paths = [Path(p) for p in csv_files]
 
+    # Medical-specific guardrail: use only per-seed run histories for epoch curves.
+    # This avoids summary/final-only artifacts skewing the Dice trajectory plot.
+    if str(experiment_name).upper() == 'MEDICAL':
+        seed_history_paths = [p for p in csv_paths if re.search(r'_seed\d+$', p.stem, flags=re.IGNORECASE)]
+        if seed_history_paths:
+            csv_paths = seed_history_paths
+
     # Delegate CIFAR10 to dedicated, hardened visualizer
     if str(experiment_name).upper() == 'CIFAR10':
         try:
@@ -9032,20 +9039,63 @@ def create_experiment_visualizations(experiment_name, results_dir, csv_files):
     acc_col = None
     metric_type = 'accuracy'  # or 'dice'
 
-    # First check for dice metrics (Medical experiments)
-    for col in ['test_dice', 'final_test_dice', 'val_dice']:
-        if col in combined_df.columns:
-            acc_col = col
-            metric_type = 'dice'
-            break
+    def _select_best_metric_column(df: pd.DataFrame, candidates: List[str], x_axis_col: Optional[str]) -> Optional[str]:
+        """Pick metric column with strongest finite time-series coverage.
 
-    # If no dice, look for accuracy metrics
-    if acc_col is None:
-        for col in ['test_acc', 'test_accuracy', 'final_test_acc', 'final_test_accuracy', 'val_acc', 'val_accuracy']:
-            if col in combined_df.columns:
-                acc_col = col
-                metric_type = 'accuracy'
-                break
+        Prefer columns with more distinct x-axis points containing finite values,
+        then break ties by total finite count.
+        """
+        best_col: Optional[str] = None
+        best_unique_x = -1
+        best_finite = -1
+
+        for candidate in candidates:
+            if candidate not in df.columns:
+                continue
+
+            metric_series = pd.to_numeric(df[candidate], errors='coerce')
+            finite_mask = np.isfinite(metric_series.to_numpy(dtype=float))
+            finite_count = int(finite_mask.sum())
+            if finite_count <= 0:
+                continue
+
+            if x_axis_col and x_axis_col in df.columns:
+                x_series = pd.to_numeric(df[x_axis_col], errors='coerce')
+                valid = finite_mask & np.isfinite(x_series.to_numpy(dtype=float))
+                unique_x = int(pd.Series(x_series[valid]).nunique())
+            else:
+                unique_x = 0
+
+            if unique_x > best_unique_x or (unique_x == best_unique_x and finite_count > best_finite):
+                best_col = candidate
+                best_unique_x = unique_x
+                best_finite = finite_count
+
+        return best_col
+
+    # First check for dice metrics (Medical experiments), choosing best-coverage column
+    # For Medical epoch curves, prefer validation Dice explicitly to avoid final-only
+    # test_dice rows collapsing curves to a single x-point.
+    if str(experiment_name).strip().lower() == 'medical' and 'val_dice' in combined_df.columns:
+        val_series = pd.to_numeric(combined_df['val_dice'], errors='coerce')
+        if int(np.isfinite(val_series.to_numpy(dtype=float)).sum()) > 0:
+            acc_col = 'val_dice'
+            metric_type = 'dice'
+        else:
+            acc_col = _select_best_metric_column(combined_df, ['test_dice', 'final_test_dice', 'val_dice'], x_col)
+    else:
+        acc_col = _select_best_metric_column(combined_df, ['test_dice', 'final_test_dice', 'val_dice'], x_col)
+    if acc_col is not None:
+        metric_type = 'dice'
+    else:
+        # Fall back to accuracy metrics using same coverage logic
+        acc_col = _select_best_metric_column(
+            combined_df,
+            ['test_acc', 'test_accuracy', 'final_test_acc', 'final_test_accuracy', 'val_acc', 'val_accuracy'],
+            x_col,
+        )
+        if acc_col is not None:
+            metric_type = 'accuracy'
 
     if x_col and has_optimizer and acc_col:
         try:
@@ -9061,15 +9111,41 @@ def create_experiment_visualizations(experiment_name, results_dir, csv_files):
                 opt_data = combined_df[combined_df['optimizer'] == opt]
                 if 'seed' in opt_data.columns:
                     grouped = opt_data.groupby(x_col)['acc_pct'].agg(['mean', 'std'])
-                    plt.plot(arr_to_numpy_float(grouped.index), arr_to_numpy_float(grouped['mean']), label=opt, linewidth=2)
-                    plt.fill_between(arr_to_numpy_float(grouped.index),
-                                   arr_to_numpy_float((grouped['mean'] - grouped['std'])),
-                                   arr_to_numpy_float((grouped['mean'] + grouped['std'])),
-                                   alpha=0.2)
+                    x_vals = arr_to_numpy_float(grouped.index)
+                    mean_vals = arr_to_numpy_float(grouped['mean'])
+                    std_vals = arr_to_numpy_float(grouped['std'])
+
+                    finite_mask = np.isfinite(x_vals) & np.isfinite(mean_vals)
+                    x_vals = x_vals[finite_mask]
+                    mean_vals = mean_vals[finite_mask]
+                    std_vals = std_vals[finite_mask]
+
+                    if x_vals.size == 0:
+                        logging.debug(f"Skipping {experiment_name}/{opt}: no finite {metric_type} values")
+                        continue
+
+                    marker = 'o' if x_vals.size <= 1 else None
+                    plt.plot(x_vals, mean_vals, label=opt, linewidth=2, marker=marker)
+
+                    if x_vals.size > 1:
+                        lower = mean_vals - std_vals
+                        upper = mean_vals + std_vals
+                        plt.fill_between(x_vals, lower, upper, alpha=0.2)
                 else:
                     # single run
+                    x_vals = arr_to_numpy_float(opt_data[x_col])
                     yvals = arr_to_numpy_float(opt_data['acc_pct'])
-                    plt.plot(arr_to_numpy_float(opt_data[x_col]), yvals, label=opt, linewidth=2)
+
+                    finite_mask = np.isfinite(x_vals) & np.isfinite(yvals)
+                    x_vals = x_vals[finite_mask]
+                    yvals = yvals[finite_mask]
+
+                    if x_vals.size == 0:
+                        logging.debug(f"Skipping {experiment_name}/{opt}: no finite {metric_type} values")
+                        continue
+
+                    marker = 'o' if x_vals.size <= 1 else None
+                    plt.plot(x_vals, yvals, label=opt, linewidth=2, marker=marker)
 
             plt.xlabel(x_label, fontsize=12)
             y_label = 'Dice Score (%)' if metric_type == 'dice' else 'Test Accuracy (%)'
@@ -13464,50 +13540,14 @@ def print_system_info():
 def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False, resume_behavior: str = None):
     if seeds is None:
         seeds = [42, 123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021]
-    """Run ResNet18 experiment with enhanced monitoring
+    """Run ResNet18 experiment across SGD, Adam, AdamW, SAM optimizers.
 
     Args:
         resume: If True, skip experiments that already have result files
     """
     logging.info("\n" + "="*80)
-    logging.info("ðŸ—ï¸  RESNET18 EXPERIMENT")
+    logging.info("RESNET18 EXPERIMENT - SGD / Adam / AdamW / SAM")
     logging.info("="*80)
-
-    # Check if experiment is already completed
-    if resume:
-        result_file = Path(results_dir) / "resnet_results.csv"
-        legacy_result_file = Path(results_dir) / "resnet_results_all_seeds.csv"
-        existing_result_file = result_file if result_file.exists() else legacy_result_file
-        required_seed_set = {int(s) for s in seeds}
-        existing_seed_set: Set[int] = set()
-        for per_seed_csv in Path(results_dir).glob("ResNet18_CIFAR10_Adam_seed*.csv"):
-            m = re.search(r"seed(\d+)\.csv$", per_seed_csv.name)
-            if m:
-                existing_seed_set.add(int(m.group(1)))
-        if required_seed_set and required_seed_set.issubset(existing_seed_set):
-            if existing_result_file.exists():
-                try:
-                    df = pd.read_csv(existing_result_file)
-                except Exception:
-                    df = pd.DataFrame()
-            else:
-                seed_frames = []
-                for seed in sorted(required_seed_set):
-                    per_seed = Path(results_dir) / f"ResNet18_CIFAR10_Adam_seed{seed}.csv"
-                    if per_seed.exists():
-                        try:
-                            seed_frames.append(pd.read_csv(per_seed))
-                        except Exception:
-                            logging.debug("Could not read ResNet per-seed CSV: %s", per_seed, exc_info=True)
-                df = pd.concat(seed_frames, ignore_index=True) if seed_frames else pd.DataFrame()
-            logging.info("Skipping ResNet18 experiment (all requested seeds already completed)")
-            return df
-        if existing_seed_set:
-            logging.info(
-                "ResNet resume detected partial coverage (%d/%d seeds). Re-running requested seeds.",
-                len(existing_seed_set),
-                len(required_seed_set),
-            )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logging.info(f"Device: {device}")
@@ -13540,7 +13580,6 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
     opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ssl_context))
     urllib.request.install_opener(opener)
 
-    # Use exponential backoff for dataset downloads
     @retry_with_backoff(max_retries=3, initial_backoff=1.0, backoff_factor=2.0,
                        exceptions=(Exception,), log_prefix="CIFAR-10 download (ResNet)")
     def download_cifar10_resnet():
@@ -13566,22 +13605,28 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
     dl_kwargs = get_dataloader_kwargs()
 
     epochs = 2 if ULTRA_QUICK_MODE else (20 if quick else 50)
-    
+
     results_dir = Path(results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
 
+    criterion = nn.CrossEntropyLoss()
+
+    # Multi-optimizer configuration: SGD_Momentum, Adam, AdamW, SAM_SGD
+    default_lrs = {
+        OptimizerNames.SGD_MOMENTUM: 0.01,
+        OptimizerNames.ADAM: 0.001,
+        OptimizerNames.ADAMW: 0.001,
+        'SAM_SGD': 0.01,
+    }
+
     # Hyperparameter tuning (if enabled)
-    # Note: ResNet experiment currently uses a single optimizer (Adam)
-    # but we prepare tuning cache for future multi-optimizer support
     tuned_params = {}
     tuning_cache = create_tuning_cache(results_dir) if not skip_tuning else None
 
-    default_lr = 0.001
     if tuning_cache is not None and not skip_tuning:
         logging.info("\nRESNET18 HYPERPARAMETER TUNING PHASE")
         logging.info("-" * 80)
 
-        # Create loaders for tuning with first seed
         tune_seed = seeds[0] if seeds else 42
         tune_train_loader = make_dataloader(train_dataset_split, batch_size=train_bs, shuffle=True,
                                             seed=tune_seed, **dl_kwargs)
@@ -13591,76 +13636,133 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
         n_trials = 5 if quick else 15
         tune_epochs = 1 if ULTRA_QUICK_MODE else (2 if quick else 3)
 
-        tuned_params[OptimizerNames.ADAM] = quick_tune_optimizer(
-            OptimizerNames.ADAM, lambda: ResNet18(num_classes=10),
-            tune_train_loader, tune_val_loader,
-            device, epochs=tune_epochs, n_trials=n_trials, seed=tune_seed,
-            tuning_cache=tuning_cache, dataset_name="CIFAR10_ResNet", model_name="ResNet18"
-        )
+        for opt_name in [OptimizerNames.SGD_MOMENTUM, OptimizerNames.ADAM, OptimizerNames.ADAMW]:
+            tuned_params[opt_name] = quick_tune_optimizer(
+                opt_name, lambda: ResNet18(num_classes=10),
+                tune_train_loader, tune_val_loader,
+                device, epochs=tune_epochs, n_trials=n_trials, seed=tune_seed,
+                tuning_cache=tuning_cache, dataset_name="CIFAR10_ResNet", model_name="ResNet18"
+            )
         logging.info("\nResNet18 tuning complete!\n")
 
-    # Get tuned or default LR
-    tuned_lr = tuned_params.get(OptimizerNames.ADAM, {}).get('lr', default_lr)
+    # Build optimizers_config with tuned or default LRs
+    optimizers_config = []
+    for opt_name, default_lr in default_lrs.items():
+        lr = tuned_params.get(opt_name, {}).get('lr', default_lr)
+        optimizers_config.append((opt_name, lr))
 
     all_results = []
 
-    for seed in seeds:
-        logging.info(f"\nðŸŽ² Running ResNet18 experiment with seed={seed}")
-        set_seed(seed)
+    for opt_name, lr in optimizers_config:
+        for seed in seeds:
+            # Per-(optimizer, seed) resume check
+            if resume and is_experiment_completed(results_dir, 'CIFAR10', 'ResNet18', opt_name, seed):
+                logging.info(f"Skipping ResNet18 {opt_name} seed {seed} (already completed)")
+                continue
 
-        train_loader = make_dataloader(train_dataset_split, batch_size=train_bs, shuffle=True,
-                                         seed=seed, **dl_kwargs)
-        val_loader = make_dataloader(val_dataset, batch_size=test_bs, shuffle=False,
-                                       seed=seed, **dl_kwargs)
-        test_loader = make_dataloader(test_dataset, batch_size=test_bs, shuffle=False,
-                                        seed=seed, **dl_kwargs)
+            logging.info(f"\nRunning ResNet18 experiment: optimizer={opt_name}, seed={seed}")
+            set_seed(seed)
 
-        model = ResNet18(num_classes=10)
-        model = safe_device_transfer(model, device, operation=f"ResNet18 seed={seed}")
-        optimizer = optim.Adam(model.parameters(), lr=tuned_lr, weight_decay=0.0001)
-        criterion = nn.CrossEntropyLoss()
+            train_loader = make_dataloader(train_dataset_split, batch_size=train_bs, shuffle=True,
+                                             seed=seed, **dl_kwargs)
+            val_loader = make_dataloader(val_dataset, batch_size=test_bs, shuffle=False,
+                                           seed=seed, **dl_kwargs)
+            test_loader = make_dataloader(test_dataset, batch_size=test_bs, shuffle=False,
+                                            seed=seed, **dl_kwargs)
 
-        results = []
+            model = ResNet18(num_classes=10)
+            model = safe_device_transfer(model, device, operation=f"ResNet18 {opt_name} seed={seed}")
 
-        for epoch in range(epochs):
-            # Train
-            model.train()
-            train_loss, train_correct = 0, 0
+            # Build optimizer
+            if opt_name == OptimizerNames.SGD_MOMENTUM:
+                optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=5e-4)
+            elif opt_name == OptimizerNames.ADAM:
+                optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=0.0001)
+            elif opt_name == OptimizerNames.ADAMW:
+                optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=0.01)
+            elif opt_name == 'SAM_SGD':
+                base_opt = optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=5e-4)
+                optimizer = SAMWrapper(base_opt, rho=0.05)
+            else:
+                optimizer = optim.Adam(model.parameters(), lr=lr)
 
-            for inputs, targets in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}"):
-                inputs, targets = inputs.to(device), targets.to(device)
+            results = []
 
-                if isinstance(optimizer, SAMWrapper):
-                    def closure():
+            for epoch in range(epochs):
+                # Train
+                model.train()
+                train_loss, train_correct = 0, 0
+
+                for inputs, targets in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs} [{opt_name}]"):
+                    inputs, targets = inputs.to(device), targets.to(device)
+
+                    if isinstance(optimizer, SAMWrapper):
+                        def closure():
+                            optimizer.zero_grad()
+                            outputs = model(inputs)
+                            loss = criterion(outputs, targets)
+                            loss.backward()
+                            return loss
+                        loss = optimizer.step(closure)
+                        outputs = model(inputs)
+                    else:
                         optimizer.zero_grad()
                         outputs = model(inputs)
                         loss = criterion(outputs, targets)
                         loss.backward()
-                        return loss
-                    # Pass actual closure to SAM
-                    loss = optimizer.step(closure)
-                    outputs = model(inputs)  # Recompute after SAM step
-                else:
-                    optimizer.zero_grad()
-                    outputs = model(inputs)
-                    loss = criterion(outputs, targets)
-                    loss.backward()
-                    optimizer.step()
+                        optimizer.step()
 
-                from src.utils.num_utils import safe_to_float
-                loss_value = safe_to_float(loss)
-                train_loss += loss_value
-                _, predicted = outputs.max(1)
-                train_correct += predicted.eq(targets).sum().item()
+                    from src.utils.num_utils import safe_to_float
+                    loss_value = safe_to_float(loss)
+                    train_loss += loss_value
+                    _, predicted = outputs.max(1)
+                    train_correct += predicted.eq(targets).sum().item()
 
-            train_loss /= max(1, _safe_len(train_loader))
-            train_acc = 100. * train_correct / max(1, _safe_len(train_dataset_split))
+                train_loss /= max(1, _safe_len(train_loader))
+                train_acc = 100. * train_correct / max(1, _safe_len(train_dataset_split))
 
-            # Sanity check: Verify all batches were processed
-            if epoch > 1 and train_acc < 10.0:
-                logging.error(f"SANITY CHECK FAILED: ResNet train accuracy {train_acc:.1f}% is suspiciously low")
+                if epoch > 1 and train_acc < 10.0:
+                    logging.error(f"SANITY CHECK FAILED: ResNet {opt_name} train accuracy {train_acc:.1f}% is suspiciously low")
 
-            # Test
+                # Validation
+                model.eval()
+                val_loss, val_correct = 0, 0
+                with torch.no_grad():
+                    for inputs, targets in val_loader:
+                        inputs, targets = inputs.to(device), targets.to(device)
+                        outputs = model(inputs)
+                        loss = criterion(outputs, targets)
+                        val_loss += loss.item()
+                        _, predicted = outputs.max(1)
+                        val_correct += predicted.eq(targets).sum().item()
+
+                val_loss /= max(1, len(val_loader))
+                val_acc = 100. * val_correct / len(val_dataset)
+
+                results.append({
+                    'epoch': epoch + 1,
+                    'optimizer': opt_name,
+                    'seed': seed,
+                    'train_loss': train_loss,
+                    'train_acc': train_acc,
+                    'val_loss': val_loss,
+                    'val_acc': val_acc,
+                })
+
+                if tracker:
+                    tracker.log_metrics({
+                        f'resnet_{opt_name}_train_loss': train_loss,
+                        f'resnet_{opt_name}_train_acc': train_acc,
+                        f'resnet_{opt_name}_val_loss': val_loss,
+                        f'resnet_{opt_name}_val_acc': val_acc,
+                    }, step=epoch)
+
+                print(f"Epoch {epoch+1}/{epochs} [{opt_name} seed={seed}]: "
+                      f"Train Loss={train_loss:.4f}, Train Acc={train_acc:.1f}%, "
+                      f"Val Loss={val_loss:.4f}, Val Acc={val_acc:.1f}%")
+
+            # Final test evaluation
+            logging.info(f"Evaluating final performance on test set ({opt_name} seed={seed})...")
             model.eval()
             test_loss, test_correct = 0, 0
             with torch.no_grad():
@@ -13672,85 +13774,41 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
                     _, predicted = outputs.max(1)
                     test_correct += predicted.eq(targets).sum().item()
 
-            # Validation
-            val_loss, val_correct = 0, 0
-            with torch.no_grad():
-                for inputs, targets in val_loader:
-                    inputs, targets = inputs.to(device), targets.to(device)
-                    outputs = model(inputs)
-                    loss = criterion(outputs, targets)
-                    val_loss += loss.item()
-                    _, predicted = outputs.max(1)
-                    val_correct += predicted.eq(targets).sum().item()
+            test_loss /= max(1, len(test_loader))
+            test_acc = 100. * test_correct / len(test_dataset)
+            logging.info(f"[{opt_name} seed={seed}] Final Test: Loss={test_loss:.4f}, Acc={test_acc:.2f}%")
 
-            val_loss /= max(1, len(val_loader))  # Protect against empty loader
-            val_acc = 100. * val_correct / len(val_dataset)
+            # Attach final test metrics to each epoch row
+            for row in results:
+                row['test_loss'] = test_loss
+                row['test_acc'] = test_acc
+                row['final_test_acc'] = test_acc
 
-            results.append({
-                'epoch': epoch + 1,
-                'train_loss': train_loss,
-                'train_acc': train_acc,
-                'val_loss': val_loss,
-                'val_acc': val_acc
-            })
+            # Save per-(optimizer, seed) CSV
+            df_seed = pd.DataFrame(results)
+            result_filename = results_dir / f"ResNet18_CIFAR10_{opt_name}_seed{seed}.csv"
+            df_seed.to_csv(result_filename, index=False)
+            all_results.extend(results)
 
-            if tracker:
-                tracker.log_metrics({
-                    'resnet_train_loss': train_loss,
-                    'resnet_train_acc': train_acc,
-                    'resnet_val_loss': val_loss,
-                    'resnet_val_acc': val_acc
-                }, step=epoch)
+            # Save per-run artifact
+            try:
+                params = {'epochs': epochs, 'batch_size': train_bs, 'seed': seed, 'optimizer': opt_name}
+                save_run_artifacts(results_dir, 'ResNet18', 'CIFAR10', opt_name, seed, results, params, device=device, exp_tracker=tracker)
+            except Exception:
+                logging.debug("Failed to save per-run ResNet artifact for opt=%s seed=%s", opt_name, seed)
 
-            print(f"Epoch {epoch}/{epochs}: Train Loss={train_loss:.4f}, "
-                  f"Train Acc={train_acc:.1f}%, Val Loss={val_loss:.4f}, "
-                  f"Val Acc={val_acc:.1f}%")
-
-        # Final test evaluation (only after training completes - use test set only for final evaluation)
-        logging.info("Evaluating final performance on test set...")
-        model.eval()
-        test_loss, test_correct = 0, 0
-        with torch.no_grad():
-            for inputs, targets in test_loader:
-                inputs, targets = inputs.to(device), targets.to(device)
-                outputs = model(inputs)
-                loss = criterion(outputs, targets)
-                test_loss += loss.item()
-                _, predicted = outputs.max(1)
-                test_correct += predicted.eq(targets).sum().item()
-
-        test_loss /= max(1, len(test_loader))  # Protect against empty loader
-        test_acc = 100. * test_correct / len(test_dataset)
-        logging.info(f"Final Test Performance: Loss={test_loss:.4f}, Acc={test_acc:.2f}%")
-
-        # Save per-seed results
-        os.makedirs(results_dir, exist_ok=True)
-        df_seed = pd.DataFrame(results)
-        df_seed['seed'] = seed
-        result_filename = f"{results_dir}/ResNet18_CIFAR10_Adam_seed{seed}.csv"
-        df_seed.to_csv(result_filename, index=False)
-        all_results.extend(results)
-
-        # Save per-run artifact
-        try:
-            params = {'epochs': epochs, 'batch_size': train_bs, 'seed': seed}
-            save_run_artifacts(results_dir, 'ResNet18', 'CIFAR10', 'Adam', seed, results, params, device=device, exp_tracker=tracker)
-        except Exception:
-            logging.debug("Failed to save per-run ResNet artifact for seed=%s", seed)
-
-        logging.info("Results for seed=%s saved to %s", seed, result_filename)
+            logging.info("Results for %s seed=%s saved to %s", opt_name, seed, result_filename)
 
     # End profiling
     if profiler:
         perf_metrics = profiler.end_profiling("ResNet18_Experiment")
         profiler.log_performance("ResNet18_Experiment")
 
-    # Aggregate results across all seeds
+    # Aggregate results across all optimizers and seeds
     df = pd.DataFrame(all_results)
-    canonical_summary = Path(results_dir) / "resnet_results.csv"
-    legacy_summary = Path(results_dir) / "resnet_results_all_seeds.csv"
+    canonical_summary = results_dir / "resnet_results.csv"
+    legacy_summary = results_dir / "resnet_results_all_seeds.csv"
     df.to_csv(canonical_summary, index=False)
-    # Keep legacy filename for backward compatibility with old notebooks.
     if legacy_summary != canonical_summary:
         df.to_csv(legacy_summary, index=False)
     logging.info("Aggregated results saved to %s", canonical_summary)
@@ -13761,13 +13819,14 @@ def run_resnet_experiment(results_dir="results_resnet", seeds=None, quick=False,
 
     # Generate visualizations for ResNet experiment
     try:
-        resnet_csvs = list(Path(results_dir).glob("*.csv"))
+        resnet_csvs = list(results_dir.glob("*.csv"))
         if resnet_csvs:
-            create_experiment_visualizations('ResNet18', str(Path(results_dir).parent.parent), resnet_csvs)
+            create_experiment_visualizations('ResNet18', str(results_dir.parent.parent), resnet_csvs)
     except Exception as viz_e:
         logging.warning(f"Could not create ResNet visualizations: {viz_e}")
 
     return df
+
 
 
 def run_highdim_experiment(results_dir="results_highdim", seeds=None, quick=False, skip_tuning=False, profiler=None, tracker=None, checkpoint_manager=None, resume=False, resume_behavior: str = None):
