@@ -1,0 +1,47 @@
+{
+  "timestamp": "2026-02-24T09:58:50.958494",
+  "dataset": "Ablation",
+  "model": "2D_Rosenbrock",
+  "optimizer": "SAM_SGD",
+  "seed": 1415,
+  "rows": 1000,
+  "rows_original": 1000,
+  "history_thinning_stride": 1,
+  "params": {
+    "lr": 0.002,
+    "rho": 0.01,
+    "seed": 1415,
+    "initial_x": -0.0018640228303556938,
+    "initial_y": -1.3087847651263622,
+    "strict_convergence_threshold": 1e-06,
+    "practical_convergence_threshold": 0.001
+  },
+  "model_path": null,
+  "system": {
+    "python_version": "3.13.7 (tags/v3.13.7:bcee1c3, Aug 14 2025, 14:15:11) [MSC v.1944 64 bit (AMD64)]",
+    "torch_version": "2.6.0+cu124",
+    "cuda_available": true,
+    "cpu_count": 16,
+    "total_memory_gb": 15.730949401855469,
+    "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
+    "gpu_memory_gb": 3.99951171875,
+    "cuda_version": "12.4"
+  },
+  "provenance": {
+    "timestamp": "2026-02-24T09:58:50.959354",
+    "python_version": "3.13.7 (tags/v3.13.7:bcee1c3, Aug 14 2025, 14:15:11) [MSC v.1944 64 bit (AMD64)]",
+    "pytorch_version": "2.6.0+cu124",
+    "command_line": "run_all_kaggle.py --experiments ablation --seeds 42,123,456,789,1011,1213,1415,1617,1819,2021 --results-dir results_proposal_full_20260223_v2 --no-mlflow --robust-gradients",
+    "working_dir": "F:\\GDSearch",
+    "git_commit": "9b39ba81d7d01d50c2dd77630a8c2b5555f6e93b",
+    "git_dirty": true,
+    "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
+    "gpu_count": 1,
+    "gpu_memory_gb": 3.99951171875,
+    "cuda_version": "12.4",
+    "nvidia_driver": "581.80"
+  },
+  "completed": true,
+  "tainted": false,
+  "run_signature": "f3c2982e2de50aa3195a6dfb6900fda77cb06d7384cf0e277b9d5d20e0b6c2ed"
+}

@@ -1,0 +1,17 @@
+{
+  "dataset": "MNIST",
+  "model": "SimpleMLP",
+  "optimizer": "Lookahead_SGD",
+  "best_params": {
+    "lr": 0.09713797692841979,
+    "k": 8,
+    "alpha": 0.48640192328929555
+  },
+  "timestamp": "2026-03-13T14:14:39.645969",
+  "metadata": {
+    "best_val_acc": 87.30909090909091,
+    "n_trials": 15,
+    "epochs": 3,
+    "seed": 42
+  }
+}

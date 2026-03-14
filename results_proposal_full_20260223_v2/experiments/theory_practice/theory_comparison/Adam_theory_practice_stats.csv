@@ -1,0 +1,2 @@
+optimizer,empirical_rate,theoretical_rate,optimality_gap,optimality_gap_pct,convergence_regime,pl_constant,fit_r_squared,mean_relative_error,median_relative_error,max_relative_error,final_loss,theoretical_final
+Adam,1.9811317723876432,0.999645210781473,,,linear (PL),0.0006844370099717544,0.5046790151260955,0.7893099396037713,0.8623260871714246,0.9290505824805743,0.1327243622561747,1.8706899505234174

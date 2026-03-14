@@ -1,0 +1,16 @@
+epoch,train_loss,val_loss,val_acc,test_acc,test_loss,synthetic_filled_row,synthetic_fill_policy
+1,0.3415088388639338,0.2697608788808187,88.8,89.4,0.580344064696692,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+2,0.1819430699067957,0.2508307908376058,89.93333333333334,89.4,0.580344064696692,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+3,0.0864497778345556,0.2871409688790639,89.93333333333334,89.4,0.580344064696692,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+4,0.0541222767601994,0.3424156398375829,90.06666666666666,89.4,0.580344064696692,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+5,0.0328017651552663,0.43293297402064,89.06666666666666,89.4,0.580344064696692,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+6,0.0159359428994357,0.496298270702362,89.06666666666666,89.4,0.580344064696692,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+7,0.0196591190358295,0.429285195906957,89.73333333333333,89.4,0.580344064696692,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+8,0.0116273704905282,0.4784406615893046,89.8,89.4,0.580344064696692,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+9,0.0033550096597275,0.521937151114146,90.13333333333334,89.4,0.580344064696692,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+10,0.0039160738619907,0.598234323422114,89.86666666666666,89.4,0.580344064696692,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+11,0.0038675776965477,0.5795929196675619,89.4,89.4,0.580344064696692,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+12,0.0016597396165461,0.5785142557621002,89.66666666666667,89.4,0.580344064696692,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+13,0.0016057910316842,0.5647722568511963,90.26666666666668,89.4,0.580344064696692,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+14,0.0012442698771791,0.5928383858998617,89.66666666666667,89.4,0.580344064696692,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+15,0.0013784238309051,0.5832006465593974,89.66666666666667,89.4,0.580344064696692,0,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker

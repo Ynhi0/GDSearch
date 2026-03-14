@@ -1,0 +1,17 @@
+{
+  "dataset": "CIFAR10_ResNet",
+  "model": "ResNet18",
+  "optimizer": "Adam",
+  "best_params": {
+    "lr": 0.0003489018845491386,
+    "beta1": 0.9092414568862042,
+    "beta2": 0.9046403962307278
+  },
+  "timestamp": "2026-03-03T18:07:21.888073",
+  "metadata": {
+    "best_val_acc": 75.72,
+    "n_trials": 15,
+    "epochs": 3,
+    "seed": 42
+  }
+}

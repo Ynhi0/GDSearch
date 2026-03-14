@@ -1,0 +1,6 @@
+experiment,optimizer,n_runs,n_rows,loss_samples_total,loss_samples_finite,mean_loss,std_loss
+robustness,Adam,10,100,10,10,9.898183634504676e-05,0.0
+robustness,SAM_Adam,10,100,10,10,0.0182060748338699,0.0
+robustness,SAM_SGD,10,100,10,10,3.5983190536499023,0.0
+robustness,SGD,10,100,10,10,3.51401686668396,0.0
+robustness,SGD_Momentum,10,100,10,10,413.83551025390636,5.684341886080802e-14

@@ -1,0 +1,3 @@
+\contentsline {figure}{\numberline {1}{\ignorespaces Kiến trúc thời gian chạy trực tuyến và luồng dữ liệu. Mũi tên liền biểu thị luồng suy luận; mũi tên nét đứt biểu thị đầu vào điều hòa và kiểm soát.}}{14}{figure.1}%
+\contentsline {figure}{\numberline {2}{\ignorespaces Luồng đánh giá và đào tạo ngoại tuyến với các vòng phản hồi. Mô hình ứng cử viên và cấu hình điều khiển được xuất sang đường dẫn thời gian chạy trực tuyến trong Hình~\ref {fig:runtime_architecture}.}}{15}{figure.2}%
+\contentsline {figure}{\numberline {3}{\ignorespaces Mức tăng trung bình-delta được ghép nối của việc tạo theo ngữ cảnh được kiểm soát so với việc tạo theo ngữ cảnh thô, với khoảng tin cậy CI 95\%.}}{32}{figure.3}%

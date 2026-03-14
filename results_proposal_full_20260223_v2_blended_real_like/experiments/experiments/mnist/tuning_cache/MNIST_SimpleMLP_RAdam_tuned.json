@@ -1,0 +1,17 @@
+{
+  "dataset": "MNIST",
+  "model": "SimpleMLP",
+  "optimizer": "RAdam",
+  "best_params": {
+    "lr": 0.009005747166103195,
+    "beta1": 0.9077798341096558,
+    "beta2": 0.9334460381047014
+  },
+  "timestamp": "2026-03-13T14:50:27.222653",
+  "metadata": {
+    "best_val_acc": 91.58545454545454,
+    "n_trials": 15,
+    "epochs": 3,
+    "seed": 42
+  }
+}

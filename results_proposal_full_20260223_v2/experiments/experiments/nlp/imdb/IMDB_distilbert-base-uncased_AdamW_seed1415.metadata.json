@@ -1,0 +1,45 @@
+{
+  "timestamp": "2026-03-14T03:53:47.717801",
+  "dataset": "IMDB",
+  "model": "distilbert-base-uncased",
+  "optimizer": "AdamW",
+  "seed": 1415,
+  "rows": 3,
+  "rows_original": 3,
+  "history_thinning_stride": 1,
+  "params": {
+    "lr": 5e-05,
+    "epochs": 3,
+    "batch_size": 16,
+    "model_name": "distilbert-base-uncased"
+  },
+  "model_path": null,
+  "system": {
+    "python_version": "3.13.7 (tags/v3.13.7:bcee1c3, Aug 14 2025, 14:15:11) [MSC v.1944 64 bit (AMD64)]",
+    "torch_version": "2.9.1+cu128",
+    "cuda_available": true,
+    "cpu_count": 16,
+    "total_memory_gb": 15.730949401855469,
+    "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
+    "gpu_memory_gb": 3.99951171875,
+    "cuda_version": "12.8"
+  },
+  "provenance": {
+    "timestamp": "2026-03-14T03:53:47.723743",
+    "python_version": "3.13.7 (tags/v3.13.7:bcee1c3, Aug 14 2025, 14:15:11) [MSC v.1944 64 bit (AMD64)]",
+    "pytorch_version": "2.9.1+cu128",
+    "command_line": "run_all_kaggle.py --experiments nlp --quick --skip-tuning --seeds 1213,1415,1617,1819,2021 --results-dir results_proposal_full_20260223_v2/experiments --resume --resume-behavior restart_if_no_checkpoint --deterministic --no-mlflow --robust-gradients",
+    "working_dir": "F:\\GDSearch",
+    "git_commit": "0cabda9be6edd1c5356e6241f97343909c3feac0",
+    "git_dirty": true,
+    "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
+    "gpu_count": 1,
+    "gpu_memory_gb": 3.99951171875,
+    "cuda_version": "12.8",
+    "nvidia_driver": "581.80"
+  },
+  "completed": true,
+  "tainted": false,
+  "run_signature": "12c3e0f9b8e8fc7daea0dea2380210dabec64503a3a7543c18d7b8137e8bb46f",
+  "device": "cuda"
+}

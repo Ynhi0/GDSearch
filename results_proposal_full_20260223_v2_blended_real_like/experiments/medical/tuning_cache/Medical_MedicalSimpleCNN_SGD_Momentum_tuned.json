@@ -1,0 +1,16 @@
+{
+  "dataset": "Medical",
+  "model": "MedicalSimpleCNN",
+  "optimizer": "SGD_Momentum",
+  "best_params": {
+    "lr": 0.015702970884055395,
+    "momentum": 0.793342657256548
+  },
+  "timestamp": "2026-03-08T10:38:58.082386",
+  "metadata": {
+    "best_val_acc": 74.21481481481482,
+    "n_trials": 5,
+    "epochs": 2,
+    "seed": 42
+  }
+}

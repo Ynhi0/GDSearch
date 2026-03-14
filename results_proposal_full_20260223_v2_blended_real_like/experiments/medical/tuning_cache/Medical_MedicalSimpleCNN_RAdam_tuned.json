@@ -1,0 +1,17 @@
+{
+  "dataset": "Medical",
+  "model": "MedicalSimpleCNN",
+  "optimizer": "RAdam",
+  "best_params": {
+    "lr": 0.0001329291894316216,
+    "beta1": 0.9450714306409915,
+    "beta2": 0.9731261947869594
+  },
+  "timestamp": "2026-03-08T11:42:34.137621",
+  "metadata": {
+    "best_val_acc": 51.49629629629629,
+    "n_trials": 5,
+    "epochs": 2,
+    "seed": 42
+  }
+}

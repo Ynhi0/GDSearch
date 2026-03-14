@@ -1,0 +1,87 @@
+================================================================================
+THEORY-PRACTICE CONVERGENCE VALIDATION SUMMARY
+================================================================================
+
+STABILITY CHECK (GAP 5 FIX):
+  Total runs: 10
+  Stable (LR ≤ 2/L): 10
+  UNSTABLE (LR > 2/L): 0
+PL-CONDITION ANALYSIS (GAP 4 FIX):
+  Runs with estimated μ_PL: 10/10
+  Average μ_PL: 3.2269e-04
+  ✓ Non-convex linear convergence explained by PL-condition
+
+Overall Statistics:
+  Total comparisons: 10
+By Optimizer:
+
+  AdaBound:
+    Theoretical rate: 0.9995
+    Experiments: mnist, cifar10
+    Stable runs: 2/2
+
+  Adam:
+    Theoretical rate: 0.9993
+    Experiments: mnist, cifar10
+    Stable runs: 2/2
+
+  AMSGrad:
+    Theoretical rate: 1.0000
+    Experiments: mnist
+    Stable runs: 1/1
+
+  LAMB:
+    Theoretical rate: 0.9994
+    Experiments: mnist, cifar10
+    Stable runs: 2/2
+
+  SGD:
+    Theoretical rate: 0.9996
+    Experiments: mnist
+    Stable runs: 1/1
+
+  SGD_Momentum:
+    Theoretical rate: 0.9996
+    Experiments: mnist, cifar10
+    Stable runs: 2/2
+
+================================================================================
+CRITICAL SCIENTIFIC GAPS - METHODOLOGY WARNINGS
+================================================================================
+
+GAP 7: EPOCH vs ITERATION UNIT SCALE:
+  ⚠ CRITICAL: Ensure all plots use ITERATIONS not EPOCHS.
+  Theory operates on parameter updates (iterations).
+  For CIFAR-10 (batch=128): 1 epoch = 391 iterations.
+  Plotting epochs will make theory curves 391× too optimistic!
+
+GAP 8: LEARNING RATE SCHEDULER:
+  ⚠ WARNING: Theory assumes constant or 1/k decaying LR.
+  If you use StepLR/CosineAnnealing, theory curves will be smooth
+  while practice has sudden drops → poor R² but NOT theory failure.
+  Solution: Only analyze constant-LR runs, or use piecewise theory.
+
+GAP 9: ZERO-LOSS ASSUMPTION (f*):
+  ⚠ CRITICAL: Real loss converges to f* > 0 (not 0).
+  Estimate f* = min(observed_loss) and plot: (loss - f*) vs theory.
+  Otherwise: Practice flattens at 0.3, Theory crashes to 0 → false mismatch.
+
+GAP 10: SURVIVOR BIAS:
+  ⚠ WARNING: Include ONLY converged runs in analysis.
+  Filter: diverged (NaN), unstable (final > initial), or outliers.
+  Convergence bounds assume convergence; including failures is invalid.
+
+
+================================================================================
+INTERPRETATION:
+================================================================================
+High R² (>0.9): Observed convergence matches theory well
+Medium R² (0.7-0.9): Reasonable agreement with minor deviations
+Low R² (<0.7): Significant deviation from theory (non-convex effects)
+
+BEFORE concluding 'theory failed', check:
+  1. Did you use iterations (not epochs) on x-axis?
+  2. Did you filter unstable runs (LR > 2/L)?
+  3. Did you use constant LR (no schedulers)?
+  4. Did you subtract f* baseline?
+  5. Did you exclude diverged/NaN runs?

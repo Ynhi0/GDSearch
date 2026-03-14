@@ -1,0 +1,10 @@
+## Cifar10 Training Results - Tabular Summary
+
+| Optimizer/Config | Final Loss | Loss Std | Final Test Acc (%) | Acc Std (%) | Speed (iters/sec) |
+|------------------|------------|----------|--------------------|-------------|-------------------|
+| ResNet18_Adam | 0.0041 | 0.0003 | 92.6544 | 0.1828 | N/A |
+| ResNet18_AdamW | 0.0035 | 0.0008 | 92.2530 | 0.1664 | N/A |
+| ResNet18_RAdam | 0.1220 | 0.0249 | 88.6130 | 0.9359 | N/A |
+| ResNet18_SGD_Momentum | 0.0663 | 0.0019 | 88.5760 | 0.1868 | N/A |
+| ResNet18_LAMB | 0.3457 | 0.0069 | 81.0590 | 0.2410 | N/A |
+| ResNet18_AdaBound | 0.4997 | 0.0078 | 78.3620 | 0.5880 | N/A |

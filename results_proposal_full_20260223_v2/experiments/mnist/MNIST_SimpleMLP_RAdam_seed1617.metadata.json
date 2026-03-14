@@ -1,0 +1,49 @@
+{
+  "timestamp": "2026-02-03T04:38:11.311582",
+  "dataset": "MNIST",
+  "model": "SimpleMLP",
+  "optimizer": "RAdam",
+  "seed": 1617,
+  "rows": 20,
+  "params": {
+    "batch_size_train": 128,
+    "batch_size_test": 256,
+    "epochs": 50,
+    "optimizer_name": "RAdam",
+    "tainted": false,
+    "effective_batch_size": 128,
+    "original_batch_size": 128,
+    "robust_gradient_stats": {
+      "mean_grad_norm": 0.6850978026552875,
+      "max_grad_norm": 2.3268074989318848,
+      "clip_fraction": 0.0,
+      "heavy_tail_fraction": 0.5312570525840667
+    }
+  },
+  "model_path": "/kaggle/working/results/results_full/experiments/models/MNIST_SimpleMLP_RAdam_seed1617_final.pt",
+  "system": {
+    "python_version": "3.12.12 (main, Oct 10 2025, 08:52:57) [GCC 11.4.0]",
+    "torch_version": "2.8.0+cu126",
+    "cuda_available": true,
+    "cpu_count": 4,
+    "total_memory_gb": 31.35062026977539,
+    "gpu_name": "Tesla T4",
+    "gpu_memory_gb": 14.56317138671875,
+    "cuda_version": "12.6"
+  },
+  "provenance": {
+    "timestamp": "2026-02-03T04:38:11.312459",
+    "python_version": "3.12.12 (main, Oct 10 2025, 08:52:57) [GCC 11.4.0]",
+    "pytorch_version": "2.8.0+cu126",
+    "command_line": "run_all_kaggle.py --experiments all --seeds 42,123,456,789,1011,1213,1415,1617,1819,2021 --results-dir /kaggle/working/results/results_full --no-mlflow --robust-gradients --kaggle-t4",
+    "working_dir": "/kaggle/working/GDSearch",
+    "git_commit": "unknown",
+    "gpu_name": "Tesla T4",
+    "gpu_count": 2,
+    "gpu_memory_gb": 14.56317138671875,
+    "cuda_version": "12.6",
+    "nvidia_driver": "580.105.08\n580.105.08"
+  },
+  "completed": true,
+  "device": "cuda"
+}

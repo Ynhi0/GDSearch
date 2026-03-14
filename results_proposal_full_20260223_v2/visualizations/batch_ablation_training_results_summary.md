@@ -1,0 +1,6 @@
+## Batch Ablation Training Results - Tabular Summary
+
+| Optimizer/Config | Final Loss | Loss Std | Final Test Acc (%) | Acc Std (%) | Speed (iters/sec) |
+|------------------|------------|----------|--------------------|-------------|-------------------|
+| BatchAblation_MNIST_SAM | 0.1190 | 0.0022 | 96.2583 | 0.2652 | 0.0100 |
+| BatchAblation_MNIST_SGD | 0.1247 | 0.0013 | 96.2033 | 0.2172 | 0.0089 |

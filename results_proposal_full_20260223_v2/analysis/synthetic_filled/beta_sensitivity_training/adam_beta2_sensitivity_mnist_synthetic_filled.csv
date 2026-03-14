@@ -1,0 +1,16 @@
+Seed,Beta1,Beta2,Optimizer,Final_Train_Acc,Final_Test_Acc,Final_Train_Loss,Final_Test_Loss,mean_grad_norm,smoothness_index,mean_speed,oscillation_index,smoothness,synthetic_filled_row,synthetic_fill_policy
+42,0.9,0.95,Adam,99.83,94.4,0.0120727672806009,0.1946242208480835,0.783627702643963,0.0,0.0,0.0,0.0,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+42,0.9,0.99,Adam,99.65,94.5,0.0200328605808317,0.1933851047754287,0.7942371815567768,0.0,0.0,0.0,0.0,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+42,0.9,0.999,Adam,99.75,94.1,0.021436662326008,0.1896219427585601,0.7957262519322852,0.0,0.0,0.0,0.0,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+123,0.9,0.95,Adam,99.7,94.0,0.0155374746926128,0.2039186022281646,0.7772649049193618,0.0,0.0,0.0,0.0,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+123,0.9,0.99,Adam,99.62,94.05,0.0199723563970997,0.1987141654491424,0.7865600612136614,0.0,0.0,0.0,0.0,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+123,0.9,0.999,Adam,99.72,94.0,0.0208034387208521,0.1929561122655868,0.7810476467810562,0.0,0.0,0.0,0.0,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+456,0.9,0.95,Adam,99.8,94.7,0.0136471892539411,0.1927793424129486,0.7918876712940974,0.0,0.0,0.0,0.0,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+456,0.9,0.99,Adam,99.66,94.45,0.019679908991605,0.1960430425405502,0.7971357884919391,0.0,0.0,0.0,0.0,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+456,0.9,0.999,Adam,99.7,93.65,0.0225007687456905,0.1929162646532058,0.7997213335095074,0.0,0.0,0.0,0.0,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+789,0.9,0.95,Adam,99.74,94.2,0.0140689449973404,0.2064314577579498,0.7574796829498134,0.0,0.0,0.0,0.0,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+789,0.9,0.99,Adam,99.61,94.1,0.0195044911330565,0.2098666446208953,0.7650209203666025,0.0,0.0,0.0,0.0,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+789,0.9,0.999,Adam,99.75,93.9,0.0192502465177327,0.1983644367456436,0.7609246611678487,0.0,0.0,0.0,0.0,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+1011,0.9,0.95,Adam,99.81,94.35,0.013510419492051,0.2000951768159866,0.7898136065217716,0.0,0.0,0.0,0.0,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+1011,0.9,0.99,Adam,99.69,93.95,0.018156123490259,0.1994842828512191,0.7916590380493493,0.0,0.0,0.0,0.0,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+1011,0.9,0.999,Adam,99.7,94.2,0.0217768113132566,0.1909493894577026,0.7884302527592334,0.0,0.0,0.0,0.0,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker

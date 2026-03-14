@@ -1,0 +1,5 @@
+optimizer,noise_rate,test_acc_mean,test_acc_std,baseline_acc,retention_pct
+Adam,0.0,96.95,,96.95,100.0
+AdamW,0.0,96.93,,96.93,100.0
+SGD,0.0,90.97,,90.97,100.0
+SGD_Momentum,0.0,97.32,,97.32,100.0

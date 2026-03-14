@@ -1,0 +1,10 @@
+Optimizer/Config,Final Loss,Loss Std,Final Test Acc (%),Acc Std (%),Speed (iters/sec)
+MedicalSimpleCNN_AdaBound,1.5162,0.1184,58.2173,4.1279,N/A
+MedicalSimpleCNN_LAMB,2.4625,0.1890,57.9972,4.0717,N/A
+MedicalSimpleCNN_RAdam,2.5250,1.3606,52.4220,5.1700,N/A
+MedicalSimpleCNN_SGD_Momentum,1.6378,0.1354,49.7326,4.5549,N/A
+MedicalSimpleCNN_AdamW,1.9247,0.1552,44.3148,6.2032,N/A
+MedicalSimpleCNN_Adam,2.1521,0.1381,25.5000,17.2273,N/A
+UNet2D_Adam,0.3976,0.0646,23.2799,3.8393,N/A
+UNet2D_AdamW,0.3969,0.0647,23.1033,3.6116,N/A
+UNet2D_SGD_Momentum,0.4266,0.0149,18.8544,0.4997,N/A

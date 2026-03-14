@@ -96,8 +96,44 @@ def set_seed(seed: int, deterministic: bool = True):
     """
     random.seed(seed)
     np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+
+    def _cuda_seed_once(seed_value: int) -> None:
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed_value)
+
+    try:
+        torch.manual_seed(seed)
+        _cuda_seed_once(seed)
+    except Exception as e:
+        message = str(e).lower()
+        is_cuda_oom = "cuda" in message and "out of memory" in message
+        if not is_cuda_oom:
+            raise
+
+        logging.warning(
+            "CUDA OOM during set_seed(seed=%s). Attempting emergency cleanup and retry.",
+            seed,
+        )
+        try:
+            import gc
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                if hasattr(torch.cuda, "ipc_collect"):
+                    torch.cuda.ipc_collect()
+                try:
+                    torch.cuda.synchronize()
+                except Exception:
+                    pass
+
+            torch.manual_seed(seed)
+            _cuda_seed_once(seed)
+            logging.info("Recovered from CUDA OOM in set_seed after cleanup.")
+        except Exception as retry_error:
+            logging.warning(
+                "set_seed recovery failed after CUDA OOM; proceeding with CPU RNG only. Error: %s",
+                retry_error,
+            )
 
     if deterministic:
         # Enforce deterministic behavior where possible
@@ -114,8 +150,10 @@ def set_seed(seed: int, deterministic: bool = True):
             if torch.cuda.is_available() and 'CUBLAS_WORKSPACE_CONFIG' not in os.environ:
                 os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
         except Exception as e:
-            # Older PyTorch versions may not support this
-            logging.debug("Could not enable torch.use_deterministic_algorithms: %s", e, exc_info=True)
+            if 'out of memory' in str(e).lower() and 'cuda' in str(e).lower():
+                logging.warning("Skipping deterministic CUDA toggle due to transient CUDA OOM: %s", e)
+            else:
+                logging.debug("Could not enable torch.use_deterministic_algorithms: %s", e, exc_info=True)
     else:
         # Preserve performance-related flags (do not override cudnn.benchmark)
         try:

@@ -1,0 +1,5 @@
+label,data_dir,data_dir_exists,csv_count,viz_dir,viz_dir_exists,png_count
+REAL_OFFICIAL,f:\GDSearch\results_proposal_full_20260223_v2\experiments,True,2982,f:\GDSearch\results_proposal_full_20260223_v2\visualizations,True,184
+SYNTH_IMPUTED_DATA,f:\GDSearch\results_proposal_full_20260223_v2\experiments_imputed_for_visualization,True,1996,,,
+SYNTH_BLENDED_DATA,f:\GDSearch\results_proposal_full_20260223_v2\experiments_study_blended,True,1996,,,
+SYNTH_BLENDED_RENDER,f:\GDSearch\results_proposal_full_20260223_v2_study_blended_render\experiments,True,1996,f:\GDSearch\results_proposal_full_20260223_v2_study_blended_render\visualizations,True,135

@@ -1,0 +1,2 @@
+optimizer,empirical_rate,theoretical_rate,optimality_gap,optimality_gap_pct,convergence_regime,pl_constant,fit_r_squared,mean_relative_error,median_relative_error,max_relative_error,final_loss,theoretical_final
+SGD_Momentum,2.086005866287543,0.9996074285679836,,,linear (PL),0.0005136645726834638,0.49972313745890384,0.8056816377210392,0.8782150105678602,0.9617259413294367,0.0676616787360134,1.760954517701235

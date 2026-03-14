@@ -1,0 +1,10 @@
+## Theory Practice Training Results - Tabular Summary
+
+| Optimizer/Config | Final Loss | Loss Std | Final Test Acc (%) | Acc Std (%) | Speed (iters/sec) |
+|------------------|------------|----------|--------------------|-------------|-------------------|
+| AMSGrad_temp | 0.0004 | N/A | N/A | N/A | N/A |
+| SGD_temp | 0.0200 | N/A | N/A | N/A | N/A |
+| SGD_Momentum_temp | 0.0677 | N/A | N/A | N/A | N/A |
+| Adam_temp | 0.1327 | N/A | N/A | N/A | N/A |
+| LAMB_temp | 0.3376 | N/A | N/A | N/A | N/A |
+| AdaBound_temp | 0.4813 | N/A | N/A | N/A | N/A |

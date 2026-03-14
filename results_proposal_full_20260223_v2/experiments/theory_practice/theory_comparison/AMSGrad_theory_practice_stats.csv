@@ -1,0 +1,2 @@
+optimizer,empirical_rate,theoretical_rate,optimality_gap,optimality_gap_pct,convergence_regime,pl_constant,fit_r_squared,mean_relative_error,median_relative_error,max_relative_error,final_loss,theoretical_final
+AMSGrad,0.09899609290765385,0.9999668197888786,,,linear (PL),7.860017941807056e-06,0.9250549592116556,0.9316233321480264,0.9966239652423021,0.9982868769027451,0.0004268892583745,0.249187789766686

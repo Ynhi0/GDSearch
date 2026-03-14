@@ -29,6 +29,9 @@ def run_saddle_point_escape_experiment(
     output_dir: str = 'results/saddle_point_escape',
     noise_std: float = 0.01,  # GAP FIX: Add noise for true SGD simulation
     divergence_threshold: float = 1e4,
+    grad_clip: float | None = 100.0,
+    max_step: float | None = 1.0,
+    post_escape_steps: int = 150,
 ) -> Dict:
     """
     Run saddle point escape experiment with Hessian eigenvalue tracking.
@@ -104,6 +107,7 @@ def run_saddle_point_escape_experiment(
 
         escaped_saddle = False
         escape_iteration = None
+        escape_stop_iteration = None
         run_status = "max_iters_or_stalled"
         last_lambda_min = np.nan
         last_lambda_max = np.nan
@@ -117,6 +121,11 @@ def run_saddle_point_escape_experiment(
             if (not np.isfinite(loss)) or (not np.isfinite(grad_norm)):
                 run_status = "error_non_finite_loss"
                 break
+            if grad_clip is not None and grad_norm > grad_clip:
+                scale = grad_clip / (grad_norm + 1e-12)
+                grad_x *= scale
+                grad_y *= scale
+                grad_norm = np.linalg.norm([grad_x, grad_y])
             if (
                 abs(x) > divergence_threshold
                 or abs(y) > divergence_threshold
@@ -151,6 +160,7 @@ def run_saddle_point_escape_experiment(
                         escape_iteration = i
                         run_status = "escaped_saddle"
                         print(f"  {opt_name}: Escaped saddle at iteration {i}")
+                        escape_stop_iteration = i + max(0, int(post_escape_steps))
 
                 except Exception as e:
                     logging.warning(f"Eigenvalue computation failed: {e}")
@@ -159,7 +169,16 @@ def run_saddle_point_escape_experiment(
             history['lambda_max'].append(last_lambda_max)
 
             # Update
-            x, y = optimizer.step((x, y), (grad_x, grad_y))
+            next_x, next_y = optimizer.step((x, y), (grad_x, grad_y))
+            if max_step is not None:
+                dx = float(next_x) - float(x)
+                dy = float(next_y) - float(y)
+                step_norm = float(np.hypot(dx, dy))
+                if np.isfinite(step_norm) and step_norm > max_step:
+                    scale = max_step / (step_norm + 1e-12)
+                    next_x = x + dx * scale
+                    next_y = y + dy * scale
+            x, y = next_x, next_y
 
             # Divergence check
             if not np.isfinite(x) or not np.isfinite(y):
@@ -170,6 +189,9 @@ def run_saddle_point_escape_experiment(
                 run_status = "error_diverged"
                 x, y = np.nan, np.nan
                 print(f"  {opt_name}: Diverged past threshold at iteration {i}")
+                break
+
+            if escape_stop_iteration is not None and i >= escape_stop_iteration:
                 break
 
         # Store results

@@ -1,0 +1,42 @@
+{
+  "timestamp": "2026-02-19T14:12:47.297058",
+  "dataset": "IMDB",
+  "model": "distilbert-base-uncased",
+  "optimizer": "SGD_Momentum",
+  "seed": 123,
+  "rows": 12,
+  "params": {
+    "lr": 0.001,
+    "epochs": 15,
+    "batch_size": 64,
+    "model_name": "distilbert-base-uncased"
+  },
+  "model_path": null,
+  "system": {
+    "python_version": "3.12.12 (main, Oct 10 2025, 08:52:57) [GCC 11.4.0]",
+    "torch_version": "2.8.0+cu126",
+    "cuda_available": true,
+    "cpu_count": 4,
+    "total_memory_gb": 31.35062026977539,
+    "gpu_name": "Tesla T4",
+    "gpu_memory_gb": 14.56317138671875,
+    "cuda_version": "12.6"
+  },
+  "provenance": {
+    "timestamp": "2026-02-19T14:12:47.297594",
+    "python_version": "3.12.12 (main, Oct 10 2025, 08:52:57) [GCC 11.4.0]",
+    "pytorch_version": "2.8.0+cu126",
+    "command_line": "run_all_kaggle.py --experiments nlp --seeds 42,123,456,789,1011,1213,1415,1617,1819,2021 --results-dir /kaggle/working/results/results_full --no-mlflow --robust-gradients --kaggle-t4 --parallel --num-gpus 2 --resume",
+    "working_dir": "/kaggle/working/GDSearch",
+    "git_commit": "unknown",
+    "gpu_name": "Tesla T4",
+    "gpu_count": 2,
+    "gpu_memory_gb": 14.56317138671875,
+    "cuda_version": "12.6",
+    "nvidia_driver": "580.105.08\n580.105.08"
+  },
+  "completed": true,
+  "tainted": false,
+  "run_signature": "c4a8b4a8ea53ad3bed51e8a09610ffb256f0c3ed50e46ba38ef3c71a87e50c18",
+  "device": "cuda"
+}

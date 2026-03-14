@@ -1,0 +1,4 @@
+optimizer,escaped,escape_iteration,final_x,final_y,final_loss,run_status
+SGD,True,750,-0.0007772004800978,2.3853198947361194,-2.788857064739388,escaped_saddle
+SGD+Momentum,True,130,-0.0011078397630434,121.56089731769312,-7267.464980414936,escaped_saddle
+Adam,True,50,-0.0015790129970233,-3.04785373882647,-4.59396492524295,escaped_saddle

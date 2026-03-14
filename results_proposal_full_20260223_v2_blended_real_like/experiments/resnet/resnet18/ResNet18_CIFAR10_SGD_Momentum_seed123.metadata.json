@@ -1,0 +1,45 @@
+{
+  "timestamp": "2026-03-12T14:42:30.492901",
+  "dataset": "ResNet18",
+  "model": "CIFAR10",
+  "optimizer": "SGD_Momentum",
+  "seed": 123,
+  "rows": 20,
+  "rows_original": 20,
+  "history_thinning_stride": 1,
+  "params": {
+    "epochs": 20,
+    "batch_size": 128,
+    "seed": 123,
+    "optimizer": "SGD_Momentum"
+  },
+  "model_path": null,
+  "system": {
+    "python_version": "3.13.7 (tags/v3.13.7:bcee1c3, Aug 14 2025, 14:15:11) [MSC v.1944 64 bit (AMD64)]",
+    "torch_version": "2.6.0+cu124",
+    "cuda_available": true,
+    "cpu_count": 16,
+    "total_memory_gb": 15.730949401855469,
+    "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
+    "gpu_memory_gb": 3.99951171875,
+    "cuda_version": "12.4"
+  },
+  "provenance": {
+    "timestamp": "2026-03-12T14:42:30.533697",
+    "python_version": "3.13.7 (tags/v3.13.7:bcee1c3, Aug 14 2025, 14:15:11) [MSC v.1944 64 bit (AMD64)]",
+    "pytorch_version": "2.6.0+cu124",
+    "command_line": "run_all_kaggle.py --experiments resnet,highdim,hyperparam_sensitivity,convergence_validation,ablation_comprehensive,2d_visualization,dynamics_overhead,theory_practice,cross_optimizer_dynamics,beta_sensitivity,label_noise,saddle_escape,hyperparameter_heatmaps,stochastic_2d_integrity,adam_adamw_comparison --seeds 42,123,456,789,1011,1213,1415,1617,1819,2021 --resume --resume-behavior skip_if_results_exist --robust-gradients --use-agc --use-trimmed-mean --use-robust-loss --gradient-clip-norm 1.0 --quick --no-mlflow --results-dir results_proposal_full_20260223_v2",
+    "working_dir": "F:\\GDSearch",
+    "git_commit": "d46b561e93904db4461c6592de861f2ade056d44",
+    "git_dirty": true,
+    "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
+    "gpu_count": 1,
+    "gpu_memory_gb": 3.99951171875,
+    "cuda_version": "12.4",
+    "nvidia_driver": "581.80"
+  },
+  "completed": true,
+  "tainted": false,
+  "run_signature": "98af131ccead3dd48c95b6c58796101f3ef1cb19cf5c737f825ce4a842596b2c",
+  "device": "cuda"
+}

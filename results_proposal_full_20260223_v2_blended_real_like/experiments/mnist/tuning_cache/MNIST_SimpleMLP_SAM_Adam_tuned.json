@@ -1,0 +1,16 @@
+{
+  "dataset": "MNIST",
+  "model": "SimpleMLP",
+  "optimizer": "SAM_Adam",
+  "best_params": {
+    "lr": 0.001570297088405539,
+    "rho": 0.12374511199743694
+  },
+  "timestamp": "2026-03-08T00:53:42.240387",
+  "metadata": {
+    "best_val_acc": 91.51636363636364,
+    "n_trials": 5,
+    "epochs": 2,
+    "seed": 42
+  }
+}

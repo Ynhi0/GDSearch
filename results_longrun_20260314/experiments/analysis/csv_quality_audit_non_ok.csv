@@ -1,0 +1,7 @@
+path,experiment,rows,status,nan_cells,inf_cells,max_abs_numeric,has_axis,has_loss_like
+results_longrun_20260314\experiments\summary_quantitative.csv,summary_quantitative.csv,58,has_nan,48,0,789.0,False,True
+results_longrun_20260314\experiments\experiments\mnist\MNIST_SimpleMLP_SGD_Momentum_seed42.csv,experiments,50,has_nan,45,0,1491.613361120224,True,True
+results_longrun_20260314\experiments\experiments\mnist\MNIST_SimpleMLP_SGD_seed123.csv,experiments,50,has_nan,45,0,1604.2099194526672,True,True
+results_longrun_20260314\experiments\experiments\mnist\MNIST_SimpleMLP_SGD_seed42.csv,experiments,50,has_nan,45,0,804.3145041465759,True,True
+results_longrun_20260314\experiments\experiments\mnist\MNIST_SimpleMLP_SGD_seed456.csv,experiments,50,has_nan,45,0,1832.4795441627505,True,True
+results_longrun_20260314\experiments\experiments\mnist\MNIST_SimpleMLP_SGD_seed789.csv,experiments,50,has_nan,45,0,1678.0834140777588,True,True

@@ -1,0 +1,11 @@
+seed,optimizer,momentum,final_train_loss,final_test_accuracy,convergence_epoch,diverged,divergence_reason,synthetic_filled_row,synthetic_fill_policy
+42,SGD,0.0,1.4499779815038043,50.45,10,False,0.0,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+42,SGD_Momentum,0.9,0.3769694549719493,89.5,10,False,0.0,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+43,SGD,0.0,1.3600633682250975,54.31,10,False,0.0,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+43,SGD_Momentum,0.9,0.3267926104704539,91.58,10,False,0.0,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+44,SGD,0.0,1.349804425239563,53.15,10,False,0.0,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+44,SGD_Momentum,0.9,0.42465883547465,86.92,10,False,0.0,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+45,SGD,0.0,1.3812323086420697,51.73,10,False,0.0,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+45,SGD_Momentum,0.9,0.3426947372277578,91.02,10,False,0.0,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+46,SGD,0.0,1.327897330156962,54.81,10,False,0.0,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+46,SGD_Momentum,0.9,0.3639778349558512,88.21,10,False,0.0,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker

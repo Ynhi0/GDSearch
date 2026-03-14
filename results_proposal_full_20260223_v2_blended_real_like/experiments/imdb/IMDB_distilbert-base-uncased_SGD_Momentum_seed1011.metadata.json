@@ -1,0 +1,37 @@
+{
+  "timestamp": "2026-02-21T23:42:06.293398",
+  "dataset": "IMDB",
+  "model": "distilbert-base-uncased",
+  "optimizer": "SGD_Momentum",
+  "seed": 1011,
+  "rows": 10,
+  "params": {
+    "lr": 0.001,
+    "epochs": 15,
+    "batch_size": 64,
+    "model_name": "distilbert-base-uncased"
+  },
+  "model_path": null,
+  "system": {
+    "python_version": "3.12.12 (main, Oct 10 2025, 08:52:57) [GCC 11.4.0]",
+    "torch_version": "2.9.0+cpu",
+    "cuda_available": false,
+    "cpu_count": 4,
+    "total_memory_gb": 31.35062026977539
+  },
+  "provenance": {
+    "timestamp": "2026-02-21T23:42:06.319801",
+    "python_version": "3.12.12 (main, Oct 10 2025, 08:52:57) [GCC 11.4.0]",
+    "pytorch_version": "2.9.0+cpu",
+    "command_line": "run_all_kaggle.py --experiments nlp --seeds 42,123,456,789,1011,1213,1415,1617,1819,2021 --results-dir /kaggle/working/results/results_full --no-mlflow --robust-gradients --kaggle-t4 --resume",
+    "working_dir": "/kaggle/working/GDSearch",
+    "git_commit": "unknown",
+    "gpu_name": "CPU",
+    "gpu_count": 0,
+    "nvidia_driver": "unknown"
+  },
+  "completed": true,
+  "tainted": false,
+  "run_signature": "2b00f2c6ef4dfb4c15e5691b1c5e47a4305fd5f24d25cb401243661e263906d2",
+  "device": "cpu"
+}

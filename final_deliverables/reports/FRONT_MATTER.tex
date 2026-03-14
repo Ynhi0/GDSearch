@@ -1,0 +1,136 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage[a4paper,left=3cm,right=2cm,top=2cm,bottom=2cm]{geometry}
+\usepackage{iftex}
+\ifPDFTeX
+\PackageError{FRONT_MATTER}{This report must be compiled with XeLaTeX}{Run xelatex FRONT_MATTER.tex.}
+\fi
+\usepackage{fontspec}
+\setmainfont{Times New Roman}
+\usepackage{unicode-math}
+\setmathfont{Cambria Math}
+\usepackage{setspace}
+\setstretch{1.35}
+\AtBeginDocument{\fontsize{13pt}{18.2pt}\selectfont}
+\setlength{\parindent}{1.25em}
+\usepackage{indentfirst}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage[unicode,hidelinks]{hyperref}
+\usepackage{xurl}
+\Urlmuskip=0mu plus 1mu
+\usepackage{tikz}
+
+\newcommand{\CoverPageBorder}{
+\begin{tikzpicture}[remember picture,overlay]
+\draw[line width=1.2pt]
+  ([xshift=1cm,yshift=-1cm]current page.north west)
+  rectangle
+  ([xshift=-1cm,yshift=1cm]current page.south east);
+\end{tikzpicture}
+}
+
+\newcommand{\ReportTitleUpper}{TỐC ĐỘ HỘI TỤ CỦA GD TRONG TỐI ƯU HÓA HÀM MẤT MÁT}
+\newcommand{\ReportTitle}{Tốc độ hội tụ của GD trong tối ưu hóa hàm mất mát}
+\newcommand{\ProjectCode}{733}
+\newcommand{\ReportDate}{TP. Hồ Chí Minh, 2026}
+\newcommand{\ChairName}{Bùi Thị Yến Nhi}
+\newcommand{\AdvisorName}{TS. Lê Quang Minh}
+\newcommand{\FacultyName}{Đào Tạo Đặc Biệt}
+\newcommand{\StudentId}{2251012103}
+\newcommand{\MemberOne}{Lê Trần Minh Phúc}
+\newcommand{\MemberTwo}{Nguyễn Công Huy}
+
+\begin{document}
+\begin{titlepage}
+\thispagestyle{empty}
+\CoverPageBorder
+\begin{center}
+{\large \textbf{BỘ GIÁO DỤC VÀ ĐÀO TẠO}}\\[0.3cm]
+{\large \textbf{TRƯỜNG ĐẠI HỌC MỞ THÀNH PHỐ HỒ CHÍ MINH}}\\[2.8cm]
+{\Large \textbf{BÁO CÁO TỔNG KẾT}}\\[0.4cm]
+{\Large \textbf{ĐỀ TÀI NGHIÊN CỨU KHOA HỌC SINH VIÊN}}\\[1.2cm]
+{\Large \textbf{\ReportTitleUpper.}}\\[1.2cm]
+{\Large \textbf{MÃ SỐ ĐỀ TÀI: \ProjectCode}}\\[2.4cm]
+\vfill
+{\large \textbf{\ReportDate}}
+\end{center}
+\end{titlepage}
+
+\begin{titlepage}
+\thispagestyle{empty}
+\CoverPageBorder
+\begin{center}
+{\large \textbf{BỘ GIÁO DỤC VÀ ĐÀO TẠO}}\\[0.3cm]
+{\large \textbf{TRƯỜNG ĐẠI HỌC MỞ THÀNH PHỐ HỒ CHÍ MINH}}\\[2.2cm]
+{\Large \textbf{BÁO CÁO TỔNG KẾT}}\\[0.4cm]
+{\Large \textbf{ĐỀ TÀI NGHIÊN CỨU KHOA HỌC SINH VIÊN}}\\[1.2cm]
+{\Large \textbf{\ReportTitleUpper}}\\[0.8cm]
+{\Large \textbf{Mã số đề tài: \ProjectCode}}\\[1.6cm]
+\begin{minipage}{0.75\textwidth}
+\centering
+Chủ nhiệm đề tài: \ChairName\\[0.3cm]
+Khoa: \FacultyName\\[0.3cm]
+Các thành viên:
+\MemberOne\\
+\MemberTwo\\[0.3cm]
+Người hướng dẫn: \AdvisorName
+\end{minipage}
+\vfill
+{\large \textbf{\ReportDate}}
+\end{center}
+\end{titlepage}
+
+\begin{titlepage}
+\thispagestyle{empty}
+\begin{minipage}[t]{0.48\textwidth}
+\centering
+{\large \textbf{BỘ GIÁO DỤC VÀ ĐÀO TẠO}}\\[0.2cm]
+{\large \textbf{TRƯỜNG ĐẠI HỌC MỞ}}\\[0.1cm]
+{\large \textbf{THÀNH PHỐ HỒ CHÍ MINH}}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.48\textwidth}
+\centering
+{\large \textbf{CỘNG HOÀ XÃ HỘI CHỦ NGHĨA VIỆT NAM}}\\[0.2cm]
+{\large \textbf{Độc lập - Tự do - Hạnh phúc}}
+\end{minipage}
+
+\vspace{1.2cm}
+\begin{center}
+{\Large \textbf{THÔNG TIN KẾT QUẢ NGHIÊN CỨU CỦA ĐỀ TÀI}}
+\end{center}
+
+\vspace{0.6cm}
+\noindent\textbf{1. Thông tin chung:}\\
+- Tên đề tài: \ReportTitle\\
+- Mã số đề tài: \ProjectCode\\
+- Sinh viên chủ nhiệm đề tài: \ChairName\\
+- Khoa: \FacultyName \hfill Mã số sinh viên: \StudentId\\
+- Giảng viên hướng dẫn: \AdvisorName
+
+\vspace{0.45cm}
+\noindent\textbf{2. Mục tiêu đề tài:}\\
+Xây dựng khung đánh giá tốc độ hội tụ cho họ thuật toán GD (SGD, Momentum, RMSProp, Adam, AdamW) trên hàm kiểm tra 2D, mô hình nơ-ron cơ bản và các tình huống ứng dụng, đồng thời đo lường song song chỉ số tối ưu và chỉ số dự báo để rút ra kết luận thực nghiệm có kiểm soát.
+
+\vspace{0.45cm}
+\noindent\textbf{3. Tính mới và sáng tạo:}\\
+Đề tài thiết kế chuỗi thí nghiệm cắt lớp cô lập cơ chế momentum và học thích ứng, chuẩn hoá ngân sách siêu tham số giữa các optimizer, và áp dụng quy trình suy luận thống kê có điều chỉnh đa giả thuyết. Cách tổ chức này giúp liên kết trực tiếp phân tích động học 2D với xác thực trên mô hình và bài toán ứng dụng.
+
+\vspace{0.45cm}
+\noindent\textbf{4. Kết quả nghiên cứu:}\\
+Hoàn thiện bộ pipeline thực nghiệm có khả năng tái lập với nhiều hạt giống, thu thập log động học chi tiết và so sánh liên-optimizer nhất quán. Kết quả cho thấy các phương pháp thích nghi hội tụ nhanh hơn ở giai đoạn đầu, trong khi SGD kết hợp Momentum thể hiện tính ổn định và xu hướng tổng quát tốt khi ngân sách huấn luyện đủ và lịch học được kiểm soát.
+
+\vspace{0.45cm}
+\noindent\textbf{5. Đóng góp về mặt kinh tế - xã hội, giáo dục và đào tạo, an ninh, quốc phòng và khả năng áp dụng của đề tài:}\\
+Khung đánh giá và mã nguồn đi kèm có thể tái sử dụng trong đào tạo và thực hành tối ưu hoá, hỗ trợ lựa chọn optimizer phù hợp cho các bài toán học sâu trong môi trường hạn chế tài nguyên. Kết quả góp phần nâng cao năng lực nghiên cứu của sinh viên và tăng khả năng ứng dụng vào các dự án AI thực tế.
+
+\vspace{0.45cm}
+\noindent\textbf{6. Công bố khoa học của sinh viên từ kết quả nghiên cứu của đề tài:}\\
+Chưa có công bố khoa học chính thức; sản phẩm hiện bao gồm báo cáo nghiên cứu, bộ mã nguồn và tài liệu kỹ thuật nội bộ phục vụ hoàn thiện bản thảo.
+
+\vfill
+\begin{center}
+{\large \textbf{\ReportDate}}
+\end{center}
+\end{titlepage}
+\end{document}

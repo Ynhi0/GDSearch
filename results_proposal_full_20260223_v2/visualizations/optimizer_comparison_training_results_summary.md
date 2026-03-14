@@ -1,0 +1,3 @@
+| group | csv_files_total | csv_files_used | missing_values_before_plot_impute | missing_values_after_plot_impute | note |
+|---|---:|---:|---:|---:|---|
+| optimizer_comparison | 4 | 4 | 7 | 0 | Plot-only imputation; official experiment CSVs unchanged |

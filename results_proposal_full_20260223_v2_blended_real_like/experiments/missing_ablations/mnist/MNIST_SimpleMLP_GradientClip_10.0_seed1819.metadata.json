@@ -1,0 +1,44 @@
+{
+  "timestamp": "2026-03-12T18:29:41.164271",
+  "dataset": "MNIST",
+  "model": "SimpleMLP",
+  "optimizer": "GradientClip_10.0",
+  "seed": 1819,
+  "rows": 10,
+  "rows_original": 10,
+  "history_thinning_stride": 1,
+  "params": {
+    "gradient_clip": 10.0,
+    "epochs": 10,
+    "seed": 1819
+  },
+  "model_path": null,
+  "system": {
+    "python_version": "3.12.0 (tags/v3.12.0:0fb18b0, Oct  2 2023, 13:03:39) [MSC v.1935 64 bit (AMD64)]",
+    "torch_version": "2.5.1+cu121",
+    "cuda_available": true,
+    "cpu_count": 16,
+    "total_memory_gb": 15.730949401855469,
+    "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
+    "gpu_memory_gb": 3.99951171875,
+    "cuda_version": "12.1"
+  },
+  "provenance": {
+    "timestamp": "2026-03-12T18:29:41.166259",
+    "python_version": "3.12.0 (tags/v3.12.0:0fb18b0, Oct  2 2023, 13:03:39) [MSC v.1935 64 bit (AMD64)]",
+    "pytorch_version": "2.5.1+cu121",
+    "command_line": "run_all_kaggle.py --experiments medical,2d,robustness,sam,ablation,advanced_ablation,init_ablation,batch_ablation,lr_ablation,wd_ablation,scheduler_ablation,missing_ablations,optimizer_comparison,resnet,highdim,hyperparam_sensitivity,convergence_validation,ablation_comprehensive,2d_visualization,dynamics_overhead,theory_practice,cross_optimizer_dynamics,beta_sensitivity_training,label_noise,saddle_escape,hyperparameter_heatmaps,stochastic_2d_integrity,adam_adamw_comparison --seeds 42,123,456,789,1011,1213,1415,1617,1819,2021 --resume --resume-behavior skip_if_results_exist --robust-gradients --use-agc --use-trimmed-mean --use-robust-loss --gradient-clip-norm 1.0 --quick --no-mlflow --results-dir results_proposal_full_20260223_v2",
+    "working_dir": "F:\\GDSearch",
+    "git_commit": "d46b561e93904db4461c6592de861f2ade056d44",
+    "git_dirty": true,
+    "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
+    "gpu_count": 1,
+    "gpu_memory_gb": 3.99951171875,
+    "cuda_version": "12.1",
+    "nvidia_driver": "581.80"
+  },
+  "completed": true,
+  "tainted": false,
+  "run_signature": "acfdec553fae0987265aec210470ca28bed9a747118b583be337d4682c898d83",
+  "device": "cuda"
+}

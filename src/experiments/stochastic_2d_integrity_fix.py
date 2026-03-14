@@ -14,7 +14,7 @@ Date: 2026-01-02
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 import logging
 
 # Import test functions
@@ -40,6 +40,8 @@ def run_stochastic_2d_experiments(
     max_iter: int = 5000,
     resume: bool = False,
     divergence_threshold: float = 1e6,
+    grad_clip: Optional[float] = 100.0,
+    max_step: Optional[float] = 1.0,
 ) -> pd.DataFrame:
     """
     Run 2D optimization experiments with PROPER stochastic gradient noise.
@@ -151,6 +153,36 @@ def run_stochastic_2d_experiments(
 
     results = []
 
+    def _disable_optimizer_history(opt: Any) -> None:
+        """Prevent optimizer internal history growth to avoid MemoryError."""
+        try:
+            if hasattr(opt, "_append_history"):
+                opt._append_history = lambda *args, **kwargs: None  # type: ignore[assignment]
+            opt.history_params = []
+        except Exception:
+            pass
+        try:
+            base_opt = getattr(opt, "base_opt", None)
+            if base_opt is not None:
+                if hasattr(base_opt, "_append_history"):
+                    base_opt._append_history = lambda *args, **kwargs: None  # type: ignore[assignment]
+                base_opt.history_params = []
+        except Exception:
+            pass
+
+    def _cap_step(x_val: float, y_val: float, next_x: float, next_y: float) -> Tuple[float, float]:
+        if max_step is None:
+            return next_x, next_y
+        dx = next_x - x_val
+        dy = next_y - y_val
+        step_norm = float(np.hypot(dx, dy))
+        if not np.isfinite(step_norm) or step_norm <= 0:
+            return next_x, next_y
+        if step_norm > max_step:
+            scale = max_step / (step_norm + 1e-12)
+            return x_val + dx * scale, y_val + dy * scale
+        return next_x, next_y
+
     for func_name, func, start_point in test_functions:
         print(f"\n[FUNCTION] {func_name}")
         print("-" * 40)
@@ -165,6 +197,7 @@ def run_stochastic_2d_experiments(
 
                 # Reset optimizer state
                 optimizer.reset()
+                _disable_optimizer_history(optimizer)
                 run_status = "max_iters_or_stalled"
                 converged_iteration = -1
 
@@ -184,6 +217,11 @@ def run_stochastic_2d_experiments(
                     if not np.isfinite(loss) or not np.isfinite(grad_norm):
                         run_status = "error_non_finite_loss"
                         break
+                    if grad_clip is not None and grad_norm > grad_clip:
+                        scale = grad_clip / (grad_norm + 1e-12)
+                        grad_x *= scale
+                        grad_y *= scale
+                        grad_norm = np.hypot(grad_x, grad_y)
                     if (
                         abs(x) > divergence_threshold
                         or abs(y) > divergence_threshold
@@ -223,10 +261,12 @@ def run_stochastic_2d_experiments(
                         adversarial_gradients = (adv_grad_x, adv_grad_y)
 
                         # SAM step with adversarial gradients
-                        x, y = optimizer.step((x, y), (grad_x, grad_y), adversarial_gradients=adversarial_gradients)
+                        next_x, next_y = optimizer.step((x, y), (grad_x, grad_y), adversarial_gradients=adversarial_gradients)
+                        x, y = _cap_step(x, y, float(next_x), float(next_y))
                     else:
                         # Standard optimizer step
-                        x, y = optimizer.step((x, y), (grad_x, grad_y))
+                        next_x, next_y = optimizer.step((x, y), (grad_x, grad_y))
+                        x, y = _cap_step(x, y, float(next_x), float(next_y))
 
                     # Divergence guardrail to avoid numeric blow-ups.
                     if (not np.isfinite(x)) or (not np.isfinite(y)):
@@ -297,6 +337,8 @@ def compare_deterministic_vs_stochastic(
     seeds: Optional[List[int]] = None,
     max_iter: int = 5000,
     divergence_threshold: float = 1e6,
+    grad_clip: Optional[float] = 100.0,
+    max_step: Optional[float] = 1.0,
 ) -> Dict[str, pd.DataFrame]:
     """
     Compare deterministic GD (noise_std=0) vs. stochastic SGD (noise_std>0).
@@ -327,6 +369,8 @@ def compare_deterministic_vs_stochastic(
         max_iter=max_iter,
         resume=False,
         divergence_threshold=divergence_threshold,
+        grad_clip=grad_clip,
+        max_step=max_step,
     )
 
     # Run stochastic (REAL SGD)
@@ -340,6 +384,8 @@ def compare_deterministic_vs_stochastic(
         max_iter=max_iter,
         resume=False,
         divergence_threshold=divergence_threshold,
+        grad_clip=grad_clip,
+        max_step=max_step,
     )
 
     # Compare

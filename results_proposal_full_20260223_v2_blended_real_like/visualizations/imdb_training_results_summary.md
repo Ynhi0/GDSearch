@@ -1,0 +1,10 @@
+## Imdb Training Results - Tabular Summary
+
+| Optimizer/Config | Final Loss | Loss Std | Final Test Acc (%) | Acc Std (%) | Speed (iters/sec) |
+|------------------|------------|----------|--------------------|-------------|-------------------|
+| distilbert-base-uncased_AdamW | 0.0127 | 0.0081 | 90.0550 | 0.5062 | N/A |
+| distilbert-base-uncased_Adam | 0.0101 | 0.0131 | 90.0200 | 0.5662 | N/A |
+| distilbert-base-uncased_SGD_Momentum | 0.1898 | 0.1177 | 87.7350 | 2.0400 | N/A |
+| distilbert-base-uncased_AdaBound | 0.2341 | 0.0120 | 87.6800 | 1.4586 | N/A |
+| distilbert-base-uncased_LAMB | 0.2521 | 0.0100 | 87.6800 | 0.5706 | N/A |
+| distilbert-base-uncased_RAdam | 0.3599 | 0.0852 | 83.7200 | 1.4048 | N/A |

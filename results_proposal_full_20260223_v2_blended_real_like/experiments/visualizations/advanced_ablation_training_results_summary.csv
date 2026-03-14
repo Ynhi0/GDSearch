@@ -1,0 +1,9 @@
+Optimizer/Config,Final Loss,Loss Std,Final Test Acc (%),Acc Std (%),Speed (iters/sec)
+LabelSmoothing_EMA,0.7314,0.0049,95.253,0.1705,0.0
+LabelSmoothing_only,0.7325,0.0048,95.219,0.1849,0.0
+Baseline,0.2125,0.0095,94.324,0.273,0.0
+EMA_only,0.2131,0.0108,94.261,0.3087,0.0
+AMP_LabelSmoothing,0.7843,0.0105,94.031,0.3528,0.0
+All_Combined,0.784,0.0104,93.99,0.3446,0.0
+AMP_EMA,0.275,0.0204,92.738,0.4701,0.0
+AMP_only,0.2755,0.0203,92.738,0.5092,0.0

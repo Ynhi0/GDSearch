@@ -4,8 +4,6 @@ Core implementations: optimizers, test functions, models, data utilities, LR sch
 
 from .optimizers import SGD, SGDMomentum, RMSProp, Adam
 from .test_functions import Rosenbrock, IllConditionedQuadratic, SaddlePoint
-from .models import SimpleMLP, SimpleCNN, ConvNet
-from .data_utils import get_mnist_loaders, get_cifar10_loaders
 from .validation import validate_config, validate_learning_rate, validate_epochs, validate_batch_size
 from .lr_schedulers import (
     LRScheduler, ConstantLR, StepLR, MultiStepLR, ExponentialLR,
@@ -38,6 +36,21 @@ except ImportError:
     get_loss_function = None
     create_amp_wrapper = None
     create_model_ema = None
+
+# Optional imports that may pull torch/torchvision and fail on some systems.
+# Keep core test-function utilities usable even if torch DLLs fail to load.
+try:
+    from .models import SimpleMLP, SimpleCNN, ConvNet
+except Exception:
+    SimpleMLP = None
+    SimpleCNN = None
+    ConvNet = None
+
+try:
+    from .data_utils import get_mnist_loaders, get_cifar10_loaders
+except Exception:
+    get_mnist_loaders = None
+    get_cifar10_loaders = None
 
 __all__ = [
     # Optimizers

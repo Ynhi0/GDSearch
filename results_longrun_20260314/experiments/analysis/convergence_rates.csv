@@ -1,0 +1,6 @@
+file,convergence_rate,convergence_rate_type,converged_epoch,converged_basis,final_loss,stagnation_detected,optimizer,seed
+MNIST_SimpleMLP_SGD_Momentum_seed42.csv,0.005210915881842604,linear,27,practical_90pct,0.1064291600155632,False,SGD_Momentum,42
+MNIST_SimpleMLP_SGD_seed123.csv,0.024411240854910875,linear,10,practical_90pct,0.2928416571945329,False,SGD,123
+MNIST_SimpleMLP_SGD_seed42.csv,0.02321013275729118,linear,12,practical_90pct,0.2944965844478788,False,SGD,42
+MNIST_SimpleMLP_SGD_seed456.csv,0.022738088798007296,linear,11,practical_90pct,0.2946829176684724,False,SGD,456
+MNIST_SimpleMLP_SGD_seed789.csv,0.02526749054487147,linear,10,practical_90pct,0.2920025555723453,False,SGD,789

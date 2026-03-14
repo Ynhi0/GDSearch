@@ -1,5 +1,5 @@
 status,count
-ok,1252
-has_nan,342
-no_metric_cols,5
-read_error: No columns to parse from file,1
+ok,1868
+has_nan,623
+ok_meta,5
+read_error: No columns to parse from file,4

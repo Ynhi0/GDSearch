@@ -1,0 +1,5 @@
+experiment,summary_csv,status,rows,n_seeds,expected_unique_seeds,seed_shortfall,missing_required_columns,missing_metric_alt,missing_convergence_alt,all_null_columns,error_rows,nonfinite_final_loss_rows
+2d_optimization,experiments/2d_optimization/2d_optimization_results.csv,error_rows_present,60,10,10,0,,False,False,,60,0
+robustness,experiments/robustness/robustness_results.csv,error_rows_present,500,10,10,0,,False,False,,500,0
+sam_sensitivity,experiments/sam_sensitivity/sam_sensitivity_results.csv,ok,50,10,10,0,,False,False,,0,0
+ablation,experiments/ablation/ablation_results.csv,error_rows_present,50,10,10,0,,False,False,,50,0

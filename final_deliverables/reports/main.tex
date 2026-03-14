@@ -1,0 +1,607 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage[a4paper,left=3cm,right=2cm,top=2cm,bottom=2cm]{geometry}
+\usepackage{iftex}
+\ifPDFTeX
+\PackageError{MAIN}{This report must be compiled with XeLaTeX}{Run xelatex main.tex}
+\fi
+\usepackage{fontspec}
+\setmainfont{Times New Roman}
+\usepackage{unicode-math}
+\setmathfont{Cambria Math}
+\usepackage{setspace}
+\setstretch{1.35}
+\AtBeginDocument{\fontsize{13pt}{18.2pt}\selectfont}
+\setlength{\parindent}{1.25em}
+\usepackage{indentfirst}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{float}
+\usepackage{enumitem}
+\usepackage{array}
+\usepackage[unicode,hidelinks]{hyperref}
+\usepackage{xurl}
+\Urlmuskip=0mu plus 1mu
+\usepackage{tikz}
+
+\renewcommand{\refname}{Tài liệu tham khảo (IEEE)}
+\newcommand{\ind}{\mathbf{1}}
+\newcommand{\assign}{\ensuremath{\leftarrow}}
+\newcommand{\flow}{\ensuremath{\rightarrow}}
+% Vietnamese algorithm keywords
+\floatname{algorithm}{Thuật toán}
+\algrenewcommand\algorithmicrequire{\textbf{Đầu vào:}}
+\algrenewcommand\algorithmicensure{\textbf{Đầu ra:}}
+\algrenewcommand\algorithmicreturn{\textbf{Trả về:}}
+\algrenewcommand\algorithmicfor{\textbf{Đối với mỗi}}
+\algrenewcommand\algorithmicforall{\textbf{Với mỗi}}
+\algrenewcommand\algorithmicif{\textbf{Nếu}}
+\algrenewcommand\algorithmicelse{\textbf{Ngược lại}}
+\algrenewcommand\algorithmicthen{\textbf{thì}}
+\algrenewcommand\algorithmicdo{\textbf{thực hiện}}
+\algrenewcommand\algorithmicwhile{\textbf{Trong khi}}
+\algrenewcommand\algorithmicrepeat{\textbf{Lặp}}
+\algrenewcommand\algorithmicuntil{\textbf{cho đến khi}}
+
+% Breakable algorithm environment (avoids blank pages, allows page breaks)
+\makeatletter
+\newenvironment{breakablealgorithm}
+  {%
+    \par\addvspace{0.6\baselineskip}
+    \refstepcounter{algorithm}
+    \noindent\hrule height .8pt depth 0pt \kern 2pt
+    \renewcommand{\caption}[2][\relax]{%
+      \noindent\textbf{Thu?t to?n \thealgorithm. ##2}\par
+      \ifx\relax##1\relax
+        \addcontentsline{loa}{algorithm}{\protect\numberline{\thealgorithm}##2}%
+      \else
+        \addcontentsline{loa}{algorithm}{\protect\numberline{\thealgorithm}##1}%
+      \fi
+      \kern 2pt \hrule \kern 2pt
+    }%
+  }{%
+    \kern 2pt \hrule \par\addvspace{0.6\baselineskip}
+  }
+\renewenvironment{algorithm}[1][htbp]{\begin{breakablealgorithm}}{\end{breakablealgorithm}}
+\makeatother
+
+\newcommand{\CoverPageBorder}{
+\begin{tikzpicture}[remember picture,overlay]
+\draw[line width=1.2pt]
+  ([xshift=1cm,yshift=-1cm]current page.north west)
+  rectangle
+  ([xshift=-1cm,yshift=1cm]current page.south east);
+\end{tikzpicture}
+}
+
+\newcommand{\ReportTitleUpper}{TỐC ĐỘ HỘI TỤ CỦA GD TRONG TỐI ƯU HÓA HÀM MẤT MÁT}
+\newcommand{\ReportTitle}{Tốc độ hội tụ của GD trong tối ưu hóa hàm mất mát}
+\newcommand{\ProjectCode}{733}
+\newcommand{\ReportDate}{TP. Hồ Chí Minh, 2026}
+\newcommand{\ChairName}{Bùi Thị Yến Nhi}
+\newcommand{\AdvisorName}{TS. Lê Quang Minh}
+\newcommand{\FacultyName}{Đào Tạo Đặc Biệt}
+\newcommand{\StudentId}{2251012103}
+\newcommand{\MemberOne}{Lê Trần Minh Phúc}
+\newcommand{\MemberTwo}{Nguyễn Công Huy}
+
+\begin{document}
+\begin{titlepage}
+\thispagestyle{empty}
+\CoverPageBorder
+\begin{center}
+{\large \textbf{BỘ GIÁO DỤC VÀ ĐÀO TẠO}}\\[0.3cm]
+{\large \textbf{TRƯỜNG ĐẠI HỌC MỞ THÀNH PHỐ HỒ CHÍ MINH}}\\[2.8cm]
+{\Large \textbf{BÁO CÁO TỔNG KẾT}}\\[0.4cm]
+{\Large \textbf{ĐỀ TÀI NGHIÊN CỨU KHOA HỌC SINH VIÊN}}\\[1.2cm]
+{\Large \textbf{\ReportTitleUpper.}}\\[1.2cm]
+{\Large \textbf{MÃ SỐ ĐỀ TÀI: \ProjectCode}}\\[2.4cm]
+\vfill
+{\large \textbf{\ReportDate}}
+\end{center}
+\end{titlepage}
+
+\begin{titlepage}
+\thispagestyle{empty}
+\CoverPageBorder
+\begin{center}
+{\large \textbf{BỘ GIÁO DỤC VÀ ĐÀO TẠO}}\\[0.3cm]
+{\large \textbf{TRƯỜNG ĐẠI HỌC MỞ THÀNH PHỐ HỒ CHÍ MINH}}\\[2.2cm]
+{\Large \textbf{BÁO CÁO TỔNG KẾT}}\\[0.4cm]
+{\Large \textbf{ĐỀ TÀI NGHIÊN CỨU KHOA HỌC SINH VIÊN}}\\[1.2cm]
+{\Large \textbf{\ReportTitleUpper}}\\[0.8cm]
+{\Large \textbf{Mã số đề tài: \ProjectCode}}\\[1.6cm]
+\begin{minipage}{0.75\textwidth}
+\centering
+Chủ nhiệm đề tài: \ChairName\\[0.3cm]
+Khoa: \FacultyName\\[0.3cm]
+Các thành viên:
+\MemberOne\\
+\MemberTwo\\[0.3cm]
+Người hướng dẫn: \AdvisorName
+\end{minipage}
+\vfill
+{\large \textbf{\ReportDate}}
+\end{center}
+\end{titlepage}
+
+\begin{titlepage}
+\thispagestyle{empty}
+\begin{minipage}[t]{0.48\textwidth}
+\centering
+{\large \textbf{BỘ GIÁO DỤC VÀ ĐÀO TẠO}}\\[0.2cm]
+{\large \textbf{TRƯỜNG ĐẠI HỌC MỞ}}\\[0.1cm]
+{\large \textbf{THÀNH PHỐ HỒ CHÍ MINH}}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.48\textwidth}
+\centering
+{\large \textbf{CỘNG HOÀ XÃ HỘI CHỦ NGHĨA VIỆT NAM}}\\[0.2cm]
+{\large \textbf{Độc lập - Tự do - Hạnh phúc}}
+\end{minipage}
+
+\vspace{1.2cm}
+\begin{center}
+{\Large \textbf{THÔNG TIN KẾT QUẢ NGHIÊN CỨU CỦA ĐỀ TÀI}}
+\end{center}
+
+\vspace{0.6cm}
+\noindent\textbf{1. Thông tin chung:}\\
+- Tên đề tài: \ReportTitle\\
+- Mã số đề tài: \ProjectCode\\
+- Sinh viên chủ nhiệm đề tài: \ChairName\\
+- Khoa: \FacultyName \hfill Mã số sinh viên: \StudentId\\
+- Giảng viên hướng dẫn: \AdvisorName
+
+\vspace{0.45cm}
+\noindent\textbf{2. Mục tiêu đề tài:}\\
+Xây dựng khung đánh giá tốc độ hội tụ cho họ thuật toán GD (SGD, Momentum, RMSProp, Adam, AdamW) trên hàm kiểm tra 2D, mô hình nơ-ron cơ bản và các tình huống ứng dụng, đồng thời đo lường song song chỉ số tối ưu và chỉ số dự báo để rút ra kết luận thực nghiệm có kiểm soát.
+
+\vspace{0.45cm}
+\noindent\textbf{3. Tính mới và sáng tạo:}\\
+Đề tài thiết kế chuỗi thí nghiệm cắt lớp cô lập cơ chế momentum và học thích ứng, chuẩn hoá ngân sách siêu tham số giữa các optimizer, và áp dụng quy trình suy luận thống kê có điều chỉnh đa giả thuyết. Cách tổ chức này giúp liên kết trực tiếp phân tích động học 2D với xác thực trên mô hình và bài toán ứng dụng.
+
+\vspace{0.45cm}
+\noindent\textbf{4. Kết quả nghiên cứu:}\\
+Hoàn thiện bộ pipeline thực nghiệm có khả năng tái lập với nhiều hạt giống, thu thập log động học chi tiết và so sánh liên-optimizer nhất quán. Kết quả cho thấy các phương pháp thích nghi hội tụ nhanh hơn ở giai đoạn đầu, trong khi SGD kết hợp Momentum thể hiện tính ổn định và xu hướng tổng quát tốt khi ngân sách huấn luyện đủ và lịch học được kiểm soát.
+
+\vspace{0.45cm}
+\noindent\textbf{5. Đóng góp về mặt kinh tế - xã hội, giáo dục và đào tạo, an ninh, quốc phòng và khả năng áp dụng của đề tài:}\\
+Khung đánh giá và mã nguồn đi kèm có thể tái sử dụng trong đào tạo và thực hành tối ưu hoá, hỗ trợ lựa chọn optimizer phù hợp cho các bài toán học sâu trong môi trường hạn chế tài nguyên. Kết quả góp phần nâng cao năng lực nghiên cứu của sinh viên và tăng khả năng ứng dụng vào các dự án AI thực tế.
+
+\vspace{0.45cm}
+\noindent\textbf{6. Công bố khoa học của sinh viên từ kết quả nghiên cứu của đề tài:}\\
+Chưa có công bố khoa học chính thức; sản phẩm hiện bao gồm báo cáo nghiên cứu, bộ mã nguồn và tài liệu kỹ thuật nội bộ phục vụ hoàn thiện bản thảo.
+
+\vfill
+\begin{center}
+{\large \textbf{\ReportDate}}
+\end{center}
+\end{titlepage}
+
+\section{Chương 3. Phương pháp nghiên cứu}
+
+\subsection{3.1. Định hướng phương pháp luận }
+
+Phương pháp nghiên cứu trong báo cáo được xây dựng theo định hướng thực nghiệm có kiểm soát. Mục tiêu không dừng ở việc so sánh chỉ số đầu ra, mà tập trung làm rõ cơ chế động học của quá trình tối ưu. Câu hỏi trọng tâm là: những thành phần nào trong quy tắc cập nhật của thuật toán tối ưu bậc nhất chi phối đồng thời tốc độ hội tụ, độ ổn định quỹ đạo và năng lực tổng quát hóa, khi chuyển từ không gian tối ưu hình học đơn giản sang các bài toán học sâu thực tế. Để trả lời câu hỏi này, nghiên cứu triển khai một chuỗi bằng chứng liên thông qua ba tầng bối cảnh: phân tích trên hàm kiểm tra hai chiều, xác thực trên bộ dữ liệu phân loại chuẩn, và kiểm định trên tác vụ ứng dụng có độ phức tạp cao hơn. Trục xuyên suốt của chương là nguyên tắc thay đổi tối thiểu theo cơ chế, nhằm bảo đảm khả năng quy kết nguyên nhân và giảm nhiễu đồng biến do cấu hình.
+
+\subsubsection{3.1.1. Giả thuyết nghiên cứu và tiêu chí bác bỏ}
+
+Để mạch suy luận có thể kiểm định và có thể bác bỏ, chương này xác lập ba giả thuyết nghiên cứu tường minh. Giả thuyết thứ nhất $H_1$ cho rằng các cơ chế thích nghi theo moment bậc một và bậc hai đạt tốc độ hội tụ cao hơn SGD chuẩn khi ngân sách huấn luyện và cấu hình dữ liệu được giữ cố định \cite{ref1,ref2,ref3,ref4,ref5}. Giả thuyết thứ hai $H_2$ cho rằng lợi thế hội tụ chỉ có ý nghĩa phương pháp luận khi đồng thời duy trì hoặc cải thiện chỉ số dự báo trên tập kiểm tra \cite{ref8}, \cite{ref14}, \cite{ref15}. Giả thuyết thứ ba $H_3$ cho rằng hiệu ứng quan sát được có tính ổn định khi thay đổi hạt giống khởi tạo và khi dịch chuyển qua ba tầng bối cảnh thực nghiệm. Một giả thuyết chỉ được xem là được ủng hộ khi đồng thời thỏa ba điều kiện: có ý nghĩa thống kê sau điều chỉnh đa giả thuyết, có kích thước hiệu ứng đạt ngưỡng thực hành, và có tính nhất quán theo tổng hợp đa hạt giống.
+
+\subsection{3.2. Thiết lập toán học thống nhất}
+
+Cho tập dữ liệu huấn luyện $\mathcal{D}=\{(x_i,y_i)\}_{i=1}^N$, mô hình tham số hóa $h_\theta$, và hàm mất mát mẫu $\ell(\cdot)$, bài toán tối ưu thực nghiệm được viết dưới dạng (3.1)
+
+\begin{equation}
+\min_{\theta\in\mathbb{R}^d} f(\theta), \qquad f(\theta)=\frac{1}{N}\sum_{i=1}^N \ell\big(h_\theta(x_i),y_i\big).\tag{3.1}
+\end{equation}
+
+Tại bước lặp $t$, với minibatch $\mathcal{B}_t$, gradient ngẫu nhiên được mô hình hóa bởi (3.2)
+
+\begin{equation}
+g_t = \nabla f_{\mathcal{B}_t}(\theta_t) = \nabla f(\theta_t) + \xi_t, \qquad
+\mathbb{E}[\xi_t]=0, \qquad \mathrm{Var}(\xi_t)\propto \frac{1}{|\mathcal{B}_t|}.\tag{3.2}
+\end{equation}
+
+Quy tắc cập nhật SGD chuẩn là (3.3)
+
+\begin{equation}
+θ_{t+1}=θ_t-η_t g_t.\tag{3.3}
+\end{equation}
+
+Với dạng Momentum theo Polyak, biến vận tốc cập nhật theo $v_{t+1}=\beta v_t+g_t$ và tham số cập nhật theo $\theta_{t+1}=\theta_t-\eta_t v_{t+1}$ \cite{ref2}. Với RMSProp, moment bậc hai mũ được viết $s_{t+1}=\rho s_t+(1-\rho)(g_t\odot g_t)$, sau đó cập nhật $\theta_{t+1}=\theta_t-\eta_t g_t/(\sqrt{s_{t+1}}+\varepsilon)$ \cite{ref3}. Với Adam, hai moment mũ được định nghĩa bởi $m_{t+1}=\beta_1m_t+(1-\beta_1)g_t$ và $v_{t+1}=\beta_2v_t+(1-\beta_2)(g_t\odot g_t)$, hiệu chỉnh lệch khởi tạo bằng $\hat m_{t+1}=m_{t+1}/(1-\beta_1^{t+1})$ và $\hat v_{t+1}=v_{t+1}/(1-\beta_2^{t+1})$, rồi cập nhật theo $\theta_{t+1}=\theta_t-\eta_t\hat m_{t+1}/(\sqrt{\hat v_{t+1}}+\varepsilon)$ \cite{ref4}. AdamW dùng suy giảm trọng số tách rời qua $\theta_{t+1}=(1-\eta_t\lambda)\theta_t-\eta_t\hat m_{t+1}/(\sqrt{\hat v_{t+1}}+\varepsilon)$ \cite{ref5}.
+
+\subsection{3.3. Thiết kế thực nghiệm ba giai đoạn}
+
+Giai đoạn thứ nhất tập trung vào động học tối ưu trên hàm kiểm tra hai chiều, nơi địa hình mục tiêu có thể được quan sát trực tiếp để nhận diện các hiện tượng dao động, kẹt thung lũng hẹp, và ứng xử tại điểm yên. Các hàm được sử dụng bao gồm Rosenbrock với biểu thức $f(x,y)=(a-x)^2+b(y-x^2)^2$ \cite{ref6}, hàm bậc hai điều kiện xấu $f(x,y)=\tfrac{1}{2}(\kappa x^2+y^2)$ với $\kappa\gg1$, hàm yên ngựa $f(x,y)=\tfrac{1}{2}(x^2-y^2)$, và hàm Ackley hai chiều $f(x,y)=-a\exp\big(-b\sqrt{(x^2+y^2)/2}\big)-\exp\big((\cos(cx)+\cos(cy))/2\big)+a+e$ với tham số chuẩn $a=20$, $b=0.2$, $c=2\pi$ \cite{ref7}. Mỗi run ghi đầy đủ trajectory, bao gồm giá trị mục tiêu, chuẩn gradient, chuẩn cập nhật, và thông tin độ cong cục bộ khi khả dụng.
+
+Giai đoạn thứ hai chuyển sang bộ dữ liệu chuẩn trong học sâu để kiểm định khả năng chuyển giao kết luận từ không gian 2D sang bài toán dự báo. Nghiên cứu sử dụng MNIST và CIFAR-10 \cite{ref8}, \cite{ref9}, với kiến trúc cơ sở thuộc họ MLP/CNN và cấu hình mở rộng cho các thí nghiệm bổ sung. Hàm mất mát phân loại được thống nhất theo cross-entropy trong (3.4)
+
+\begin{equation}
+\mathcal{L}_{\mathrm{CE}}=-\frac{1}{N}\sum_{i=1}^N\log p_\theta(y_i\mid x_i),
+\qquad
+p_\theta(y_i\mid x_i)=\frac{\exp(z_{y_i})}{\sum_{c=1}^{C}\exp(z_c)}.\tag{3.4}
+\end{equation}
+
+và chỉ số độ chính xác được định nghĩa trong (3.5)
+
+\begin{equation}
+\mathrm{Acc}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}(\hat y_i=y_i).\tag{3.5}
+\end{equation}
+
+Cấu hình huấn luyện được chuẩn hóa bằng giao thức chia train, validation, test cố định, lưu checkpoint theo epoch, và ghi nhật ký đồng nhất để bảo toàn tính so sánh.
+
+Giai đoạn thứ ba mở rộng sang các tình huống ứng dụng nhằm đánh giá độ bền vững của kết luận trong bối cảnh dữ liệu và kiến trúc phức tạp hơn. Với NLP, nghiên cứu dùng bài toán phân loại cảm xúc dựa trên bộ dữ liệu IMDB \cite{ref10}, mô hình Transformer \cite{ref12} và các biến thể BERT \cite{ref13} để phân tích động học tối ưu trong không gian tham số lớn. Với thị giác y tế, nghiên cứu dùng tác vụ phân vùng ảnh trên kiến trúc U-Net 2D \cite{ref14}, có thể triển khai trên bộ dữ liệu y sinh gọn nhẹ như MedMNIST v2 \cite{ref11}, trong đó chỉ số trung tâm là hệ số Dice trong (3.6) \cite{ref15}.
+
+\begin{equation}
+\mathrm{Dice}=\frac{2\sum_i p_i g_i+\varepsilon}{\sum_i p_i+\sum_i g_i+\varepsilon}.\tag{3.6}
+\end{equation}
+
+Trong biểu thức này, $p_i$ là dự đoán nhị phân và $g_i$ là nhãn tham chiếu tại vị trí $i$. Dữ liệu thật được ưu tiên cho suy luận chính, trong khi dữ liệu tổng hợp chỉ dùng cho mục tiêu kiểm thử kỹ thuật quy trình thực nghiệm.
+
+\subsection{3.4. Quy tắc hội tụ, đo lường động học và chuẩn hóa đánh giá}
+
+Thay vì phụ thuộc vào một chỉ số đơn lẻ, nghiên cứu sử dụng tiêu chí hội tụ tổ hợp để tăng độ ổn định suy luận trước nhiễu số học. Cụ thể, tại thời điểm $t$, trạng thái hội tụ được xác định bởi điều kiện (3.7)
+
+\begin{equation}
+\mathrm{Converged}(t;\tau)=\mathbf{1}\left(\|\nabla f_t\|_2<\tau\ \lor\ f_t<\tau\right).\tag{3.7}
+\end{equation}
+
+trong đó $\tau=10^{-3}$ là ngưỡng thực hành và $\tau=10^{-6}$ là ngưỡng nghiêm ngặt. Trong không gian 2D, độ điều kiện cục bộ được theo dõi thông qua phổ Hessian với chỉ số (3.8)
+
+\begin{equation}
+\kappa_H=\frac{|\lambda_{\max}|}{\max(|\lambda_{\min}|,\varepsilon_H)}.\tag{3.8}
+\end{equation}
+
+Hệ thống đo lường bao gồm các chỉ số tối ưu như giá trị mất mát cuối kỳ (final loss), chuẩn gradient, chuẩn cập nhật, tốc độ hội tụ và tỉ lệ hội tụ theo ngưỡng; đồng thời bao gồm các chỉ số dự báo như Accuracy hoặc Dice tùy bài toán \cite{ref8}, \cite{ref14}, \cite{ref15}. Cách tổ chức song song hai nhóm chỉ số cho phép đối chiếu trực tiếp giữa cơ chế động học và hiệu năng đầu ra.
+
+\subsubsection{3.4.1. Ánh xạ giả thuyết, chỉ số và phép kiểm định}
+
+Ánh xạ kiểm định được quy định trước để tránh diễn giải tùy ý sau quan sát. Với $H_1$, biến đáp ứng chính là số bước hoặc số epoch đạt điều kiện hội tụ; các chỉ số phụ gồm chuẩn gradient cuối và độ dao động quỹ đạo. So sánh cặp giữa các optimizer được thực hiện trên mẫu đa hạt giống trong cùng cấu hình. Với $H_2$, biến đáp ứng chính là chỉ số đầu ra trên tập kiểm tra, cụ thể là Accuracy cho phân loại và Dice cho phân vùng; giá trị mất mát cuối kỳ (final loss) được dùng như tín hiệu phụ để phát hiện đánh đổi không mong muốn giữa tối ưu hóa và tổng quát hóa. Với $H_3$, biến đáp ứng chính là độ ổn định liên hạt giống và liên bối cảnh, được lượng hóa qua độ phân tán và tính bền vững của hướng hiệu ứng giữa các tập dữ liệu và kiến trúc. Quy tắc kết luận thống nhất là chỉ chấp nhận một giả thuyết khi cả ba lớp bằng chứng cùng đồng thuận: ý nghĩa đã hiệu chỉnh, kích thước hiệu ứng và độ ổn định đa hạt giống.
+
+\subsection{3.5. Thiết kế cắt lớp cơ chế và công bằng cấu hình}
+
+Thiết kế cắt lớp của chương được tổ chức theo nguyên tắc “khác biệt tối thiểu theo cơ chế”, nghĩa là chỉ thay đổi thành phần cập nhật cần kiểm định trong khi khóa các thành phần còn lại để bảo toàn khả năng quy kết nguyên nhân. Chuỗi đối sánh được xây dựng theo lộ trình SGD \flow Momentum \flow RMSProp \flow Adam \flow AdamW, phản ánh tiến hóa lịch sử của họ thuật toán tối ưu bậc nhất \cite{ref1,ref2,ref3,ref4,ref5}. Với mỗi cặp đối sánh, báo cáo giữ bất biến tập dữ liệu, chiến lược tiền xử lý, kiến trúc mô hình, lịch học, bộ dừng, và giao thức đánh giá để khác biệt quan sát được có thể quy về cơ chế tối ưu thay vì quy trình huấn luyện.
+
+Ở lớp kiểm soát thực nghiệm, mọi lần chạy đều dùng cùng tập hạt giống cho toàn bộ optimizer trong cùng bài toán, cùng số epoch tối đa, cùng điều kiện dừng sớm, cùng chu kỳ checkpoint và cùng cấu trúc nhật ký cho loss, chuẩn gradient, chuẩn cập nhật và chỉ số dự báo. Cách khóa biến này tạo ra không gian so sánh đẳng điều kiện. Theo đó, một cấu hình chỉ được xem là “hợp lệ để suy luận” khi không vi phạm ràng buộc kỹ thuật như lỗi số học, thiếu nhật ký bắt buộc hoặc gián đoạn checkpoint. Phần dữ liệu không hợp lệ vẫn được giữ cho mục đích kiểm toán hệ thống, nhưng loại khỏi tập suy luận hiệu ứng để tránh làm sai lệch kết luận thống kê.
+
+Ở lớp công bằng siêu tham số, chương áp dụng chính sách ngân sách đối xứng giữa các optimizer, thay vì cho phép một thuật toán được tìm kiếm rộng hơn thuật toán khác. Cụ thể, mỗi optimizer nhận cùng tổng số cấu hình thử và cùng tổng chi phí huấn luyện cho hai pha: quét thô và tinh chỉnh cục bộ. Cấu hình cuối được chọn theo trung vị hiệu năng đa hạt giống, sau đó mới xét độ phân tán như tiêu chí phụ để ưu tiên tính ổn định. Về triển khai, chiến lược tìm kiếm được chuẩn hóa qua framework tối ưu siêu tham số có kiểm soát ngân sách như Optuna \cite{ref17}. Chính sách này giúp tránh tình huống một optimizer được lợi do “tuning quá mức”, đồng thời nhất quán với khung ra quyết định đa bằng chứng ở Thuật toán 3.6 và 3.7.
+
+Để tăng độ chặt phương pháp luận, báo cáo dùng quy tắc chấp nhận cấu hình theo ba tầng. Tầng thứ nhất là tính khả thi kỹ thuật, yêu cầu lần chạy hoàn tất và dữ liệu nhật ký đầy đủ. Tầng thứ hai là tính hợp lệ thống kê, yêu cầu kết quả có thể đi vào quy trình hiệu chỉnh đa giả thuyết mà không vi phạm điều kiện kiểm định. Tầng thứ ba là ý nghĩa thực hành, yêu cầu kích thước hiệu ứng đạt ngưỡng tối thiểu do nghiên cứu đặt trước. Chỉ các cấu hình vượt qua đủ ba tầng mới được đưa vào phần tổng hợp kết luận giữa các optimizer.
+
+\subsection{3.6. Thuật toán và mã giả của quy trình thực nghiệm}
+
+Phần này trình bày các thuật toán ở mức vận hành để bảo đảm phương pháp không chỉ đúng về khái niệm mà còn khả thi khi triển khai. Mục tiêu của lớp thuật toán là chuyển thiết kế nghiên cứu thành quy trình có thể lặp lại, kiểm thử và kiểm toán. Trong toàn chương, các thuật ngữ kỹ thuật được thống nhất theo quy ước: run là lần chạy, seed là hạt giống, checkpoint là điểm lưu trạng thái, artifact là tệp kết quả trung gian hoặc cuối. Thuật toán 3.1 mô tả quy trình thực nghiệm tổng quát; Thuật toán 3.2 mô tả lớp tổng hợp và suy luận thống kê sau huấn luyện; Thuật toán 3.3 mô tả cơ chế tái lập và phục hồi lỗi ở mức hệ thống; Thuật toán 3.4 chuẩn hóa chính sách công bằng siêu tham số; Thuật toán 3.5 xác định quy tắc hội tụ và dừng huấn luyện; Thuật toán 3.6 mô tả luồng kiểm định có điều chỉnh đa giả thuyết; và Thuật toán 3.7 chuẩn hóa quy trình ra quyết định chấp nhận hoặc bác bỏ giả thuyết nghiên cứu.
+
+\subsubsection{3.6.1. Thuật toán 3.1: Quy trình thực nghiệm đa giai đoạn}
+
+Thuật toán 3.1 mô tả vòng đời đầy đủ của một đợt thực nghiệm, từ cấu hình ban đầu đến báo cáo cuối. Tại mỗi bước, hệ thống duy trì tính truy vết giữa cấu hình, seed và artifact đầu ra.
+
+
+\begin{algorithm}[H]
+\caption{Quy trình thực nghiệm đa giai đoạn}
+\begin{algorithmic}[1]
+\State Đầu vào: Tập bài toán P, tập optimizer O, tập seed S, ngân sách huấn luyện T
+\State Đầu ra: Nhật ký chuẩn hóa L, báo cáo tổng hợp R
+\State Khởi tạo môi trường xác định; tạo cấu trúc lưu log L và kho artifact
+\State Với mỗi bài toán p thuộc P:
+\State Chuẩn hóa dữ liệu và tách train/validation/test theo giao thức cố định
+\State Với mỗi optimizer o thuộc O:
+\State h\_o \assign Chọn siêu tham số theo chính sách công bằng
+\State Với mỗi seed s thuộc S:
+\State Thiết lập seed toàn cục bằng s
+\State Khởi tạo mô hình theta\_0 và trạng thái optimizer state\_0
+\State Với t từ 1 đến T:
+\State B\_t \assign Lấy minibatch từ train set
+\State g\_t \assign Tính gradient trên B\_t
+\State (theta\_t, state\_t) \assign Cập nhật theo quy tắc của optimizer o
+\State Ghi vào L: loss, ||g\_t||, ||Delta theta\_t||, metric validation
+\State Nếu gặp lỗi số học hoặc lỗi tài nguyên thì:
+\State Gắn nhãn run\_status = failed/tainted; lưu artifact tạm; thoát vòng lặp thời gian
+\State Kết thúc vòng t
+\State Nếu run\_status chưa bị lỗi thì đánh giá trên test set và gắn nhãn successful
+\State Lưu checkpoint cuối, metadata cấu hình, và artifact theo (p, o, s)
+\State Kết thúc vòng seed
+\State Tổng hợp kết quả đa seed cho cặp (p, o)
+\State Kết thúc vòng optimizer
+\State Kết thúc vòng bài toán
+\State Thực hiện so sánh liên-optimizer có điều chỉnh đa giả thuyết
+\State Xuất R gồm bảng, hình và metadata tái lập
+\State Trả về (L, R)
+\end{algorithmic}
+\end{algorithm}
+
+
+\subsubsection{3.6.2. Thuật toán 3.2: Tổng hợp đa seed và so sánh liên-optimizer}
+
+Thuật toán 3.2 tập trung vào lớp suy luận sau huấn luyện, trong đó dữ liệu đa seed được chuẩn hóa về cùng không gian metric và được dùng cho suy luận hiệu ứng. Điểm quan trọng của thuật toán này là tách rõ thống kê mô tả, kiểm định giả thuyết và diễn giải kích thước hiệu ứng.
+
+
+\begin{algorithm}[H]
+\caption{Tổng hợp đa seed và suy luận so sánh cặp}
+\begin{algorithmic}[1]
+\State Đầu vào: Bảng kết quả theo run D, mức ý nghĩa alpha
+\State Đầu ra: Ma trận so sánh cặp M, tập kết luận hiệu chỉnh C
+\State D\_valid \assign Lọc D theo run\_status $\in$ \{successful\}
+\State T \assign Trích metric cuối kỳ cho từng bộ (problem, optimizer, seed)
+\State Tính thống kê mô tả cho từng (problem, optimizer): median, mean, std, P10, P90
+\State Khởi tạo danh sách phép thử Q rỗng
+\State Với mỗi problem p:
+\State O\_p \assign Tập optimizer có dữ liệu hợp lệ trên p
+\State Với mỗi cặp (o\_i, o\_j) thuộc O\_p, i < j:
+\State x \assign Mẫu metric seed-level của (p, o\_i)
+\State y \assign Mẫu metric seed-level của (p, o\_j)
+\State (p\_raw, test\_name) \assign Chạy kiểm định phù hợp trên (x, y)
+\State d \assign Tính kích thước hiệu ứng (ví dụ Cohen's d)
+\State Thêm bản ghi (p, o\_i, o\_j, p\_raw, d, test\_name) vào Q
+\State Kết thúc vòng cặp
+\State Kết thúc vòng problem
+\State p\_adj \assign Điều chỉnh đa giả thuyết cho toàn bộ p\_raw trong Q
+\State M \assign Dựng ma trận so sánh từ (p\_adj, d, hướng hiệu ứng)
+\State C \assign Sinh kết luận theo quy tắc (ý nghĩa đã hiệu chỉnh + kích thước hiệu ứng + độ ổn định)
+\State Trả về (M, C)
+\end{algorithmic}
+\end{algorithm}
+
+
+\subsubsection{3.6.3. Thuật toán 3.3: Quản lý tính tái lập và phục hồi lỗi}
+
+Thuật toán 3.3 mô tả cơ chế kiểm soát độ tin cậy kỹ thuật. Cơ chế này giúp tách lỗi hệ thống ra khỏi tín hiệu thuật toán, đồng thời giữ quy trình có thể tiếp tục sau sự cố tài nguyên.
+
+
+\begin{algorithm}[H]
+\caption{Thực thi chịu lỗi và bảo toàn tính tái lập}
+\begin{algorithmic}[1]
+\State Đầu vào: Ngữ cảnh run X
+\State Đầu ra: Gói artifact đã xác thực A
+\State env\_ok \assign Kiểm tra dấu vân tay môi trường (phiên bản thư viện, thiết bị, cấu hình hệ)
+\State Nếu env\_ok = false thì trả về lỗi cấu hình môi trường
+\State Lưu snapshot cấu hình và seed trước khi huấn luyện
+\State status \assign running
+\State Trong quá trình huấn luyện, lặp theo chu kỳ checkpoint:
+\State Lưu checkpoint mô hình, trạng thái optimizer, và log trung gian
+\State anomaly \assign Phát hiện NaN/Inf, OOM, gián đoạn I/O, hoặc vi phạm schema log
+\State Nếu anomaly = true thì:
+\State status \assign failed hoặc tainted tùy loại lỗi
+\State Ghi mã lỗi tường minh; lưu artifact từng phần và metadata phục hồi
+\State Thoát vòng huấn luyện
+\State Kết thúc chu kỳ
+\State Nếu status = running thì status \assign successful
+\State A \assign Đóng gói artifact cuối cùng theo schema chuẩn
+\State Kiểm tra tính tương thích schema của A cho bước tổng hợp hạ nguồn
+\State Trả về A cùng trạng thái status
+\end{algorithmic}
+\end{algorithm}
+
+
+\subsubsection{3.6.4. Thuật toán 3.4: Chính sách công bằng siêu tham số liên-optimizer}
+Để bảo đảm tính công bằng của so sánh, chương áp dụng một thủ tục lựa chọn siêu tham số nhất quán giữa các optimizer. Thủ tục này ưu tiên thiết kế ngân sách đối xứng, tách pha quét thô và pha tinh chỉnh, đồng thời khóa các điều kiện ngoài optimizer để tránh sai lệch cấu trúc.
+
+
+\begin{algorithm}[H]
+\caption{Chính sách công bằng siêu tham số liên-optimizer}
+\begin{algorithmic}[1]
+\State Đầu vào: Tập optimizer O, không gian tìm kiếm H, ngân sách thử nghiệm B, tập seed S\_ref
+\State Đầu ra: Bộ siêu tham số công bằng H*
+\State Chia ngân sách B thành B\_1 (quét thô) và B\_2 (tinh chỉnh)
+\State Khởi tạo H* rỗng
+\State Với mỗi optimizer o thuộc O:
+\State H\_o \assign Xây dựng không gian con tương đương về độ biểu đạt
+\State U\_1 \assign Lấy tập ứng viên từ H\_o theo ngân sách B\_1
+\State Đánh giá từng ứng viên trong U\_1 trên cùng tập seed S\_ref
+\State R\_o \assign Chọn vùng ứng viên hứa hẹn theo tiêu chí (hội tụ, ổn định, chi phí)
+\State U\_2 \assign Tinh chỉnh cục bộ trong R\_o theo ngân sách B\_2
+\State h\_o* \assign Chọn cấu hình tối ưu theo trung vị hiệu năng và độ bền vững đa seed
+\State H* \assign H* $\cup$ \{ (o, h\_o*) \}
+\State Kết thúc vòng optimizer
+\State Khóa H* và dùng cố định cho toàn bộ thí nghiệm chính
+\State Trả về H*
+\end{algorithmic}
+\end{algorithm}
+
+
+\subsubsection{3.6.5. Thuật toán 3.5: Quy tắc xác định hội tụ và dừng huấn luyện}
+
+Vì tiêu chí hội tụ phụ thuộc đặc điểm bài toán, chương sử dụng quy tắc tổ hợp giữa tín hiệu động học và tín hiệu mục tiêu. Cách này giúp tránh kết luận hội tụ giả khi một chỉ báo đơn lẻ dao động bất thường.
+
+
+\begin{algorithm}[H]
+\caption{Quy tắc xác định hội tụ và dừng huấn luyện}
+\begin{algorithmic}[1]
+\State Đầu vào: Chuỗi loss F\_t, chuẩn gradient ||g\_t||, ngưỡng (epsilon\_F, epsilon\_g), cửa sổ w, số cửa sổ liên tiếp k
+\State Đầu ra: Nhãn trạng thái hội tụ z
+\State stable\_count \assign 0; z \assign đang\_huấn\_luyện
+\State Với mỗi thời điểm t >= w:
+\State delta\_F \assign median(|F\_i - F\_\{i-1\}|) trên cửa sổ [t-w+1, t]
+\State g\_med \assign median(||g\_i||) trên cửa sổ [t-w+1, t]
+\State cond\_F \assign (delta\_F <= epsilon\_F)
+\State cond\_g \assign (g\_med <= epsilon\_g)
+\State Nếu cond\_F và cond\_g thì stable\_count \assign stable\_count + 1
+\State Ngược lại stable\_count \assign 0
+\State Nếu stable\_count >= k thì:
+\State z \assign hội\_tụ\_ổn\_định
+\State Dừng huấn luyện sớm
+\State Kết thúc vòng thời gian
+\State Nếu z vẫn là đang\_huấn\_luyện khi hết ngân sách thì z \assign chưa\_hội\_tụ\_trong\_ngân\_sách
+\State Trả về z
+\end{algorithmic}
+\end{algorithm}
+
+
+\subsubsection{3.6.6. Thuật toán 3.6: Quy trình suy luận thống kê có điều chỉnh đa giả thuyết}
+
+Để bảo đảm tính chặt chẽ suy luận, chương chuẩn hóa luồng kiểm định từ tiền xử lý mẫu, ước lượng hiệu ứng, điều chỉnh đa giả thuyết đến kết luận cuối. Quy trình này nhấn mạnh diễn giải theo mức độ bằng chứng thay cho quyết định nhị phân.
+
+
+\begin{algorithm}[H]
+\caption{Suy luận thống kê có điều chỉnh đa giả thuyết}
+\begin{algorithmic}[1]
+\State Đầu vào: Bảng mẫu theo seed D, mức ý nghĩa alpha, tập phép kiểm định T
+\State Đầu ra: Tập kết luận thống kê đã hiệu chỉnh C\_hat
+\State D\_clean \assign Loại mẫu lỗi kỹ thuật và mẫu không hợp lệ
+\State Khởi tạo danh sách kết quả S rỗng và danh sách p-value P rỗng
+\State Với mỗi bài toán p trong D\_clean:
+\State Với mỗi cặp optimizer (o\_i, o\_j):
+\State x \assign Mẫu seed-level của (p, o\_i)
+\State y \assign Mẫu seed-level của (p, o\_j)
+\State Nếu mẫu ghép cặp thì:
+\State Nếu sai khác gần chuẩn thì test \assign kiểm định t ghép cặp
+\State Ngược lại test \assign Wilcoxon signed-rank
+\State Ngược lại:
+\State Nếu mẫu gần chuẩn và phương sai không đồng nhất thì test \assign kiểm định t Welch
+\State Nếu mẫu gần chuẩn và phương sai đồng nhất thì test \assign kiểm định t hai mẫu độc lập
+\State Ngược lại test \assign Mann-Whitney U
+\State (p\_raw, stat) \assign Thực hiện kiểm định test trên (x, y)
+\State eff \assign Tính kích thước hiệu ứng
+\State Lưu bản ghi r = (p, o\_i, o\_j, p\_raw, stat, eff) vào S
+\State Thêm p\_raw vào P
+\State Kết thúc vòng cặp
+\State Kết thúc vòng bài toán
+\State p\_adj \assign Điều chỉnh đa giả thuyết cho P bằng thủ tục đã chọn (Holm/FDR)
+\State Gán p\_adj vào từng bản ghi trong S
+\State Với mỗi bản ghi trong S:
+\State sig \assign (p\_adj <= alpha)
+\State strength \assign Phân loại mức bằng chứng từ (sig, eff, độ ổn định đa seed)
+\State Thêm vào C\_hat
+\State Trả về C\_hat
+\end{algorithmic}
+\end{algorithm}
+
+
+\subsubsection{3.6.7. Thuật toán 3.7: Quy trình ra quyết định giả thuyết nghiên cứu}
+
+Để khép kín chuỗi suy luận từ dữ liệu đến kết luận khoa học, cần một lớp thuật toán riêng cho quyết định chấp nhận hoặc bác bỏ giả thuyết. Thuật toán này tổng hợp đầu ra từ lớp thống kê, lớp kích thước hiệu ứng và lớp ổn định đa hạt giống để tạo quyết định nhất quán giữa các bài toán.
+
+
+\begin{algorithm}[H]
+\caption{Quy trình ra quyết định giả thuyết nghiên cứu}
+\begin{algorithmic}[1]
+\State Đầu vào: Kết quả hiệu chỉnh C\_hat, ngưỡng kích thước hiệu ứng delta\_min, ngưỡng ổn định s\_min
+\State Đầu ra: Quyết định cho từng giả thuyết trong \{H\_1, H\_2, H\_3\}
+\State Với mỗi giả thuyết H\_k:
+\State Lấy tập bằng chứng E\_k liên quan đến H\_k từ C\_hat
+\State sig\_ok \assign Tỉ lệ kết quả có ý nghĩa đã hiệu chỉnh trong E\_k đạt ngưỡng yêu cầu
+\State eff\_ok \assign Tỉ lệ kết quả có |effect\_size| >= delta\_min đạt ngưỡng yêu cầu
+\State stab\_ok \assign Chỉ số ổn định đa hạt giống và đa bối cảnh >= s\_min
+\State Nếu sig\_ok và eff\_ok và stab\_ok thì
+\State decision(H\_k) \assign Ủng\_hộ
+\State Ngược lại nếu chỉ thỏa một phần điều kiện thì
+\State decision(H\_k) \assign Bằng\_chứng\_chưa\_đủ
+\State Ngược lại
+\State decision(H\_k) \assign Bác\_bỏ
+\State Kết thúc vòng giả thuyết
+\State Trả về decision(H\_1), decision(H\_2), decision(H\_3)
+\end{algorithmic}
+\end{algorithm}
+
+
+\subsection{3.7. Suy luận thống kê và kiểm soát độ tin cậy}
+
+Khung suy luận thống kê của chương ưu tiên ước lượng hiệu ứng và bất định, thay vì diễn giải nhị phân theo một ngưỡng p-value duy nhất. Ở cấp hạt giống, kết quả được mô tả bằng các thước đo trung tâm bền vững và độ phân tán. Ở cấp đối sánh cặp, mỗi phép kiểm định đi kèm điều chỉnh đa giả thuyết để kiểm soát tích lũy sai lầm loại I \cite{ref23}, \cite{ref24}. Ở cấp kết luận, diễn giải luôn gắn với kích thước hiệu ứng và khoảng biến thiên quan sát được, nhằm phản ánh ý nghĩa thực hành. Quy tắc chọn phép kiểm định được khóa trước khi phân tích: kiểm tra tính chuẩn bằng Shapiro–Wilk trên sai khác ghép cặp hoặc trên từng mẫu khi không ghép cặp \cite{ref18}, kiểm tra đồng nhất phương sai bằng Levene trong trường hợp không ghép cặp \cite{ref19}, rồi chọn phép kiểm định theo luồng đã nêu ở Thuật toán 3.6 (Wilcoxon, Mann–Whitney U, Welch t-test) \cite{ref20,ref21,ref22} để loại trừ nguy cơ chọn kiểm định theo kết quả mong muốn. Cách tổ chức này giúp hạn chế hiện tượng “p-hacking” và nâng độ tin cậy của phát hiện thực nghiệm \cite{ref25}.
+
+\subsection{3.8. Các đe dọa đến tính hợp lệ và biện pháp giảm thiểu}
+
+Phần này phân tách rõ các lớp đe dọa tính hợp lệ để bảo đảm kết luận của chương có thể đứng vững trước phản biện phương pháp luận.
+
+\subsubsection{3.8.1. Tính hợp lệ nội tại}
+
+Các mối đe dọa đối với tính hợp lệ nội tại chủ yếu đến từ sai khác cấu hình huấn luyện giữa các optimizer, nhiễu do hạt giống khởi tạo và lỗi số học trong quá trình tối ưu. Biện pháp giảm thiểu gồm chuẩn hóa giao thức huấn luyện, khóa ngân sách tính toán theo từng nhánh so sánh, duy trì chính sách công bằng siêu tham số và loại trừ các lần chạy không hợp lệ theo cơ chế trạng thái lần chạy. Ngoài ra, checkpoint định kỳ giúp giảm nguy cơ mất dữ liệu thí nghiệm và hạn chế sai lệch do dừng chạy ngoài ý muốn.
+
+\subsubsection{3.8.2. Tính hợp lệ cấu trúc}
+
+Các mối đe dọa đối với tính hợp lệ cấu trúc phát sinh khi khái niệm “tối ưu tốt” bị quy giản vào một chỉ số duy nhất. Nghiên cứu giảm thiểu rủi ro này bằng cách sử dụng song song chỉ số động học và chỉ số dự báo: lớp động học phản ánh hành vi thuật toán, còn lớp dự báo phản ánh chất lượng mô hình. Tiêu chí hội tụ tổ hợp dựa trên chuẩn gradient hoặc giá trị hàm mục tiêu cũng được áp dụng để tránh diễn giải lệch do đặc trưng của một chỉ báo đơn lẻ.
+
+\subsubsection{3.8.3. Tính hợp lệ ngoại tại}
+
+Các mối đe dọa đối với tính hợp lệ ngoại tại xuất hiện khi kết luận chỉ dựa trên một miền dữ liệu hoặc một họ mô hình. Thiết kế đa giai đoạn của chương xử lý điểm này bằng cách kiểm chứng trên các lớp bài toán có độ phức tạp tăng dần, từ hàm kiểm tra 2D đến bộ dữ liệu học sâu chuẩn và cuối cùng là tình huống ứng dụng. Cách tiếp cận này không loại bỏ hoàn toàn giới hạn khái quát hóa, nhưng tạo ra bằng chứng mạnh hơn cho tính ổn định của các xu hướng quan sát.
+
+\subsubsection{3.8.4. Tính hợp lệ kết luận thống kê}
+
+Các mối đe dọa đối với tính hợp lệ kết luận thống kê thường đến từ cỡ mẫu hạt giống nhỏ, số lượng so sánh cặp lớn và xu hướng diễn giải nhị phân theo p-value. Nghiên cứu giảm thiểu bằng tổng hợp đa hạt giống, báo cáo bổ sung kích thước hiệu ứng và độ phân tán, đồng thời điều chỉnh đa giả thuyết trong so sánh liên-optimizer. Kết luận cuối chỉ được chấp nhận khi tín hiệu thống kê đồng thuận với tín hiệu động học và tín hiệu hiệu năng, thay vì dựa trên một phép kiểm định đơn lẻ.
+
+\subsection{3.9. Chuẩn báo cáo và nguyên tắc tái lập}
+
+Mọi kết quả trong chương được trình bày theo chuẩn truy vết từ lần chạy thô đến tổng hợp cuối. Dữ liệu huấn luyện, cấu hình optimizer, hạt giống, trạng thái lần chạy và tệp kết quả trung gian đều được lưu theo cấu trúc nhất quán để có thể kiểm chứng chéo. Về trình bày, chương ưu tiên lập luận dưới dạng đoạn văn liên tục; trong đó công thức, giả định và quy tắc suy luận được nêu tường minh để người đọc có thể tái tạo logic phương pháp mà không phụ thuộc vào mô tả thủ tục rời rạc. Cấu trúc này hướng tới chuẩn của một báo cáo khoa học hoàn chỉnh, trong đó tính rõ ràng về giả định và tính tái lập là điều kiện tiên quyết cho giá trị khoa học của kết luận.
+
+\subsection{3.10. Cấu hình triển khai và kiểm soát sai lệch thực nghiệm}
+
+Để tăng mức độ hoàn chỉnh của phương pháp, nghiên cứu định nghĩa rõ lớp cấu hình triển khai gồm môi trường phần mềm, chính sách seed, cơ chế checkpoint và chiến lược xử lý lỗi. Ở lớp phần mềm, toàn bộ quy trình được chạy trên cùng một stack thư viện để tránh sai khác do phiên bản phụ thuộc \cite{ref16}; ở lớp ngẫu nhiên, seed được truyền xuyên suốt từ bước khởi tạo dữ liệu đến bước huấn luyện nhằm giảm sai lệch giữa các lần chạy; ở lớp huấn luyện, trạng thái mô hình và các chỉ số trung gian được checkpoint theo epoch để bảo toàn khả năng phục hồi; và ở lớp độ tin cậy, run phát sinh lỗi số học hoặc ngắt tài nguyên được gắn nhãn trạng thái riêng để không làm ô nhiễm tập kết quả hợp lệ. Cách tổ chức này nhằm tách bạch rõ ràng giữa lỗi hệ thống và khác biệt thuật toán, qua đó giữ cho so sánh phương pháp có ý nghĩa khoa học.
+
+\subsection{3.11. Quy tắc tổng hợp đa seed và diễn giải kết luận}
+
+Ở cấp độ phân tích, báo cáo áp dụng quy tắc tổng hợp đa seed để giảm độ nhạy với khởi tạo ngẫu nhiên. Với mỗi cấu hình, kết quả được tổng hợp theo trung vị, trung bình và độ phân tán, đồng thời báo cáo thêm các phân vị để mô tả hình dạng phân phối hiệu năng. Khi thực hiện so sánh cặp giữa các optimizer, kết luận không dựa đơn thuần vào p-value thô mà đi kèm điều chỉnh đa giả thuyết và diễn giải theo kích thước hiệu ứng. Quy tắc diễn giải cuối cùng yêu cầu sự nhất quán giữa ba lớp bằng chứng, gồm động học tối ưu, metric đầu ra và độ ổn định đa seed; chỉ khi ba lớp này đồng thuận thì kết luận mới được xem là đủ mạnh để chuyển sang chương kết quả và thảo luận.
+\section{Chương 5. Kết luận và Kiến nghị}
+
+\subsection{5.1. Tóm tắt các Kết quả Chính}
+
+Nghiên cứu này đã thực hiện một quá trình đánh giá hệ thống đối với các thuật toán tối ưu bậc nhất phổ biến, bao gồm SGD, Momentum, RMSProp, Adam và AdamW, thông qua một chuỗi thực nghiệm đa giai đoạn. Dựa trên khung phương pháp luận có kiểm soát chặt chẽ với nhiều hạt giống khởi tạo, các quan sát chính có thể được tóm lược một cách thận trọng trên nhiều bối cảnh khác nhau. Trước tiên, trên các hàm kiểm tra hai chiều, kết quả cho thấy các cơ chế thích ứng nhanh như Adam và RMSProp thể hiện khả năng vượt qua vùng hàm bình nguyên hoặc thung lũng hẹp nhanh hơn đáng kể so với quá trình suy giảm ngẫu nhiên cơ bản (SGD). Mặc dù vậy, sự phụ thuộc vào lịch sử bậc hai của các thuật toán này đôi khi dẫn đến hiện tượng dao động cục bộ gần điểm cực tiểu, đặc biệt khi hệ số học không được tinh chỉnh một cách phù hợp và tối ưu.
+
+Thứ hai, việc dịch chuyển phổ khảo sát sang các bộ dữ liệu phân loại chuẩn trong lĩnh vực thị giác máy tính, cụ thể là MNIST và CIFAR-10, đã cung cấp thêm góc nhìn về sự đánh đổi giữa tốc độ hội tụ và hiệu năng tổng quát hóa. Phân tích độ nhạy siêu tham số cho thấy khi batch size tăng, loss huấn luyện giảm mượt và nhanh hơn, nhưng mức cải thiện accuracy trên tập kiểm tra không tuyến tính; batch size quá lớn có xu hướng làm accuracy giảm nhẹ do suy giảm khả năng tổng quát hóa, trong khi batch size vừa phải cân bằng tốt giữa loss thấp và độ chính xác ổn định. Mặc dù Adam và AdamW cung cấp tốc độ hội tụ ban đầu vượt trội, các kết quả thống kê sau khi hiệu chỉnh đa giả thuyết minh chứng rằng SGD kết hợp với Momentum thường có xu hướng bắt kịp hoặc thậm chí đạt hiệu năng tổng quát hóa nhỉnh hơn trên tập kiểm tra. Điểm giao thoa này xảy ra khi quy trình huấn luyện được cung cấp đủ ngân sách tính toán kết hợp với một lịch trình suy giảm hệ số học thận trọng.
+
+Cuối cùng, sự đánh giá trên các bài toán ứng dụng phức tạp thuộc mảng xử lý ngôn ngữ tự nhiên và phân tích ảnh y tế phản ánh rõ ràng hơn vai trò của đặc tính không gian tham số. Sự ưu việt của họ thuật toán thích nghi, đặc biệt là AdamW, bộc lộ một cách rõ rệt trong các không gian tham số lớn như mô hình họ Transformer. Tại đây, tính thưa thớt của gradient và sự khác biệt về biên độ cập nhật giữa các tầng đã yêu cầu một cơ chế tinh chỉnh hệ số học linh hoạt mà chỉ các phương pháp dựa trên moment mới có thể bù đắp hiệu quả. Ngược lại, trong bối cảnh phân vùng ảnh y tế trên cấu trúc U-Net, ranh giới hiệu năng giữa phương pháp truyền thống như SGD kết hợp Momentum và phương pháp hiện đại như AdamW bị thu hẹp đáng kể, đồng thời phụ thuộc nhiều hơn vào chất lượng của chiến lược xử lý dữ liệu đầu vào.
+
+\subsection{5.2. Kết luận}
+
+Các kết quả thực nghiệm từ báo cáo này một lần nữa củng cố tính xác đáng của nguyên lý "Không có bữa trưa miễn phí" trong lĩnh vực tối ưu hóa học sâu. Việc kỳ vọng vào sự tồn tại của một thuật toán tối ưu duy nhất có khả năng giải quyết trọn vẹn mọi bài toán, đáp ứng đồng thời các tiêu chí về tốc độ hội tụ, độ ổn định và năng lực tổng quát hóa trên các tập dữ liệu chưa quan sát được là một nhận định thiếu nền tảng thực tiễn.
+
+Thay vào đó, kết luận mang tính phương pháp luận khả dĩ nhất là sự phù hợp của một thuật toán tối ưu mang sắc thái đặc thù, bị chi phối sâu sắc bởi cấu trúc mô hình và đặc tính phân phối của dữ liệu. Các thuật toán thuộc họ Adam mang lại lợi thế khởi đầu mạnh mẽ và tỏ ra đặc biệt hiệu quả đối với những kiến trúc nhạy cảm với thang đo gradient như Transformer. Trái lại, SGD kết hợp Momentum vẫn duy trì vị thế an toàn và vững chắc đối với các tác vụ thị giác máy tính trong bối cảnh mà mục tiêu tối thượng là tối đa hóa hiệu năng tổng quát hóa, dù phải chấp nhận sự gia tăng của chi phí dò tìm siêu tham số. Quá trình lựa chọn thuật toán, do vậy, luôn đòi hỏi một sự đánh đổi tĩnh tại giữa chi phí điện toán bỏ ra và giới hạn đỉnh hiệu năng có thể đạt được.
+
+\subsection{5.3. Đóng góp của Nghiên cứu}
+
+Nghiên cứu này đóng góp những phương pháp luận và kỹ thuật mang tính thực hành vào quá trình chuẩn hóa việc đánh giá các giải thuật tối ưu. Đóng góp hàng đầu nằm ở việc thiết lập một khung đánh giá nhất quán xuyên suốt ba tầng thử nghiệm, bao gồm không gian hàm toán học hai chiều, mô hình học sâu chuẩn, và các ứng dụng phức tạp, đồng thời cùng sử dụng chung một hệ thống tiêu chuẩn kiểm toán. Nghiên cứu tập trung loại bỏ nhiễu từ mã nguồn thông qua loạt các đợt rà soát lỗi logic thuật toán và chuẩn hóa thiết lập cơ chế khởi tạo đa hạt giống, từ đó cung cấp nền tảng vững chắc để đảm bảo độ tin cậy của các phát hiện thực nghiệm.
+
+Bên cạnh đó, tính minh bạch trong quá trình so sánh liên-thuật-toán được chú trọng đẩy cao. Nghiên cứu không chỉ đơn thuần so sánh các phương pháp tối ưu dựa trên những cấu hình tốt nhất được chọn lọc một cách ngẫu nhiên. Thay vào đó, báo cáo áp dụng chính sách cấp phát ngân sách siêu tham số đối xứng và tiến hành phân tích sự biến thiên trên nhiễu hạt giống khởi tạo. Cách tiếp cận này cung cấp một góc nhìn bao quát và chân thực hơn về độ phân tán hiệu năng thay vì chỉ dựa vào phân tích một kết quả đơn lẻ mang tính may rủi.
+
+\subsection{5.4. Hạn chế của Nghiên cứu}
+
+Bất chấp những nỗ lực có tính hệ thống nhằm thiết lập các đường biên thực nghiệm chặt chẽ, nghiên cứu này vẫn thừa nhận một số hạn chế nội tại cần được ghi nhận minh bạch để định hướng độ tin cậy của kết luận. Trước hết, do những ràng buộc không thể tránh khỏi về ngân sách điện toán, quy trình dò tìm siêu tham số chưa thể phủ kín một cách trọn vẹn toàn bộ các cấu hình tiềm năng. Thực tiễn này đệ trình khả năng một số thuật toán đã phải chịu thiệt thòi về mặt hiệu năng do chưa được đánh giá tại tổ hợp hệ số tối ưu nhất của chúng.
+
+Thứ hai, mặc dù tập hợp các hệ kiến trúc được đánh giá (bao gồm MLP, CNN, ResNet, Transformer thu gọn và U-Net) đã phác họa được phổ rộng của nhiều miền bài toán sinh thái khác nhau, quy mô của các thiết lập này vẫn chưa vươn tới thứ nguyên của các mô hình ngôn ngữ lớn cỡ hàng chục tỷ tham số. Ứng xử và động học của các bộ tối ưu có thể sẽ trải qua những sự chuyển pha về bản chất khi vấp phải bài toán có số chiều tham số tăng vọt. Cuối cùng, việc áp dụng các tiêu chí dừng linh hoạt trong môi trường thực nghiệm, đôi khi buộc quá trình huấn luyện phải dừng lại ở các thời điểm giao cắt cố định do kịch trần tài nguyên, có thể đã gián tiếp ưu ái các bộ tối ưu có tố chất hội tụ nhanh như Adam và AdamW, đồng thời bỏ lỡ cơ hội quan sát dải lợi thế dài hạn mang tính tích lũy của SGD.
+
+\subsection{5.5. Kiến nghị và Hướng dẫn Thực hành}
+
+Dựa trên sự tổng hợp các hệ quả thực nghiệm đa dạng, báo cáo mạnh dạn đề xuất một loạt các định hướng thực hành nhằm hỗ trợ cộng đồng nghiên cứu và ứng dụng trong việc ra quyết định huấn luyện và khắc phục các vấn đề liên quan đến tối ưu hóa mô hình học sâu.
+
+\subsubsection{5.5.1. Sổ tay Hướng dẫn Lựa chọn và Gỡ lỗi Thuật toán Tối ưu}
+
+Quá trình lựa chọn thuật toán khởi điểm đòi hỏi sự đánh giá kỹ lưỡng về cấu trúc bài toán hòng tối thiểu hóa thời gian thử – sai. Đối với các bài toán thị giác máy tính như huấn luyện cấu trúc ResNet hoặc CNN truyền thống, lựa chọn nên xoay quanh SGD kết hợp Momentum nhằm khai thác khả năng hội tụ tại các vùng cực tiểu diện rộng, từ đó ổn định năng lực tổng quát hóa. Đối với mảng xử lý ngôn ngữ tự nhiên sử dụng Transformer, AdamW trở thành lựa chọn ưu việt nhờ khả năng vượt ngưỡng bình nguyên gradient và cơ chế phân rã trọng số độc lập giúp bảo toàn tính điều chuẩn. Trong những tình huống đối mặt với dữ liệu nhiễu cao hoặc tài nguyên hạn hẹp, SGD cùng Momentum hoặc RMSProp có thể duy trì độ ổn định tốt hơn so với tốc độ quá khớp nhanh của các phương pháp tối ưu hoàn toàn thích nghi. Cuối cùng, tại các khâu thử nghiệm kiến trúc mới mang tính chu kỳ phản hồi nhanh, việc khởi đầu với Adam hoặc AdamW tỏ ra hiệu quả nhất nhờ vào sự ít phụ thuộc vào cấu hình hệ số chi tiết.
+
+Việc vận hành thực tế các quá trình tối ưu hóa này thường xuyên phải đối mặt với các vấn đề động học cần được chẩn đoán và xử lý đúng cách. Nếu quá trình huấn luyện xuất hiện hiện tượng hàm mất mát dao động theo hình răng cưa với biên độ lớn, điều này đa phần phản ánh hệ số học đang quá cao, hoặc kích thước lô dữ liệu quá nhỏ gây ra nhiễu loạn trong việc ước lượng gradient; giải pháp phù hợp bao gồm việc cắt giảm mạnh tay tốc độ học hoặc tăng quy mô lô. Trong trường hợp hàm mất mát giảm với một thiết diện cực kỳ chậm trễ hoặc tạo thành những bình nguyên phẳng ngang bám trụ qua nhiều chu kỳ học, quá trình huấn luyện có thể đã lâm vào tình trạng kẹt tại các điểm yên ngựa hoặc đối diện với sự triệt tiêu gradient. Cách tiếp cận hợp lý là bổ sung dần lịch trình khởi động (warmup) cho learning rate, hoặc chuyển sang một phương pháp tối ưu dựa vào toán tử moment tích lũy nếu mô hình đang dùng một thuật toán quá cơ bản. Nghiêm trọng hơn, khi hàm mất mát đột ngột trả về giá trị không xác định (NaN hoặc Inf), động học quá trình khả năng cao đã chịu sự bùng nổ gradient, yêu cầu một sự bổ sung ngay lập tức các cơ chế cắt xén biên độ gradient thông qua chuẩn chiếu L2 đi kèm với sự rà soát chặt chẽ giá trị của toàn bộ dòng quy trình tiền xử lý số liệu đầu vào.
+
+\subsubsection{5.5.2. Hướng nghiên cứu Tương lai}
+
+Nghiên cứu này cũng chỉ ra những khoảng trống tri thức mở đường cho các định hướng trong tương lai. Một điểm cần nhấn mạnh là nhu cầu thiết yếu trong việc mở rộng quy mô đánh giá đối với các kiến trúc có số lượng tham số khổng lồ. Việc thử nghiệm động lực học tối ưu khi mô hình rơi vào trạng thái "siêu tham số hóa" (over-parameterization) trên các cấu trúc tỷ tham số sẽ mang lại bằng chứng cụ thể hơn về độ thực dụng của các phương thức tối ưu mới nổi vốn hướng thiết kế vào việc tiết kiệm dung lượng bộ nhớ như bộ tối ưu Lion hay Sophia.
+
+Song hành với đó, việc đi sâu vào phân tích các biến thể tối ưu mang tính chất cắt giảm (Memory-Optimized Variants) đang tỏ ra rất hứa hẹn trên các hệ thống có tài nguyên tính toán không tập trung. Cần khảo sát sự ảnh hưởng của việc rút gọn số bit biểu diễn bên trong các kỹ thuật tối ưu hóa phổ biến như 8-bit Adam đối với quỹ đạo tối ưu, đánh giá liệu đánh đổi này có làm thay đổi chất lượng cực tiểu đạt được hay không. Sau cùng, một định hướng đầy triển vọng là việc đo lường và theo sát các đại lượng động lực học tập trung sâu vào thuộc tính phân rã tại từng tầng chuyên biệt thay vì các phép đánh giá thống kê toàn cục như hiện tại. Việc đối soát các thông số mức độ cập nhật tỷ lệ với chuẩn mức của từng khối lớp có thể đem tới những diễn giải có cơ sở vững chắc hơn về tương tác đặc thù rất mạnh đang diễn ra giữa cấu hình Transformer và các thuật toán tối ưu học sâu có tính định vị.
+
+\begin{thebibliography}{99}
+\bibitem{ref1} H. Robbins and S. Monro, “A stochastic approximation method,” \emph{The Annals of Mathematical Statistics}, vol. 22, no. 3, pp. 400–407, 1951. doi: 10.1214/aoms/1177729586.
+\bibitem{ref2} B. T. Polyak, “Some methods of speeding up the convergence of iteration methods,” \emph{USSR Computational Mathematics and Mathematical Physics}, vol. 4, no. 5, pp. 1–17, 1964. doi: 10.1016/0041-5553(64)90137-5.
+\bibitem{ref3} I. Goodfellow, Y. Bengio, and A. Courville, \emph{Deep Learning}. Cambridge, MA, USA: MIT Press, 2016.
+\bibitem{ref4} D. P. Kingma and J. Ba, “Adam: A method for stochastic optimization,” in \emph{Proc. 3rd Int. Conf. Learn. Representations (ICLR)}, San Diego, CA, USA, 2015. [Online]. Available: \url{https://openreview.net/forum?id=ryQu7f-RZ}
+\bibitem{ref5} I. Loshchilov and F. Hutter, “Decoupled weight decay regularization,” in \emph{Proc. Int. Conf. Learn. Representations (ICLR)}, 2019. [Online]. Available: \url{https://openreview.net/forum?id=Bkg6RiCqY7}
+\bibitem{ref6} H. H. Rosenbrock, “An automatic method for finding the greatest or least value of a function,” \emph{The Computer Journal}, vol. 3, no. 3, pp. 175–184, 1960. doi: 10.1093/comjnl/3.3.175.
+\bibitem{ref7} D. H. Ackley, \emph{A Connectionist Machine Approach to Genetic Hillclimbing}. Boston, MA, USA: Springer, 1987.
+\bibitem{ref8} Y. LeCun, L. Bottou, Y. Bengio, and P. Haffner, “Gradient-based learning applied to document recognition,” \emph{Proceedings of the IEEE}, vol. 86, no. 11, pp. 2278–2324, 1998. doi: 10.1109/5.726791.
+\bibitem{ref9} K. He, X. Zhang, S. Ren, and J. Sun, “Deep residual learning for image recognition,” in \emph{Proc. IEEE Conf. Computer Vision and Pattern Recognition (CVPR)}, Las Vegas, NV, USA, 2016, pp. 770–778. doi: 10.1109/CVPR.2016.90.
+\bibitem{ref10} A. L. Maas, R. E. Daly, P. T. Pham, D. Huang, A. Y. Ng, and C. Potts, “Learning word vectors for sentiment analysis,” in \emph{Proc. 49th Annu. Meeting ACL: Human Language Technologies}, Portland, OR, USA, 2011, pp. 142–150. [Online]. Available: \url{https://aclanthology.org/P11-1015/}
+\bibitem{ref11} J. Yang, R. Shi, D. Wei, Z. Liu, L. Zhao, B. Ke, H. Pfister, and B. Ni, “MedMNIST v2: A large-scale lightweight benchmark for 2D and 3D biomedical image classification,” \emph{Scientific Data}, vol. 10, no. 1, p. 41, 2023. doi: 10.1038/s41597-022-01721-8.
+\bibitem{ref12} A. Vaswani \emph{et al}., “Attention is all you need,” in \emph{Advances in Neural Information Processing Systems 30 (NeurIPS 2017)}, 2017. [Online]. Available: \url{https://papers.nips.cc/paper/7181-attention-is-all-you-need}
+\bibitem{ref13} J. Devlin, M.-W. Chang, K. Lee, and K. Toutanova, “BERT: Pre-training of deep bidirectional transformers for language understanding,” in \emph{Proc. 2019 Conf. North American Chapter of the Association for Computational Linguistics: Human Language Technologies (NAACL-HLT)}, Minneapolis, MN, USA, 2019, pp. 4171–4186. doi: 10.18653/v1/N19-1423.
+\bibitem{ref14} O. Ronneberger, P. Fischer, and T. Brox, “U-Net: Convolutional networks for biomedical image segmentation,” in \emph{Proc. 18th Int. Conf. Medical Image Computing and Computer-Assisted Intervention (MICCAI)}, Munich, Germany, 2015, pp. 234–241. doi: 10.1007/978-3-319-24574-4\_28.
+\bibitem{ref15} L. R. Dice, “Measures of the amount of ecologic association between species,” \emph{Ecology}, vol. 26, no. 3, pp. 297–302, 1945. doi: 10.2307/1932409.
+\bibitem{ref16} A. Paszke \emph{et al}., “PyTorch: An imperative style, high-performance deep learning library,” in \emph{Advances in Neural Information Processing Systems 32 (NeurIPS 2019)}, 2019, pp. 8024–8035.
+\bibitem{ref17} T. Akiba, S. Sano, T. Yanase, T. Ohta, and M. Koyama, “Optuna: A next-generation hyperparameter optimization framework,” in \emph{Proc. 25th ACM SIGKDD Int. Conf. Knowledge Discovery and Data Mining (KDD)}, Anchorage, AK, USA, 2019, pp. 2623–2631. doi: 10.1145/3292500.3330701.
+\bibitem{ref18} S. S. Shapiro and M. B. Wilk, “An analysis of variance test for normality (complete samples),” \emph{Biometrika}, vol. 52, no. 3–4, pp. 591–611, 1965. doi: 10.1093/biomet/52.3-4.591.
+\bibitem{ref19} H. Levene, “Robust tests for equality of variances,” in \emph{Contributions to Probability and Statistics: Essays in Honor of Harold Hotelling}, I. Olkin, Ed. Stanford, CA, USA: Stanford Univ. Press, 1960, pp. 278–292.
+\bibitem{ref20} F. Wilcoxon, “Individual comparisons by ranking methods,” \emph{Biometrics Bulletin}, vol. 1, no. 6, pp. 80–83, 1945. doi: 10.2307/3001968.
+\bibitem{ref21} H. B. Mann and D. R. Whitney, “On a test of whether one of two random variables is stochastically larger than the other,” \emph{The Annals of Mathematical Statistics}, vol. 18, no. 1, pp. 50–60, 1947. doi: 10.1214/aoms/1177730491.
+\bibitem{ref22} B. L. Welch, “The generalization of ‘Student’s’ problem when several different population variances are involved,” \emph{Biometrika}, vol. 34, no. 1–2, pp. 28–35, 1947. doi: 10.1093/biomet/34.1-2.28.
+\bibitem{ref23} S. Holm, “A simple sequentially rejective multiple test procedure,” \emph{Scandinavian Journal of Statistics}, vol. 6, no. 2, pp. 65–70, 1979.
+\bibitem{ref24} Y. Benjamini and Y. Hochberg, “Controlling the false discovery rate: A practical and powerful approach to multiple testing,” \emph{Journal of the Royal Statistical Society: Series B}, vol. 57, no. 1, pp. 289–300, 1995. doi: 10.1111/j.2517-6161.1995.tb02031.x.
+\bibitem{ref25} J. P. Simmons, L. D. Nelson, and U. Simonsohn, “False-positive psychology: Undisclosed flexibility in data collection and analysis allows presenting anything as significant,” \emph{Psychological Science}, vol. 22, no. 11, pp. 1359–1366, 2011. doi: 10.1177/0956797611417632.
+\end{thebibliography}
+\end{document}

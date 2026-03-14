@@ -1,0 +1,18 @@
+{
+  "dataset": "Medical",
+  "model": "MedicalSimpleCNN",
+  "optimizer": "AdamW",
+  "best_params": {
+    "lr": 0.00314288089084011,
+    "beta1": 0.8712339110678275,
+    "beta2": 0.9181643142239894,
+    "weight_decay": 5.415244119402541e-06
+  },
+  "timestamp": "2026-03-08T10:17:13.843312",
+  "metadata": {
+    "best_val_acc": 76.78518518518518,
+    "n_trials": 5,
+    "epochs": 2,
+    "seed": 42
+  }
+}

@@ -1,0 +1,6 @@
+epoch,phase,seed,torch_version,cuda_available,device,cudnn_deterministic,cudnn_benchmark,time_sec,batch,global_step,train_loss,grad_norm,update_norm,lr,tainted,effective_batch_size,original_batch_size,test_loss,test_accuracy
+1,eval,,,,,,,35.839561223983765,,469.0,,,,,False,128.0,128.0,0.4225935651302338,0.8896
+2,eval,,,,,,,72.37811493873596,,938.0,,,,,False,128.0,128.0,0.3211781826734542,0.9106
+3,eval,,,,,,,110.56976366043092,,1407.0,,,,,False,128.0,128.0,0.2832162189245224,0.9187
+4,eval,,,,,,,151.45117211341858,,1876.0,,,,,False,128.0,128.0,0.2599171806335449,0.9263
+5,eval,,,,,,,195.8014159202576,,2345.0,,,,,False,128.0,128.0,0.2418350460410118,0.9316

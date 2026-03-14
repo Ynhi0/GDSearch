@@ -1,0 +1,6 @@
+Unnamed: 0,SGD,SGD_Momentum,Adam,AdamW,AMSGrad
+SGD,0.0,-1.0,-1.0,-1.0,-1.0
+SGD_Momentum,1.0,0.0,0.0,-1.0,-1.0
+Adam,1.0,0.0,0.0,0.0,0.0
+AdamW,1.0,1.0,0.0,0.0,0.0
+AMSGrad,1.0,1.0,0.0,0.0,0.0

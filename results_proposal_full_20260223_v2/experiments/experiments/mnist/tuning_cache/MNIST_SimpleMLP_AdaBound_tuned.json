@@ -1,0 +1,19 @@
+{
+  "dataset": "MNIST",
+  "model": "SimpleMLP",
+  "optimizer": "AdaBound",
+  "best_params": {
+    "lr": 0.009605733505412186,
+    "beta1": 0.8987619793416283,
+    "beta2": 0.9271810806607137,
+    "final_lr": 0.3989059227404665,
+    "gamma": 0.0008474429961345866
+  },
+  "timestamp": "2026-03-13T14:36:45.243166",
+  "metadata": {
+    "best_val_acc": 93.29272727272728,
+    "n_trials": 15,
+    "epochs": 3,
+    "seed": 42
+  }
+}

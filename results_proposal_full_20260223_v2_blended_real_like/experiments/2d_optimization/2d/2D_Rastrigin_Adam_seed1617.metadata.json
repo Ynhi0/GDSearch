@@ -1,0 +1,45 @@
+{
+  "timestamp": "2026-02-26T03:04:31.336318",
+  "dataset": "2D",
+  "model": "Rastrigin",
+  "optimizer": "Adam",
+  "seed": 1617,
+  "rows": 1000,
+  "rows_original": 1000,
+  "history_thinning_stride": 1,
+  "params": {
+    "function": "Rastrigin",
+    "optimizer": "Adam",
+    "max_iter": 1000,
+    "initial_x": -0.8436690048393052,
+    "initial_y": -1.1316626332592739
+  },
+  "model_path": null,
+  "system": {
+    "python_version": "3.13.7 (tags/v3.13.7:bcee1c3, Aug 14 2025, 14:15:11) [MSC v.1944 64 bit (AMD64)]",
+    "torch_version": "2.6.0+cu124",
+    "cuda_available": true,
+    "cpu_count": 16,
+    "total_memory_gb": 15.730949401855469,
+    "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
+    "gpu_memory_gb": 3.99951171875,
+    "cuda_version": "12.4"
+  },
+  "provenance": {
+    "timestamp": "2026-02-26T03:04:31.337988",
+    "python_version": "3.13.7 (tags/v3.13.7:bcee1c3, Aug 14 2025, 14:15:11) [MSC v.1944 64 bit (AMD64)]",
+    "pytorch_version": "2.6.0+cu124",
+    "command_line": "run_all_kaggle.py --experiment-mode full --experiments 2d,robustness,sam,ablation,beta_sensitivity,hyperparam_sensitivity,convergence_validation,2d_visualization,saddle_escape,stochastic_2d_integrity,adam_adamw_comparison,hyperparameter_heatmaps --seeds 42,123,456,789,1011,1213,1415,1617,1819,2021 --results-dir results_proposal_full_20260223_v2 --skip-tuning --robust-gradients --generate-deliverables",
+    "working_dir": "F:\\GDSearch",
+    "git_commit": "d6630fd8de45030119f292096c0d5e9873354920",
+    "git_dirty": true,
+    "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
+    "gpu_count": 1,
+    "gpu_memory_gb": 3.99951171875,
+    "cuda_version": "12.4",
+    "nvidia_driver": "581.80"
+  },
+  "completed": true,
+  "tainted": false,
+  "run_signature": "1d053c6bab482dfe16cda34709fba33d1f7eb69a8b06f4956b3fa0b9c0bdf2f5"
+}

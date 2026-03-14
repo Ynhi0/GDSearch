@@ -1,0 +1,7 @@
+optimizer,csv_seed_count,missing_seed_count,missing_seeds,metadata_count,status
+AdaBound,10,0,,10,OK
+Adam,10,0,,10,OK
+AdamW,10,0,,10,OK
+LAMB,5,5,1213;1415;1617;1819;2021,5,PARTIAL
+RAdam,10,0,,10,OK
+SGD_Momentum,10,0,,10,OK

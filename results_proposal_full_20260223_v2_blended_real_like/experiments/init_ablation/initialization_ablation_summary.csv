@@ -1,0 +1,7 @@
+initialization,optimizer,mean_test_acc,std_test_acc,mean_convergence_epoch,std_convergence_epoch,divergence_rate,n_seeds
+normal_small,SGD,11.26,1.38,1.1,0.3,0.0,10
+normal_small,Adam,22.47,1.032521186223314,1.9,0.3,0.0,10
+xavier_normal,SGD,11.59,3.247907018373525,1.5,0.5,0.0,10
+xavier_normal,Adam,34.129999999999995,2.551489760904402,1.8,0.4,0.0,10
+kaiming_normal,SGD,21.03,4.967907003960521,1.6,0.4898979485566356,0.0,10
+kaiming_normal,Adam,37.6,4.852834223420372,1.8,0.4,0.0,10

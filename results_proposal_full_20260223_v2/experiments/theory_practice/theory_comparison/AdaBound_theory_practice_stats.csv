@@ -1,0 +1,2 @@
+optimizer,empirical_rate,theoretical_rate,optimality_gap,optimality_gap_pct,convergence_regime,pl_constant,fit_r_squared,mean_relative_error,median_relative_error,max_relative_error,final_loss,theoretical_final
+AdaBound,3.590288434837975,0.9993559357415306,,,linear (PL),0.0005682162806517525,-2.819905717686063,0.560979027442458,0.6154412543096618,0.7563249183957348,0.481295426630161,1.9751524182822684

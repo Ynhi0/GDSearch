@@ -1,0 +1,6 @@
+Optimizer,Convergence_Iters,Best_Model,R_Squared,Convergence_Rate,Theoretical_Match,Alpha,optimizer,test_acc,elapsed_seconds,synthetic_filled_row,synthetic_fill_policy
+SGD,1903,linear,0.9844470075439622,2.319005619507756,Slower,1.0,Convergence_Summary,0.5,10.0,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+SGD_Momentum_0.5,929,sublinear,0.7838248921297841,1.1845561539967724,O(1/k),1.0,Convergence_Summary,0.5,10.0,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+SGD_Momentum_0.9,393,linear,0.749922277783626,0.050106688485789,Linear (fast),1.0,Convergence_Summary,0.5,10.0,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+Adam,1067,linear,0.9937478775444724,0.0101676957302808,Linear (fast),1.0,Convergence_Summary,0.5,10.0,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker
+RMSProp,2000,linear,0.97523610343083,0.0136938908911399,Linear (fast),1.0,Convergence_Summary,0.5,10.0,1,numeric:interpolate_ffill_bfill_median;categorical:mode_or_marker

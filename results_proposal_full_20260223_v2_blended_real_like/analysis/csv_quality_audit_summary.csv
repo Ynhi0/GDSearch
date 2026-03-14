@@ -1,0 +1,5 @@
+status,count
+ok,2337
+has_nan,607
+ok_meta,7
+read_error: No columns to parse from file,4

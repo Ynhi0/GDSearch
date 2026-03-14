@@ -1,0 +1,54 @@
+{
+  "timestamp": "2026-03-14T01:27:23.949000",
+  "dataset": "MNIST",
+  "model": "SimpleMLP",
+  "optimizer": "AdamW",
+  "seed": 1415,
+  "rows": 48,
+  "rows_original": 48,
+  "history_thinning_stride": 1,
+  "params": {
+    "batch_size_train": 128,
+    "batch_size_test": 256,
+    "epochs": 50,
+    "optimizer_name": "AdamW",
+    "tainted": false,
+    "effective_batch_size": 128,
+    "original_batch_size": 128,
+    "robust_gradient_stats": {
+      "mean_grad_norm": 1.4266458020044886e-07,
+      "max_grad_norm": 1.3835690424457425e-06,
+      "clip_fraction": 0.0,
+      "heavy_tail_fraction": 0.027843601895734597
+    }
+  },
+  "model_path": "results_proposal_full_20260223_v2\\experiments\\experiments\\models\\MNIST_SimpleMLP_AdamW_seed1415_final.pt",
+  "system": {
+    "python_version": "3.13.7 (tags/v3.13.7:bcee1c3, Aug 14 2025, 14:15:11) [MSC v.1944 64 bit (AMD64)]",
+    "torch_version": "2.9.1+cu128",
+    "cuda_available": true,
+    "cpu_count": 16,
+    "total_memory_gb": 15.730949401855469,
+    "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
+    "gpu_memory_gb": 3.99951171875,
+    "cuda_version": "12.8"
+  },
+  "provenance": {
+    "timestamp": "2026-03-14T01:27:23.993604",
+    "python_version": "3.13.7 (tags/v3.13.7:bcee1c3, Aug 14 2025, 14:15:11) [MSC v.1944 64 bit (AMD64)]",
+    "pytorch_version": "2.9.1+cu128",
+    "command_line": "run_all_kaggle.py --experiments mnist,cifar10 --seeds 42,123,456,789,1011,1213,1415,1617,1819,2021 --results-dir results_proposal_full_20260223_v2/experiments --resume --resume-behavior restart_if_no_checkpoint --skip-tuning --deterministic --no-mlflow --robust-gradients",
+    "working_dir": "F:\\GDSearch",
+    "git_commit": "0cabda9be6edd1c5356e6241f97343909c3feac0",
+    "git_dirty": true,
+    "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
+    "gpu_count": 1,
+    "gpu_memory_gb": 3.99951171875,
+    "cuda_version": "12.8",
+    "nvidia_driver": "581.80"
+  },
+  "completed": true,
+  "tainted": false,
+  "run_signature": "d347859cf3b0d51b3d0df4667470159a442cc0d2e45e9c96e1fe8d3d1786e9d5",
+  "device": "cuda"
+}

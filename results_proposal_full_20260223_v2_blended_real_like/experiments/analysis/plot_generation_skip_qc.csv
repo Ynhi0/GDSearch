@@ -1,0 +1,14 @@
+reason,count
+meta_csv,11
+static_only::2d_optimization,61
+static_only::2d_visualization,1
+static_only::ablation,51
+static_only::adam_adamw_comparison,2
+static_only::beta_sensitivity_2d,2
+static_only::convergence_validation,6
+static_only::hyperparam_sensitivity,4
+static_only::hyperparameter_heatmaps,2
+static_only::robustness,451
+static_only::saddle_escape,4
+static_only::sam_sensitivity,51
+static_only::stochastic_2d_integrity,3

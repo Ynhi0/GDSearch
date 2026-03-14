@@ -1,0 +1,43 @@
+{
+  "timestamp": "2026-03-14T16:51:42.304918",
+  "dataset": "BatchAblation",
+  "model": "MNIST",
+  "optimizer": "Adam",
+  "seed": 123,
+  "rows": 1,
+  "rows_original": 1,
+  "history_thinning_stride": 1,
+  "params": {
+    "batch_size": 512,
+    "scaled_lr": 0.02,
+    "base_lr": 0.01
+  },
+  "model_path": null,
+  "system": {
+    "python_version": "3.13.7 (tags/v3.13.7:bcee1c3, Aug 14 2025, 14:15:11) [MSC v.1944 64 bit (AMD64)]",
+    "torch_version": "2.9.1+cu128",
+    "cuda_available": true,
+    "cpu_count": 16,
+    "total_memory_gb": 15.730949401855469,
+    "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
+    "gpu_memory_gb": 3.99951171875,
+    "cuda_version": "12.8"
+  },
+  "provenance": {
+    "timestamp": "2026-03-14T16:51:42.306991",
+    "python_version": "3.13.7 (tags/v3.13.7:bcee1c3, Aug 14 2025, 14:15:11) [MSC v.1944 64 bit (AMD64)]",
+    "pytorch_version": "2.9.1+cu128",
+    "command_line": "run_all_kaggle.py --experiments batch_ablation,lr_ablation --seeds 42,123,456,789 --skip-tuning --deterministic --no-mlflow --robust-gradients --results-dir results_longrun_20260314/experiments",
+    "working_dir": "F:\\GDSearch",
+    "git_commit": "0cabda9be6edd1c5356e6241f97343909c3feac0",
+    "git_dirty": true,
+    "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
+    "gpu_count": 1,
+    "gpu_memory_gb": 3.99951171875,
+    "cuda_version": "12.8",
+    "nvidia_driver": "581.80"
+  },
+  "completed": true,
+  "tainted": false,
+  "run_signature": "571f13885df4126bd3a2fd4de109803c5484dd7bc98cf8b4d70b3bb383dbb6ae"
+}

@@ -1,0 +1,13 @@
+## Experiments Training Results - Tabular Summary
+
+| Optimizer/Config | Final Loss | Loss Std | Final Test Acc (%) | Acc Std (%) | Speed (iters/sec) |
+|------------------|------------|----------|--------------------|-------------|-------------------|
+| SimpleMLP_SGD_Momentum | 0.0010 | 0.0001 | 98.2290 | 0.0599 | 0.0235 |
+| SimpleMLP_Adam | 0.0017 | 0.0050 | 98.1590 | 0.1882 | 0.0564 |
+| SimpleMLP_AdamW | 0.0036 | 0.0043 | 98.1088 | 0.2488 | 0.0530 |
+| SimpleMLP_SGD | 0.0075 | 0.0021 | 98.0670 | 0.1032 | 0.0280 |
+| Robustness_Rosenbrock_Adam | 0.0001 | 0.0000 | N/A | N/A | N/A |
+| Robustness_Rosenbrock_SAM_Adam | 0.0097 | 0.0077 | N/A | N/A | N/A |
+| Robustness_Rosenbrock_SAM_SGD | 8.7729 | 5.5791 | N/A | N/A | N/A |
+| Robustness_Rosenbrock_SGD_Momentum | 270.0794 | 324.7445 | N/A | N/A | N/A |
+| Robustness_Rosenbrock_SGD | 9.2499 | 5.3114 | N/A | N/A | N/A |

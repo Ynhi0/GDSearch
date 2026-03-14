@@ -2083,7 +2083,7 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
     """
     Ablation Study A: Impact of Batch Size on Convergence
 
-    Compares batch sizes [32, 256, 512] for SGD vs SAM on MNIST.
+    Compares batch sizes [32, 256, 512] across multiple optimizers on MNIST.
     Mitigation: Uses Linear LR Scaling (lr = base_lr * batch_size/256)
     to account for effective gradient noise reduction.
 
@@ -2111,7 +2111,12 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
 
     os.makedirs(results_dir, exist_ok=True)
     batch_sizes = [32, 256, 512]
-    optimizers_to_test = [OptimizerNames.SGD, OptimizerNames.SAM]
+    optimizers_to_test = [
+        OptimizerNames.SGD,
+        OptimizerNames.SGD_MOMENTUM,
+        OptimizerNames.ADAM,
+        OptimizerNames.ADAMW,
+    ]
     base_lr = 0.01  # Reference LR for batch_size=256
 
     # FIX: Use canonical data loaders to prevent validation data leakage
@@ -2178,14 +2183,16 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
                 model = safe_device_transfer(model, device, operation="MNIST batch ablation model")
 
                 # Create optimizer (ensure defined before usage)
-                # FIX: Added weight_decay=1e-4 to SGD for fair comparison with AdamW
-                # Without this, we were comparing "No Regularization" vs "AdamW with WD"
+                # Keep weight_decay consistent to avoid regularization confounds.
                 optimizer = None
                 if opt_name == OptimizerNames.SGD:
+                    optimizer = torch.optim.SGD(model.parameters(), lr=scaled_lr, momentum=0.0, weight_decay=1e-4)
+                elif opt_name == OptimizerNames.SGD_MOMENTUM:
                     optimizer = torch.optim.SGD(model.parameters(), lr=scaled_lr, momentum=0.9, weight_decay=1e-4)
-                elif opt_name == OptimizerNames.SAM:
-                    base_opt = torch.optim.SGD(model.parameters(), lr=scaled_lr, momentum=0.9, weight_decay=1e-4)
-                    optimizer = SAMWrapper(base_opt, rho=0.05)
+                elif opt_name == OptimizerNames.ADAM:
+                    optimizer = torch.optim.Adam(model.parameters(), lr=scaled_lr, weight_decay=1e-4)
+                elif opt_name == OptimizerNames.ADAMW:
+                    optimizer = torch.optim.AdamW(model.parameters(), lr=scaled_lr, weight_decay=1e-4)
                 else:
                     raise ValueError(f"Unsupported optimizer for batch ablation: {opt_name}")
                 assert optimizer is not None
@@ -2372,10 +2379,19 @@ def run_batch_ablation(dataset_name: str = 'MNIST', results_dir: Union[str, Path
         # Use module-level matplotlib (imported at top)
         _, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
 
+        loss_col = next((c for c in ['final_loss', 'test_loss', 'loss'] if c in df.columns), None)
+        acc_col = next((c for c in ['final_accuracy', 'final_test_acc', 'test_accuracy'] if c in df.columns), None)
+
+        if loss_col is None or acc_col is None:
+            raise KeyError(
+                f"Missing required plotting columns. Available={list(df.columns)}, "
+                f"loss_col={loss_col}, acc_col={acc_col}"
+            )
+
         for opt_name in optimizers_to_test:
             subset = df[df['optimizer'] == opt_name]
-            ax1.plot(subset['batch_size'], subset['final_loss'], marker='o', label=opt_name)
-            ax2.plot(subset['batch_size'], subset['final_accuracy'], marker='o', label=opt_name)
+            ax1.plot(subset['batch_size'], subset[loss_col], marker='o', label=opt_name)
+            ax2.plot(subset['batch_size'], subset[acc_col], marker='o', label=opt_name)
 
         ax1.set_xlabel('Batch Size')
         ax1.set_ylabel('Final Loss')
@@ -3080,7 +3096,20 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader
 
     logging.info(f"  Tuning {optimizer_name} ({n_trials} trials, {epochs} epochs each)")
 
+    def _optuna_trial_cleanup(_study, _trial):
+        """Best-effort CUDA/GC cleanup between trials to prevent VRAM accumulation."""
+        try:
+            import gc
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception as cleanup_err:
+            logging.debug("Per-trial cleanup failed for %s: %s", optimizer_name, cleanup_err, exc_info=True)
+
     def objective(trial) -> float:
+        # Cleanup before trial to mitigate residual allocations after prior failures
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         set_seed(seed + trial.number)
         model = model_fn()
         model = safe_device_transfer(model, device, operation=f"Tuning {optimizer_name} trial {trial.number}")
@@ -3249,7 +3278,13 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader
     )
 
     try:
-        study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
+        study.optimize(
+            objective,
+            n_trials=n_trials,
+            show_progress_bar=False,
+            gc_after_trial=True,
+            callbacks=[_optuna_trial_cleanup],
+        )
     except Exception as tuning_err:
         logging.warning(
             "Tuning failed for %s on %s/%s; falling back to defaults. Error: %s",
@@ -3258,6 +3293,10 @@ def quick_tune_optimizer(optimizer_name: str, model_fn, train_loader, val_loader
             model_name,
             tuning_err,
         )
+        try:
+            clear_gpu_memory(force=True)
+        except Exception:
+            pass
         return get_default_hyperparameters(optimizer_name)
 
     if len(study.trials) == 0 or study.best_trial is None:
@@ -4420,6 +4459,11 @@ def run_cifar10_experiment(results_dir="results_cifar10", seeds=None, quick=Fals
                 logging.info(f"Skipping CIFAR-10 {opt_name} seed {seed} (already completed)")
                 continue
 
+            # Prevent residual VRAM from prior runs/trials from poisoning new seed startup
+            try:
+                clear_gpu_memory(force=False)
+            except Exception:
+                pass
             set_seed(seed)
 
             # Create fresh model for each run
@@ -8315,24 +8359,45 @@ def _create_robustness_visualizations(csv_paths, static_dir, experiment_name):
 
     # Always load per-run time-series files (needed for trajectory-like convergence plots).
     per_run_dfs = []
+    max_seeds_per_optimizer = 5
+    seen_seeds_per_optimizer: Dict[str, Set[int]] = {}
     for p in csv_paths:
         stem = p.stem.lower()
         if 'results' in stem:
             continue
         try:
-            df = safe_read_csv(p)
-            if df is None or df.empty:
-                continue
-            # Extract optimizer from filename like Robustness_Rosenbrock_Adam_start0_seed42
-            parsed = parse_experiment_filename(p.stem)
-            opt = parsed.get('optimizer')
+            # Extract optimizer/seed from filename like Robustness_Rosenbrock_SAM_Adam_start0_seed42
+            opt = None
+            seed_val = None
+            match = re.match(r'^Robustness_Rosenbrock_(?P<optimizer>.+)_start\d+_seed(?P<seed>\d+)$', p.stem)
+            if match:
+                opt = match.group('optimizer')
+                seed_val = int(match.group('seed'))
+            if opt is None:
+                parsed = parse_experiment_filename(p.stem)
+                opt = parsed.get('optimizer')
+                seed_val = parsed.get('seed') if seed_val is None else seed_val
             if opt is None:
                 # Fallback: tokenize filename
                 parts = p.stem.split('_')
                 # Typical: Robustness_Rosenbrock_<Optimizer>_start<N>_seed<S>
                 opt = parts[2] if len(parts) > 2 else 'Unknown'
-            if 'optimizer' not in df.columns or df['optimizer'].isnull().all():
-                df['optimizer'] = opt
+            if isinstance(opt, str):
+                opt = re.sub(r'_start\d+$', '', opt)
+            if seed_val is not None:
+                seen = seen_seeds_per_optimizer.setdefault(str(opt), set())
+                if seed_val not in seen and len(seen) >= max_seeds_per_optimizer:
+                    continue
+                seen.add(seed_val)
+
+            df = safe_read_csv(p)
+            if df is None or df.empty:
+                continue
+            if len(df) > 500:
+                step = max(1, len(df) // 500)
+                df = df.iloc[::step].reset_index(drop=True)
+            # Always normalize optimizer labels from filename (avoid start-point suffixes).
+            df['optimizer'] = opt
             # Extract start_point from filename when missing
             if 'start_point' not in df.columns:
                 for part in p.stem.split('_'):
@@ -8348,6 +8413,14 @@ def _create_robustness_visualizations(csv_paths, static_dir, experiment_name):
     # Fallback to per-run aggregation if summary CSV is unavailable.
     if (summary_df is None or summary_df.empty) and not per_run_df.empty:
         summary_df = per_run_df.copy()
+
+    if summary_df is not None and not summary_df.empty and 'optimizer' in summary_df.columns:
+        summary_df = summary_df.copy()
+        summary_df['optimizer'] = (
+            summary_df['optimizer']
+            .astype(str)
+            .str.replace(r'_start\d+$', '', regex=True)
+        )
 
     if summary_df is None or summary_df.empty:
         logging.warning("No usable data found for Robustness visualizations")
@@ -8383,10 +8456,23 @@ def _create_robustness_visualizations(csv_paths, static_dir, experiment_name):
         try:
             plt.figure(figsize=(10, 6))
             for opt, grp in time_df.groupby('optimizer'):
-                agg = grp.groupby('iteration')['loss'].agg(['mean', 'std'])
+                iter_series = pd.to_numeric(grp['iteration'], errors='coerce')
+                value_series = pd.to_numeric(grp['loss'], errors='coerce')
+                if iter_series.notna().any():
+                    max_iter = int(iter_series.dropna().max())
+                    step = max(1, max_iter // 500) if max_iter > 2000 else 1
+                    bucket = (iter_series // step) * step
+                    agg = pd.DataFrame({'iter': bucket, 'value': value_series}).groupby('iter')['value'].agg(['mean', 'std'])
+                else:
+                    agg = grp.groupby('iteration')['loss'].agg(['mean', 'std'])
                 niter = arr_to_numpy_float(agg.index)
                 nmean = arr_to_numpy_float(agg['mean'])
                 nstd = arr_to_numpy_float(agg['std'])
+                if len(niter) > 2000:
+                    sample_idx = np.linspace(0, len(niter) - 1, 2000, dtype=int)
+                    niter = niter[sample_idx]
+                    nmean = nmean[sample_idx]
+                    nstd = nstd[sample_idx]
                 plt.plot(niter, nmean, label=str(opt), linewidth=2)
                 plt.fill_between(niter, nmean - nstd, nmean + nstd, alpha=0.2)
             plt.xlabel('Iteration', fontsize=12)
@@ -8406,12 +8492,22 @@ def _create_robustness_visualizations(csv_paths, static_dir, experiment_name):
         try:
             plt.figure(figsize=(10, 6))
             for opt, grp in time_df.groupby('optimizer'):
-                agg = grp.groupby('iteration')['grad_norm'].agg(['mean', 'std'])
+                iter_series = pd.to_numeric(grp['iteration'], errors='coerce')
+                value_series = pd.to_numeric(grp['grad_norm'], errors='coerce')
+                if iter_series.notna().any():
+                    max_iter = int(iter_series.dropna().max())
+                    step = max(1, max_iter // 400) if max_iter > 800 else 1
+                    bucket = (iter_series // step) * step
+                    agg = pd.DataFrame({'iter': bucket, 'value': value_series}).groupby('iter')['value'].mean()
+                else:
+                    agg = grp.groupby('iteration')['grad_norm'].mean()
                 niter = arr_to_numpy_float(agg.index)
-                nmean = arr_to_numpy_float(agg['mean'])
-                nstd = arr_to_numpy_float(agg['std'])
+                nmean = arr_to_numpy_float(agg.values)
+                if len(niter) > 800:
+                    sample_idx = np.linspace(0, len(niter) - 1, 800, dtype=int)
+                    niter = niter[sample_idx]
+                    nmean = nmean[sample_idx]
                 plt.plot(niter, nmean, label=str(opt), linewidth=2)
-                plt.fill_between(niter, nmean - nstd, nmean + nstd, alpha=0.2)
             plt.xlabel('Iteration', fontsize=12)
             plt.ylabel('Gradient Norm', fontsize=12)
             plt.title(f'{experiment_name} - Gradient Norm by Optimizer', fontsize=14, fontweight='bold')
@@ -8419,7 +8515,7 @@ def _create_robustness_visualizations(csv_paths, static_dir, experiment_name):
             plt.grid(True, alpha=0.3)
             plt.yscale('log')
             plt.tight_layout()
-            plt.savefig(static_dir / f'{experiment_name.lower()}_grad_norm_convergence.png', dpi=300, bbox_inches='tight')
+            plt.savefig(static_dir / f'{experiment_name.lower()}_grad_norm_convergence.png', dpi=220, bbox_inches='tight')
             plt.close()
             print(f"   Created {experiment_name.lower()}_grad_norm_convergence.png")
         except Exception as e:
@@ -9535,6 +9631,8 @@ def generate_interactive_visualizations(results_dir, plots_dir):
                         if 'seed' in part and i > 0:
                             df['optimizer'] = parts[i-1]
                             break
+                if df.columns.duplicated().any():
+                    df = df.loc[:, ~df.columns.duplicated()].copy()
                 dfs.append(df)
             except Exception as e:
                 logging.debug(f"Could not load {csv_file}: {e}")
@@ -9741,7 +9839,7 @@ def run_theory_analysis_pipeline(
         if not dry_run:
             print("   Running convergence theory validation...")
             validation_df = run_theory_practice_validation(
-                results_dir=str(results_dir),
+                results_dir=str(results_dir / 'experiments'),
                 output_dir=str(theory_output_dir),
                 experiments=['mnist', 'cifar10']  # Validate on main experiments
             )
@@ -15656,6 +15754,7 @@ Examples:
                     from src.experiments.theory_practice_validation import run_theory_practice_validation
 
                     validation_dir = str(experiments_dir / "theory_practice")
+                    status_path = Path(validation_dir) / "theory_practice_status.csv"
 
                     # Check if already completed
                     csv_results = list(Path(validation_dir).glob("theory_practice_comparison_results.csv"))
@@ -15673,18 +15772,24 @@ Examples:
 
                         if available_experiments:
                             df = run_theory_practice_validation(
-                                results_dir=str(results_dir),
+                                results_dir=str(experiments_dir),
                                 experiments=available_experiments,
                                 output_dir=validation_dir,
                                 problem_type='non_convex'
                             )
+
+                            # Clear stale "missing input" status once comparison file is produced
+                            if status_path.exists():
+                                try:
+                                    status_path.unlink()
+                                except Exception:
+                                    logging.debug("Could not remove stale theory_practice_status.csv", exc_info=True)
 
                             experiment_results['theory_practice'] = df
                             print("Theory-practice validation completed!")
                         else:
                             print("No MNIST/CIFAR results found - skipping theory-practice validation")
                             print("    Run 'mnist' or 'cifar10' experiments first")
-                            status_path = Path(validation_dir) / "theory_practice_status.csv"
                             Path(validation_dir).mkdir(parents=True, exist_ok=True)
                             pd.DataFrame([{
                                 'status': 'skipped',

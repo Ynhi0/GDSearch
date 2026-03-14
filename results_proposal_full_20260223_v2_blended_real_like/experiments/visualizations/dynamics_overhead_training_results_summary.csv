@@ -1,0 +1,2 @@
+Optimizer/Config,Final Loss,Loss Std,Final Test Acc (%),Acc Std (%),Speed (iters/sec)
+dynamics,0.0224,0.02,0.0,0.0,0.0

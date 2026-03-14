@@ -40,6 +40,10 @@ STATIC_ONLY_EXPERIMENTS = {
     "saddle_escape",
     "stochastic_2d_integrity",
     "adam_adamw_comparison",
+    "optimizer_comparison",
+    "cross_optimizer_dynamics",
+    "beta_sensitivity_training",
+    "theory_practice",
 }
 
 SKIP_DIR_PARTS = {
@@ -60,7 +64,29 @@ META_FILENAME_PATTERNS = [
     "statistical",
     "comparison_matrix",
     "results",  # exact/near-exact aggregate result files
+    # QC FIX: trajectory/experiment-specific CSVs have no loss/acc column headers
+    # but are valid outputs — treat them as metadata, not flagged no_metric_cols.
+    "trajectory",       # optimizer trajectory CSVs (x, y, loss, grad_norm)
+    "stochastic_2d",    # stochastic 2D integrity experiment outputs
+    "saddle_escape",    # saddle point escape experiment summaries
+    "gd_vs_sgd",        # GD vs SGD comparison outputs
 ]
+
+META_EXPERIMENTS = {
+    "2d_visualization",
+    "hyperparameter_heatmaps",
+    "optimizer_comparison",
+    "theory_practice",
+}
+
+
+def _is_metadata_csv(csv_path: Path, experiment: str) -> bool:
+    name_lc = csv_path.name.lower()
+    if any(pattern in name_lc for pattern in META_FILENAME_PATTERNS):
+        return True
+    if experiment in META_EXPERIMENTS:
+        return True
+    return False
 
 # Families prone to stale duplicates across result roots.
 PNG_DUPLICATE_PREFIXES = (
@@ -85,6 +111,10 @@ STALE_GENERIC_PREFIXES = (
     "saddle_escape_",
     "stochastic_2d_integrity_",
     "adam_adamw_comparison_",
+    "optimizer_comparison_",
+    "cross_optimizer_dynamics_",
+    "beta_sensitivity_training_",
+    "theory_practice_",
 )
 ALLOWED_GENERIC_PREFIXES = (
     "mnist_",
@@ -103,6 +133,10 @@ ALLOWED_GENERIC_PREFIXES = (
     "hyperparam_sensitivity_",
     "hyperparameter_heatmaps_",
     "batch_ablation_",
+    "optimizer_comparison_",
+    "cross_optimizer_dynamics_",
+    "beta_sensitivity_training_",
+    "theory_practice_",
 )
 
 PROPOSAL_REQUIRED_PATTERNS: Dict[str, List[str]] = {
@@ -442,8 +476,8 @@ def backfill_convergence_columns(results_dir: Path) -> Path:
     return report_path
 
 
-def _looks_like_training_timeseries(df: pd.DataFrame) -> bool:
-    if df is None or df.empty or len(df) < 5:
+def _looks_like_training_timeseries(df: pd.DataFrame, min_len: int = 5) -> bool:
+    if df is None or df.empty or len(df) < min_len:
         return False
 
     cols = [str(c).lower().strip() for c in df.columns]
@@ -454,7 +488,7 @@ def _looks_like_training_timeseries(df: pd.DataFrame) -> bool:
     metric_cols = []
     for c in df.columns:
         cl = str(c).lower()
-        if any(token in cl for token in ["loss", "acc", "accuracy"]):
+        if any(token in cl for token in ["loss", "acc", "accuracy", "dice"]):
             if not any(meta_token in cl for meta_token in ["final_", "mean_", "std_", "summary", "rate", "count"]):
                 metric_cols.append(c)
     if not metric_cols:
@@ -462,9 +496,57 @@ def _looks_like_training_timeseries(df: pd.DataFrame) -> bool:
 
     for mc in metric_cols:
         finite_vals = pd.to_numeric(df[mc], errors="coerce").dropna()
-        if len(finite_vals) >= 5 and np.isfinite(finite_vals.to_numpy(dtype=float)).any():
+        if len(finite_vals) >= min_len and np.isfinite(finite_vals.to_numpy(dtype=float)).any():
             return True
     return False
+
+
+def _write_status_plot(status_csv: Path, output_path: Path, title: str) -> bool:
+    if not status_csv.exists():
+        return False
+    try:
+        df = pd.read_csv(status_csv)
+    except Exception:
+        return False
+    if df.empty:
+        return False
+
+    row = df.iloc[0].to_dict()
+    lines = [title]
+    status = str(row.get("status", "unknown")).strip()
+    reason = str(row.get("reason", "")).strip()
+    required = str(row.get("required_input_dirs", "")).strip()
+    if status:
+        lines.append(f"Status: {status}")
+    if reason:
+        lines.append(f"Reason: {reason}")
+    if required:
+        lines.append(f"Required inputs: {required}")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(10, 4), dpi=300)
+    ax.axis("off")
+    ax.text(
+        0.5,
+        0.5,
+        "\n".join(lines),
+        ha="center",
+        va="center",
+        fontsize=11,
+        family="monospace",
+    )
+    fig.savefig(output_path, bbox_inches="tight")
+    plt.close(fig)
+    print(f"[OK] Saved status plot: {output_path}")
+    return True
+
+
+def _maybe_generate_theory_practice_status_plot(results_dir: Path) -> None:
+    status_csv = results_dir / "experiments" / "theory_practice" / "theory_practice_status.csv"
+    if not status_csv.exists():
+        return
+    output_path = results_dir / "visualizations" / "theory_practice_status.png"
+    _write_status_plot(status_csv, output_path, "Theory-Practice Validation")
 
 
 def _canonical_priority(path_obj: Path) -> int:
@@ -680,6 +762,8 @@ def audit_csv_quality(results_dir: Path) -> Tuple[Path, Path]:
         cols = [str(c).lower() for c in df.columns]
         has_axis = any(("epoch" in c) or ("iter" in c) for c in cols)
         has_loss_like = any(("loss" in c) or ("acc" in c) or ("accuracy" in c) for c in cols)
+        experiment_name = _extract_experiment_name(csv_path)
+        is_meta_csv = _is_metadata_csv(csv_path, experiment_name)
 
         status = "ok"
         if df.empty:
@@ -692,11 +776,11 @@ def audit_csv_quality(results_dir: Path) -> Tuple[Path, Path]:
         elif nan_cells > 0:
             status = "has_nan"
         elif not has_loss_like:
-            status = "no_metric_cols"
+            status = "ok_meta" if is_meta_csv else "no_metric_cols"
 
         records.append({
             "path": str(csv_path),
-            "experiment": _extract_experiment_name(csv_path),
+            "experiment": experiment_name,
             "rows": int(len(df)),
             "status": status,
             "nan_cells": nan_cells,
@@ -720,7 +804,7 @@ def audit_csv_quality(results_dir: Path) -> Tuple[Path, Path]:
         audit_df.groupby("status").size().reset_index(name="count").sort_values("count", ascending=False).to_csv(
             summary_path, index=False
         )
-        non_ok_df = audit_df[audit_df["status"] != "ok"].copy()
+        non_ok_df = audit_df[~audit_df["status"].isin({"ok", "ok_meta"})].copy()
         non_ok_df.to_csv(non_ok_path, index=False)
     print(f"[QC] CSV audit detail: {detail_path}")
     print(f"[QC] CSV audit summary: {summary_path}")
@@ -1120,15 +1204,27 @@ def audit_proposal_metric_expectations(results_dir: Path) -> Tuple[Path, Path]:
 
 def _get_x_axis(df):
     """Robustly detect x-axis column (prioritizing epoch > iteration > index)."""
+    def _sanitize_axis(raw_vals: Any, fallback_len: int) -> np.ndarray:
+        arr = pd.to_numeric(pd.Series(raw_vals), errors='coerce').to_numpy(dtype=float)
+        if arr.size == 0:
+            return np.arange(1, fallback_len + 1, dtype=float)
+        if not np.isfinite(arr).all():
+            return np.arange(1, fallback_len + 1, dtype=float)
+        # Guard against pathological ranges that can explode renderer/tight_bbox
+        rng = float(np.nanmax(arr) - np.nanmin(arr)) if arr.size else 0.0
+        if rng > 1e7:
+            return np.arange(1, fallback_len + 1, dtype=float)
+        return arr
+
     # Look for 'epoch' or anything containing it
     epoch_col = next((col for col in df.columns if col.strip().lower() == 'epoch' or 'epoch' in col.lower()), None)
     if epoch_col is not None:
-        return df[epoch_col].values, "Epoch"
+        return _sanitize_axis(df[epoch_col].values, len(df)), "Epoch"
     
     # Fallback to iteration
     iter_col = next((col for col in df.columns if 'iter' in col.lower()), None)
     if iter_col is not None:
-        return df[iter_col].values, "Iteration"
+        return _sanitize_axis(df[iter_col].values, len(df)), "Iteration"
         
     # Final fallback: row index
     return np.arange(1, len(df) + 1), "Epoch"
@@ -1139,13 +1235,59 @@ def plot_training_curves(csv_files: List[str], output_dir: Path, title: str = "T
     Generate training curves from CSV files.
     Handles MNIST, CIFAR-10, NLP, and other NN experiments.
     """
+    def _cleanup_stale_outputs() -> None:
+        base_name = title.lower().replace(' ', '_')
+        stale_paths = [
+            output_dir / f"{base_name}.png",
+            output_dir / f"{base_name}_summary.csv",
+            output_dir / f"{base_name}_summary.md",
+        ]
+        removed = 0
+        for path in stale_paths:
+            if path.exists():
+                try:
+                    path.unlink()
+                    removed += 1
+                except Exception:
+                    continue
+        if removed:
+            print(f"[CLEAN] Removed {removed} stale outputs for {title}")
+
     if not csv_files:
+        _cleanup_stale_outputs()
         return False
 
     # Patterns that indicate meta/aggregator CSV files (not actual per-epoch training runs).
     # Any file starting with 'advablation_' is a combined ablation summary - skip it.
+
+    def _canonicalize_optimizer_name(name: str, exp_name: Optional[str]) -> str:
+        cleaned = str(name)
+        # Remove chained run suffixes such as _start0_seed42 or _trial3_run2
+        cleaned = re.sub(r'(?:_(?:start|trial|seed|run)\d+)+$', '', cleaned, flags=re.IGNORECASE)
+        # Remove any remaining start markers if embedded
+        cleaned = re.sub(r'_start\d+', '', cleaned, flags=re.IGNORECASE)
+
+        exp_lc = (exp_name or '').lower()
+        if exp_lc in {'robustness', 'adversarial'}:
+            # Collapse aliases such as adversarial__from_robustness__...
+            cleaned = re.sub(r'(?i)^adversarial__from_robustness__', '', cleaned)
+            # Robustness files usually include function/startpoint prefixes; keep only optimizer family
+            m = re.search(r'(?i)Robustness_[^_]+_(.+)$', cleaned)
+            if m:
+                cleaned = m.group(1)
+
+        cleaned = cleaned.strip('_')
+        cleaned = re.sub(r'__+', '_', cleaned)
+        return cleaned
+
     # Group by optimizer
     results = {}
+    experiment_name = None
+    if csv_files:
+        experiment_name = _extract_experiment_name(Path(csv_files[0]))
+    min_len = 5
+    if experiment_name is not None and experiment_name.lower() in {"medical", "batch_ablation"}:
+        min_len = 1
     for csv_file in csv_files:
         path_obj = Path(csv_file)
         basename = path_obj.name.lower()
@@ -1158,12 +1300,12 @@ def plot_training_curves(csv_files: List[str], output_dir: Path, title: str = "T
         except Exception:
             continue
 
-        if not _looks_like_training_timeseries(df):
+        if not _looks_like_training_timeseries(df, min_len=min_len):
             continue
 
         # Extract label from filename (removes trial/seed suffixes)
         base = os.path.basename(csv_file).replace('.csv', '')
-        optimizer = re.sub(r'(_start|_trial|_seed|_run)\d+$', '', base, flags=re.IGNORECASE)
+        optimizer = _canonicalize_optimizer_name(base, experiment_name)
         
         # Clean up known redundant dataset prefixes
         prefixes_to_strip = ['MNIST_', 'CIFAR10_', 'IMDB_', 'MEDICAL_', 'AdvAblation_', '2D_', 'Analysis_']
@@ -1194,10 +1336,13 @@ def plot_training_curves(csv_files: List[str], output_dir: Path, title: str = "T
 
     if not results:
         print(f"[SKIP] {title}: no valid training time-series CSV files")
+        _cleanup_stale_outputs()
         return False
 
     # Normalize and sort optimizers for stable color assignment
     sorted_optimizers = sorted(results.keys())
+    total_runs = int(sum(len(v) for v in results.values()))
+    heavy_plot = (len(sorted_optimizers) >= 25) or (total_runs >= 250)
     
     # Define stable colors
     base_colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#FFD93D', '#B8E6F1', 
@@ -1207,12 +1352,174 @@ def plot_training_curves(csv_files: List[str], output_dir: Path, title: str = "T
     # DEBUG: trace what landed in results
     print(f'[DEBUG] plot_training_curves({title!r}): optimizers={sorted_optimizers!r}', file=sys.stderr)
 
-    # Create figure - significantly larger to prevent cramming
-    fig, axes = plt.subplots(2, 2, figsize=(24, 16))
+    # Create figure - adapt to workload to avoid renderer OOM on very large groups
+    fig_size = (16, 10) if heavy_plot else (24, 16)
+    save_dpi = 180 if heavy_plot else 300
+    draw_individual_runs = not heavy_plot
+    max_points = 2000 if heavy_plot else None
+
+    def _downsample_xy(x_vals: np.ndarray, y_vals: np.ndarray, max_n: Optional[int]) -> Tuple[np.ndarray, np.ndarray]:
+        if max_n is None:
+            return x_vals, y_vals
+        n = min(len(x_vals), len(y_vals))
+        if n <= max_n:
+            return x_vals[:n], y_vals[:n]
+        step = max(1, int(np.ceil(n / max_n)))
+        return x_vals[:n:step], y_vals[:n:step]
+
+    def _pick_metric_column(df: pd.DataFrame, want_test: bool = True) -> Optional[str]:
+        cols = [str(c) for c in df.columns]
+        if want_test:
+            candidates = [c for c in cols if ('test' in c.lower()) and any(t in c.lower() for t in ['acc', 'accuracy', 'dice'])]
+            if candidates:
+                return candidates[0]
+        val_candidates = [c for c in cols if ('val' in c.lower()) and any(t in c.lower() for t in ['acc', 'accuracy', 'dice'])]
+        if val_candidates:
+            return val_candidates[0]
+        train_candidates = [c for c in cols if ('train' in c.lower()) and any(t in c.lower() for t in ['acc', 'accuracy', 'dice'])]
+        if train_candidates:
+            return train_candidates[0]
+        return None
+
+    # Pre-scan available panels to avoid rendering empty subplot slots
+    has_test_acc_panel = False
+    for _, dfs in sorted(results.items()):
+        for df in dfs:
+            acc_col = _pick_metric_column(df, want_test=True)
+            if not acc_col:
+                continue
+            acc_vals = pd.to_numeric(df[acc_col], errors='coerce')
+            if acc_vals.isna().all() or (acc_vals == 0.01).all() or (acc_vals == 0).all() or (acc_vals == 0.5).all():
+                continue
+            has_test_acc_panel = True
+            break
+        if has_test_acc_panel:
+            break
+
+    final_metrics = {}
+    final_stds = {}
+    final_metric_label = 'Final Metric (%)'
+    final_metric_title = 'Final Performance'
+    final_metric_is_loss = False
+    for optimizer, dfs in results.items():
+        final_vals = []
+        for df in dfs:
+            acc_col = _pick_metric_column(df, want_test=True)
+            if acc_col:
+                val = df[acc_col].iloc[-1]
+                if val <= 1.0:
+                    val = val * 100
+                final_vals.append(val)
+        # Skip degenerate placeholder-style "accuracy" (e.g., all 0.01 -> 1.00%)
+        if final_vals and not (
+            len(final_vals) > 0
+            and np.nanstd(final_vals) < 1e-9
+            and np.isclose(np.nanmean(final_vals), 1.0, atol=1e-6)
+        ):
+            final_metrics[optimizer] = np.mean(final_vals)
+            final_stds[optimizer] = np.std(final_vals) if len(final_vals) > 1 else 0
+
+    # Fallback: if no valid accuracy metric, use final loss by optimizer (lower is better)
+    if not final_metrics:
+        loss_means = {}
+        loss_stds = {}
+        for optimizer, dfs in results.items():
+            final_losses = []
+            for df in dfs:
+                loss_col = next((col for col in df.columns if 'train_loss' == col.lower()), None)
+                if not loss_col:
+                    loss_col = next((col for col in df.columns if 'loss' in col.lower() and 'test' not in col.lower() and 'val' not in col.lower()), None)
+                if not loss_col:
+                    loss_col = next((col for col in df.columns if 'loss' in col.lower()), None)
+                if loss_col and len(df[loss_col]) > 0:
+                    val = pd.to_numeric(pd.Series([df[loss_col].iloc[-1]]), errors='coerce').iloc[0]
+                    if pd.notna(val):
+                        final_losses.append(float(val))
+            if final_losses:
+                loss_means[optimizer] = float(np.mean(final_losses))
+                loss_stds[optimizer] = float(np.std(final_losses)) if len(final_losses) > 1 else 0.0
+        if loss_means:
+            final_metrics = loss_means
+            final_stds = loss_stds
+            final_metric_label = 'Final Loss (lower is better)'
+            final_metric_title = 'Final Loss'
+            final_metric_is_loss = True
+
+    final_metrics = {k: v for k, v in final_metrics.items() if str(k).lower() not in ('unknown', 'nan', '', 'missing')}
+    has_final_performance_panel = len(final_metrics) > 0
+
+    speeds = {}
+    for optimizer, dfs in results.items():
+        run_speeds = []
+        for df in dfs:
+            elapsed = None
+            if 'elapsed_seconds' in df.columns and df['elapsed_seconds'].max() > 0:
+                elapsed = df['elapsed_seconds'].max()
+            elif 'time_sec' in df.columns:
+                max_time = df['time_sec'].max()
+                if max_time > 0:
+                    elapsed = max_time
+            elif 'time' in df.columns:
+                max_time = df['time'].max()
+                if max_time > 0:
+                    elapsed = max_time
+
+            if elapsed is not None:
+                if abs(elapsed - len(df)) < 1e-3:
+                    continue
+                if (
+                    elapsed % 1 == 0
+                    and len(df) % 10 == 0
+                    and 'elapsed_seconds' in df.columns
+                    and df['elapsed_seconds'].nunique() <= 2
+                ):
+                    continue
+                x_vals, _ = _get_x_axis(df)
+                if len(x_vals) > 0 and elapsed > 1e-4:
+                    max_x = np.max(x_vals)
+                    speed = max_x / elapsed
+                    run_speeds.append(speed)
+        if run_speeds:
+            speeds[optimizer] = np.mean(run_speeds)
+
+    has_speed_panel = False
+    if speeds and len(speeds) > 0:
+        vals = list(speeds.values())
+        synthetic_only = ((max(vals) - min(vals) < 1e-5) and np.isclose(max(vals), 1000.0, atol=1e-3))
+        has_speed_panel = not synthetic_only
+
+    panel_specs = [('loss', 'Training Loss Curves')]
+    if has_test_acc_panel:
+        panel_specs.append(('accuracy', 'Accuracy'))
+    if has_final_performance_panel:
+        panel_specs.append(('final', 'Final Performance'))
+    if has_speed_panel:
+        panel_specs.append(('speed', 'Training Efficiency'))
+
+    n_panels = len(panel_specs)
+    if n_panels == 3:
+        ncols = 3
+    elif n_panels > 1:
+        ncols = 2
+    else:
+        ncols = 1
+    nrows = int(np.ceil(n_panels / ncols))
+    width_scale = max(1.0, ncols / 2)
+    height_scale = max(0.75, nrows / 2)
+    dynamic_fig_size = (
+        int(np.ceil(fig_size[0] * width_scale)),
+        max(6, int(np.ceil(fig_size[1] * height_scale))),
+    )
+
+    fig, axes = plt.subplots(nrows, ncols, figsize=dynamic_fig_size)
     fig.suptitle(title, fontsize=20, fontweight='bold', y=0.98)
+    axes_flat = np.atleast_1d(axes).ravel()
+    panel_axes = {name: axes_flat[idx] for idx, (name, _) in enumerate(panel_specs)}
+    for extra_ax in axes_flat[n_panels:]:
+        extra_ax.set_visible(False)
 
     # Plot 1: Training Loss
-    ax = axes[0, 0]
+    ax = panel_axes['loss']
     x_label_for_plot = "Epoch / Iteration" # Initialize for category
     for i, (optimizer, dfs) in enumerate(sorted(results.items())):
         color = opt_to_color[optimizer]
@@ -1234,7 +1541,11 @@ def plot_training_curves(csv_files: List[str], output_dir: Path, title: str = "T
             if loss_col and loss_col in df.columns:
                 # Plot individual run after grouping by x_axis
                 run_df = pd.DataFrame({'x': x_vals, 'y': df[loss_col]}).groupby('x').mean().reset_index()
-                ax.plot(run_df['x'], run_df['y'], color=color, alpha=0.3, linewidth=1)
+                if draw_individual_runs:
+                    xs = run_df['x'].to_numpy()
+                    ys = pd.to_numeric(run_df['y'], errors='coerce').to_numpy(dtype=float)
+                    xs, ys = _downsample_xy(xs, ys, max_points)
+                    ax.plot(xs, ys, color=color, alpha=0.25, linewidth=1)
                 runs_for_mean.append((run_df['x'].values, run_df['y'].values))
 
         # Mean line (align runs by common x-axis grid using interpolation)
@@ -1246,11 +1557,11 @@ def plot_training_curves(csv_files: List[str], output_dir: Path, title: str = "T
                 
             min_x = int(min(e.min() for e, _ in valid_runs))
             max_x = int(max(e.max() for e, _ in valid_runs))
-            
+
             # Sanity check on bounds
-            if max_x < min_x or max_x - min_x > 100000: # Prevent massive arange calls
-                 continue
-                 
+            if max_x < min_x or max_x - min_x > 100000:  # Prevent massive arange calls
+                continue
+
             common_x = np.arange(min_x, max_x + 1)
 
             aligned_losses = []
@@ -1268,7 +1579,10 @@ def plot_training_curves(csv_files: List[str], output_dir: Path, title: str = "T
             
             if aligned_losses:
                 mean_loss = np.mean(np.vstack(aligned_losses), axis=0)
-                ax.plot(common_x, mean_loss, color=color, linewidth=2.5, label=optimizer)
+                dx, dy = _downsample_xy(np.asarray(common_x), np.asarray(mean_loss), max_points)
+                ax.plot(dx, dy, color=color, linewidth=2.5, label=optimizer)
+                if len(dx) == 1:
+                    ax.scatter(dx, dy, color=color, s=40, zorder=3)
 
     ax.set_xlabel(x_label_for_plot, fontsize=14, fontweight='bold')
     ax.set_ylabel('Loss', fontsize=14, fontweight='bold')
@@ -1276,195 +1590,161 @@ def plot_training_curves(csv_files: List[str], output_dir: Path, title: str = "T
     ax.grid(True, alpha=0.3)
     ax.set_yscale('log')
     # Move legend outside the plot area
-    ax.legend(fontsize=10, bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0.)
-
-    # Plot 2: Test/Validation Accuracy
-    ax = axes[0, 1]
-    has_test_acc = False
-    for i, (optimizer, dfs) in enumerate(sorted(results.items())):
-        color = opt_to_color[optimizer]
-        
-        runs_for_mean = []
-        x_label_for_plot = "Epoch" # Default
-
-        for df in dfs:
-            x_vals, x_label = _get_x_axis(df)
-            x_label_for_plot = x_label
-            
-            # Detect accuracy column
-            acc_col = next((col for col in df.columns if 'test' in col.lower() and ('acc' in col.lower() or 'accuracy' in col.lower())), None)
-            
-            if acc_col:
-                acc_vals = pd.to_numeric(df[acc_col], errors='coerce')
-                # Filter out dummy/placeholder values
-                if acc_vals.isna().all() or (acc_vals == 0.01).all() or (acc_vals == 0).all() or (acc_vals == 0.5).all():
-                    continue
-                    
-                # Convert to percentage if needed
-                if acc_vals.max() <= 1.01:
-                    acc_vals = acc_vals * 100.0
-                
-                has_test_acc = True
-                run_df = pd.DataFrame({'x': x_vals, 'y': acc_vals}).groupby('x').mean().reset_index()
-                ax.plot(run_df['x'], run_df['y'], color=color, alpha=0.3, linewidth=1)
-                runs_for_mean.append((run_df['x'].values, run_df['y'].values))
-
-        # Mean line
-        if runs_for_mean:
-            valid_runs = [(x, y) for x, y in runs_for_mean if len(x) > 0 and np.isfinite(x).all()]
-            if not valid_runs:
-                continue
-                
-            min_x = int(min(e.min() for e, _ in valid_runs))
-            max_x = int(max(e.max() for e, _ in valid_runs))
-            
-            if max_x < min_x or max_x - min_x > 100000:
-                 continue
-                 
-            common_x = np.arange(min_x, max_x + 1)
-            
-            aligned_accs = []
-            for e, a in valid_runs:
-                s = pd.Series(a, index=e)
-                if not s.index.is_unique:
-                    s = s.groupby(level=0).mean()
-                try:
-                    s = s.reindex(common_x).interpolate().ffill().bfill().values
-                    if np.isfinite(s).all():
-                        aligned_accs.append(s)
-                except Exception:
-                    continue
-            
-            if aligned_accs:
-                mean_acc = np.mean(np.vstack(aligned_accs), axis=0)
-                ax.plot(common_x, mean_acc, color=color, linewidth=2.5, label=optimizer)
-
-    ax.set_xlabel(x_label_for_plot, fontsize=14, fontweight='bold')
-    if has_test_acc:
-        ax.set_ylabel('Test Accuracy (%)', fontsize=14, fontweight='bold')
-        ax.set_title('Test Accuracy', fontsize=16, fontweight='bold', pad=15)
-        # Move legend outside the plot area
+    if len(sorted_optimizers) <= 20:
         ax.legend(fontsize=10, bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0.)
     else:
-        ax.set_ylabel('N/A', fontsize=14, fontweight='bold')
-        ax.set_title('Test Accuracy (N/A for Task)', fontsize=16, fontweight='bold', pad=15)
-        ax.text(0.5, 0.5, 'N/A: Optimization Task', horizontalalignment='center', verticalalignment='center', transform=ax.transAxes)
-    ax.grid(True, alpha=0.3)
+        ax.text(0.98, 0.02, f'Legend omitted ({len(sorted_optimizers)} series)', ha='right', va='bottom', transform=ax.transAxes, fontsize=9)
 
-    # Plot 3: Final Performance Bar Chart
-    ax = axes[1, 0]
-    final_metrics = {}
-    final_stds = {}
+    # Plot 2: Test/Validation Accuracy (only when available)
+    if has_test_acc_panel:
+        ax = panel_axes['accuracy']
+        metric_label = "Test Accuracy (%)"
+        x_label_for_plot = "Epoch"
+        for i, (optimizer, dfs) in enumerate(sorted(results.items())):
+            color = opt_to_color[optimizer]
 
-    for optimizer, dfs in results.items():
-        # Get final test accuracy from each run
-        final_vals = []
-        for df in dfs:
-            acc_col = next((col for col in df.columns if 'acc' in col.lower() and 'test' in col.lower()), None)
-            if acc_col:
-                val = df[acc_col].iloc[-1]
-                if val <= 1.0:
-                    val = val * 100
-                final_vals.append(val)
+            runs_for_mean = []
 
-        if final_vals:
-            final_metrics[optimizer] = np.mean(final_vals)
-            final_stds[optimizer] = np.std(final_vals) if len(final_vals) > 1 else 0
+            for df in dfs:
+                x_vals, x_label = _get_x_axis(df)
+                x_label_for_plot = x_label
 
-    # Filter final_metrics to REMOVE any persistent Unknown entries
-    final_metrics = {k: v for k, v in final_metrics.items() if str(k).lower() not in ('unknown', 'nan', '', 'missing')}
+                acc_col = _pick_metric_column(df, want_test=True)
 
-    if final_metrics:
-        # Sort for better presentation
-        optimizers_sorted = sorted(final_metrics.keys(), key=lambda k: final_metrics[k], reverse=True)
-        x_pos = np.arange(len(optimizers_sorted))
-        bars = ax.bar(x_pos, [final_metrics[opt] for opt in optimizers_sorted],
-                      yerr=[final_stds[opt] for opt in optimizers_sorted],
-                      color=[opt_to_color[opt] for opt in optimizers_sorted],
+                if acc_col:
+                    acc_vals = pd.to_numeric(df[acc_col], errors='coerce')
+                    if acc_vals.isna().all() or (acc_vals == 0.01).all() or (acc_vals == 0).all() or (acc_vals == 0.5).all():
+                        continue
+
+                    if acc_vals.max() <= 1.01:
+                        acc_vals = acc_vals * 100.0
+
+                    if acc_col and 'dice' in acc_col.lower():
+                        metric_label = "Test/Val Dice (%)"
+                    elif acc_col and 'val' in acc_col.lower():
+                        metric_label = "Validation Accuracy (%)"
+                    else:
+                        metric_label = "Test Accuracy (%)"
+
+                    run_df = pd.DataFrame({'x': x_vals, 'y': acc_vals}).groupby('x').mean().reset_index()
+                    if draw_individual_runs:
+                        xs = run_df['x'].to_numpy()
+                        ys = pd.to_numeric(run_df['y'], errors='coerce').to_numpy(dtype=float)
+                        xs, ys = _downsample_xy(xs, ys, max_points)
+                        ax.plot(xs, ys, color=color, alpha=0.25, linewidth=1)
+                    runs_for_mean.append((run_df['x'].values, run_df['y'].values))
+
+            if runs_for_mean:
+                valid_runs = [(x, y) for x, y in runs_for_mean if len(x) > 0 and np.isfinite(x).all()]
+                if not valid_runs:
+                    continue
+
+                min_x = int(min(e.min() for e, _ in valid_runs))
+                max_x = int(max(e.max() for e, _ in valid_runs))
+
+                if max_x < min_x or max_x - min_x > 100000:
+                    continue
+
+                common_x = np.arange(min_x, max_x + 1)
+
+                aligned_accs = []
+                for e, a in valid_runs:
+                    s = pd.Series(a, index=e)
+                    if not s.index.is_unique:
+                        s = s.groupby(level=0).mean()
+                    try:
+                        s = s.reindex(common_x).interpolate().ffill().bfill().values
+                        if np.isfinite(s).all():
+                            aligned_accs.append(s)
+                    except Exception:
+                        continue
+
+                if aligned_accs:
+                    mean_acc = np.mean(np.vstack(aligned_accs), axis=0)
+                    dx, dy = _downsample_xy(np.asarray(common_x), np.asarray(mean_acc), max_points)
+                    ax.plot(dx, dy, color=color, linewidth=2.5, label=optimizer)
+
+        ax.set_xlabel(x_label_for_plot, fontsize=14, fontweight='bold')
+        ax.set_ylabel(metric_label, fontsize=14, fontweight='bold')
+        ax.set_title(metric_label.replace(' (%)', ''), fontsize=16, fontweight='bold', pad=15)
+        if len(sorted_optimizers) <= 20:
+            ax.legend(fontsize=10, bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0.)
+        else:
+            ax.text(0.98, 0.02, f'Legend omitted ({len(sorted_optimizers)} series)', ha='right', va='bottom', transform=ax.transAxes, fontsize=9)
+        ax.grid(True, alpha=0.3)
+
+    # Plot 3: Final Performance Bar Chart (only when available)
+    if has_final_performance_panel:
+        ax = panel_axes['final']
+        optimizers_sorted = sorted(final_metrics.keys(), key=lambda k: final_metrics[k], reverse=(not final_metric_is_loss))
+        max_bars = 15
+        if len(optimizers_sorted) > max_bars:
+            optimizers_plot = optimizers_sorted[:max_bars]
+        else:
+            optimizers_plot = optimizers_sorted
+
+        x_pos = np.arange(len(optimizers_plot))
+        bars = ax.bar(x_pos, [final_metrics[opt] for opt in optimizers_plot],
+                      yerr=[final_stds[opt] for opt in optimizers_plot],
+                      color=[opt_to_color[opt] for opt in optimizers_plot],
                       alpha=0.7, capsize=5, edgecolor='black', linewidth=1.5)
 
         ax.set_xticks(x_pos)
-        ax.set_xticklabels(optimizers_sorted, rotation=45, ha='right', fontsize=11)
-        ax.set_ylabel('Final Test Accuracy (%)', fontsize=14, fontweight='bold')
-        ax.set_title('Final Performance', fontsize=16, fontweight='bold', pad=15)
+        ax.set_xticklabels(optimizers_plot, rotation=35, ha='right', fontsize=10)
+        ax.set_ylabel(final_metric_label, fontsize=14, fontweight='bold')
+        ax.set_title(final_metric_title, fontsize=16, fontweight='bold', pad=15)
         ax.grid(axis='y', alpha=0.3)
 
-        # Value labels
-        for bar, opt in zip(bars, optimizers_sorted):
-            height = bar.get_height()
-            # If the bar represents 0 standard deviation over identical runs, just plot it
-            ax.text(bar.get_x() + bar.get_width()/2., height + 0.5,
-                    f'{final_metrics[opt]:.2f}%',
-                    ha='center', va='bottom', fontsize=10, fontweight='bold')
-
-    # Plot 4: Training speed comparison
-    ax = axes[1, 1]
-    speeds = {}
-    for optimizer, dfs in results.items():
-        run_speeds = []
-        for df in dfs:
-            elapsed = None
-            if 'elapsed_seconds' in df.columns and df['elapsed_seconds'].max() > 0:
-                elapsed = df['elapsed_seconds'].max()
-            elif 'time_sec' in df.columns:
-                max_time = df['time_sec'].max()
-                if max_time > 0:
-                    elapsed = max_time
-                    
-            if elapsed is not None:
-                # Detect dummy timing data: if elapsed seconds exactly matches row count
-                # Or if time is uniform across exactly equal step sizes, making it artificial
-                if abs(elapsed - len(df)) < 1e-3:
+        if len(optimizers_plot) <= 12:
+            panel_max = max([abs(final_metrics[o]) for o in optimizers_plot]) if optimizers_plot else 1.0
+            offset = 0.01 * max(1.0, panel_max)
+            for bar, opt in zip(bars, optimizers_plot):
+                height = bar.get_height()
+                if (not np.isfinite(height)) or abs(height) > 1e6:
                     continue
-                    
-                # Another fail-safe: if max time is literally 1.0 or 10.0 and len is 100/1000 etc
-                if (
-                    elapsed % 1 == 0
-                    and len(df) % 10 == 0
-                    and 'elapsed_seconds' in df.columns
-                    and df['elapsed_seconds'].nunique() <= 2
-                ):
-                    # Possibly uniform synthetic array, skip
-                    continue
-                    
-                # Throughput: logical steps or epochs per cumulative time.
-                # Using max_x prevents huge discrepancies between batch-level and epoch-level logging.
-                x_vals, _ = _get_x_axis(df)
-                if len(x_vals) > 0 and elapsed > 1e-4:
-                    max_x = np.max(x_vals)
-                    speed = max_x / elapsed
-                    run_speeds.append(speed)
-                    
-        # Only compute mean if we have valid non-dummy runs
-        if run_speeds:
-            speeds[optimizer] = np.mean(run_speeds)
+                label_text = f'{final_metrics[opt]:.2f}' + ('' if final_metric_is_loss else '%')
+                ax.text(bar.get_x() + bar.get_width()/2., height + offset,
+                        label_text,
+                        ha='center', va='bottom', fontsize=10, fontweight='bold')
+        if len(optimizers_sorted) > max_bars:
+            ax.text(0.98, 0.98, f'Top {max_bars} of {len(optimizers_sorted)}',
+                    transform=ax.transAxes, ha='right', va='top', fontsize=9)
 
-    if speeds and len(speeds) > 0:
-        # Sort keys based on speed values descending
+    # Plot 4: Training speed comparison (only when available)
+    if has_speed_panel:
+        ax = panel_axes['speed']
         sorted_keys = sorted(speeds.keys(), key=lambda k: speeds[k], reverse=True)
-        # Check if they are all identically equal (dummy failure case)
-        vals = [speeds[k] for k in sorted_keys]
-        if max(vals) - min(vals) < 1e-5 and max(vals) == 1000.0:
-            # Everything is identical dummy speed, ignore it
-            ax.text(0.5, 0.5, 'All timing data was synthetic placeholder.\nEfficiency N/A',
-                    ha='center', va='center', fontsize=14, transform=ax.transAxes)
+        max_bars = 15
+        if len(sorted_keys) > max_bars:
+            sorted_keys_plot = sorted_keys[:max_bars]
         else:
-            x_pos = np.arange(len(sorted_keys))
-            bars = ax.bar(x_pos, [speeds[k] for k in sorted_keys],
-                          color=[opt_to_color[k] for k in sorted_keys],
-                          alpha=0.7, edgecolor='black', linewidth=1.5)
-            ax.set_xticks(x_pos)
-            ax.set_xticklabels(sorted_keys, rotation=45, ha='right', fontsize=11)
-            ax.set_ylabel('Speed (Epochs or Steps / Sec)', fontsize=14, fontweight='bold')
-            ax.set_title('Training Efficiency', fontsize=16, fontweight='bold', pad=15)
-            ax.grid(axis='y', alpha=0.3)
-    else:
-        ax.text(0.5, 0.5, 'No valid timing data available',
-                ha='center', va='center', fontsize=14, transform=ax.transAxes)
+            sorted_keys_plot = sorted_keys
+
+        x_pos = np.arange(len(sorted_keys_plot))
+        bars = ax.bar(x_pos, [speeds[k] for k in sorted_keys_plot],
+                      color=[opt_to_color[k] for k in sorted_keys_plot],
+                      alpha=0.7, edgecolor='black', linewidth=1.5)
+        ax.set_xticks(x_pos)
+        ax.set_xticklabels(sorted_keys_plot, rotation=35, ha='right', fontsize=10)
+        ax.set_ylabel('Speed (Epochs or Steps / Sec)', fontsize=14, fontweight='bold')
+        ax.set_title('Training Efficiency', fontsize=16, fontweight='bold', pad=15)
+        ax.grid(axis='y', alpha=0.3)
+        if len(sorted_keys) > max_bars:
+            ax.text(0.98, 0.98, f'Top {max_bars} of {len(sorted_keys)}',
+                    transform=ax.transAxes, ha='right', va='top', fontsize=9)
 
     plt.tight_layout()
     output_file = output_dir / f"{title.lower().replace(' ', '_')}.png"
-    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    try:
+        plt.savefig(output_file, dpi=save_dpi, bbox_inches='tight')
+    except ValueError as e:
+        # Fallback for pathological extents from outlier values/text artists
+        print(f"[WARN] savefig tight bbox failed for {title}: {e}. Retrying with safe renderer settings.")
+        try:
+            plt.savefig(output_file, dpi=max(120, int(save_dpi * 0.67)))
+        except Exception as e2:
+            print(f"[ERROR] savefig fallback failed for {title}: {e2}")
+            raise
     print(f"[OK] Saved: {output_file}")
     plt.close()
 
@@ -1472,9 +1752,13 @@ def plot_training_curves(csv_files: List[str], output_dir: Path, title: str = "T
     try:
         summary_data = []
         for optimizer, dfs in results.items():
-            acc = final_metrics.get(optimizer, np.nan)
-            acc_std = final_stds.get(optimizer, np.nan)
-            speed = speeds.get(optimizer, np.nan)
+            if final_metric_is_loss:
+                acc = np.nan
+                acc_std = np.nan
+            else:
+                acc = final_metrics.get(optimizer, np.nan)
+                acc_std = final_stds.get(optimizer, np.nan)
+            speed = speeds.get(optimizer, np.nan) if has_speed_panel else np.nan
             
             final_losses = []
             for df in dfs:
@@ -1565,6 +1849,7 @@ def generate_all_plots(
     if cleanup_stale and not include_static_only:
         cleanup_stale_generic_pngs(results_path)
     backfill_convergence_columns(results_path)
+    _maybe_generate_theory_practice_status_plot(results_path)
 
     # Find all CSV files under experiments only (proposal-aligned scope)
     all_csvs = [p for p in results_path.rglob("*.csv") if p.is_file() and _is_experiment_csv(p)]

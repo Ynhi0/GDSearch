@@ -1,0 +1,45 @@
+{
+  "timestamp": "2026-03-06T21:59:34.033227",
+  "dataset": "SchedulerAblation",
+  "model": "MNIST",
+  "optimizer": "AdamW_CosineAnnealingLR",
+  "seed": 42,
+  "rows": 10,
+  "rows_original": 10,
+  "history_thinning_stride": 1,
+  "params": {
+    "scheduler": "CosineAnnealingLR",
+    "final_test_loss": 0.06796905592855182,
+    "final_test_accuracy": 98.02,
+    "final_loss": 0.06796905592855182,
+    "final_accuracy": 98.02
+  },
+  "model_path": null,
+  "system": {
+    "python_version": "3.13.7 (tags/v3.13.7:bcee1c3, Aug 14 2025, 14:15:11) [MSC v.1944 64 bit (AMD64)]",
+    "torch_version": "2.6.0+cu124",
+    "cuda_available": true,
+    "cpu_count": 16,
+    "total_memory_gb": 15.730949401855469,
+    "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
+    "gpu_memory_gb": 3.99951171875,
+    "cuda_version": "12.4"
+  },
+  "provenance": {
+    "timestamp": "2026-03-06T21:59:34.043665",
+    "python_version": "3.13.7 (tags/v3.13.7:bcee1c3, Aug 14 2025, 14:15:11) [MSC v.1944 64 bit (AMD64)]",
+    "pytorch_version": "2.6.0+cu124",
+    "command_line": "run_all_kaggle.py --experiment-mode full --experiments scheduler_ablation --results-dir results_proposal_full_20260223_v2 --seeds 42,123,456,789,1011,1213,1415,1617,1819,2021 --robust-gradients --resume",
+    "working_dir": "F:\\GDSearch",
+    "git_commit": "a384f1a7f5079e27e5f53bf782449468ef25c31a",
+    "git_dirty": true,
+    "gpu_name": "NVIDIA GeForce RTX 3050 Ti Laptop GPU",
+    "gpu_count": 1,
+    "gpu_memory_gb": 3.99951171875,
+    "cuda_version": "12.4",
+    "nvidia_driver": "581.80"
+  },
+  "completed": true,
+  "tainted": false,
+  "run_signature": "8bd17b38aed4975506631d109b8a7f1d461be3122f875845758e1d957c17da85"
+}
